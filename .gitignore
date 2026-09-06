@@ -1,0 +1,34 @@
+# ─────────────────────────────────────────────────────────────────────
+# REAL DATA — never commit.
+# The VUM delivery is classified sensitive: structured records are not
+# anonymised and the joined pair is personally identifying (birth date,
+# postcode, LV95 coordinates, vehicle + insurer). It must stay on the
+# host. See vision.md → "Real data" and the Risks table.
+# ─────────────────────────────────────────────────────────────────────
+data/
+
+# Defence in depth: delivery-shaped files anywhere in the tree
+vum_*.txt
+AstranaExport*
+*.xlsx
+*.xls
+*.zip
+
+# Generated: rebuilt from design/*.dc.html + design/canvas.json
+design/ra2-app-screens.html
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Local app state
+*.sqlite
+*.sqlite3
+*.db
+
+# OS
+.DS_Store
+Thumbs.db

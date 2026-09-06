@@ -1,0 +1,14 @@
+{
+  "artboards": [
+    { "file": "Import.dc.html",        "x": 0,    "y": 0,    "w": 1440, "h": 900,  "title": "Import — delivery to corpus" },
+    { "file": "Main.dc.html",          "x": 1560, "y": 0,    "w": 1440, "h": 1180, "title": "Results — Goal 1, language, Goal 3" },
+    { "file": "FeatureConfig.dc.html", "x": 0,    "y": 1320, "w": 1440, "h": 900,  "title": "Features — configuration" },
+    { "file": "Mismatches.dc.html",    "x": 1560, "y": 1320, "w": 1440, "h": 900,  "title": "Mismatches — analyst review" }
+  ],
+  "annotations": [
+    { "id": "brief", "x": -420, "y": 0, "w": 360, "text": "RA2 — starting point\n\nFour of the seven surfaces in mvp-spec.md §13. Census and Codelists are in the rail but not drawn: both are plain tables and inherit this vocabulary.\n\nStatic mockups, one direction: IBM Plex Sans/Mono, 3px radii, dense tables, one blue accent plus a semantic set. Buildable in NiceGUI/Quasar." },
+    { "id": "states", "x": -420, "y": 300, "w": 360, "text": "States the spec requires everywhere:\n\n· anonymisation marking wherever text is shown\n· dev-sized runs marked \"smoke test, not a result\" (Results uses the same header slot as the green Evaluation-run chip)\n· cells below n=20 as \"insufficient data\", never a number\n· ties shown as ties" },
+    { "id": "absent", "x": -420, "y": 640, "w": 360, "text": "Deliberately absent, and worth checking:\n\n· no hallucination rate — it is a review tag, not a metric\n· no per-record encoding damage score\n· no mismatch clustering or cross-model agreement\n· no per-entity scoring (captured, not scored)\n\nGoal 2 has its own tab, not drawn — see spec §11.2, the one place the MVP narrows a promised deliverable." }
+  ],
+  "launch": { "view": "canvas" }
+}

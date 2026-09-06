@@ -1,0 +1,158 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <style>
+    :root{
+      --ink:oklch(0.22 0.012 260); --ink2:oklch(0.47 0.010 260); --ink3:oklch(0.63 0.008 260);
+      --rule:oklch(0.895 0.006 260); --rule2:oklch(0.945 0.004 260);
+      --bg:oklch(0.976 0.004 95); --surface:oklch(1 0 0);
+      --accent:oklch(0.52 0.13 255); --accent-soft:oklch(0.955 0.028 255);
+      --warn:oklch(0.56 0.13 72); --warn-soft:oklch(0.965 0.035 80);
+      --danger:oklch(0.53 0.15 27); --danger-soft:oklch(0.962 0.030 27);
+      --ok:oklch(0.50 0.11 152); --ok-soft:oklch(0.958 0.030 152);
+      --sans:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+      --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--bg);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased;}
+    a{color:var(--accent);text-decoration:none;} a:hover{color:oklch(0.42 0.13 255);text-decoration:underline;}
+    table{border-collapse:collapse;width:100%;}
+    .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink3);font-weight:500;}
+    .th{font-family:var(--mono);font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink3);font-weight:500;padding:0 12px 7px;border-bottom:1px solid var(--rule);text-align:left;}
+    .td{padding:9px 12px;border-bottom:1px solid var(--rule2);font-size:12.5px;vertical-align:middle;}
+    .mono{font-family:var(--mono);}
+    .card{background:var(--surface);border:1px solid var(--rule);border-radius:3px;}
+    .navitem{display:flex;align-items:center;gap:9px;padding:6px 14px;color:var(--ink2);font-size:12.5px;border-left:2px solid transparent;}
+    .navitem.on{color:var(--ink);background:var(--accent-soft);border-left-color:var(--accent);font-weight:500;}
+    .val{font-family:var(--mono);font-size:15px;font-weight:500;letter-spacing:-.01em;}
+    .ci{font-family:var(--mono);font-size:10.5px;color:var(--ink3);margin-top:1px;}
+    .mk{display:inline-block;width:7px;height:7px;border-radius:1px;margin-right:6px;vertical-align:middle;}
+  </style>
+</helmet>
+
+<div style="display:flex;height:900px;background:var(--bg);">
+
+  <nav style="width:196px;flex:none;background:var(--surface);border-right:1px solid var(--rule);display:flex;flex-direction:column;padding-bottom:14px;">
+    <div style="padding:16px 14px 18px;border-bottom:1px solid var(--rule2);">
+      <div class="mono" style="font-size:15px;font-weight:600;letter-spacing:-.01em;">RA2</div>
+      <div class="lbl" style="margin-top:3px;">Accident report analysis</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:2px;padding-top:14px;">
+      <div class="lbl" style="padding:0 14px 6px;">Data</div>
+      <div class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"/><path d="m8 10 4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Import</div>
+      <div class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg>Census</div>
+      <div class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>Codelists</div>
+      <div class="lbl" style="padding:16px 14px 6px;">Configure</div>
+      <div class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h10"/><path d="M18 6h2"/><path d="M4 12h4"/><path d="M12 12h8"/><path d="M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>Features</div>
+      <div class="lbl" style="padding:16px 14px 6px;">Run</div>
+      <div class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/></svg>Evaluation</div>
+      <div class="lbl" style="padding:16px 14px 6px;">Review</div>
+      <div class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>Results</div>
+      <div class="navitem on"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 4.3 2.5 18a1.7 1.7 0 0 0 1.5 2.5h16a1.7 1.7 0 0 0 1.5-2.5L13.7 4.3a1.7 1.7 0 0 0-3 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>Mismatches</div>
+    </div>
+  </nav>
+
+  <main style="flex:1;min-width:0;display:flex;flex-direction:column;">
+
+    <header style="flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:18px 28px 14px;border-bottom:1px solid var(--rule);background:var(--surface);">
+      <div>
+        <h1 style="margin:0;font-size:19px;font-weight:600;letter-spacing:-.012em;">Mismatches</h1>
+        <div style="color:var(--ink2);font-size:12.5px;margin-top:2px;">Extracted value disagrees with the record. <strong>The record is authoritative in every case.</strong></div>
+      </div>
+      <span class="btn" style="border:1px solid var(--rule);color:var(--ink2);padding:7px 14px;border-radius:3px;font-size:12.5px;">Export CSV</span>
+    </header>
+
+    <div style="flex:1;min-height:0;overflow:hidden;padding:18px 28px 22px;display:flex;flex-direction:column;gap:14px;">
+
+      <div style="display:flex;gap:10px;align-items:center;">
+        <span class="mono" style="font-size:12px;border:1px solid var(--rule);background:var(--surface);border-radius:3px;padding:6px 11px;">run qwen3:14b <span style="color:var(--ink3);">▾</span></span>
+        <span class="mono" style="font-size:12px;border:1px solid var(--rule);background:var(--surface);border-radius:3px;padding:6px 11px;">Witter0Ausw <span style="color:var(--ink3);">▾</span></span>
+        <span class="mono" style="font-size:12px;border:1px solid var(--rule);background:var(--surface);border-radius:3px;padding:6px 11px;color:var(--ink2);">all tags <span style="color:var(--ink3);">▾</span></span>
+        <span class="mono" style="font-size:11.5px;color:var(--ink3);margin-left:auto;">188 mismatches · 40 reviewed</span>
+      </div>
+
+      <div class="card" style="padding:13px 16px;display:flex;align-items:center;gap:30px;">
+        <div><div class="lbl">Reviewed tally</div><div style="font-size:11.5px;color:var(--ink3);margin-top:3px;">Never fed back into a metric</div></div>
+        <div style="display:flex;gap:26px;align-items:baseline;">
+          <div><span class="mono" style="font-size:20px;font-weight:500;color:var(--danger);">32</span> <span style="font-size:12px;color:var(--ink2);">hallucination</span></div>
+          <div><span class="mono" style="font-size:20px;font-weight:500;color:var(--warn);">6</span> <span style="font-size:12px;color:var(--ink2);">structured‑data error</span></div>
+          <div><span class="mono" style="font-size:20px;font-weight:500;color:var(--ink3);">2</span> <span style="font-size:12px;color:var(--ink2);">unclear</span></div>
+          <div style="padding-left:8px;border-left:1px solid var(--rule);"><span class="mono" style="font-size:20px;font-weight:500;color:var(--ink3);">148</span> <span style="font-size:12px;color:var(--ink2);">untagged</span></div>
+        </div>
+      </div>
+
+      <section class="card" style="flex:1;min-height:0;display:flex;flex-direction:column;">
+        <table>
+          <thead><tr>
+            <th class="th" style="padding-top:11px;width:132px;">Record</th>
+            <th class="th" style="padding-top:11px;width:104px;">Record value</th>
+            <th class="th" style="padding-top:11px;width:104px;">Extracted</th>
+            <th class="th" style="padding-top:11px;">Evidence span</th>
+            <th class="th" style="padding-top:11px;width:216px;">Tag</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td class="td"><div class="mono" style="font-size:11px;">F4403A07CF…9A8C</div><div style="font-size:10.5px;color:var(--ink3);margin-top:2px;">de · anonymised</div></td>
+              <td class="td"><span class="mono" style="font-size:11.5px;background:oklch(0.965 0.003 260);border:1px solid var(--rule);padding:2px 7px;border-radius:3px;">W2 <span style="color:var(--ink3);">trocken</span></span></td>
+              <td class="td"><span class="mono" style="font-size:11.5px;background:var(--danger-soft);color:var(--danger);border:1px solid oklch(0.88 0.06 27);padding:2px 7px;border-radius:3px;">W4 <span style="opacity:.7;">Regen</span></span></td>
+              <td class="td" style="font-size:11.5px;line-height:1.5;color:var(--ink2);">„…leitete eine <mark style="background:var(--warn-soft);color:var(--ink);padding:0 2px;">Vollbremsung</mark> ein. B1 bemerkte G1 nicht…"</td>
+              <td class="td"><div style="display:flex;gap:5px;">
+                <span style="background:var(--danger);color:#fff;border-radius:3px;padding:4px 9px;font-size:11px;font-weight:500;">Hallucination</span>
+                <span style="border:1px solid var(--rule);color:var(--ink2);border-radius:3px;padding:4px 9px;font-size:11px;">Record error</span>
+                <span style="border:1px solid var(--rule);color:var(--ink2);border-radius:3px;padding:4px 9px;font-size:11px;">?</span>
+              </div></td>
+            </tr>
+            <tr>
+              <td class="td"><div class="mono" style="font-size:11px;">F4403A080B…9A8C</div><div style="font-size:10.5px;color:var(--ink3);margin-top:2px;">fr · anonymised</div></td>
+              <td class="td"><span class="mono" style="font-size:11.5px;background:oklch(0.965 0.003 260);border:1px solid var(--rule);padding:2px 7px;border-radius:3px;">U1 <span style="color:var(--ink3);">Schleuder</span></span></td>
+              <td class="td"><span class="mono" style="font-size:11.5px;background:var(--danger-soft);color:var(--danger);border:1px solid oklch(0.88 0.06 27);padding:2px 7px;border-radius:3px;">U7 <span style="opacity:.7;">Tier</span></span></td>
+              <td class="td" style="font-size:11.5px;line-height:1.5;color:var(--ink2);">«…voulait <mark style="background:var(--warn-soft);color:var(--ink);padding:0 2px;">éviter un animal qui traversait la chaussée</mark> et perdit la maîtrise…»</td>
+              <td class="td"><div style="display:flex;gap:5px;">
+                <span style="border:1px solid var(--rule);color:var(--ink2);border-radius:3px;padding:4px 9px;font-size:11px;">Hallucination</span>
+                <span style="background:var(--warn);color:#fff;border-radius:3px;padding:4px 9px;font-size:11px;font-weight:500;">Record error</span>
+                <span style="border:1px solid var(--rule);color:var(--ink2);border-radius:3px;padding:4px 9px;font-size:11px;">?</span>
+              </div></td>
+            </tr>
+            <tr>
+              <td class="td"><div class="mono" style="font-size:11px;">69C545A20B…2787</div><div style="font-size:10.5px;color:var(--ink3);margin-top:2px;">de · anonymised</div></td>
+              <td class="td"><span class="mono" style="font-size:11.5px;background:oklch(0.965 0.003 260);border:1px solid var(--rule);padding:2px 7px;border-radius:3px;">W1 <span style="color:var(--ink3);">bewölkt</span></span></td>
+              <td class="td"><span class="mono" style="font-size:11.5px;background:var(--danger-soft);color:var(--danger);border:1px solid oklch(0.88 0.06 27);padding:2px 7px;border-radius:3px;">W2 <span style="opacity:.7;">trocken</span></span></td>
+              <td class="td" style="font-size:11.5px;line-height:1.5;color:var(--ink3);font-style:italic;">No span returned — the model gave a value it could not point to.</td>
+              <td class="td"><div style="display:flex;gap:5px;">
+                <span style="border:1px solid var(--rule);color:var(--ink2);border-radius:3px;padding:4px 9px;font-size:11px;">Hallucination</span>
+                <span style="border:1px solid var(--rule);color:var(--ink2);border-radius:3px;padding:4px 9px;font-size:11px;">Record error</span>
+                <span style="border:1px solid var(--rule);color:var(--ink2);border-radius:3px;padding:4px 9px;font-size:11px;">?</span>
+              </div></td>
+            </tr>
+            <tr>
+              <td class="td"><div class="mono" style="font-size:11px;">A2201FE884…4B10</div><div style="font-size:10.5px;color:var(--ink3);margin-top:2px;">fr · anonymised</div></td>
+              <td class="td"><span class="mono" style="font-size:11.5px;background:oklch(0.965 0.003 260);border:1px solid var(--rule);padding:2px 7px;border-radius:3px;">W2 <span style="color:var(--ink3);">trocken</span></span></td>
+              <td class="td"><span class="mono" style="font-size:11.5px;background:var(--danger-soft);color:var(--danger);border:1px solid oklch(0.88 0.06 27);padding:2px 7px;border-radius:3px;">W5 <span style="opacity:.7;">Nebel</span></span></td>
+              <td class="td" style="font-size:11.5px;line-height:1.5;color:var(--ink2);">«…visibilité réduite par le <mark style="background:var(--warn-soft);color:var(--ink);padding:0 2px;">brouillard</mark> au moment des faits…»</td>
+              <td class="td"><div style="display:flex;gap:5px;">
+                <span style="border:1px solid var(--rule);color:var(--ink2);border-radius:3px;padding:4px 9px;font-size:11px;">Hallucination</span>
+                <span style="border:1px solid var(--rule);color:var(--ink2);border-radius:3px;padding:4px 9px;font-size:11px;">Record error</span>
+                <span style="border:1px solid var(--rule);color:var(--ink2);border-radius:3px;padding:4px 9px;font-size:11px;">?</span>
+              </div></td>
+            </tr>
+          </tbody>
+        </table>
+        <div style="margin-top:auto;padding:11px 14px;border-top:1px solid var(--rule);color:var(--ink3);font-size:11.5px;display:flex;gap:8px;align-items:flex-start;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex:none;margin-top:1px;"><circle cx="12" cy="12" r="9"/><path d="M12 11v5" stroke-linecap="round"/><path d="M12 8h.01" stroke-linecap="round"/></svg>
+          <span>Tagging records a judgement — it never rescores a run, corrects a label, or changes a metric. A flat list is deliberate for v1: clustering and cross‑model agreement come back only if this list proves too long to read.</span>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+</x-dc>
+</body>
+</html>
