@@ -1,0 +1,145 @@
+[project]
+name = "ra2"
+version = "0.1.0"
+description = "Road Accident Report Analysis — import, census and LLM extraction evaluation"
+readme = "ra2.md"
+requires-python = ">=3.14"
+license = { file = "LICENSE" }
+
+# Every dependency M0-M8 needs is declared here, once, so no later agent has
+# cause to touch this file (plan-m0-m5.md E4).
+dependencies = [
+    "fastapi>=0.115",
+    "nicegui>=2.0",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy[asyncio]>=2.0",
+    "aiosqlite>=0.20",
+    "alembic>=1.13",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "lingua-language-detector>=2.0",
+    "uuid-utils>=0.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
+    "hypothesis>=6.112",
+    "httpx>=0.27",
+    "pytest-playwright>=0.5",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "import-linter>=2.1",
+    "pre-commit>=3.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ra2"]
+
+# ---------------------------------------------------------------------------
+# ruff  (sw-design.md §11.7: format + check, PLW1514 on)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["ra2", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "SIM",  # simplify
+    "TID",  # tidy imports
+    "PTH",  # flake8-use-pathlib   (N3: no os.path)
+    "RUF",
+    "PLW1514",  # unspecified encoding on open()  (N4)
+    "PLC0415",  # import not at top level
+    "ANN",  # annotations (mypy strict's companion)
+]
+ignore = [
+    "ANN401",  # allow explicit Any where a protocol genuinely needs it
+    "B008",    # FastAPI Depends() in defaults
+    "SIM108",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN", "PLC0415"]
+"ra2/persistence/migrations/**" = ["ANN", "PLC0415", "PTH"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.isort]
+known-first-party = ["ra2"]
+
+# ---------------------------------------------------------------------------
+# mypy  (sw-design.md §11.7: strict on ra2/, no Any returns from domain/)
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.14"
+files = ["ra2", "tests"]
+strict = true
+warn_unreachable = true
+warn_return_any = true
+disallow_any_unimported = false
+plugins = ["pydantic.mypy"]
+exclude = ["^ra2/persistence/migrations/versions/"]
+
+[[tool.mypy.overrides]]
+module = ["nicegui.*", "lingua.*", "uuid_utils.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_untyped_decorators = false
+
+# ---------------------------------------------------------------------------
+# pytest  (sw-design.md §11: five layers, six markers)
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "unit: pure domain, no DB, no network, no server (the default layer)",
+    "backend: services, repositories and the API on a temporary file SQLite",
+    "ui: NiceGUI User fixture, in-process, headless",
+    "e2e: Playwright chromium against a real server on a random port",
+    "eval: real Ollama against evals/baseline.json (phase 3)",
+    "realdata: reads data/data/samples/ when present, skips when absent",
+    "visual: screenshot comparison, Linux/Chromium only, never gating",
+]
+filterwarnings = ["error"]
+
+# ---------------------------------------------------------------------------
+# coverage  (sw-design.md §11.7: fail_under 85 on domain + services only)
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+branch = true
+source = ["ra2/domain", "ra2/services"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true
+exclude_also = [
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "@overload",
+    "class .*\\(Protocol\\):",
+    "\\.\\.\\.$",
+]
