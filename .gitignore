@@ -25,9 +25,21 @@ venv/
 .env
 
 # Local app state
+# RA2_DATA_DIR default: the SQLite file, uploaded deliveries and CSV exports
+var/
 *.sqlite
 *.sqlite3
 *.db
+*.sqlite-wal
+*.sqlite-shm
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+test-results/
 
 # OS
 .DS_Store
