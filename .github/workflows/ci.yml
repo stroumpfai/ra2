@@ -100,5 +100,16 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen
       - run: uv run alembic upgrade head
-      # Green against zero migrations at M0; A3 makes it meaningful.
-      - run: uv run alembic check
+      # `models.py` is frozen at M0 but A3 writes the single initial migration
+      # (plan-m0-m5.md §4, X3). Until it lands there is a schema and no
+      # migration, which `alembic check` correctly calls drift — so the gate
+      # arms itself the moment the first revision appears, with no file edit.
+      - name: alembic check (models and migrations agree)
+        run: |
+          shopt -s nullglob
+          revisions=(ra2/persistence/migrations/versions/*.py)
+          if [ ${#revisions[@]} -eq 0 ]; then
+            echo "::notice::No migrations yet — A3 owns the initial revision. Check skipped."
+            exit 0
+          fi
+          uv run alembic check

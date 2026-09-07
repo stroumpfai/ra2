@@ -48,8 +48,7 @@ fmt:
 migrate:
     uv run alembic upgrade head
 
-# Autogenerate a migration. ONE author for all of phase 1 (A3) — no parallel
-# heads, ever. Never edit an applied migration; add a new one (§12.3).
+# ONE migration author for all of phase 1 (A3). Never edit an applied one.
 revision message:
     uv run alembic revision --autogenerate -m "{{message}}"
 
@@ -61,8 +60,7 @@ revision message:
 census-export corpus_id out:
     uv run python -m ra2.cli census-export --corpus-id {{corpus_id}} --out {{out}}
 
-# Install the Chromium that the E2E layer drives. Chromium only; no other
-# browser is downloaded.
+# Install the Chromium the E2E layer drives. Chromium only, no other browser.
 setup-e2e:
     uv run playwright install chromium
 
