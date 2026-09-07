@@ -33,6 +33,7 @@ __all__ = [
     "ErrorResponse",
     "FileOverrideRequest",
     "FindingResponse",
+    "PageMeta",
     "ProfileBucketResponse",
     "RegisterDeliveryRequest",
     "SelectFileRequest",

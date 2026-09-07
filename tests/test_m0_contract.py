@@ -46,6 +46,7 @@ FROZEN_MODULES = [
     "ra2/api/deps.py",
     "ra2/api/v1/router.py",
     "ra2/main.py",
+    "ra2/cli.py",
     "tests/conftest.py",
 ]
 
