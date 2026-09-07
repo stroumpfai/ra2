@@ -6,8 +6,7 @@
 # and should not drift.
 """Header, 4 nav groups, 7 items, active state derived from the route."""
 
-from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Final
 
@@ -52,9 +51,7 @@ NAV_ITEMS: Final[tuple[NavItem, ...]] = (
         label="Census",
         path="/census",
         title="Census",
-        description=(
-            "How populated each source column is — the basis for choosing features."
-        ),
+        description=("How populated each source column is — the basis for choosing features."),
         built=True,
     ),
     NavItem(
@@ -105,12 +102,11 @@ NAV_ITEMS: Final[tuple[NavItem, ...]] = (
 )
 
 
-@contextmanager
-def shell(*, title: str, description: str, active: str) -> Iterator[None]:
+def shell(*, title: str, description: str, active: str) -> AbstractContextManager[None]:
     """Render header + nav and yield the content column.
 
     A5 builds this from `ui.element`, not `ui.card`/`ui.table`, wherever
-    Quasar's defaults fight the design (R2).
+    Quasar's defaults fight the design (R2), and will implement it with
+    `@contextmanager` — which satisfies this return type.
     """
     raise NotImplementedError
-    yield  # pragma: no cover - unreachable; keeps the generator signature honest

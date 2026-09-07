@@ -1,4 +1,4 @@
-# FROZEN (constructor + signatures) — bodies owned by B2 (feat/m3-census-export)
+# FROZEN (constructor + signatures) — see CONTRACTS.md; bodies owned by B2
 """Query the materialised census (sw-design.md §7, SD2).
 
 Reads the `census_*` tables only. **Nothing here aggregates EAV cells** — that

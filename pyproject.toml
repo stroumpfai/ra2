@@ -49,8 +49,17 @@ packages = ["ra2"]
 target-version = "py314"
 line-length = 100
 src = ["ra2", "tests"]
+# Ruff formats Python inside Markdown fences. The spec documents are inputs,
+# not source: reformatting a code block in mvp-spec.md would silently edit the
+# contract this repo is built against.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
+# sw-design.md §11.7 requires PLW1514 (unspecified encoding, N4) to be on, and
+# it is a preview rule. `explicit-preview-rules` keeps every *other* preview
+# rule off, so the gate does not drift with each ruff release.
+preview = true
+explicit-preview-rules = true
 select = [
     "E",    # pycodestyle
     "W",    # pycodestyle warnings
@@ -71,6 +80,12 @@ ignore = [
     "ANN401",  # allow explicit Any where a protocol genuinely needs it
     "B008",    # FastAPI Depends() in defaults
     "SIM108",
+    # Ambiguous-unicode rules. This codebase processes French, German and
+    # Italian text, and domain/canary.py's literal *is* the Windows-1252-only
+    # character set (mvp-spec.md §4.4) — flagging it as a typo is exactly wrong.
+    "RUF001",
+    "RUF002",
+    "RUF003",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -89,6 +104,12 @@ known-first-party = ["ra2"]
 [tool.mypy]
 python_version = "3.14"
 files = ["ra2", "tests"]
+# `tests/` has no __init__.py (pytest collects it by rootdir). Without these,
+# mypy would name its modules `test_foo` rather than `tests.test_foo`, and the
+# `tests.*` override below would silently never apply.
+mypy_path = "."
+namespace_packages = true
+explicit_package_bases = true
 strict = true
 warn_unreachable = true
 warn_return_any = true

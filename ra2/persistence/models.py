@@ -144,7 +144,7 @@ class Delivery(Base):
     status: Mapped[DeliveryStatus] = mapped_column(default=DeliveryStatus.REGISTERED)
     analysed_at: Mapped[datetime | None] = mapped_column(default=None)
 
-    files: Mapped[list["DeliveryFile"]] = relationship(
+    files: Mapped[list[DeliveryFile]] = relationship(
         back_populates="delivery",
         cascade="all, delete-orphan",
         order_by="DeliveryFile.filename",
@@ -169,9 +169,7 @@ class DeliveryFile(Base):
     )
 
     id: Mapped[FileId] = mapped_column(primary_key=True)
-    delivery_id: Mapped[DeliveryId] = mapped_column(
-        ForeignKey("delivery.id", ondelete="CASCADE")
-    )
+    delivery_id: Mapped[DeliveryId] = mapped_column(ForeignKey("delivery.id", ondelete="CASCADE"))
     filename: Mapped[str] = mapped_column(String(400))
     relative_path: Mapped[str] = mapped_column(String(1000))
     byte_size: Mapped[int]
@@ -265,10 +263,10 @@ class Corpus(Base):
     #: `{"de": 2812, "fr": 1402, "it": 396}`.
     language_counts_json: Mapped[str | None] = mapped_column(default=None)
 
-    records: Mapped[list["Record"]] = relationship(
+    records: Mapped[list[Record]] = relationship(
         back_populates="corpus", cascade="all, delete-orphan"
     )
-    census_columns: Mapped[list["CensusColumn"]] = relationship(
+    census_columns: Mapped[list[CensusColumn]] = relationship(
         back_populates="corpus", cascade="all, delete-orphan"
     )
 
@@ -303,10 +301,10 @@ class Record(Base):
     text_anonymised_flag: Mapped[bool] = mapped_column(default=False)
 
     corpus: Mapped[Corpus] = relationship(back_populates="records")
-    unfall_cells: Mapped[list["UnfallRow"]] = relationship(
+    unfall_cells: Mapped[list[UnfallRow]] = relationship(
         back_populates="record", cascade="all, delete-orphan"
     )
-    objekt_rows: Mapped[list["ObjektRow"]] = relationship(
+    objekt_rows: Mapped[list[ObjektRow]] = relationship(
         back_populates="record", cascade="all, delete-orphan"
     )
 
@@ -355,10 +353,10 @@ class ObjektRow(Base):
     obj_nr: Mapped[str | None] = mapped_column(String(16), default=None)
 
     record: Mapped[Record] = relationship(back_populates="objekt_rows")
-    cells: Mapped[list["ObjektCell"]] = relationship(
+    cells: Mapped[list[ObjektCell]] = relationship(
         back_populates="objekt_row", cascade="all, delete-orphan"
     )
-    person_rows: Mapped[list["PersonRow"]] = relationship(
+    person_rows: Mapped[list[PersonRow]] = relationship(
         back_populates="objekt_row", cascade="all, delete-orphan"
     )
 
@@ -403,7 +401,7 @@ class PersonRow(Base):
     pers_nr: Mapped[str | None] = mapped_column(String(16), default=None)
 
     objekt_row: Mapped[ObjektRow] = relationship(back_populates="person_rows")
-    cells: Mapped[list["PersonCell"]] = relationship(
+    cells: Mapped[list[PersonCell]] = relationship(
         back_populates="person_row", cascade="all, delete-orphan"
     )
 
@@ -472,7 +470,7 @@ class CensusColumn(Base):
     long_tail: Mapped[bool] = mapped_column(default=False)
 
     corpus: Mapped[Corpus] = relationship(back_populates="census_columns")
-    values: Mapped[list["CensusValue"]] = relationship(
+    values: Mapped[list[CensusValue]] = relationship(
         back_populates="census_column",
         cascade="all, delete-orphan",
         order_by="CensusValue.rank",

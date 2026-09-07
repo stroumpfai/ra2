@@ -1,4 +1,4 @@
-# FROZEN (constructor + signatures) — bodies owned by B1 (feat/m3-delivery-corpus)
+# FROZEN (constructor + signatures) — see CONTRACTS.md; bodies owned by B1
 """Freeze a selection into an immutable corpus; list; delete-guard (§6.3)."""
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker

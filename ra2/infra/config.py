@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     @property
     def database_path(self) -> Path:
         """The resolved SQLite file. Never `None` after validation."""
-        assert self.db_path is not None  # noqa: S101 - guaranteed by the validator
+        assert self.db_path is not None
         return self.db_path
 
     @property

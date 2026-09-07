@@ -1,0 +1,57 @@
+# The §11.7 gates, run before the commit rather than after the review.
+# `uv run pre-commit install` once per clone.
+
+default_language_version:
+  python: python3.14
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      # N3: the suite runs on Windows too, so a case collision is a real bug.
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: [--maxkb=2048]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff-format
+      - id: ruff-check
+        args: [--fix]
+
+  - repo: local
+    hooks:
+      # mypy, import-linter and the real-data guard run from the project venv
+      # so they see the same versions CI does.
+      - id: mypy
+        name: mypy (strict on ra2/)
+        entry: uv run mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: import-linter
+        name: import-linter (the §1.1 layer contract)
+        entry: uv run lint-imports
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: no-real-data
+        name: no real data (the .gitignore delivery patterns)
+        description: >
+          The VUM delivery is classified sensitive and must stay on the host
+          (§12.11). This refuses any staged file matching the real-data
+          patterns in .gitignore, whatever its path.
+        entry: python scripts/check_no_real_data.py
+        language: system
+        pass_filenames: true
+        always_run: true

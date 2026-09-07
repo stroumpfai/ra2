@@ -1,4 +1,4 @@
-# FROZEN (constructor + signatures) — bodies owned by B2 (feat/m3-census-export)
+# FROZEN (constructor + signatures) — see CONTRACTS.md; bodies owned by B2
 """CSV writers (sw-design.md §7).
 
 Every export is **UTF-8 with a BOM** (Excel on Windows, N3), `;`-delimited,

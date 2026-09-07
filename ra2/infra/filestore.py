@@ -57,9 +57,7 @@ class StoredFile:
 class FileStore(Protocol):
     """Read access to a delivery's files, plus intake where supported."""
 
-    async def accept(
-        self, delivery_id: DeliveryId, filename: str, content: BinaryIO
-    ) -> StoredFile:
+    async def accept(self, delivery_id: DeliveryId, filename: str, content: BinaryIO) -> StoredFile:
         """Take a file into the store, streaming from `content`.
 
         Raises `ReadOnlyFileStoreError` on a host-path store, which registers
@@ -92,9 +90,7 @@ class UploadedFileStore:
         self._root = deliveries_dir
         self._max_bytes = max_bytes
 
-    async def accept(
-        self, delivery_id: DeliveryId, filename: str, content: BinaryIO
-    ) -> StoredFile:
+    async def accept(self, delivery_id: DeliveryId, filename: str, content: BinaryIO) -> StoredFile:
         raise NotImplementedError
 
     async def list_files(self, delivery_id: DeliveryId) -> tuple[StoredFile, ...]:
@@ -117,9 +113,7 @@ class HostPathFileStore:
         """Record which host directory a delivery was registered from."""
         self._roots[delivery_id] = root
 
-    async def accept(
-        self, delivery_id: DeliveryId, filename: str, content: BinaryIO
-    ) -> StoredFile:
+    async def accept(self, delivery_id: DeliveryId, filename: str, content: BinaryIO) -> StoredFile:
         raise ReadOnlyFileStoreError(
             "a host-path delivery registers files in place; it never receives them"
         )

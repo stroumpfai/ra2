@@ -1,0 +1,113 @@
+# The sw-design.md §1.1 dependency rule, enforced. A violation fails the
+# build; it is not a review comment.
+#
+#   ra2/domain/       stdlib and pydantic only. Nothing else in ra2/.
+#   ra2/persistence/  domain, SQLAlchemy, Alembic
+#   ra2/services/     domain, persistence, infra protocols
+#   ra2/api/          services, domain
+#   ra2/ui/           services, domain
+#   ra2/infra/        domain
+#
+# `ra2.main` is the composition root and is deliberately unconstrained: it is
+# the one module allowed to see every layer, because wiring is its whole job.
+
+[importlinter]
+root_package = ra2
+include_external_packages = True
+
+[importlinter:contract:layers]
+name = Layered architecture (sw-design.md §1.1)
+type = layers
+layers =
+    ra2.ui
+    ra2.api
+    ra2.services
+    ra2.persistence
+    ra2.infra
+    ra2.domain
+exhaustive = False
+
+[importlinter:contract:adapters-are-independent]
+name = api and ui are two adapters over one set of services, not over each other
+type = independence
+modules =
+    ra2.api
+    ra2.ui
+
+[importlinter:contract:ui-reaches-only-services-and-domain]
+name = ui never touches a session, an ORM object or an adapter (§12.7)
+type = forbidden
+source_modules =
+    ra2.ui
+forbidden_modules =
+    ra2.persistence
+    ra2.infra
+    sqlalchemy
+    alembic
+# Only *direct* imports: ui legitimately calls services, which necessarily
+# own sessions. What is banned is ui reaching past them.
+allow_indirect_imports = True
+
+[importlinter:contract:api-reaches-only-services-and-domain]
+name = api never touches persistence or an infra adapter
+type = forbidden
+source_modules =
+    ra2.api
+forbidden_modules =
+    ra2.persistence
+    ra2.infra
+    alembic
+# GET /api/v1/tasks/{id} (sw-design.md §9) exposes TaskRunner progress and
+# there is no service in front of it. The router and the response schema reach
+# for the *protocols* in ra2.infra.tasks — never for an adapter. Declared here
+# rather than left implicit; see CONTRACTS.md "Documented deviations".
+ignore_imports =
+    ra2.api.v1.tasks -> ra2.infra.tasks
+    ra2.api.schemas -> ra2.infra.tasks
+    ra2.api.deps -> ra2.infra.tasks
+# C2 may or may not need the direct import in v1/tasks.py; an exemption that
+# turns out to be unused must not fail the build.
+unmatched_ignore_imports_alerting = none
+# Direct imports only, for the same reason as the ui contract above.
+allow_indirect_imports = True
+
+[importlinter:contract:domain-is-pure]
+name = domain has no I/O, no ORM, no web framework (§1.1)
+type = forbidden
+source_modules =
+    ra2.domain
+forbidden_modules =
+    sqlalchemy
+    alembic
+    fastapi
+    starlette
+    nicegui
+    uvicorn
+    httpx
+    aiosqlite
+    pydantic_settings
+
+[importlinter:contract:persistence-has-no-web]
+name = persistence knows nothing about the web or the adapters
+type = forbidden
+source_modules =
+    ra2.persistence
+forbidden_modules =
+    fastapi
+    starlette
+    nicegui
+    ra2.infra
+    ra2.services
+
+[importlinter:contract:one-llm-seam]
+name = nothing outside the LLMClient implementation imports openai or ollama (§12.1)
+type = forbidden
+source_modules =
+    ra2.domain
+    ra2.persistence
+    ra2.services
+    ra2.api
+    ra2.ui
+forbidden_modules =
+    openai
+    ollama

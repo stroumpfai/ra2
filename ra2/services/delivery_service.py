@@ -1,4 +1,4 @@
-# FROZEN (constructor + signatures) — bodies owned by B1 (feat/m3-delivery-corpus)
+# FROZEN (constructor + signatures) — see CONTRACTS.md; bodies owned by B1
 """Register, analyse, re-parse, select (sw-design.md §6.1, §6.2).
 
 Analyse writes only to `delivery_file`. **No corpus rows.**
@@ -53,9 +53,7 @@ class DeliveryService:
         and must be absent for `UPLOAD`."""
         raise NotImplementedError
 
-    async def add_file(
-        self, delivery_id: DeliveryId, filename: str, content: BinaryIO
-    ) -> FileId:
+    async def add_file(self, delivery_id: DeliveryId, filename: str, content: BinaryIO) -> FileId:
         """Upload intake. Streamed, bounded by `RA2_MAX_UPLOAD_MB`.
 
         Raises `ReadOnlyFileStoreError` on a host-path delivery, whose files

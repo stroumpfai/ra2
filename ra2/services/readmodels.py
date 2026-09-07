@@ -102,9 +102,7 @@ class DeliveryView:
     def selected_record_count(self) -> int:
         """The "Create corpus · N records" label: the `unfall` rows of the
         selected files. Computed here, not in a view function (§8.1)."""
-        return sum(
-            f.ok_count for f in self.files if f.selected and f.file_kind is FileKind.UNFALL
-        )
+        return sum(f.ok_count for f in self.files if f.selected and f.file_kind is FileKind.UNFALL)
 
 
 @dataclass(frozen=True, slots=True)
