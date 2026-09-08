@@ -4,7 +4,6 @@
 import json
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -27,7 +26,7 @@ from ra2.domain.parsing.headers import (
 from ra2.domain.validation import validate_delivery
 from ra2.infra.clock import Clock
 from ra2.infra.config import Settings
-from ra2.infra.filestore import FileStore, HostPathFileStore, UploadedFileStore
+from ra2.infra.filestore import FileStore
 from ra2.infra.idgen import IdFactory
 from ra2.infra.tasks import TaskRunner
 from ra2.persistence.models import (
@@ -101,6 +100,8 @@ class CorpusService:
         session_factory: async_sessionmaker[AsyncSession],
         census_materialiser: CensusMaterialiser,
         language_detector: LanguageDetector,
+        upload_store: FileStore,
+        host_path_store: FileStore,
         task_runner: TaskRunner,
         clock: Clock,
         ids: IdFactory,
@@ -109,6 +110,8 @@ class CorpusService:
         self._session_factory = session_factory
         self._census_materialiser = census_materialiser
         self._language_detector = language_detector
+        self._upload_store = upload_store
+        self._host_path_store = host_path_store
         self._task_runner = task_runner
         self._clock = clock
         self._ids = ids
@@ -260,21 +263,15 @@ class CorpusService:
 
     # --- internals ---------------------------------------------------------
 
-    # SHIM (amendment: feat/m3-delivery-corpus) — `CorpusService.__init__` is
-    # frozen and takes no `FileStore`, but the freeze has to re-read every
-    # selected file's bytes to produce its rows. Rather than reach around the
-    # seam, the store is **reconstructed** from state that is already
-    # persisted: `settings` for an upload delivery, `delivery.root_path` for a
-    # host-path one. Exact for the wired-up default and for every real
-    # deployment; wrong only for a caller who injects a substitute store into
-    # `create_app()`, which is what the amendment's diff fixes.
     def _store_for(self, delivery: Delivery) -> FileStore:
+        """The store this delivery's files live in. Nothing downstream of the
+        seam knows which intake path was used (§6.1). Mirrors
+        `DeliveryService._store_for` — the freeze re-reads bytes through the
+        same injected, already-bound stores that intake and analyse used, so
+        a host-path delivery's registered root is not reconstructed."""
         if SourceKind(delivery.source_kind) is SourceKind.HOST_PATH:
-            assert delivery.root_path is not None
-            return HostPathFileStore({DeliveryId(delivery.id): Path(delivery.root_path)})
-        return UploadedFileStore(
-            self._settings.deliveries_dir, max_bytes=self._settings.max_upload_bytes
-        )
+            return self._host_path_store
+        return self._upload_store
 
     async def _read_bytes(self, delivery: Delivery, row: DeliveryFile) -> bytes:
         return await self._store_for(delivery).read_bytes(

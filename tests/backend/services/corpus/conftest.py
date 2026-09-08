@@ -126,19 +126,30 @@ def task_runner(ids: SeededFactory) -> InlineTaskRunner:
 
 
 @pytest.fixture
+def upload_store(run_upgrade_head: Settings) -> UploadedFileStore:
+    return UploadedFileStore(
+        run_upgrade_head.deliveries_dir, max_bytes=run_upgrade_head.max_upload_bytes
+    )
+
+
+@pytest.fixture
+def host_path_store() -> HostPathFileStore:
+    return HostPathFileStore()
+
+
+@pytest.fixture
 def delivery_service(
     db_session_factory: async_sessionmaker[AsyncSession],
-    run_upgrade_head: Settings,
+    upload_store: UploadedFileStore,
+    host_path_store: HostPathFileStore,
     task_runner: InlineTaskRunner,
     clock: FrozenClock,
     ids: SeededFactory,
 ) -> DeliveryService:
     return DeliveryService(
         session_factory=db_session_factory,
-        upload_store=UploadedFileStore(
-            run_upgrade_head.deliveries_dir, max_bytes=run_upgrade_head.max_upload_bytes
-        ),
-        host_path_store=HostPathFileStore(),
+        upload_store=upload_store,
+        host_path_store=host_path_store,
         task_runner=task_runner,
         clock=clock,
         ids=ids,
@@ -150,6 +161,8 @@ def corpus_service(
     db_session_factory: async_sessionmaker[AsyncSession],
     census_materialiser: RecordingMaterialiser,
     language_detector: LinguaDetector,
+    upload_store: UploadedFileStore,
+    host_path_store: HostPathFileStore,
     task_runner: InlineTaskRunner,
     clock: FrozenClock,
     ids: SeededFactory,
@@ -159,6 +172,8 @@ def corpus_service(
         session_factory=db_session_factory,
         census_materialiser=census_materialiser,
         language_detector=language_detector,
+        upload_store=upload_store,
+        host_path_store=host_path_store,
         task_runner=task_runner,
         clock=clock,
         ids=ids,

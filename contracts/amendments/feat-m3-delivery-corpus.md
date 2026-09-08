@@ -3,9 +3,25 @@
 Two items. The first blocks a design rule and needs the diff below; the second
 is an observation with a proposed fix that nothing in Wave 2 depends on.
 
+**Item 1 resolved at integration** — see its own note below. **Item 2 left
+open**, per B1's own assessment that it is not a phase-1 blocker; a future
+wave should apply the drafted `UtcDateTime` diff.
+
 ---
 
 # Item 1 — `CorpusService` has no `FileStore`
+
+**RESOLVED at Wave 2 integration.** The lead applied essentially the diff
+below: `upload_store`/`host_path_store` added to `CorpusService.__init__`,
+wired in `ra2/main.py` from the same two instances `DeliveryService` already
+gets. The `_store_for`/`_read_bytes` shim now just picks between the injected
+stores (mirroring `DeliveryService._store_for`) instead of reconstructing one.
+One consequence for tests: `corpus_service` and `delivery_service` test
+fixtures must now share the same `upload_store`/`host_path_store` fixture
+instances (they didn't before, since each built its own) — otherwise a
+host-path delivery's `.bind()` registration made through `delivery_service`
+would not be visible to `corpus_service`'s freeze. Fixed in
+`tests/backend/services/corpus/conftest.py`.
 
 ## 1. Which file
 

@@ -89,6 +89,8 @@ def create_app(
         session_factory=session_factory,
         census_materialiser=census_materialiser,
         language_detector=language_detector,
+        upload_store=upload_store,
+        host_path_store=host_path_store,
         task_runner=task_runner,
         clock=clock,
         ids=ids,
