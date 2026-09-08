@@ -8,7 +8,7 @@ value looks like an integer — there is a test that says so.
 
 from collections.abc import Iterable
 
-from ra2.domain.census import TypeHint
+from ra2.domain.census import TypeHint, _infer_type_hint
 
 __all__ = ["infer_type_hint"]
 
@@ -21,5 +21,11 @@ def infer_type_hint(column_name: str, values: Iterable[str]) -> TypeHint:
        range -> `DATE`; all `HH:MM` -> `TIME`; all integral -> `INTEGER`;
        all decimal-parseable -> `DECIMAL`; else `TEXT`.
     3. A column with no populated values -> `TEXT`.
+
+    The implementation lives in `ra2.domain.census` alongside `compute_census`,
+    which needs the same inference to fill in `ColumnCensus.type_hint` and
+    cannot import this module back without creating a cycle (`census.py`'s
+    "type-hint inference" section explains why). This function is the public
+    name callers outside `census.py` use.
     """
-    raise NotImplementedError
+    return _infer_type_hint(column_name, values)
