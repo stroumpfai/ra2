@@ -26,6 +26,7 @@ from ra2.infra.idgen import IdFactory, Uuid7Factory
 from ra2.infra.lingua_detector import LinguaDetector
 from ra2.infra.tasks import AsyncioTaskRunner, TaskRunner
 from ra2.persistence.session import create_engine, create_session_factory, ensure_database_dir
+from ra2.services.census_materialiser import RelationalCensusMaterialiser
 from ra2.services.census_service import CensusService
 from ra2.services.container import Services
 from ra2.services.corpus_service import CorpusService
@@ -75,7 +76,7 @@ def create_app(
     )
     host_path_store = host_path_store or HostPathFileStore()
     language_detector = language_detector or LinguaDetector()
-    census_materialiser = census_materialiser or _MissingCensusMaterialiser()
+    census_materialiser = census_materialiser or RelationalCensusMaterialiser(ids=ids)
 
     delivery_service = DeliveryService(
         session_factory=session_factory,
@@ -98,6 +99,7 @@ def create_app(
     export_service = ExportService(
         census_service=census_service,
         delivery_service=delivery_service,
+        corpus_service=corpus_service,
         clock=clock,
     )
     services = Services(
@@ -132,16 +134,3 @@ def create_app(
         ui.run_with(app, title="RA2", storage_secret=settings.storage_secret, dark=False)
 
     return app
-
-
-class _MissingCensusMaterialiser:
-    """The default until B2 ships one (plan-m0-m5.md E6).
-
-    `create_app()` is final at M0, so the seam must have a default. This one
-    fails loudly rather than silently producing an empty census.
-    """
-
-    async def materialise(self, session: object, corpus_id: object, cells: object) -> None:
-        raise NotImplementedError(
-            "no CensusMaterialiser is wired; B2 (feat/m3-census-export) provides it"
-        )
