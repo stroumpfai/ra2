@@ -16,9 +16,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from sqlite3 import Connection as SQLite3Connection
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 from sqlalchemy import event
+from sqlalchemy.dialects.sqlite.aiosqlite import AsyncAdapt_aiosqlite_connection
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -45,6 +46,14 @@ class SessionFactory(Protocol):
     def __call__(self) -> AsyncSession: ...
 
 
+#: The two DBAPI connection classes this app's engine ever hands to the
+#: connect-time listener: the real `sqlite3.Connection` (used synchronously by
+#: Alembic's offline mode and by direct `sqlite3` access, if any) and
+#: SQLAlchemy's async adapter around `aiosqlite` (used by every real
+#: `create_engine()` connection at runtime — see the bug note below).
+_SQLITE_CONNECTION_TYPES: Final = (SQLite3Connection, AsyncAdapt_aiosqlite_connection)
+
+
 def _apply_pragmas(dbapi_connection: Any, _record: Any) -> None:
     """The three connect-time PRAGMAs, on **every** pooled connection.
 
@@ -52,8 +61,16 @@ def _apply_pragmas(dbapi_connection: Any, _record: Any) -> None:
     - `foreign_keys=ON` — SQLite disables FK enforcement by default, so the
       orphan-FK checks would pass vacuously without this.
     - `busy_timeout` — wait rather than raise "database is locked".
+
+    The isinstance check originally only matched `sqlite3.Connection`. Every
+    real connection this app's async engine creates is actually an
+    `AsyncAdapt_aiosqlite_connection`, which is not a subclass of
+    `sqlite3.Connection` — so the check returned early on **every** real
+    connection, and none of the three pragmas were ever applied. Caught at the
+    M2 review gate (contracts/amendments/feat-m2-persistence.md) via a
+    real-file-database test showing `foreign_keys` reading back `0`.
     """
-    if not isinstance(dbapi_connection, SQLite3Connection):  # pragma: no cover
+    if not isinstance(dbapi_connection, _SQLITE_CONNECTION_TYPES):  # pragma: no cover
         return
     cursor = dbapi_connection.cursor()
     try:
