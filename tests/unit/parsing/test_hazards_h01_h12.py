@@ -353,9 +353,7 @@ def test_no_row_is_ever_silently_repaired_or_dropped(hz, hazard, filename):
     assert len(recovered) == parsed.analysis.recovered_count
     assert len(rejected) == parsed.analysis.rejected_count
     assert parsed.analysis.row_count == (
-        parsed.analysis.ok_count
-        + parsed.analysis.recovered_count
-        + parsed.analysis.rejected_count
+        parsed.analysis.ok_count + parsed.analysis.recovered_count + parsed.analysis.rejected_count
     )
     assert len(parsed.rows) == parsed.analysis.ok_count + parsed.analysis.recovered_count
 

@@ -197,7 +197,7 @@ def analyse_file(
             selected=selected,
         )
 
-    assert encoding_used is not None  # noqa: S101 - text is not None implies this
+    assert encoding_used is not None
     findings.append(
         _finding(
             FindingCode.ENCODING_DETECTED,

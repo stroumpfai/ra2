@@ -18,7 +18,7 @@ from typing import Final
 
 from ra2.domain.delivery import Dialect, FileKind
 
-__all__ = ["CANONICAL_DELIMITERS", "CANDIDATE_DELIMITERS", "DEFAULT_QUOTE_CHAR", "detect_dialect"]
+__all__ = ["CANDIDATE_DELIMITERS", "CANONICAL_DELIMITERS", "DEFAULT_QUOTE_CHAR", "detect_dialect"]
 
 #: Tried in this order; ties fall to the earlier one, then to `kind`.
 CANDIDATE_DELIMITERS: Final[tuple[str, ...]] = ("|", ";", ",", "\t")

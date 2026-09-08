@@ -3,13 +3,13 @@
 import pytest
 
 from ra2.domain.delivery import Dialect
-from ra2.domain.parsing.reader import read_rows, split_physical_lines
+from ra2.domain.parsing.reader import RawRow, read_rows, split_physical_lines
 
 SEMI = Dialect(delimiter=";")
 PIPE = Dialect(delimiter="|")
 
 
-def rows(text, dialect=SEMI):
+def rows(text: str, dialect: Dialect = SEMI) -> list[RawRow]:
     return list(read_rows(text, dialect))
 
 

@@ -6,7 +6,12 @@ import pytest
 from ra2.domain.delivery import Dialect, FileKind, RowOutcome
 from ra2.domain.findings import FindingCode, Severity
 from ra2.domain.parsing.reader import RawRow
-from ra2.domain.parsing.recovery import KEY_ANCHOR, is_key_anchor, recover_rows
+from ra2.domain.parsing.recovery import (
+    KEY_ANCHOR,
+    RecoveredRow,
+    is_key_anchor,
+    recover_rows,
+)
 
 SEMI = Dialect(delimiter=";")
 PIPE = Dialect(delimiter="|")
@@ -14,13 +19,13 @@ KEY_A = "aa" + "0" * 29 + "1"
 KEY_B = "aa" + "0" * 29 + "2"
 
 
-def run(raw, *, kind, dialect, expected):
-    return list(
-        recover_rows(raw, kind=kind, dialect=dialect, expected_field_count=expected)
-    )
+def run(
+    raw: list[RawRow], *, kind: FileKind, dialect: Dialect, expected: int
+) -> list[RecoveredRow]:
+    return list(recover_rows(raw, kind=kind, dialect=dialect, expected_field_count=expected))
 
 
-def row(line_no, *fields, span=1, error=None):
+def row(line_no: int, *fields: str, span: int = 1, error: str | None = None) -> RawRow:
     return RawRow(line_no=line_no, fields=tuple(fields), error=error, line_span=span)
 
 
@@ -64,9 +69,7 @@ def test_a_continuation_line_is_glued_onto_the_previous_narrative():
 
 
 def test_a_repaired_row_always_carries_a_finding_with_its_key():
-    result = run(
-        [row(2, KEY_A, "a"), row(3, "b")], kind=FileKind.TEXT, dialect=SEMI, expected=2
-    )
+    result = run([row(2, KEY_A, "a"), row(3, "b")], kind=FileKind.TEXT, dialect=SEMI, expected=2)
     (finding,) = result[0].findings
     assert finding.code is FindingCode.ROW_RECOVERED
     assert finding.severity is Severity.REPORTED
@@ -79,9 +82,7 @@ def test_a_delimiter_inside_an_unquoted_narrative_is_rejoined_and_reported():
     """A two-column file's second column is "everything after the first
     delimiter", so this is determined rather than guessed — but it still
     changed the row, so it is reported (§12.6)."""
-    result = run(
-        [row(2, KEY_A, "vorne", "hinten")], kind=FileKind.TEXT, dialect=SEMI, expected=2
-    )
+    result = run([row(2, KEY_A, "vorne", "hinten")], kind=FileKind.TEXT, dialect=SEMI, expected=2)
     assert result[0].fields == (KEY_A, "vorne;hinten")
     assert result[0].outcome is RowOutcome.RECOVERED
     assert result[0].findings[0].detail["method"] == "delimiter_in_narrative"
@@ -94,9 +95,7 @@ def test_a_clean_text_row_is_ok_and_reports_nothing():
 
 
 def test_a_quoted_multi_line_record_is_recovered_by_the_reader_not_the_anchor():
-    result = run(
-        [row(2, KEY_A, "one\ntwo", span=2)], kind=FileKind.TEXT, dialect=SEMI, expected=2
-    )
+    result = run([row(2, KEY_A, "one\ntwo", span=2)], kind=FileKind.TEXT, dialect=SEMI, expected=2)
     assert result[0].outcome is RowOutcome.RECOVERED
     assert result[0].findings[0].detail["method"] == "quoted"
 
@@ -137,9 +136,7 @@ def test_a_wide_row_is_rejected_even_when_the_field_count_would_come_out_right()
 
 
 def test_too_many_fields_is_rejected_with_the_counts_and_the_key():
-    result = run(
-        [row(2, KEY_A, "a", "b", "c")], kind=FileKind.UNFALL, dialect=PIPE, expected=3
-    )
+    result = run([row(2, KEY_A, "a", "b", "c")], kind=FileKind.UNFALL, dialect=PIPE, expected=3)
     (finding,) = result[0].findings
     assert finding.code is FindingCode.ROW_REJECTED_FIELD_COUNT
     assert finding.detail["expected_fields"] == "3"

@@ -74,9 +74,7 @@ class Hazards:
         return [f.code for f in findings]
 
     @staticmethod
-    def of_code(
-        findings: tuple[Finding, ...] | list[Finding], code: FindingCode
-    ) -> list[Finding]:
+    def of_code(findings: tuple[Finding, ...] | list[Finding], code: FindingCode) -> list[Finding]:
         """Every finding with `code`. Tests assert on the code, never on prose."""
         return [f for f in findings if f.code is code]
 

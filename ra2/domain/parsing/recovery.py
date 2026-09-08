@@ -32,7 +32,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Final
 
-from ra2.domain.delivery import Dialect, FileKind, RowOutcome, UNFALL_UID_PATTERN
+from ra2.domain.delivery import UNFALL_UID_PATTERN, Dialect, FileKind, RowOutcome
 from ra2.domain.findings import DEFAULT_SEVERITY, Finding, FindingCode
 from ra2.domain.ids import FileId
 from ra2.domain.parsing.reader import RawRow
@@ -166,9 +166,7 @@ def recover_rows(
                         "expected_fields": str(expected_field_count),
                         "actual_fields": str(len(fields)),
                         "reason": "continuation_line",
-                        "continuation_lines": ",".join(
-                            str(n) for n in current.continuation_lines
-                        ),
+                        "continuation_lines": ",".join(str(n) for n in current.continuation_lines),
                     },
                 )
             )

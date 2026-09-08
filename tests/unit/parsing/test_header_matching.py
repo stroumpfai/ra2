@@ -51,7 +51,10 @@ def test_the_exact_header_matches_that_kind(kind):
 def test_matching_is_case_insensitive_and_whitespace_trimmed(kind):
     """mvp-spec.md §4.1, and the reason the text file's upper-case
     `UNFALLUID` and the structured files' `UnfallUid` are the same column."""
-    mangled = [f"  {c.upper()} " if i % 2 else f"\t{c.lower()}" for i, c in enumerate(CANONICAL_HEADERS[kind])]
+    mangled = [
+        f"  {c.upper()} " if i % 2 else f"\t{c.lower()}"
+        for i, c in enumerate(CANONICAL_HEADERS[kind])
+    ]
     assert match_header(mangled) is kind
     assert classify_header(mangled).ok is True
 
@@ -148,4 +151,4 @@ def test_no_canonical_column_name_contains_a_delimiter_or_a_newline():
     for columns in CANONICAL_HEADERS.values():
         for name in columns:
             assert name == name.strip()
-            assert not any(c in name for c in "|;\r\n\"")
+            assert not any(c in name for c in '|;\r\n"')

@@ -20,20 +20,20 @@ Run it with `uv run python tests/fixtures/deliveries/generate_hazards.py`;
 
 The hazards, and what each one exists to prove:
 
-| Fixture                  | Hazard                              | Expected                        |
-|--------------------------|-------------------------------------|---------------------------------|
-| `h01_cp1252`             | Windows-1252 bytes                  | detected, decoded, reported     |
-| `h02_undecodable`        | bytes valid in neither encoding     | file fails, never `U+FFFD`      |
-| `h03_stray_delimiter`    | extra `\\|` in a wide `unfall` row   | row rejected, key in report     |
-| `h04_embedded_newline`   | newline inside a quoted narrative   | recovered, counted              |
-| `h05_unquoted_newline`   | newline in an unquoted field        | recovered by the key anchor     |
-| `h06_orphan_objekt`      | `objekt.UnfallUid` with no parent   | blocking                        |
-| `h07_dup_uid_cross_canton` | one `UnfallUid` in the AG and BE sets | blocking                    |
-| `h08_all_empty_column`   | a column empty in every row         | census 0 %, in no denominator   |
-| `h09_fr_lossy`           | French with `oe`/quotes deleted     | contributes 0 to the canary     |
-| `h10_count_mismatch`     | `AnzObjFeld` != child count         | reported, non-blocking          |
-| `h11_unmatched_text_key` | text row with no `unfall` row       | reported, non-blocking          |
-| `h12_unknown_header`     | header matching no table            | kind `unknown`, blocking if selected |
+| Fixture                | Hazard                            | Expected                    |
+|------------------------|-----------------------------------|-----------------------------|
+| h01_cp1252             | Windows-1252 bytes                | detected, decoded, reported |
+| h02_undecodable        | valid in neither encoding         | file fails, never `U+FFFD`  |
+| h03_stray_delimiter    | extra delimiter in a wide row     | row rejected, key reported  |
+| h04_embedded_newline   | newline in a quoted narrative     | recovered, counted          |
+| h05_unquoted_newline   | newline in an unquoted field      | recovered by the key anchor |
+| h06_orphan_objekt      | `objekt.UnfallUid` with no parent | blocking                    |
+| h07_dup_uid_cross_canton | one key in the AG and BE sets   | blocking                    |
+| h08_all_empty_column   | a column empty in every row       | census 0 %, no denominator  |
+| h09_fr_lossy           | French with `oe`/quotes deleted   | contributes 0 to the canary |
+| h10_count_mismatch     | `AnzObjFeld` != child count       | reported, non-blocking      |
+| h11_unmatched_text_key | text row with no `unfall` row     | reported, non-blocking      |
+| h12_unknown_header     | header matching no table          | unknown; blocks if selected |
 """
 
 import sys
@@ -117,8 +117,15 @@ def unfall_row(
     objekt_count: int = 0,
     person_count: int = 0,
     narrative: str = "Fahrzeug A bremste, Fahrzeug B fuhr auf.",
-    **overrides: str,
+    extra: dict[str, str] | None = None,
 ) -> list[str]:
+    """One `unfall` row. `extra` sets any further column by name.
+
+    A `dict` rather than `**kwargs`: a hazard sets a column named by a constant
+    (h08's `ALL_EMPTY_COLUMN`), and splatting a `dict[str, str]` into keyword
+    arguments would let it collide with `objekt_count` — which the type checker
+    is right to refuse.
+    """
     return _row(
         FileKind.UNFALL,
         key,
@@ -128,24 +135,24 @@ def unfall_row(
             UNFALL_OBJ_COUNT_COLUMN: str(objekt_count),
             UNFALL_PERS_COUNT_COLUMN: str(person_count),
             "UnfHergangTextAnonym": narrative,
-            **overrides,
+            **(extra or {}),
         },
     )
 
 
-def objekt_row(key: str, *, unfall_key: str, **overrides: str) -> list[str]:
+def objekt_row(key: str, *, unfall_key: str, extra: dict[str, str] | None = None) -> list[str]:
     return _row(
         FileKind.OBJEKT,
         key,
-        {OBJEKT_KEY_COLUMN: key, UNFALL_KEY_COLUMN: unfall_key, **overrides},
+        {OBJEKT_KEY_COLUMN: key, UNFALL_KEY_COLUMN: unfall_key, **(extra or {})},
     )
 
 
-def person_row(key: str, *, objekt_key: str, **overrides: str) -> list[str]:
+def person_row(key: str, *, objekt_key: str, extra: dict[str, str] | None = None) -> list[str]:
     return _row(
         FileKind.PERSON,
         key,
-        {PERSON_KEY_COLUMN: key, OBJEKT_KEY_COLUMN: objekt_key, **overrides},
+        {PERSON_KEY_COLUMN: key, OBJEKT_KEY_COLUMN: objekt_key, **(extra or {})},
     )
 
 
@@ -319,9 +326,8 @@ def _h08_all_empty_column() -> dict[str, bytes]:
     only possible if the canonical header, not the observed cells, decides which
     columns exist (M0-D9).
     """
-    rows = [
-        unfall_row(uid("aa", n), canton=AG, **{ALL_EMPTY_COLUMN: ""}) for n in range(1, 4)
-    ]
+    empty = {ALL_EMPTY_COLUMN: ""}
+    rows = [unfall_row(uid("aa", n), canton=AG, extra=empty) for n in range(1, 4)]
     return {"unfall.txt": structured(FileKind.UNFALL, rows).encode("utf-8")}
 
 

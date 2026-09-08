@@ -350,9 +350,7 @@ def classify_header(header: Sequence[str]) -> HeaderMatch:
         )
 
     if best is None or best_score < HEADER_MATCH_THRESHOLD:
-        return HeaderMatch(
-            FileKind.UNKNOWN, ok=False, extra=tuple(header), duplicated=duplicated
-        )
+        return HeaderMatch(FileKind.UNKNOWN, ok=False, extra=tuple(header), duplicated=duplicated)
     return best
 
 
