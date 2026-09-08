@@ -1,14 +1,16 @@
-"""The single initial Alembic migration: applies cleanly, and never drifts
-from `ra2.persistence.models.Base.metadata` (sw-design.md §11.2, §12.10)."""
+"""Alembic migrations: apply cleanly, never drift from
+`ra2.persistence.models.Base.metadata`, and form a single linear chain
+(sw-design.md §11.2, §12.10, plan-m0-m5.md X3)."""
 
 import ast
-import re
 from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
 from alembic.autogenerate import compare_metadata
+from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from ra2.infra.config import Settings
@@ -53,30 +55,25 @@ async def test_alembic_check_reports_no_drift(
     assert diff == [], f"models.py and the migration have drifted: {diff!r}"
 
 
-def test_migrations_versions_has_exactly_one_revision() -> None:
-    """A3 is the single migration author for all of phase 1 — one head, ever,
-    in this branch (plan-m0-m5.md X3)."""
-    versions_dir = REPO_ROOT / "ra2" / "persistence" / "migrations" / "versions"
-    revision_files = [
-        p
-        for p in versions_dir.glob("*.py")
-        if p.name != "__init__.py" and not p.name.startswith("_")
-    ]
-    assert len(revision_files) == 1, f"expected exactly one revision, found {revision_files}"
+def test_migrations_form_a_single_linear_chain(alembic_config: Config) -> None:
+    """One migration **author** (plan-m0-m5.md X3) means one linear history —
+    never two branch heads from independently-generated revisions racing each
+    other. It does not mean the schema is forever frozen at one revision: a
+    real bug found after the initial migration lands gets a new revision on
+    top, same as any other schema change (§12.3 — never edit an *applied* one,
+    add a new one instead)."""
+    script = ScriptDirectory.from_config(alembic_config)
+    heads = script.get_heads()
+    assert len(heads) == 1, f"expected exactly one migration head, found {heads}"
 
 
-def test_no_migration_has_ever_been_edited_after_generation() -> None:
-    """A cheap proxy for §12.3: the one revision file still declares
-    `down_revision = None` — i.e. it really is the first and only migration,
-    not a hand-edited chain pretending to be one."""
-    versions_dir = REPO_ROOT / "ra2" / "persistence" / "migrations" / "versions"
-    (revision_file,) = [
-        p
-        for p in versions_dir.glob("*.py")
-        if p.name != "__init__.py" and not p.name.startswith("_")
-    ]
-    text = revision_file.read_text(encoding="utf-8")
-    assert re.search(r"down_revision:.*=\s*None", text)
+def test_exactly_one_migration_is_the_root(alembic_config: Config) -> None:
+    """Exactly one revision has no parent — the original schema's migration.
+    Every other revision chains onto something, so the history is a single
+    line from that root to the current head, not a hand-edited fork."""
+    script = ScriptDirectory.from_config(alembic_config)
+    roots = [rev.revision for rev in script.walk_revisions() if rev.down_revision is None]
+    assert len(roots) == 1, f"expected exactly one root revision, found {roots}"
 
 
 def test_no_metadata_create_all_in_persistence_or_tests() -> None:

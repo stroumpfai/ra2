@@ -442,9 +442,15 @@ class CensusColumn(Base):
             "corpus_id", "table_name", "column_name", name="uq_census_column_corpus_table_column"
         ),
         Index("ix_census_column_corpus_id", "corpus_id"),
-        CheckConstraint(
-            "populated_rate >= 0.0 AND populated_rate <= 1.0", name="populated_rate_is_a_rate"
-        ),
+        # No upper bound: `compute_census` (ra2/domain/census.py) uses the
+        # *record* count as the denominator for every table so rates are
+        # comparable across tables (sw-design.md §7), but objekt/person are
+        # one-to-many with record — a multi-vehicle accident's objekt columns
+        # legitimately populate more cells than there are records, so
+        # populated_rate can exceed 1.0. Found at Wave 2 integration: a
+        # `<= 1.0` upper bound here made corpus_service.freeze() crash on any
+        # real delivery with more than one object per accident.
+        CheckConstraint("populated_rate >= 0.0", name="populated_rate_is_a_rate"),
     )
 
     id: Mapped[CensusColumnId] = mapped_column(primary_key=True)
