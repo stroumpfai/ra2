@@ -128,3 +128,48 @@ def test_the_file_column_is_the_only_one_that_truncates(page, demo_tables_url):
         ".tableLayout"
     )
     assert layout == "fixed"
+
+
+def test_no_component_in_the_kit_is_swallowed_by_quasar(page: Page, demo_tables_url: str) -> None:
+    """Quasar ships `.sm` / `.md` / `.lg` breakpoint helpers carrying
+    `display:none !important`, so a utility class named after a size silently
+    deletes the element it was meant to size. That is how the add button and
+    every row action once vanished; this is the tripwire.
+    """
+    page.set_viewport_size({"width": 1440, "height": HEIGHT})
+    page.goto(demo_tables_url)
+    page.wait_for_selector('[data-card="text"]')
+
+    invisible = page.evaluate(
+        """() => [...document.querySelectorAll(
+            '.iconbtn, .tick, .bar, .distbar, .chip, .card, .navitem, .lbl, .sorth'
+        )]
+            .filter(e => e.getBoundingClientRect().width === 0)
+            .map(e => e.className)"""
+    )
+    assert invisible == [], f"components rendered with a zero box: {invisible}"
+
+
+def test_the_header_block_is_the_designs_two_tight_lines(page: Page, demo_tables_url: str) -> None:
+    """Quasar sets `h1` to 6rem/6rem weight 300. Unreset, the header block is
+    145px tall and the description floats 40px below the title instead of the
+    design's `margin-top:2px` (README §0, "View title block")."""
+    page.set_viewport_size({"width": 1440, "height": HEIGHT})
+    page.goto(demo_tables_url)
+    page.wait_for_selector('[data-card="text"]')
+
+    title = _box(page, '[data-testid="view-title"]')
+    description = _box(page, '[data-testid="view-description"]')
+
+    assert title["height"] < 30, "the h1 kept Quasar's 6rem line box"
+    assert description["y"] - (title["y"] + title["height"]) == pytest.approx(2, abs=1)
+    assert _box(page, '[data-testid="header"]')["height"] < 90
+
+    styles = page.evaluate(
+        """() => {
+            const s = getComputedStyle(document.querySelector('[data-testid="view-title"]'));
+            return {size: s.fontSize, weight: s.fontWeight};
+        }"""
+    )
+    assert styles["size"] == "19px"
+    assert styles["weight"] == "600"

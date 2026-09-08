@@ -112,7 +112,7 @@ def icon_button(
 ) -> Element:
     """A bordered icon-only button. A real `<button>`, so Tab reaches it and
     the `--focus` ring shows (README: focus is undesigned; add one)."""
-    css_size = "md" if size == 24 else "sm"
+    css_size = "iconbtn-md" if size == 24 else "iconbtn-sm"
     button = (
         ui.element("button")
         .classes(f"iconbtn {css_size} {extra_class}".strip())
@@ -331,7 +331,7 @@ def _arrow(
 ) -> None:
     button = (
         ui.element("button")
-        .classes("iconbtn md")
+        .classes("iconbtn iconbtn-md")
         .props(f'type="button" aria-label="{label}" title="{label}" data-testid="{testid}"')
         .mark(testid)
     )

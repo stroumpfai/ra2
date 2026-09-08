@@ -130,6 +130,12 @@ body,.q-layout,.nicegui-content{
 .nicegui-content{padding:0;gap:0;}
 .q-page,.q-page-container{padding:0!important;min-height:0;}
 .ra2-root{display:flex;flex-direction:column;height:100vh;background:var(--bg);}
+/* Quasar sizes `h1` at 6rem/6rem weight 300. Every heading in this design is
+   set by its own rule, so the base is neutralised here rather than overridden
+   six times. Without this the header block is 145px instead of ~60px. */
+h1,h2,h3,h4,h5,h6{
+  margin:0;font-size:inherit;font-weight:600;line-height:1.25;letter-spacing:normal;
+}
 table{border-collapse:collapse;width:100%;}
 .mono{font-family:var(--mono);}
 .nowrap{white-space:nowrap;}
@@ -189,8 +195,11 @@ _UTILITIES: Final = """
   border:1px solid var(--rule);border-radius:3px;background:var(--surface);
   color:var(--ink2);cursor:pointer;padding:0;
 }
-.iconbtn.sm{width:22px;height:22px;color:var(--ink3);}
-.iconbtn.md{width:24px;height:24px;}
+/* Named `iconbtn-sm` / `iconbtn-md`, never `sm` / `md`: those are Quasar's
+   breakpoint visibility helpers and they carry `display:none!important`, which
+   makes every icon button vanish on most screens. */
+.iconbtn-sm{width:22px;height:22px;color:var(--ink3);}
+.iconbtn-md{width:24px;height:24px;}
 .iconbtn[disabled]{color:var(--muted-arrow);cursor:default;}
 .tick{
   display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;
