@@ -41,6 +41,9 @@ var/
 htmlcov/
 test-results/
 
+# Claude Code session/agent state, including nested worktrees for parallel waves
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db

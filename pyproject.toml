@@ -52,7 +52,10 @@ src = ["ra2", "tests"]
 # Ruff formats Python inside Markdown fences. The spec documents are inputs,
 # not source: reformatting a code block in mvp-spec.md would silently edit the
 # contract this repo is built against.
-extend-exclude = ["*.md"]
+# `.claude/worktrees/` holds other agents' isolated checkouts nested inside
+# this tree during parallel waves — never lint or format someone else's
+# in-progress worktree from here.
+extend-exclude = ["*.md", ".claude"]
 
 [tool.ruff.lint]
 # sw-design.md §11.7 requires PLW1514 (unspecified encoding, N4) to be on, and
