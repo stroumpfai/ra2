@@ -12,8 +12,10 @@ A4 implements `AsyncioTaskRunner` (real, concurrent) and `InlineTaskRunner`
 (executes synchronously, so backend tests need no polling).
 """
 
+import asyncio
+import threading
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
@@ -92,27 +94,145 @@ class TaskRunner(Protocol):
 # --- STUB implementations — bodies owned by A4 (feat/m2-infra). Not frozen. ---
 
 
+class _ProgressTable:
+    """Shared bookkeeping for both runners.
+
+    Guarantees the monotonic-progress invariant itself — `update()` never
+    lets `done` move backward and a terminal task never moves again — rather
+    than trusting every `TaskWork` to behave.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._tasks: dict[TaskId, TaskProgress] = {}
+
+    def create(self, task_id: TaskId, name: str) -> None:
+        with self._lock:
+            self._tasks[task_id] = TaskProgress(
+                task_id=task_id, name=name, status=TaskStatus.PENDING
+            )
+
+    def mark_running(self, task_id: TaskId) -> None:
+        with self._lock:
+            current = self._tasks[task_id]
+            if current.is_terminal:
+                return
+            self._tasks[task_id] = replace(current, status=TaskStatus.RUNNING)
+
+    def update(self, task_id: TaskId, *, done: int, total: int, message: str) -> None:
+        with self._lock:
+            current = self._tasks[task_id]
+            if current.is_terminal:
+                return
+            self._tasks[task_id] = replace(
+                current,
+                status=TaskStatus.RUNNING,
+                done=max(done, current.done),
+                total=total or current.total,
+                message=message,
+            )
+
+    def mark_ok(self, task_id: TaskId) -> None:
+        with self._lock:
+            current = self._tasks[task_id]
+            done = current.total if current.total else current.done
+            self._tasks[task_id] = replace(
+                current, status=TaskStatus.OK, done=done, total=current.total or done
+            )
+
+    def mark_failed(self, task_id: TaskId, error: str) -> None:
+        with self._lock:
+            current = self._tasks[task_id]
+            self._tasks[task_id] = replace(current, status=TaskStatus.FAILED, error=error)
+
+    def get(self, task_id: TaskId) -> TaskProgress:
+        with self._lock:
+            return self._tasks[task_id]
+
+
+class _Reporter:
+    """The `ProgressReporter` handed to running work."""
+
+    def __init__(self, task_id: TaskId, table: _ProgressTable) -> None:
+        self._task_id = task_id
+        self._table = table
+
+    def report(self, done: int, total: int, message: str = "") -> None:
+        self._table.update(self._task_id, done=done, total=total, message=message)
+
+
 class AsyncioTaskRunner:
     """The production runner: one in-process asyncio worker, no broker."""
 
     def __init__(self, ids: IdFactory) -> None:
         self._ids = ids
+        self._table = _ProgressTable()
+        #: Kept only so the tasks are not garbage-collected mid-flight.
+        self._tasks: dict[TaskId, asyncio.Task[None]] = {}
 
     def submit(self, name: str, work: TaskWork) -> TaskId:
-        raise NotImplementedError
+        task_id = TaskId(self._ids.new_id())
+        self._table.create(task_id, name)
+        reporter = _Reporter(task_id, self._table)
+
+        async def _run() -> None:
+            self._table.mark_running(task_id)
+            try:
+                await work(reporter)
+            except Exception as exc:  # a failure is a recorded outcome, never a silent retry
+                self._table.mark_failed(task_id, str(exc))
+            else:
+                self._table.mark_ok(task_id)
+
+        loop = asyncio.get_running_loop()
+        self._tasks[task_id] = loop.create_task(_run())
+        return task_id
 
     def progress(self, task_id: TaskId) -> TaskProgress:
-        raise NotImplementedError
+        return self._table.get(task_id)
 
 
 class InlineTaskRunner:
-    """Executes synchronously, so backend tests need no polling."""
+    """Executes synchronously, so backend tests need no polling.
+
+    `submit()` is not an `async def` — the `TaskRunner` protocol calls for a
+    plain method that schedules work and returns immediately. To still run an
+    async `TaskWork` to *completion* before returning (so `progress()` is
+    already terminal), the work is driven on a brand-new event loop in a
+    throwaway thread and joined: `submit()` may itself be called from inside
+    a running loop (a service coroutine calling it without `await`), and
+    neither `asyncio.run()` nor `loop.run_until_complete()` can re-enter a
+    loop that is already running on the calling thread.
+    """
 
     def __init__(self, ids: IdFactory) -> None:
         self._ids = ids
+        self._table = _ProgressTable()
 
     def submit(self, name: str, work: TaskWork) -> TaskId:
-        raise NotImplementedError
+        task_id = TaskId(self._ids.new_id())
+        self._table.create(task_id, name)
+        self._table.mark_running(task_id)
+        reporter = _Reporter(task_id, self._table)
+
+        errors: list[Exception] = []
+
+        def _run_to_completion() -> None:
+            try:
+                asyncio.run(work(reporter))
+            except Exception as exc:  # recorded as TaskStatus.FAILED below
+                errors.append(exc)
+
+        worker = threading.Thread(target=_run_to_completion)
+        worker.start()
+        worker.join()
+
+        if errors:
+            self._table.mark_failed(task_id, str(errors[0]))
+        else:
+            self._table.mark_ok(task_id)
+
+        return task_id
 
     def progress(self, task_id: TaskId) -> TaskProgress:
-        raise NotImplementedError
+        return self._table.get(task_id)

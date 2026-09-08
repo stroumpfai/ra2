@@ -14,12 +14,18 @@ A4's parametrised contract test asserts exactly that, so both implementations
 run the same test.
 """
 
+import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Protocol, runtime_checkable
 
 from ra2.domain.ids import DeliveryId, FileId
+from ra2.infra.files import open_binary_writer
+from ra2.infra.files import read_bytes as files_read_bytes
+
+#: Streamed in bounded chunks so `accept()` never buffers a whole upload.
+_CHUNK_BYTES = 1024 * 1024
 
 __all__ = [
     "FileStore",
@@ -91,16 +97,49 @@ class UploadedFileStore:
         self._max_bytes = max_bytes
 
     async def accept(self, delivery_id: DeliveryId, filename: str, content: BinaryIO) -> StoredFile:
-        raise NotImplementedError
+        # Only the basename: an upload's filename is analyst-supplied and
+        # must never be allowed to escape the delivery's own directory.
+        safe_name = Path(filename).name
+        if not safe_name:
+            raise FileStoreError(f"empty filename for delivery {delivery_id!r}")
+
+        dest = self._root / delivery_id / safe_name
+        digest = hashlib.sha256()
+        size = 0
+        with open_binary_writer(dest) as out:
+            while chunk := content.read(_CHUNK_BYTES):
+                size += len(chunk)
+                if size > self._max_bytes:
+                    out.close()
+                    dest.unlink(missing_ok=True)
+                    raise FileStoreError(
+                        f"{filename!r} exceeds the {self._max_bytes}-byte upload limit"
+                    )
+                digest.update(chunk)
+                out.write(chunk)
+
+        return StoredFile(
+            file_id=FileId(safe_name),
+            filename=filename,
+            relative_path=safe_name,
+            byte_size=size,
+            sha256=digest.hexdigest(),
+        )
 
     async def list_files(self, delivery_id: DeliveryId) -> tuple[StoredFile, ...]:
-        raise NotImplementedError
+        root = self._root / delivery_id
+        if not root.is_dir():
+            return ()
+        return tuple(_stat_file(path, root) for path in sorted(root.rglob("*")) if path.is_file())
 
     async def read_bytes(self, delivery_id: DeliveryId, relative_path: str) -> bytes:
-        raise NotImplementedError
+        return files_read_bytes(_resolve(self._root / delivery_id, relative_path))
 
     async def remove(self, delivery_id: DeliveryId, relative_path: str) -> None:
-        raise NotImplementedError
+        path = _resolve(self._root / delivery_id, relative_path)
+        if not path.is_file():
+            raise FileStoreError(f"{relative_path!r} is not in delivery {delivery_id!r}")
+        path.unlink()
 
 
 class HostPathFileStore:
@@ -119,10 +158,45 @@ class HostPathFileStore:
         )
 
     async def list_files(self, delivery_id: DeliveryId) -> tuple[StoredFile, ...]:
-        raise NotImplementedError
+        root = self._root_for(delivery_id)
+        return tuple(_stat_file(path, root) for path in sorted(root.rglob("*")) if path.is_file())
 
     async def read_bytes(self, delivery_id: DeliveryId, relative_path: str) -> bytes:
-        raise NotImplementedError
+        root = self._root_for(delivery_id)
+        return files_read_bytes(_resolve(root, relative_path))
 
     async def remove(self, delivery_id: DeliveryId, relative_path: str) -> None:
         raise ReadOnlyFileStoreError("a host-path delivery never deletes the analyst's files")
+
+    def _root_for(self, delivery_id: DeliveryId) -> Path:
+        try:
+            return self._roots[delivery_id]
+        except KeyError:
+            raise FileStoreError(f"no host path registered for delivery {delivery_id!r}") from None
+
+
+def _stat_file(path: Path, root: Path) -> StoredFile:
+    """One `StoredFile` for a file already sitting on disk.
+
+    `file_id` is the relative path: neither store is handed an `IdFactory`
+    (only `DeliveryService`, via B1, mints the `FileId` that becomes the
+    `delivery_file` primary key), so this is a stable, store-local identity
+    rather than that final id.
+    """
+    relative_path = path.relative_to(root).as_posix()
+    data = files_read_bytes(path)
+    return StoredFile(
+        file_id=FileId(relative_path),
+        filename=path.name,
+        relative_path=relative_path,
+        byte_size=len(data),
+        sha256=hashlib.sha256(data).hexdigest(),
+    )
+
+
+def _resolve(root: Path, relative_path: str) -> Path:
+    """`root / relative_path`, refusing to leave `root` (defence in depth)."""
+    candidate = (root / relative_path).resolve()
+    if candidate != root.resolve() and root.resolve() not in candidate.parents:
+        raise FileStoreError(f"{relative_path!r} escapes its delivery root")
+    return candidate
