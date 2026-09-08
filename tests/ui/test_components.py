@@ -9,10 +9,13 @@ The last group is the architectural one. A component that quietly grew a
 `sorted()` call would pass a rendering test and fail these.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import pytest
 from nicegui import ui
+from nicegui.testing.user import User
+from nicegui.testing.user_interaction import UserInteraction
 
 from ra2.services.readmodels import SortDir
 from ra2.ui.components import (
@@ -81,7 +84,7 @@ COLUMNS: tuple[ColumnSpec[Row], ...] = (
 )
 
 
-def page(path, build):
+def page(path: str, build: Callable[[], object]) -> None:
     """Register a throwaway route that renders `build()` and nothing else."""
 
     @ui.page(path)
@@ -307,7 +310,7 @@ async def test_two_tables_on_one_page_keep_independent_sort_state(user):
 # --- helpers ----------------------------------------------------------------
 
 
-def _all(user):
+def _all(user: User) -> list[ui.element]:
     """Every element on the page, in creation order.
 
     `UserInteraction.elements` is a **set**, so anything asserting order has to
@@ -317,14 +320,14 @@ def _all(user):
     return _ordered(user.find(kind=ui.element))
 
 
-def _ordered(interaction):
+def _ordered[T: ui.element](interaction: UserInteraction[T]) -> list[T]:
     return sorted(interaction.elements, key=lambda e: e.id)
 
 
-def _text(element) -> str:
+def _text(element: ui.element) -> str:
     parts = [getattr(child, "text", "") for child in element.descendants()]
     return " ".join(p for p in parts if p).strip()
 
 
-def _row_names(user) -> list[str]:
-    return [e.text for e in _ordered(user.find(marker="filename"))]
+def _row_names(user: User) -> list[str]:
+    return [str(e.text) for e in _ordered(user.find(kind=ui.label, marker="filename"))]

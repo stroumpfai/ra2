@@ -21,6 +21,7 @@ from ra2.ui.shell import (
     BRAND_TITLE,
     NAV_GROUPS,
     NAV_ITEMS,
+    NavItem,
     item_for_path,
 )
 from ra2.ui.views.placeholder_view import PLACEHOLDER_NOTE
@@ -64,7 +65,7 @@ def test_the_design_readme_still_says_what_nav_items_says():
 
 
 @pytest.mark.parametrize("item", NAV_ITEMS, ids=lambda i: i.key)
-def test_item_for_path_maps_every_route(item):
+def test_item_for_path_maps_every_route(item: NavItem) -> None:
     assert item_for_path(item.path) is item
     assert item_for_path(item.path + "/") is item
 

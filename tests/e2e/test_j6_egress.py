@@ -12,8 +12,10 @@ URL at all.
 """
 
 import re
+from urllib.parse import urlsplit
 
 import pytest
+from playwright.sync_api import Page
 
 from ra2.ui import theme
 from ra2.ui.shell import NAV_ITEMS
@@ -26,17 +28,32 @@ LOCAL_SCHEMES = ("data:", "blob:", "about:", "javascript:")
 #: Any absolute URL. `//host/path` is protocol-relative and just as external.
 ABSOLUTE_URL = re.compile(r"""(?:https?:)?//[^\s'")]+""")
 
+#: Namespace identifiers, not addresses — nothing dereferences them.
+XML_NAMESPACES = frozenset({"www.w3.org"})
 
-def _record(page) -> list[str]:
+
+def _record(page: Page) -> list[str]:
+    """Every URL the browser asks for, HTTP **and** WebSocket.
+
+    Playwright reports sockets on a separate event, and NiceGUI's whole
+    transport is a socket — leaving it out would be the one hole in this gate.
+    """
     seen: list[str] = []
     page.on("request", lambda request: seen.append(request.url))
+    page.on("websocket", lambda socket: seen.append(socket.url))
     return seen
 
 
+def _host(url: str) -> str:
+    return urlsplit(url).netloc
+
+
 def _external(urls: list[str], server_url: str) -> list[str]:
-    return [
-        url for url in urls if not url.startswith(server_url) and not url.startswith(LOCAL_SCHEMES)
-    ]
+    """Compared on **host**, not on prefix: `ws://` to the server under test is
+    the same host, and `http://evil/` that merely starts with the right string
+    is not."""
+    ours = _host(server_url)
+    return [url for url in urls if not url.startswith(LOCAL_SCHEMES) and _host(url) != ours]
 
 
 @pytest.mark.parametrize("item", NAV_ITEMS, ids=lambda i: i.key)
@@ -95,7 +112,6 @@ def test_the_served_html_names_no_other_host(page, server_url, item):
     offenders = [
         url
         for url in ABSOLUTE_URL.findall(response.text())
-        if not url.lstrip("htps:").startswith(("//127.0.0.1", "//localhost"))
-        and not url.startswith(("http://www.w3.org", "https://www.w3.org"))
+        if _host(url) not in {_host(server_url), "127.0.0.1", "localhost", *XML_NAMESPACES}
     ]
     assert offenders == [], f"{item.path} names external URLs: {offenders}"

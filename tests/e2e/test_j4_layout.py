@@ -12,6 +12,7 @@ Everything is measured in a real Chromium at the three widths the plan names.
 """
 
 import pytest
+from playwright.sync_api import FloatRect, Page
 
 pytestmark = pytest.mark.e2e
 
@@ -21,7 +22,7 @@ WIDTHS = (1024, 1440, 1920)
 HEIGHT = 900
 
 
-def _box(page, selector: str) -> dict[str, float]:
+def _box(page: Page, selector: str) -> FloatRect:
     box = page.locator(selector).first.bounding_box()
     assert box is not None, f"{selector} has no box — it is not rendered"
     return box

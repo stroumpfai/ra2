@@ -53,9 +53,11 @@ class ColumnSpec[T]:
     width: str | None = None
     align: Align = "left"
     sortable: bool = False
-    render: Callable[[T], None] | None = None
+    #: Draws the cell's contents. Its return value is ignored — most
+    #: renderers are a one-liner that hands back the element they made.
+    render: Callable[[T], object] | None = None
     #: Draws the header cell instead of the label — the select-all tick.
-    header_render: Callable[[], None] | None = None
+    header_render: Callable[[], object] | None = None
     cell_class: str = ""
     cell_style: str = ""
     header_style: str = ""
