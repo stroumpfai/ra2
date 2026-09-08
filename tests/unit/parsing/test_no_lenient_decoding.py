@@ -169,6 +169,11 @@ def test_the_scan_would_actually_catch_a_violation(tmp_path):
     assert not LENIENT_ERRORS.search('decode("utf-8", errors="strict")')
 
 
+#: Any binary-mode literal ("rb", "wb", "ab", "xb", and the "+" variants, in
+#: either quote style) needs no `encoding=` — binary mode has no encoding.
+_BINARY_MODE = re.compile(r"""['"](?:[rwax]\+?b|b\+?[rwax]?)['"]""")
+
+
 def test_every_open_call_in_ra2_names_its_encoding():
     """Do-NOT rule 4's other half. `ruff` has `PLW1514` on for this, so the test
     is a belt to that braces — and it fails in a way that says which line."""
@@ -177,4 +182,4 @@ def test_every_open_call_in_ra2_names_its_encoding():
         path_name, number = hit.rsplit(":", 1)
         path = RA2.parent / path_name
         line = _code_only(path).splitlines()[int(number) - 1]
-        assert "encoding=" in line or '"rb"' in line or "'rb'" in line, hit
+        assert "encoding=" in line or _BINARY_MODE.search(line), hit
