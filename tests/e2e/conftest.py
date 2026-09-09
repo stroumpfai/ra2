@@ -21,6 +21,7 @@ demo branch inside production code.
 import socket
 import threading
 import time
+from argparse import Namespace
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -28,6 +29,8 @@ from pathlib import Path
 
 import pytest
 import uvicorn
+from alembic import command
+from alembic.config import Config
 from nicegui import ui
 
 from ra2.infra.config import Settings
@@ -244,13 +247,53 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+#: `tests/e2e/conftest.py` -> `tests/e2e` -> `tests` -> the repo root.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _migrate(settings: Settings) -> None:
+    """`alembic upgrade head` against the session server's own database.
+
+    `create_app()` does not migrate — `just migrate` does — so without this
+    every view that reads a service (from M6, Import is one) meets a database
+    with no tables. The schema comes from the real migration chain here, the
+    same way `tests/backend/conftest.py` and `tests/ui/conftest.py` get it;
+    `metadata.create_all()` is banned in tests as much as in the app (§12.10).
+    """
+    config = Config(str(REPO_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(REPO_ROOT / "ra2" / "persistence" / "migrations"))
+    # Mirrors what `-x url=...` would set from the CLI.
+    config.cmd_opts = Namespace(x=[f"url={settings.database_url}"])
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # On its own thread: `migrations/env.py` calls `asyncio.run`, and by the
+    # time this session fixture runs, pytest-asyncio already has a loop on the
+    # main thread — `asyncio.run` refuses to re-enter one. A fresh thread has
+    # no loop, which is the whole trick.
+    failures: list[BaseException] = []
+
+    def _run() -> None:
+        try:
+            command.upgrade(config, "head")
+        except BaseException as exc:  # re-raised on the calling thread below
+            failures.append(exc)
+
+    worker = threading.Thread(target=_run)
+    worker.start()
+    worker.join()
+    if failures:
+        raise failures[0]
+
+
 @pytest.fixture(scope="session")
 def server_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     """A real RA2 on a random port, for the whole session."""
     data_dir: Path = tmp_path_factory.mktemp("ra2-e2e")
+    settings = Settings(data_dir=data_dir, _env_file=None)
+    _migrate(settings)
     _register_demo()
     app = create_app(
-        settings=Settings(data_dir=data_dir, _env_file=None),
+        settings=settings,
         clock=_FrozenClock(),
         ids=_SeededFactory(),
         mount_ui=True,

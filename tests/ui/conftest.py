@@ -12,13 +12,26 @@ is a composition-root parameter, exactly as CONTRACTS.md M0-D6 describes it.
 singleton (`nicegui.core.app`): it drops routes, middleware and client state
 between tests, which is what lets more than one UI-mounted app exist in one
 pytest session.
+
+**The database is migrated first.** From M6 the Import view reads its delivery
+and its corpora from real services, so every UI page now needs a schema.
+`create_app()` never migrates — `just migrate` does — and §12.10 bans
+`metadata.create_all()` in tests as much as in the app, so the schema comes
+from the real Alembic chain here, the same way `tests/backend/conftest.py`
+gets it. `migrated_db` is **synchronous** on purpose: `migrations/env.py`
+calls `asyncio.run`, which cannot re-enter the loop an async fixture is
+already running on.
 """
 
 import os
+from argparse import Namespace
 from collections.abc import AsyncIterator, Callable
+from pathlib import Path
 
 import httpx
 import pytest
+from alembic import command
+from alembic.config import Config
 from fastapi import FastAPI
 from nicegui import ui
 from nicegui.functions.download import download
@@ -27,11 +40,29 @@ from nicegui.functions.notify import notify
 from nicegui.testing.general import nicegui_reset_globals
 from nicegui.testing.user import User
 
-__all__ = ["user"]
+from ra2.infra.config import Settings
+
+__all__ = ["migrated_db", "user"]
+
+#: `tests/ui/conftest.py` -> `tests/ui` -> `tests` -> the repo root.
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture
-async def user(app_factory: Callable[..., FastAPI]) -> AsyncIterator[User]:
+def migrated_db(settings: Settings) -> Settings:
+    """A real temp-file SQLite database at `alembic upgrade head`."""
+    config = Config(str(REPO_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(REPO_ROOT / "ra2" / "persistence" / "migrations"))
+    # Mirrors what `-x url=...` would set from the CLI, exactly as
+    # `tests/backend/conftest.py` does.
+    config.cmd_opts = Namespace(x=[f"url={settings.database_url}"])
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    command.upgrade(config, "head")
+    return settings
+
+
+@pytest.fixture
+async def user(app_factory: Callable[..., FastAPI], migrated_db: Settings) -> AsyncIterator[User]:
     """A simulated browser against the real, UI-mounted app."""
     with nicegui_reset_globals():
         os.environ["NICEGUI_USER_SIMULATION"] = "true"
