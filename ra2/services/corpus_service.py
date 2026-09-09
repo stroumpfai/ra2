@@ -51,7 +51,7 @@ from ra2.services.errors import (
     NotFoundError,
 )
 from ra2.services.protocols import CensusInput, CensusMaterialiser, CensusTableInput
-from ra2.services.readmodels import CorpusView, Page, SortDir
+from ra2.services.readmodels import CorpusSummary, CorpusView, Page, SortDir
 
 __all__ = ["CorpusService"]
 
@@ -244,6 +244,22 @@ class CorpusService:
             sort_key=key,
             sort_dir=sort_dir,
         )
+
+    async def summary(self) -> CorpusSummary:
+        """How many corpora exist, and how many an evaluation cites.
+
+        Over the whole table, not over a page: the Corpora card's header
+        count ("4 imported · 2 locked by an evaluation", design README §1b)
+        is a property of the corpus set, not of what is on screen.
+        """
+        async with self._session_factory() as session:
+            repo = CorpusRepository(session)
+            corpora = await repo.list_all()
+            locked = 0
+            for corpus in corpora:
+                if await repo.count_citing_evaluations(CorpusId(corpus.id)) > 0:
+                    locked += 1
+            return CorpusSummary(total=len(corpora), locked=locked)
 
     async def delete(self, corpus_id: CorpusId) -> None:
         """Refused when any evaluation cites the corpus.

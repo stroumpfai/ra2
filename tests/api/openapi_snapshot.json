@@ -1,0 +1,1873 @@
+{
+  "components": {
+    "schemas": {
+      "AnalyseResponse": {
+        "additionalProperties": false,
+        "description": "Analyse is asynchronous; poll `GET /api/v1/tasks/{task_id}`.",
+        "properties": {
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "title": "AnalyseResponse",
+        "type": "object"
+      },
+      "BlockingFindingsResponse": {
+        "additionalProperties": false,
+        "description": "422 from a refused freeze. **Nothing was created** (J2).",
+        "properties": {
+          "detail": {
+            "default": "blocking validation findings; no corpus was created",
+            "title": "Detail",
+            "type": "string"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/FindingResponse"
+            },
+            "title": "Findings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "findings"
+        ],
+        "title": "BlockingFindingsResponse",
+        "type": "object"
+      },
+      "Body_upload_file_api_v1_deliveries__delivery_id__files_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_file_api_v1_deliveries__delivery_id__files_post",
+        "type": "object"
+      },
+      "CensusBucketLabel": {
+        "description": "The six population-profile buckets, over all tables (sw-design.md \u00a77).\n\nValues are stable identifiers; the \"100\u201380 %\" rendering lives in `ra2/ui/`.",
+        "enum": [
+          "100-80",
+          "80-60",
+          "60-40",
+          "40-20",
+          "20-0",
+          "empty"
+        ],
+        "title": "CensusBucketLabel",
+        "type": "string"
+      },
+      "CensusColumnResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "census_column_id": {
+            "title": "Census Column Id",
+            "type": "string"
+          },
+          "column_name": {
+            "title": "Column Name",
+            "type": "string"
+          },
+          "distinct_count": {
+            "title": "Distinct Count",
+            "type": "integer"
+          },
+          "in_config": {
+            "default": false,
+            "title": "In Config",
+            "type": "boolean"
+          },
+          "long_tail": {
+            "title": "Long Tail",
+            "type": "boolean"
+          },
+          "populated_count": {
+            "title": "Populated Count",
+            "type": "integer"
+          },
+          "populated_rate": {
+            "title": "Populated Rate",
+            "type": "number"
+          },
+          "record_count": {
+            "title": "Record Count",
+            "type": "integer"
+          },
+          "table_name": {
+            "title": "Table Name",
+            "type": "string"
+          },
+          "top_value_share": {
+            "title": "Top Value Share",
+            "type": "number"
+          },
+          "top_values": {
+            "items": {
+              "$ref": "#/components/schemas/ValueCountResponse"
+            },
+            "title": "Top Values",
+            "type": "array"
+          },
+          "type_hint": {
+            "$ref": "#/components/schemas/TypeHint"
+          }
+        },
+        "required": [
+          "census_column_id",
+          "table_name",
+          "column_name",
+          "type_hint",
+          "record_count",
+          "populated_count",
+          "populated_rate",
+          "distinct_count",
+          "top_value_share",
+          "long_tail"
+        ],
+        "title": "CensusColumnResponse",
+        "type": "object"
+      },
+      "CensusPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CensusColumnResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PageMeta"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
+        ],
+        "title": "CensusPage",
+        "type": "object"
+      },
+      "CensusSummaryResponse": {
+        "additionalProperties": false,
+        "description": "The two summary cards plus the table chip's counts.",
+        "properties": {
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileBucketResponse"
+            },
+            "title": "Buckets",
+            "type": "array"
+          },
+          "column_counts_by_table": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Column Counts By Table",
+            "type": "object"
+          },
+          "corpus_id": {
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "total_column_count": {
+            "default": 0,
+            "title": "Total Column Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "corpus_id",
+          "buckets"
+        ],
+        "title": "CensusSummaryResponse",
+        "type": "object"
+      },
+      "CorpusPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CorpusResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PageMeta"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
+        ],
+        "title": "CorpusPage",
+        "type": "object"
+      },
+      "CorpusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "corpus_id": {
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "cp1252_canary_count": {
+            "default": 0,
+            "title": "Cp1252 Canary Count",
+            "type": "integer"
+          },
+          "delivery_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "imported_at": {
+            "format": "date-time",
+            "title": "Imported At",
+            "type": "string"
+          },
+          "is_dev_sized": {
+            "default": false,
+            "title": "Is Dev Sized",
+            "type": "boolean"
+          },
+          "language_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Language Counts",
+            "type": "object"
+          },
+          "locked_by_evaluations": {
+            "default": 0,
+            "title": "Locked By Evaluations",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "record_count": {
+            "title": "Record Count",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "corpus_id",
+          "name",
+          "version",
+          "imported_at",
+          "record_count"
+        ],
+        "title": "CorpusResponse",
+        "type": "object"
+      },
+      "CreateCorpusRequest": {
+        "additionalProperties": false,
+        "description": "Freeze the **selected** files of a delivery into one immutable corpus.",
+        "properties": {
+          "delivery_id": {
+            "title": "Delivery Id",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "delivery_id",
+          "name"
+        ],
+        "title": "CreateCorpusRequest",
+        "type": "object"
+      },
+      "DeliveryFileResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "analysed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysed At"
+          },
+          "byte_size": {
+            "title": "Byte Size",
+            "type": "integer"
+          },
+          "canton": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canton"
+          },
+          "delimiter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delimiter"
+          },
+          "encoding": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Encoding"
+          },
+          "encoding_detected": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Encoding Detected"
+          },
+          "file_id": {
+            "title": "File Id",
+            "type": "string"
+          },
+          "file_kind": {
+            "$ref": "#/components/schemas/FileKind"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/FindingResponse"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "header_ok": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Header Ok"
+          },
+          "ok_count": {
+            "default": 0,
+            "title": "Ok Count",
+            "type": "integer"
+          },
+          "quote_char": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Char"
+          },
+          "recovered_count": {
+            "default": 0,
+            "title": "Recovered Count",
+            "type": "integer"
+          },
+          "rejected_count": {
+            "default": 0,
+            "title": "Rejected Count",
+            "type": "integer"
+          },
+          "relative_path": {
+            "title": "Relative Path",
+            "type": "string"
+          },
+          "row_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row Count"
+          },
+          "selected": {
+            "default": true,
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "set_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set Key"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_id",
+          "filename",
+          "relative_path",
+          "byte_size",
+          "sha256",
+          "file_kind"
+        ],
+        "title": "DeliveryFileResponse",
+        "type": "object"
+      },
+      "DeliveryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "analysed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "delivery_id": {
+            "title": "Delivery Id",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/DeliveryFileResponse"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "root_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Path"
+          },
+          "selected_record_count": {
+            "default": 0,
+            "title": "Selected Record Count",
+            "type": "integer"
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/SourceKind"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DeliveryStatus"
+          }
+        },
+        "required": [
+          "delivery_id",
+          "name",
+          "source_kind",
+          "status",
+          "created_at"
+        ],
+        "title": "DeliveryResponse",
+        "type": "object"
+      },
+      "DeliveryStatus": {
+        "description": "Lifecycle of the staging area (sw-design.md \u00a74.1).",
+        "enum": [
+          "registered",
+          "analysing",
+          "analysed",
+          "failed"
+        ],
+        "title": "DeliveryStatus",
+        "type": "string"
+      },
+      "Encoding": {
+        "description": "The only two encodings the pipeline tries, in this order.\n\nUndecodable bytes **fail the file**. There is no third fallback and\n`errors=\"replace\"` is banned (mvp-spec.md \u00a74.2.1, sw-design.md \u00a712.4).",
+        "enum": [
+          "utf-8",
+          "cp1252"
+        ],
+        "title": "Encoding",
+        "type": "string"
+      },
+      "ErrorResponse": {
+        "additionalProperties": false,
+        "description": "The body of every 4xx that is not a validation error.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "FileKind": {
+        "description": "Which table a file holds \u2014 decided by header match only (SD5).",
+        "enum": [
+          "unfall",
+          "objekt",
+          "person",
+          "text",
+          "unknown"
+        ],
+        "title": "FileKind",
+        "type": "string"
+      },
+      "FileOverrideRequest": {
+        "additionalProperties": false,
+        "description": "The file report modal's encoding/delimiter override (\u00a78.3).\n\n`None` means \"keep what is effective now\". Applying it re-parses that file\nalone.",
+        "properties": {
+          "delimiter": {
+            "anyOf": [
+              {
+                "maxLength": 1,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delimiter"
+          },
+          "encoding": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Encoding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quote_char": {
+            "anyOf": [
+              {
+                "maxLength": 1,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Char"
+          }
+        },
+        "title": "FileOverrideRequest",
+        "type": "object"
+      },
+      "FindingCode": {
+        "description": "Every outcome the import pipeline can report.\n\nGrouped by where it is raised. Hazard fixture references (h01-h12) point at\nsw-design.md \u00a711.4.",
+        "enum": [
+          "ENCODING_DETECTED",
+          "FILE_UNDECODABLE",
+          "DIALECT_DETECTED",
+          "UNKNOWN_HEADER",
+          "HEADER_MISMATCH",
+          "ROW_RECOVERED",
+          "ROW_REJECTED_FIELD_COUNT",
+          "ROW_REJECTED_PARSE_ERROR",
+          "DUP_KEY_CROSS_SET",
+          "ORPHAN_FK",
+          "SET_UNRESOLVED",
+          "COUNT_MISMATCH_OBJ",
+          "COUNT_MISMATCH_PERS",
+          "TEXT_KEY_UNMATCHED",
+          "UNFALL_WITHOUT_TEXT",
+          "CP1252_CANARY_ZERO"
+        ],
+        "title": "FindingCode",
+        "type": "string"
+      },
+      "FindingResponse": {
+        "additionalProperties": false,
+        "description": "One reported outcome (sw-design.md \u00a75).\n\n`detail` is structured data. The UI renders it from one table; the API\nnever sends a pre-formatted sentence, so wording changes break no test.",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/FindingCode"
+          },
+          "detail": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Detail",
+            "type": "object"
+          },
+          "file_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Id"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "line_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line No"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          }
+        },
+        "required": [
+          "code",
+          "severity"
+        ],
+        "title": "FindingResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "PageMeta": {
+        "additionalProperties": false,
+        "description": "Paging envelope. `total` is the unpaged count matching the filter.",
+        "properties": {
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "sort_dir": {
+            "$ref": "#/components/schemas/SortDir"
+          },
+          "sort_key": {
+            "title": "Sort Key",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "page",
+          "page_size",
+          "sort_key",
+          "sort_dir"
+        ],
+        "title": "PageMeta",
+        "type": "object"
+      },
+      "ProfileBucketResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "column_count": {
+            "title": "Column Count",
+            "type": "integer"
+          },
+          "label": {
+            "$ref": "#/components/schemas/CensusBucketLabel"
+          }
+        },
+        "required": [
+          "label",
+          "column_count"
+        ],
+        "title": "ProfileBucketResponse",
+        "type": "object"
+      },
+      "RegisterDeliveryRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "root_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Path"
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/SourceKind"
+          }
+        },
+        "required": [
+          "name",
+          "source_kind"
+        ],
+        "title": "RegisterDeliveryRequest",
+        "type": "object"
+      },
+      "SelectFileRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "selected"
+        ],
+        "title": "SelectFileRequest",
+        "type": "object"
+      },
+      "Severity": {
+        "description": "Whether a finding stops the import or is merely reported.\n\n`BLOCKING` findings fail the freeze: nothing is written and the errors go\nback to the analyst (mvp-spec.md \u00a74.3, sw-design.md \u00a76.3.1).\n`REPORTED` findings are collected into the import report and shown, but the\ncorpus is still created.",
+        "enum": [
+          "BLOCKING",
+          "REPORTED"
+        ],
+        "title": "Severity",
+        "type": "string"
+      },
+      "SortDir": {
+        "description": "Sort direction. Always an explicit **service-call parameter**, even when\nthe dataset is small enough to sort in memory (sw-design.md \u00a78.4).",
+        "enum": [
+          "asc",
+          "desc"
+        ],
+        "title": "SortDir",
+        "type": "string"
+      },
+      "SourceKind": {
+        "description": "How a delivery's files got here (sw-design.md \u00a76.1).\n\nNothing downstream of the `FileStore` seam knows which was used.",
+        "enum": [
+          "upload",
+          "host_path"
+        ],
+        "title": "SourceKind",
+        "type": "string"
+      },
+      "TaskProgressResponse": {
+        "additionalProperties": false,
+        "description": "What the UI polls with `ui.timer` (sw-design.md \u00a79).",
+        "properties": {
+          "done": {
+            "default": 0,
+            "title": "Done",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "task_id",
+          "name",
+          "status"
+        ],
+        "title": "TaskProgressResponse",
+        "type": "object"
+      },
+      "TaskStatus": {
+        "description": "`OK` and `FAILED` are terminal; nothing leaves them.",
+        "enum": [
+          "pending",
+          "running",
+          "ok",
+          "failed"
+        ],
+        "title": "TaskStatus",
+        "type": "string"
+      },
+      "TypeHint": {
+        "description": "Inferred column type (sw-design.md \u00a77).\n\nThe `Ausw`/`Feld` suffix rule runs **first**; value-shape inspection only\ndecides what the suffix leaves open. An `Ausw` column is `ENUM` even when\nevery value happens to look like an integer.",
+        "enum": [
+          "enum",
+          "date",
+          "time",
+          "integer",
+          "decimal",
+          "text"
+        ],
+        "title": "TypeHint",
+        "type": "string"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "ValueCountResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          },
+          "value_raw": {
+            "title": "Value Raw",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value_raw",
+          "count",
+          "share"
+        ],
+        "title": "ValueCountResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Road accident report analysis \u2014 import, census and evaluation.",
+    "title": "RA2",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/census/{corpus_id}/columns": {
+      "get": {
+        "operationId": "list_columns_api_v1_census__corpus_id__columns_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "corpus_id",
+            "required": true,
+            "schema": {
+              "title": "Corpus Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "table_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Table Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_populated_rate",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Populated Rate"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_key",
+            "required": false,
+            "schema": {
+              "default": "populated_rate",
+              "title": "Sort Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_dir",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortDir",
+              "default": "desc"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CensusPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Columns",
+        "tags": [
+          "census"
+        ]
+      }
+    },
+    "/api/v1/census/{corpus_id}/export.csv": {
+      "get": {
+        "description": "UTF-8 **with BOM**, `;`-delimited, current filter and sort only.",
+        "operationId": "export_csv_api_v1_census__corpus_id__export_csv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "corpus_id",
+            "required": true,
+            "schema": {
+              "title": "Corpus Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "table_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Table Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_populated_rate",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Populated Rate"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_key",
+            "required": false,
+            "schema": {
+              "default": "populated_rate",
+              "title": "Sort Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_dir",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortDir",
+              "default": "desc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Csv",
+        "tags": [
+          "census"
+        ]
+      }
+    },
+    "/api/v1/census/{corpus_id}/summary": {
+      "get": {
+        "description": "The population-profile buckets and the per-table column counts.",
+        "operationId": "get_summary_api_v1_census__corpus_id__summary_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "corpus_id",
+            "required": true,
+            "schema": {
+              "title": "Corpus Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CensusSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Summary",
+        "tags": [
+          "census"
+        ]
+      }
+    },
+    "/api/v1/corpora": {
+      "get": {
+        "operationId": "list_corpora_api_v1_corpora_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sort_key",
+            "required": false,
+            "schema": {
+              "default": "imported_at",
+              "title": "Sort Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_dir",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortDir",
+              "default": "desc"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorpusPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Corpora",
+        "tags": [
+          "corpora"
+        ]
+      },
+      "post": {
+        "description": "Freeze the selected files. All-or-nothing (sw-design.md \u00a76.3).",
+        "operationId": "create_corpus_api_v1_corpora_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCorpusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorpusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockingFindingsResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "summary": "Create Corpus",
+        "tags": [
+          "corpora"
+        ]
+      }
+    },
+    "/api/v1/corpora/{corpus_id}": {
+      "delete": {
+        "description": "409 when any evaluation cites the corpus (J3).",
+        "operationId": "delete_corpus_api_v1_corpora__corpus_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "corpus_id",
+            "required": true,
+            "schema": {
+              "title": "Corpus Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Corpus",
+        "tags": [
+          "corpora"
+        ]
+      },
+      "get": {
+        "operationId": "get_corpus_api_v1_corpora__corpus_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "corpus_id",
+            "required": true,
+            "schema": {
+              "title": "Corpus Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorpusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Corpus",
+        "tags": [
+          "corpora"
+        ]
+      }
+    },
+    "/api/v1/deliveries": {
+      "get": {
+        "operationId": "list_deliveries_api_v1_deliveries_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DeliveryResponse"
+                  },
+                  "title": "Response List Deliveries Api V1 Deliveries Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Deliveries",
+        "tags": [
+          "deliveries"
+        ]
+      },
+      "post": {
+        "operationId": "register_delivery_api_v1_deliveries_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDeliveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register Delivery",
+        "tags": [
+          "deliveries"
+        ]
+      }
+    },
+    "/api/v1/deliveries/{delivery_id}": {
+      "get": {
+        "operationId": "get_delivery_api_v1_deliveries__delivery_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "title": "Delivery Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Delivery",
+        "tags": [
+          "deliveries"
+        ]
+      }
+    },
+    "/api/v1/deliveries/{delivery_id}/analyse": {
+      "post": {
+        "operationId": "analyse_delivery_api_v1_deliveries__delivery_id__analyse_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "title": "Delivery Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyse Delivery",
+        "tags": [
+          "deliveries"
+        ]
+      }
+    },
+    "/api/v1/deliveries/{delivery_id}/files": {
+      "post": {
+        "operationId": "upload_file_api_v1_deliveries__delivery_id__files_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "title": "Delivery Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_file_api_v1_deliveries__delivery_id__files_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryFileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload File",
+        "tags": [
+          "deliveries"
+        ]
+      }
+    },
+    "/api/v1/deliveries/{delivery_id}/files/{file_id}": {
+      "delete": {
+        "operationId": "remove_file_api_v1_deliveries__delivery_id__files__file_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "title": "Delivery Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove File",
+        "tags": [
+          "deliveries"
+        ]
+      },
+      "patch": {
+        "description": "Re-runs analysis for this file alone (sw-design.md \u00a76.2.5).",
+        "operationId": "override_and_reparse_api_v1_deliveries__delivery_id__files__file_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "title": "Delivery Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileOverrideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryFileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Override And Reparse",
+        "tags": [
+          "deliveries"
+        ]
+      }
+    },
+    "/api/v1/deliveries/{delivery_id}/files/{file_id}/selection": {
+      "put": {
+        "description": "Returns the whole delivery so both counts recompute from one call.",
+        "operationId": "set_file_selection_api_v1_deliveries__delivery_id__files__file_id__selection_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "title": "Delivery Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectFileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set File Selection",
+        "tags": [
+          "deliveries"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}": {
+      "get": {
+        "description": "The UI polls this with `ui.timer` for records-done/total and ETA.",
+        "operationId": "get_task_api_v1_tasks__task_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProgressResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Task",
+        "tags": [
+          "tasks"
+        ]
+      }
+    }
+  }
+}

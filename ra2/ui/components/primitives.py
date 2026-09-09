@@ -306,10 +306,14 @@ def _page_size_select(
         .style("padding:3px 8px;font-size:11px;")
     )
     if on_page_size is not None:
+        # `args=[["target", "value"]]` looks like a nested-path extraction but
+        # is not one: it does not serialise, so `event.args` always comes
+        # back `{}` and every page-size change was silently inert. The client
+        # must emit the value itself.
         select.on(
             "change",
-            lambda event: on_page_size(int(event.args["target"]["value"])),
-            args=[["target", "value"]],
+            lambda event: on_page_size(int(event.args)),
+            js_handler="(e) => emit(e.target.value)",
         )
     with select:
         for size in page_sizes:

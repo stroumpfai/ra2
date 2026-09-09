@@ -24,6 +24,7 @@ __all__ = [
     "CensusBucket",
     "CensusColumnView",
     "CensusSummary",
+    "CorpusSummary",
     "CorpusView",
     "DeliveryFileView",
     "DeliveryView",
@@ -128,6 +129,16 @@ class CorpusView:
     @property
     def is_locked(self) -> bool:
         return self.locked_by_evaluations > 0
+
+
+@dataclass(frozen=True, slots=True)
+class CorpusSummary:
+    """The Corpora card's header count: "4 imported · 2 locked by an
+    evaluation" (design README §1b). Over the whole table, not over a page —
+    a property of the corpus set, not of what is on screen."""
+
+    total: int
+    locked: int
 
 
 @dataclass(frozen=True, slots=True)
