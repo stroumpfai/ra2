@@ -7,9 +7,10 @@
 > canary → Census loads, sorted Populated ▼ → filter to `unfall` → Export CSV
 > and assert the downloaded file's header and row count.
 
-**This is the Import half.** Census is M7's; the journey stops at "the corpus
-row shows records, language composition and canary" and the Census tail lands
-with that view.
+**The whole journey, in one browser session.** The Import half landed with M6
+and the Census tail with M7; they are one test function because J1 is one
+sentence — the corpus the Census half profiles is the corpus the Import half
+just created, and asserting that is the point of the journey.
 
 Two deliberate departures from the sentence above, both because the journey is
 driven against the **committed** hazard fixtures rather than the design mock's
@@ -33,10 +34,14 @@ API could not seed it in any case — `ra2/api/v1/deliveries.py` is still the M0
 stub and every handler raises 501.)
 """
 
+import csv
+import io
 from pathlib import Path
 
 import pytest
 from playwright.sync_api import Page, expect
+
+from ra2.services.export_service import CSV_BOM, CSV_DELIMITER
 
 pytestmark = pytest.mark.e2e
 
@@ -65,6 +70,23 @@ STATE = '[data-testid="file-state"]'
 ALL_RECORDS = 4
 AFTER_DESELECT = 2
 
+CENSUS_TABLE = '[data-testid="table-census"]'
+#: `ExportService._CENSUS_CSV_HEADER`, spelled out here rather than imported:
+#: the header row is the export's **contract with Excel**, and a test that
+#: imported it would agree with any change to it (§11.5).
+CENSUS_CSV_HEADER = [
+    "table_name",
+    "column_name",
+    "type_hint",
+    "record_count",
+    "populated_count",
+    "populated_rate",
+    "distinct_count",
+    "top_value_share",
+    "long_tail",
+    "top_values",
+]
+
 
 @pytest.fixture
 def delivery_root(tmp_path: Path) -> Path:
@@ -88,7 +110,18 @@ def _register(page: Page, server_url: str, root: Path) -> None:
     page.click('[data-testid="register-delivery"]')
 
 
-def test_a_delivery_becomes_a_corpus(page: Page, server_url: str, delivery_root: Path) -> None:
+def _census_total(page: Page) -> int:
+    """The unpaged total behind "1–25 of 67" — the number the export must
+    contain, read off the screen rather than recomputed."""
+    label = page.locator('[data-testid="pagination-range"]').inner_text()
+    # `format_count` groups thousands with a space, so the digits are pulled
+    # out rather than the separator guessed at.
+    return int("".join(c for c in label.rsplit(" of ", 1)[1] if c.isdigit()))
+
+
+def test_a_delivery_becomes_a_corpus(
+    page: Page, server_url: str, delivery_root: Path, tmp_path: Path
+) -> None:
     _register(page, server_url, delivery_root)
 
     # --- analyse: the per-file states are the analysis's, not a filename's ---
@@ -146,6 +179,56 @@ def test_a_delivery_becomes_a_corpus(page: Page, server_url: str, delivery_root:
     # Nothing cites it yet, so delete is offered rather than blocked (J3).
     expect(row.locator('[data-testid="delete-corpus"]')).to_have_count(1)
     expect(row).to_contain_text("Not used by any evaluation")
+
+    # --- Census loads, sorted Populated ▼ -----------------------------------
+    # Through the nav, not a `goto`: "Census loads" is the analyst walking
+    # there from the corpus they just made, in the same session.
+    page.click('[data-testid="nav-census"]')
+    page.wait_for_selector(f"{CENSUS_TABLE} tbody tr")
+    # The corpus this journey created is the one being profiled — newest
+    # first, which is what the corpus chip defaults to.
+    expect(page.locator('[data-chip="corpus"]')).to_contain_text("corpus j1-delivery · v1")
+    expect(page.locator('[data-testid="sort-populated_rate"]')).to_have_attribute(
+        "aria-sort", "descending"
+    )
+    # …and no other column is the active sort.
+    for other in ("column_name", "table_name", "type_hint", "distinct_count"):
+        expect(page.locator(f'[data-testid="sort-{other}"]')).to_have_attribute("aria-sort", "none")
+    all_columns = _census_total(page)
+
+    # --- filter to `unfall` --------------------------------------------------
+    page.click('[data-chip="table"]')
+    page.click('[data-testid="option-table"][aria-label^="table · unfall"]')
+    expect(page.locator('[data-chip="table"]')).to_contain_text("table · unfall")
+    expect(page.locator(f'{CENSUS_TABLE} [data-testid="census-table-name"]')).not_to_have_count(0)
+    # Every rendered row is `unfall`, and the total dropped.
+    for cell in page.locator(f'{CENSUS_TABLE} [data-testid="census-table-name"]').all():
+        assert cell.inner_text() == "unfall"
+    unfall_columns = _census_total(page)
+    assert 0 < unfall_columns < all_columns
+
+    # --- Export CSV: the header and the row count ----------------------------
+    with page.expect_download() as downloading:
+        page.click('[data-testid="export-csv"]')
+    saved = tmp_path / "census.csv"
+    downloading.value.save_as(saved)
+    raw = saved.read_bytes()
+
+    # UTF-8 **with BOM** — Excel on Windows reads UTF-8 no other way (N3).
+    assert raw.startswith(CSV_BOM)
+    text = raw.decode("utf-8-sig")
+    comment, _, body = text.partition("\r\n")
+    # The header comment line names the corpus and its version (sw-design.md §7).
+    assert comment.startswith("# corpus ")
+    assert comment.endswith(" v1")
+
+    reader = csv.reader(io.StringIO(body), delimiter=CSV_DELIMITER)
+    assert next(reader) == CENSUS_CSV_HEADER
+    rows = [row for row in reader if row]
+    # The export is the **currently filtered** table, whole — no paging, so
+    # the file holds every `unfall` column, not the 25 on screen.
+    assert len(rows) == unfall_columns
+    assert {row[0] for row in rows} == {"unfall"}
 
 
 def test_the_corpora_card_states_the_immutability_rule(page: Page, server_url: str) -> None:
