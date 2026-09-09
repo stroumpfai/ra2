@@ -7,7 +7,7 @@ happened once, at freeze.
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ra2.domain.census import CensusBucket, CensusBucketLabel, ValueCount
+from ra2.domain.census import CensusBucket, CensusBucketLabel, TypeHint, ValueCount
 from ra2.domain.ids import CorpusId
 from ra2.persistence.models import CensusColumn
 from ra2.persistence.repositories.census_repo import CensusRepository
@@ -20,12 +20,20 @@ def _to_column_view(row: CensusColumn) -> CensusColumnView:
     """The only place an ORM `CensusColumn` becomes a `CensusColumnView`.
 
     Every field is copied verbatim from the materialised row — nothing here
-    recomputes a rate, a share or a top-values list (sw-design.md §7)."""
+    recomputes a rate, a share or a top-values list (sw-design.md §7).
+
+    `type_hint` is coerced explicitly: `Mapped[TypeHint]` backed by a plain
+    `String` column (M0's `type_annotation_map`) reads back as a bare `str`,
+    not a `TypeHint` instance — the same class of gap B1 found and coerced
+    for `source_kind`/`status`/`file_kind` elsewhere. Left uncoerced,
+    `CensusColumnView.type_hint` lies about its own type and `.value` raises
+    `AttributeError` on the first caller that trusts the annotation.
+    """
     return CensusColumnView(
         census_column_id=row.id,
         table_name=row.table_name,
         column_name=row.column_name,
-        type_hint=row.type_hint,
+        type_hint=TypeHint(row.type_hint),
         record_count=row.record_count,
         populated_count=row.populated_count,
         populated_rate=row.populated_rate,
