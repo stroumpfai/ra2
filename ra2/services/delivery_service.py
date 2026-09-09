@@ -5,10 +5,10 @@ Analyse writes only to `delivery_file`. **No corpus rows.**
 """
 
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any, BinaryIO, Protocol, runtime_checkable
+from typing import Any, BinaryIO, Final, Protocol, runtime_checkable
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -25,7 +25,7 @@ from ra2.persistence.models import Delivery, DeliveryFile
 from ra2.persistence.repositories.delivery_repo import DeliveryRepository
 from ra2.persistence.session import session_scope
 from ra2.services.errors import NotFoundError
-from ra2.services.readmodels import DeliveryFileView, DeliveryView
+from ra2.services.readmodels import DeliveryFileView, DeliveryView, Page, SortDir
 
 __all__ = ["DeliveryService"]
 
@@ -203,6 +203,36 @@ def delivery_view(delivery: Delivery, files: Sequence[DeliveryFile]) -> Delivery
         analysed_at=delivery.analysed_at,
         files=tuple(file_view(row) for row in sorted(files, key=lambda f: f.relative_path)),
     )
+
+
+#: `sort_key` -> the `DeliveryFileView` attribute the file tables sort on. An
+#: unknown key falls back to `filename`, the design's default (README §1a:
+#: "Sortable, currently sorted ascending").
+_FILE_SORT_KEYS: Final[frozenset[str]] = frozenset({"filename", "row_count", "state"})
+
+#: How the State column orders: by severity, which is the order its colour
+#: ramp implies — not the lexicographic order of the rendered string.
+_STATE_RANK: Final[dict[str, int]] = {"ok": 0, "recovered": 1, "rejected": 2, "failed": 3}
+
+
+def _file_sort_value(file: DeliveryFileView, key: str) -> tuple[object, ...]:
+    if key == "row_count":
+        return (file.row_count or 0, file.filename.casefold())
+    if key == "state":
+        if file.analysed_at is None:
+            rank = max(_STATE_RANK.values()) + 1
+            count = 0
+        elif file.header_ok is False or file.file_kind is FileKind.UNKNOWN:
+            rank = _STATE_RANK["failed"]
+            count = 0
+        elif file.rejected_count:
+            rank, count = _STATE_RANK["rejected"], file.rejected_count
+        elif file.recovered_count:
+            rank, count = _STATE_RANK["recovered"], file.recovered_count
+        else:
+            rank, count = _STATE_RANK["ok"], 0
+        return (rank, count, file.filename.casefold())
+    return (file.filename.casefold(), file.relative_path)
 
 
 @runtime_checkable
@@ -477,6 +507,74 @@ class DeliveryService:
         async with self._session_factory() as session:
             repo = DeliveryRepository(session)
             return tuple(delivery_view(d, d.files) for d in await repo.list_all())
+
+    async def files(
+        self,
+        delivery_id: DeliveryId,
+        *,
+        kinds: Collection[FileKind] | None = None,
+        exclude_kinds: Collection[FileKind] | None = None,
+        sort_key: str = "filename",
+        sort_dir: SortDir = SortDir.ASC,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> Page[DeliveryFileView]:
+        """One page of one of the Import view's two file tables.
+
+        The left card is every non-`TEXT` file, the right card is the text
+        file, and each has its own sort and its own page (sw-design.md §8.1,
+        design README §1a). Sort and page are service-call parameters,
+        always (§8.4) — a view must never sort or slice this list itself.
+
+        `state` sorts by severity — ok, recovered, rejected, failed — because
+        that is the order the column's colour ramp implies, not the
+        lexicographic order of the rendered string.
+        """
+        key = sort_key if sort_key in _FILE_SORT_KEYS else "filename"
+        view = await self.get(delivery_id)
+        rows = [
+            f
+            for f in view.files
+            if (kinds is None or f.file_kind in kinds)
+            and (exclude_kinds is None or f.file_kind not in exclude_kinds)
+        ]
+        rows.sort(key=lambda f: _file_sort_value(f, key), reverse=sort_dir is SortDir.DESC)
+        start = max(page - 1, 0) * page_size
+        return Page(
+            items=tuple(rows[start : start + page_size]),
+            total=len(rows),
+            page=page,
+            page_size=page_size,
+            sort_key=key,
+            sort_dir=sort_dir,
+        )
+
+    async def preview(
+        self, delivery_id: DeliveryId, file_id: FileId, *, lines: int = 20
+    ) -> tuple[str, ...]:
+        """The first `lines` physical lines of a file, decoded with its
+        **effective** encoding (sw-design.md §8.3's "20-row raw preview").
+
+        Physical lines, not parsed rows: the preview exists so an analyst can
+        see what the parser saw before recovery and rejection, which is the
+        only way an encoding or delimiter override can be chosen on evidence.
+        A file whose bytes decode under neither encoding previews as empty —
+        `errors="replace"` is banned and U+FFFD is never rendered (§12.4).
+        """
+        async with self._session_factory() as session:
+            repo = DeliveryRepository(session)
+            delivery = await self._require(repo, delivery_id)
+            row = await self._require_file(repo, delivery_id, file_id)
+            data = await self._store_for(delivery).read_bytes(delivery_id, row.relative_path)
+        encoding = Encoding(row.encoding) if row.encoding else None
+        candidates = (encoding,) if encoding else (Encoding.UTF_8, Encoding.CP1252)
+        for candidate in candidates:
+            try:
+                text = data.decode(candidate.value)
+            except UnicodeDecodeError:
+                continue
+            return tuple(text.splitlines()[:lines])
+        return ()
 
     # --- internals ---------------------------------------------------------
 

@@ -237,6 +237,9 @@ _UTILITIES: Final = """
 .ok{color:var(--ok);}
 .warn{color:var(--warn);}
 .danger{color:var(--danger);}
+.ink2{color:var(--ink2);}
+.ink3{color:var(--ink3);}
+.accent{color:var(--accent);}
 """
 
 # Focus is undesigned in the mock (README §"`.navitem` states"). One token,
