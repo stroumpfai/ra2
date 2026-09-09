@@ -160,15 +160,23 @@ class _FileReport:
         return next((f for f in self._delivery.files if f.file_id == self._file_id), None)
 
     async def _refresh(self) -> None:
-        """Re-read the delivery, redraw the modal, and tell the view behind
-        it to redraw too."""
+        """Re-read the delivery, redraw the view behind the modal, and only
+        **then** redraw the modal itself.
+
+        The order is load-bearing. Every action here is fired by a button
+        inside `self._body`, and redrawing the body destroys that button —
+        after which NiceGUI can no longer resolve the handler's slot, and the
+        next `app.storage.client` or `ui.notify` in the same handler raises
+        "The parent element this slot belongs to has been deleted." So the
+        modal redraws itself last, and nothing follows it.
+        """
         self._delivery = await self._services.delivery.get(self._delivery.delivery_id)
         file = self._file()
+        await self._on_changed()
         if file is None:
             self._close()
         else:
             self._render(file)
-        await self._on_changed()
 
     def _close(self) -> None:
         if self._dialog is not None:
@@ -395,8 +403,11 @@ class _FileReport:
         except (ServiceError, ValueError) as exc:
             ui.notify(str(exc), type="negative")
             return
+        # No toast on success: `_refresh` ends by redrawing this modal, which
+        # deletes the button that fired this handler, and a notification after
+        # that has no slot to resolve. The new counts and the row's new state
+        # are the feedback — README's own advice for parse outcomes.
         await self._refresh()
-        ui.notify("Re-parsed.", type="positive")
 
     async def _export(self) -> None:
         data = await self._services.export.findings_csv(self._delivery.delivery_id, self._file_id)

@@ -607,8 +607,11 @@ class _ImportPage:
         except ServiceError as exc:
             ui.notify(str(exc), type="negative")
             return
+        # `reload()` redraws the corpora card, which deletes the button that
+        # fired this handler — so nothing follows it, and in particular no
+        # toast, which would have no slot left to resolve. The new row in the
+        # table is the feedback.
         await self.reload()
-        ui.notify("Corpus created.", type="positive")
 
     async def _delete_corpus(self, corpus_id: CorpusId) -> None:
         try:
