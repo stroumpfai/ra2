@@ -156,6 +156,24 @@ async def _until_analysed(services: Services, delivery_id: str) -> None:
     raise AssertionError("the delivery never finished analysing")
 
 
+async def _until(predicate: Callable[[], bool]) -> None:
+    """Poll until `predicate()` is true.
+
+    A click's handler is dispatched but not awaited by `UserInteraction.click`
+    (`nicegui.testing`'s `_dispatch_click` fires it via `handle_event` and
+    returns immediately), so an async handler's effects — a sort, a page
+    change, a selection — are not guaranteed to be visible the instant
+    `.click()` returns. `user.should_see(text)` covers most cases, but a text
+    marker is only a reliable sync point when it cannot **already** be true
+    before the handler runs; this covers the rest.
+    """
+    for _ in range(500):
+        if predicate():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("condition never became true")
+
+
 # --- helpers -----------------------------------------------------------------
 
 
@@ -321,6 +339,12 @@ async def test_sorting_on_rows_moves_the_active_column(seeded: Seeded) -> None:
     await user.open("/import")
     (header,) = _within(_table(user, "structured"), "sort-row_count")
     _one(user, header).click()
+    await _until(
+        lambda: (
+            _within(_table(user, "structured"), "sort-row_count")[0]._props["aria-sort"]
+            == "ascending"
+        )
+    )
 
     table = _table(user, "structured")
     assert _within(table, "sort-row_count")[0]._props["aria-sort"] == "ascending"
@@ -485,15 +509,9 @@ async def test_the_report_shows_detected_beside_effective_settings(seeded: Seede
     assert _text_of(user, "detected-delimiter") == "|"
 
 
-@pytest.mark.xfail(reason="amendment: feat/m6-import-view", strict=True)
 async def test_the_report_shows_a_twenty_line_raw_preview(seeded: Seeded) -> None:
-    """§8.3 requires a 20-row raw preview.
-
-    Reading a delivery file's bytes needs `FileStore`, which lives in
-    `ra2.infra`, and `.importlinter` forbids `ra2.ui -> ra2.infra` — so there
-    is no legal shim. Amendment item 3 proposes `DeliveryService.preview()`;
-    until it lands the modal renders its own absence.
-    """
+    """§8.3 requires a 20-row raw preview, via `DeliveryService.preview()`
+    (amendment feat/m6-import-view item 3, resolved at integration)."""
     user = seeded.user
     await user.open("/import")
     structured = _card(user, "structured")

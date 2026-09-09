@@ -7,10 +7,9 @@ and a create-corpus button whose record count comes from the service.
 Three rules shape every line of this module:
 
 1. **The UI holds no business logic** (§8.1.1). Selection, freeze, delete,
-   re-parse and every count are service calls; `DeliveryView` and `CorpusView`
-   arrive as detached read models and are rendered, never recomputed. The two
-   exceptions are marked `SHIM` and are filed as
-   `contracts/amendments/feat-m6-import-view.md` items 1 and 2.
+   re-parse, sort, page and every count are service calls; `DeliveryView`,
+   `DeliveryFileView`, `CorpusView` and `CorpusSummary` arrive as detached read
+   models and are rendered, never recomputed.
 2. **No module-level mutable state** (§12.8). Sort and page live in
    `app.storage.client` through `ui/state.py`; the current delivery id lives
    there too; everything else is per-render local state on a `_ImportPage`
@@ -95,10 +94,6 @@ DELIVERY_KEY: Final = "ra2.import.delivery"
 WELL_HEIGHT_PX: Final = 404
 PAGE_SIZE: Final = 10
 
-#: A page size that fetches every corpus in one call. The Corpora table is a
-#: handful of rows; this only bounds the shim in `_corpus_counts`.
-_ALL_ROWS: Final = 10_000
-
 # --- copy, verbatim from design/nav-import-census/README.md ------------------
 
 STRUCTURED_TITLE: Final = "Structured sets"
@@ -127,20 +122,6 @@ NO_DELIVERY_MESSAGE: Final = "No delivery yet — use + to register one."
 NO_FILES_MESSAGE: Final = "No files."
 NO_CORPORA_MESSAGE: Final = "No corpora yet."
 
-# --- SHIM: three colour utility classes --------------------------------------
-#
-# The design puts `--ink2`, `--ink3` and `--accent` on text this view renders
-# through `card_header(count_class=…)`, whose only styling hook is a CSS class.
-# `theme.py` defines `.ok`, `.warn` and `.danger` but none of these three, and
-# it is not this milestone's file to edit. Filed as
-# `contracts/amendments/feat-m6-import-view.md` item 4; this second injection
-# disappears when that lands.
-_SHIM_CSS: Final = """
-.ra2-ink2{color:var(--ink2);}
-.ra2-ink3{color:var(--ink3);}
-.ra2-accent{color:var(--accent);}
-"""
-
 
 def register(services: Services) -> None:
     @ui.page(_ITEM.path)
@@ -165,6 +146,8 @@ class _ImportPage:
     def __init__(self, services: Services) -> None:
         self._services = services
         self._delivery: DeliveryView | None = None
+        self._structured: Page[DeliveryFileView] | None = None
+        self._text: Page[DeliveryFileView] | None = None
         self._corpora: Page[CorpusView] | None = None
         self._corpus_total = 0
         self._corpus_locked = 0
@@ -176,7 +159,6 @@ class _ImportPage:
     # --- lifecycle ---------------------------------------------------------
 
     async def build(self) -> None:
-        ui.add_css(_SHIM_CSS, shared=True)
         with shell(
             title=_ITEM.title,
             description=_ITEM.description,
@@ -199,6 +181,31 @@ class _ImportPage:
         its action invalidated.
         """
         self._delivery = await self._current_delivery()
+        if self._delivery is not None:
+            delivery_id = self._delivery.delivery_id
+            structured_state = table_state(
+                STRUCTURED_TABLE, sort_key="filename", page_size=PAGE_SIZE
+            )
+            text_state = table_state(TEXT_TABLE, sort_key="filename", page_size=PAGE_SIZE)
+            self._structured = await self._services.delivery.files(
+                delivery_id,
+                exclude_kinds={FileKind.TEXT},
+                sort_key=structured_state.sort_key,
+                sort_dir=structured_state.sort_dir,
+                page=structured_state.page,
+                page_size=structured_state.page_size,
+            )
+            self._text = await self._services.delivery.files(
+                delivery_id,
+                kinds={FileKind.TEXT},
+                sort_key=text_state.sort_key,
+                sort_dir=text_state.sort_dir,
+                page=text_state.page,
+                page_size=text_state.page_size,
+            )
+        else:
+            self._structured = None
+            self._text = None
         state = table_state(CORPORA_TABLE, sort_key="imported_at", page_size=PAGE_SIZE)
         self._corpora = await self._services.corpus.list_corpora(
             sort_key="imported_at",
@@ -206,7 +213,8 @@ class _ImportPage:
             page=state.page,
             page_size=state.page_size,
         )
-        self._corpus_total, self._corpus_locked = await self._corpus_counts()
+        summary = await self._services.corpus.summary()
+        self._corpus_total, self._corpus_locked = summary.total, summary.locked
         self._render()
 
     async def _current_delivery(self) -> DeliveryView | None:
@@ -229,18 +237,6 @@ class _ImportPage:
         app.storage.client[DELIVERY_KEY] = current.delivery_id
         return current
 
-    async def _corpus_counts(self) -> tuple[int, int]:
-        """SHIM — "4 imported · 2 locked by an evaluation" (README §1b).
-
-        `Page.total` gives the first number; nothing gives the second, because
-        `locked_by_evaluations` is per row and this count is over the whole
-        table. Filed as `contracts/amendments/feat-m6-import-view.md` item 2
-        (`CorpusService.summary()`); until it lands the locked rows are counted
-        here, from one unpaged service call.
-        """
-        every = await self._services.corpus.list_corpora(page=1, page_size=_ALL_ROWS)
-        return every.total, sum(1 for c in every.items if c.is_locked)
-
     # --- rendering ---------------------------------------------------------
 
     def _render(self) -> None:
@@ -252,20 +248,22 @@ class _ImportPage:
             self._file_card(
                 title=STRUCTURED_TITLE,
                 name=STRUCTURED_TABLE,
-                files=self._files(text=False),
+                page=self._structured,
+                all_files=self._files(text=False),
                 note=STRUCTURED_NOTE,
                 note_tone="muted",
-                count_class="ra2-ink2",
+                count_class="ink2",
                 add_label="Add set",
                 testid="structured",
             )
             self._file_card(
                 title=TEXT_TITLE,
                 name=TEXT_TABLE,
-                files=self._files(text=True),
+                page=self._text,
+                all_files=self._files(text=True),
                 note=TEXT_NOTE,
                 note_tone="info",
-                count_class="ra2-accent",
+                count_class="accent",
                 add_label="Add file",
                 testid="text",
             )
@@ -274,9 +272,11 @@ class _ImportPage:
             self._corpora_card()
 
     def _files(self, *, text: bool) -> tuple[DeliveryFileView, ...]:
-        """The left card is every non-text file, the right card is the text
-        file (README §1a). Which is which comes from the **header-derived**
-        `file_kind`, never from a filename (§12.5)."""
+        """Every file of the relevant kind, unpaged — used only for the
+        selection count and the select-all/indeterminate state, which are
+        properties of the **whole table**, not of the page on screen. The
+        rows actually rendered come from `self._structured` / `self._text`,
+        fetched sorted and paged by `DeliveryService.files` (§8.1/§8.4)."""
         if self._delivery is None:
             return ()
         return tuple(f for f in self._delivery.files if (f.file_kind is FileKind.TEXT) == text)
@@ -286,7 +286,8 @@ class _ImportPage:
         *,
         title: str,
         name: str,
-        files: Sequence[DeliveryFileView],
+        page: Page[DeliveryFileView] | None,
+        all_files: Sequence[DeliveryFileView],
         note: str,
         note_tone: str,
         count_class: str,
@@ -294,8 +295,9 @@ class _ImportPage:
         testid: str,
     ) -> None:
         state = table_state(name, sort_key="filename", page_size=PAGE_SIZE)
-        rows, total = _page_of(files, state)
-        selected = sum(1 for f in files if f.selected)
+        rows = page.items if page is not None else ()
+        total = page.total if page is not None else 0
+        selected = sum(1 for f in all_files if f.selected)
 
         with card().props(f'data-card="{testid}"'):
             with card_header(
@@ -308,10 +310,10 @@ class _ImportPage:
                 .style(f"height:{WELL_HEIGHT_PX}px;overflow:auto;flex:none;")
             ):
                 data_table(
-                    columns=self._file_columns(files=files, selected=selected),
+                    columns=self._file_columns(files=all_files, selected=selected),
                     rows=rows,
                     state=state,
-                    on_sort=lambda key: self._sort(name, key),
+                    on_sort=_sync(lambda key: self._sort(name, key)),
                     empty_message=NO_FILES_MESSAGE if self._delivery else NO_DELIVERY_MESSAGE,
                     testid=f"table-{testid}",
                 )
@@ -319,8 +321,8 @@ class _ImportPage:
                 state=state,
                 total=total,
                 shown=len(rows),
-                on_page=lambda page: self._file_page(name, page),
-                on_page_size=lambda size: self._file_page_size(name, size),
+                on_page=_sync(lambda page_num: self._file_page(name, page_num)),
+                on_page_size=_sync(lambda size: self._file_page_size(name, size)),
             )
             footnote(note, tone=note_tone)
 
@@ -391,7 +393,7 @@ class _ImportPage:
                 title=CORPORA_TITLE,
                 count=f"{self._corpus_total} imported · {self._corpus_locked} "
                 f"locked by an evaluation",
-                count_class="ra2-ink2",
+                count_class="ink2",
             ):
                 self._create_corpus_button()
             ui.label(CORPORA_CAPTION).props('data-testid="corpora-caption"').style(
@@ -498,7 +500,7 @@ class _ImportPage:
         """ "Delete" only when no evaluation cites the corpus; otherwise a
         non-interactive "delete blocked" (README §1b, J3)."""
         if row.is_locked:
-            ui.label("delete blocked").classes("mono ra2-ink3").props(
+            ui.label("delete blocked").classes("mono ink3").props(
                 'data-testid="delete-blocked"'
             ).mark("delete-blocked").style("font-size:11px;")
             return
@@ -518,12 +520,14 @@ class _ImportPage:
 
     # --- table state -------------------------------------------------------
 
-    def _sort(self, name: str, key: str) -> None:
-        """`TableState.toggled` decides the next direction; this only stores
-        it and redraws. Independent per table, because each table has its own
+    async def _sort(self, name: str, key: str) -> None:
+        """`TableState.toggled` decides the next direction; this stores it and
+        re-reads the table's page from the service — sort is a **service
+        call** parameter, not something this view applies to rows it already
+        holds (§8.1.4). Independent per table, because each table has its own
         named state (README, Interactions)."""
         set_table_state(name, table_state(name, sort_key="filename").toggled(key))
-        self._render()
+        await self.reload()
 
     @staticmethod
     def _turn(name: str, *, page: int | None = None, page_size: int | None = None) -> None:
@@ -539,13 +543,15 @@ class _ImportPage:
             TableState(current.sort_key, current.sort_dir, page or current.page, current.page_size),
         )
 
-    def _file_page(self, name: str, page: int) -> None:
+    async def _file_page(self, name: str, page: int) -> None:
+        """The file table's page is a **service call** with the new page
+        number, not a slice of a list this view is holding (§8.1.4)."""
         self._turn(name, page=page)
-        self._render()
+        await self.reload()
 
-    def _file_page_size(self, name: str, size: int) -> None:
+    async def _file_page_size(self, name: str, size: int) -> None:
         self._turn(name, page_size=size)
-        self._render()
+        await self.reload()
 
     async def _corpora_page(self, page: int) -> None:
         """The corpora page is a **service call** with the new page number, not
@@ -562,13 +568,19 @@ class _ImportPage:
     async def _toggle(self, file: DeliveryFileView) -> None:
         """Per-file selection. The service returns the whole delivery so the
         header count and the "Create corpus · N records" label both recompute
-        from one call (README, Interactions)."""
+        from one call (README, Interactions).
+
+        Reloads rather than just re-rendering: the table's own rows come from
+        `self._structured` / `self._text`, fetched separately by
+        `DeliveryService.files` (§8.1.4), and would otherwise still show this
+        file's pre-toggle `selected` value.
+        """
         if self._delivery is None:
             return
         self._delivery = await self._services.delivery.set_selected(
             self._delivery.delivery_id, file.file_id, selected=not file.selected
         )
-        self._render()
+        await self.reload()
 
     async def _select_all(self, files: Sequence[DeliveryFileView], *, selected: bool) -> None:
         """The header tick: select all / none for **that table only**."""
@@ -579,7 +591,7 @@ class _ImportPage:
                 self._delivery = await self._services.delivery.set_selected(
                     self._delivery.delivery_id, file.file_id, selected=selected
                 )
-        self._render()
+        await self.reload()
 
     async def _open_report(self, file: DeliveryFileView) -> None:
         if self._delivery is None:
@@ -786,43 +798,6 @@ class _ImportPage:
             self._poll = ui.timer(0.2, poll)
 
 
-# --- SHIM: sort and page over `DeliveryView.files` ---------------------------
-#
-# `DeliveryService` has no paged, sorted file query — `get()` returns every
-# file in `relative_path` order — while the Import view has two independently
-# sorted and independently paged tables over it (README §1a). sw-design.md
-# §8.1.4 wants sort and page in the **service call signature**, so this is
-# filed as `contracts/amendments/feat-m6-import-view.md` item 1
-# (`DeliveryService.files(...) -> Page[DeliveryFileView]`) and moves there
-# verbatim when that lands. Nothing else in this module sorts, pages, filters
-# or derives a count.
-
-#: How the State column orders: by severity, which is the order its colour
-#: ramp implies — not the lexicographic order of the rendered string.
-_STATE_RANK: Final[dict[str, int]] = {"ok": 0, "recovered": 1, "rejected": 2, "failed": 3}
-
-
-def _sort_value(file: DeliveryFileView, key: str) -> tuple[object, ...]:
-    if key == "row_count":
-        return (file.row_count or 0, file.filename.casefold())
-    if key == "state":
-        text, _ = _state(file)
-        rank = _STATE_RANK.get(text.split(" ")[-1], 9)
-        count = file.rejected_count or file.recovered_count
-        return (rank, count, file.filename.casefold())
-    return (file.filename.casefold(), file.relative_path)
-
-
-def _page_of(
-    files: Sequence[DeliveryFileView], state: TableState
-) -> tuple[tuple[DeliveryFileView, ...], int]:
-    ordered = sorted(
-        files, key=lambda f: _sort_value(f, state.sort_key), reverse=state.sort_dir is SortDir.DESC
-    )
-    start = max(state.page - 1, 0) * state.page_size
-    return tuple(ordered[start : start + state.page_size]), len(ordered)
-
-
 # --- cell renderers ----------------------------------------------------------
 
 
@@ -836,7 +811,7 @@ def _state(file: DeliveryFileView) -> tuple[str, str]:
     rejected row is data that did not make it in.
     """
     if file.analysed_at is None:
-        return "not analysed", "ra2-ink3"
+        return "not analysed", "ink3"
     if file.header_ok is False or file.file_kind is FileKind.UNKNOWN:
         return "failed", "danger"
     if file.rejected_count:
@@ -866,7 +841,7 @@ def _render_corpus_name(corpus: CorpusView) -> None:
         ui.label(corpus.name).classes("mono").props('data-testid="corpus-name"').mark(
             "corpus-name"
         ).style("font-weight:500;overflow:hidden;text-overflow:ellipsis;")
-        ui.label(f"v{corpus.version}").classes("mono ra2-ink3").style("font-size:11px;")
+        ui.label(f"v{corpus.version}").classes("mono ink3").style("font-size:11px;")
 
 
 def _render_languages(corpus: CorpusView) -> None:
@@ -900,7 +875,7 @@ def _render_status(corpus: CorpusView) -> None:
             'data-testid="locked-pill"'
         ).mark("locked-pill")
         return
-    ui.label("Not used by any evaluation").classes("ra2-ink2").style("font-size:12px;")
+    ui.label("Not used by any evaluation").classes("ink2").style("font-size:12px;")
 
 
 # --- error surfaces ----------------------------------------------------------

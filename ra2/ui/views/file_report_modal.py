@@ -126,6 +126,7 @@ class _FileReport:
         self._encoding = ""
         self._delimiter = ""
         self._quote_char = ""
+        self._preview_lines: tuple[str, ...] = ()
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -142,6 +143,7 @@ class _FileReport:
         if file is None:
             ui.notify("That file is no longer part of this delivery.", type="warning")
             return
+        await self._load_preview()
         with self._host, ui.dialog().props('data-testid="file-report"') as dialog:
             self._dialog = dialog
             # Quasar re-enables pointer events with `.q-dialog__inner > div`,
@@ -172,6 +174,8 @@ class _FileReport:
         """
         self._delivery = await self._services.delivery.get(self._delivery.delivery_id)
         file = self._file()
+        if file is not None:
+            await self._load_preview()
         await self._on_changed()
         if file is None:
             self._close()
@@ -181,6 +185,20 @@ class _FileReport:
     def _close(self) -> None:
         if self._dialog is not None:
             self._dialog.close()
+
+    async def _load_preview(self) -> None:
+        """The 20-row raw preview's content, re-read on every render.
+
+        A re-parse can change the file's effective encoding, and the preview
+        exists precisely so that change is visible — fetching it fresh here
+        rather than caching across renders is the point, not a missed cache.
+        """
+        try:
+            self._preview_lines = await self._services.delivery.preview(
+                self._delivery.delivery_id, self._file_id, lines=PREVIEW_LINES
+            )
+        except ServiceError:
+            self._preview_lines = ()
 
     # --- rendering ---------------------------------------------------------
 
@@ -358,23 +376,29 @@ class _FileReport:
                 )
 
     def _preview(self) -> None:
-        """The 20-row raw preview (§8.3).
-
-        **Blocked on `contracts/amendments/feat-m6-import-view.md` item 3.**
-        Reading a delivery file's bytes needs `FileStore`, which lives in
-        `ra2.infra`, and `.importlinter` forbids `ra2.ui -> ra2.infra` — so
-        the import that would implement this fails the build. The section
-        renders its own absence rather than pretending the file has no
-        content.
-        """
+        """The 20-row raw preview (§8.3), decoded with the file's effective
+        encoding by `DeliveryService.preview` — fetched fresh in `show()` /
+        `_refresh()` before this synchronous render runs."""
         with ui.element("div").style(_SECTION):
             ui.label(f"First {PREVIEW_LINES} lines").classes("lbl")
-            ui.label(
-                "Unavailable: no service reads a delivery file's raw lines yet "
-                "(amendment feat/m6-import-view, item 3)."
-            ).props('data-testid="report-preview"').mark("report-preview").style(
-                "font-size:12.5px;color:var(--ink3);margin-top:8px;"
-            )
+            if not self._preview_lines:
+                ui.label("No preview available for this file.").props(
+                    'data-testid="report-preview"'
+                ).mark("report-preview").style("font-size:12.5px;color:var(--ink3);margin-top:8px;")
+                return
+            with (
+                ui.element("div")
+                .props('data-testid="report-preview"')
+                .mark("report-preview")
+                .style(
+                    "margin-top:8px;background:var(--bg);border:1px solid var(--rule);"
+                    "border-radius:3px;padding:8px 10px;overflow-x:auto;"
+                )
+            ):
+                for line in self._preview_lines:
+                    ui.label(line).classes("mono").style(
+                        "font-size:11px;white-space:pre;line-height:1.6;"
+                    )
 
     def _actions(self, file: DeliveryFileView) -> None:
         with ui.element("div").style(
