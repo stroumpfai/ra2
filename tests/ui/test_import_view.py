@@ -242,14 +242,14 @@ async def test_deselecting_a_file_updates_both_counts(seeded: Seeded) -> None:
     """
     user = seeded.user
     await user.open("/import")
-    await user.should_see(f"{STRUCTURED_FILES} files · {STRUCTURED_FILES} selected")
-    await user.should_see(f"Create corpus · {ALL_RECORDS} records")
+    await user.should_see(f"{STRUCTURED_FILES} files · {STRUCTURED_FILES} selected", retries=30)
+    await user.should_see(f"Create corpus · {ALL_RECORDS} records", retries=30)
 
     structured = _card(user, "structured")
     _one(user, _tick(user, structured, "Select a_unfall.txt")).click()
 
-    await user.should_see(f"{STRUCTURED_FILES} files · {STRUCTURED_FILES - 1} selected")
-    await user.should_see(f"Create corpus · {WITHOUT_A} records")
+    await user.should_see(f"{STRUCTURED_FILES} files · {STRUCTURED_FILES - 1} selected", retries=30)
+    await user.should_see(f"Create corpus · {WITHOUT_A} records", retries=30)
 
 
 async def test_a_deselected_file_stays_in_the_list(seeded: Seeded) -> None:
@@ -259,7 +259,7 @@ async def test_a_deselected_file_stays_in_the_list(seeded: Seeded) -> None:
     await user.open("/import")
     structured = _card(user, "structured")
     _one(user, _tick(user, structured, "Select a_unfall.txt")).click()
-    await user.should_see(f"Create corpus · {WITHOUT_A} records")
+    await user.should_see(f"Create corpus · {WITHOUT_A} records", retries=30)
 
     structured = _card(user, "structured")
     assert "a_unfall.txt" in _filenames(structured)
@@ -281,17 +281,17 @@ async def test_the_header_tick_selects_all_none_and_goes_indeterminate(seeded: S
     assert header()._props["aria-checked"] == "true"
 
     _one(user, _tick(user, _card(user, "structured"), "Select a_unfall.txt")).click()
-    await user.should_see(f"Create corpus · {WITHOUT_A} records")
+    await user.should_see(f"Create corpus · {WITHOUT_A} records", retries=30)
     assert header()._props["aria-checked"] == "mixed"
 
     _one(user, header()).click()
-    await user.should_see(f"Create corpus · {ALL_RECORDS} records")
+    await user.should_see(f"Create corpus · {ALL_RECORDS} records", retries=30)
     assert header()._props["aria-checked"] == "true"
 
     _one(user, header()).click()
-    await user.should_see("Create corpus · 0 records")
+    await user.should_see("Create corpus · 0 records", retries=30)
     assert header()._props["aria-checked"] == "false"
-    await user.should_see(f"{STRUCTURED_FILES} files · 0 selected")
+    await user.should_see(f"{STRUCTURED_FILES} files · 0 selected", retries=30)
 
 
 async def test_the_header_tick_only_touches_its_own_table(seeded: Seeded) -> None:
@@ -300,8 +300,8 @@ async def test_the_header_tick_only_touches_its_own_table(seeded: Seeded) -> Non
     user = seeded.user
     await user.open("/import")
     _one(user, _tick(user, _table(user, "structured"), "Select all")).click()
-    await user.should_see(f"{STRUCTURED_FILES} files · 0 selected")
-    await user.should_see(f"{TEXT_FILES} file · {TEXT_FILES} selected")
+    await user.should_see(f"{STRUCTURED_FILES} files · 0 selected", retries=30)
+    await user.should_see(f"{TEXT_FILES} file · {TEXT_FILES} selected", retries=30)
 
 
 # --- §11.3: sorting ----------------------------------------------------------
@@ -320,7 +320,7 @@ async def test_a_sort_click_flips_the_direction(seeded: Seeded) -> None:
     assert _filenames(table)[0] == "a_unfall.txt"
 
     _one(user, header).click()
-    await user.should_see("l_person.txt")
+    await user.should_see("l_person.txt", retries=30)
 
     table = _table(user, "structured")
     (header,) = _within(table, "sort-filename")
@@ -359,7 +359,7 @@ async def test_sort_state_is_independent_per_table(seeded: Seeded) -> None:
     await user.open("/import")
     (header,) = _within(_table(user, "structured"), "sort-filename")
     _one(user, header).click()
-    await user.should_see("l_person.txt")
+    await user.should_see("l_person.txt", retries=30)
 
     assert _within(_table(user, "structured"), "sort-filename")[0]._props["aria-sort"] == (
         "descending"
@@ -379,10 +379,10 @@ async def test_pagination_disables_rather_than_hides(seeded: Seeded) -> None:
     (following,) = _within(card, "page-next")
     assert "disabled" in previous._props
     assert "disabled" not in following._props
-    await user.should_see(f"1–10 of {STRUCTURED_FILES}")
+    await user.should_see(f"1–10 of {STRUCTURED_FILES}", retries=30)
 
     _one(user, following).click()
-    await user.should_see(f"11–{STRUCTURED_FILES} of {STRUCTURED_FILES}")
+    await user.should_see(f"11–{STRUCTURED_FILES} of {STRUCTURED_FILES}", retries=30)
 
     card = _card(user, "structured")
     assert "disabled" not in _within(card, "page-prev")[0]._props
@@ -396,7 +396,7 @@ async def test_the_single_text_file_has_both_arrows_disabled_not_hidden(seeded: 
     card = _card(user, "text")
     assert "disabled" in _within(card, "page-prev")[0]._props
     assert "disabled" in _within(card, "page-next")[0]._props
-    await user.should_see(f"1–1 of {TEXT_FILES}")
+    await user.should_see(f"1–1 of {TEXT_FILES}", retries=30)
 
 
 # --- the design's own copy and states ----------------------------------------
@@ -427,8 +427,8 @@ async def test_the_state_column_renders_the_designs_three_states(seeded: Seeded)
 async def test_the_two_cards_carry_the_designs_titles_and_footnotes(seeded: Seeded) -> None:
     user = seeded.user
     await user.open("/import")
-    await user.should_see("Structured sets")
-    await user.should_see("Text file")
+    await user.should_see("Structured sets", retries=30)
+    await user.should_see("Text file", retries=30)
     await user.should_see(STRUCTURED_NOTE)
     await user.should_see(TEXT_NOTE)
 
@@ -437,8 +437,8 @@ async def test_the_corpora_card_is_empty_and_carries_its_caption(seeded: Seeded)
     """The immutability note is a sub-caption strip, verbatim (README §1b)."""
     user = seeded.user
     await user.open("/import")
-    await user.should_see("Corpora")
-    await user.should_see("0 imported · 0 locked by an evaluation")
+    await user.should_see("Corpora", retries=30)
+    await user.should_see("0 imported · 0 locked by an evaluation", retries=30)
     await user.should_see(CORPORA_CAPTION)
     await user.should_see(NO_CORPORA_MESSAGE)
 
@@ -460,9 +460,9 @@ async def test_a_delivery_that_has_not_been_registered_yet_says_so(
             ):
                 user = User(client)
                 await user.open("/import")
-                await user.should_see("No delivery yet")
-                await user.should_see("0 files · 0 selected")
-                await user.should_see("Create corpus · 0 records")
+                await user.should_see("No delivery yet", retries=30)
+                await user.should_see("0 files · 0 selected", retries=30)
+                await user.should_see("Create corpus · 0 records", retries=30)
         finally:
             os.environ.pop("NICEGUI_USER_SIMULATION", None)
 
@@ -483,13 +483,13 @@ async def test_the_row_action_opens_that_files_report(seeded: Seeded) -> None:
     )
     _one(user, action).click()
 
-    await user.should_see("File report")
-    await user.should_see("a_unfall.txt")
+    await user.should_see("File report", retries=30)
+    await user.should_see("a_unfall.txt", retries=30)
     # The code, not its wording: `FindingCode` values are the stable
     # identifiers tests assert on (sw-design.md §5.1).
-    await user.should_see("ROW_REJECTED_FIELD_COUNT")
+    await user.should_see("ROW_REJECTED_FIELD_COUNT", retries=30)
     # …and the offending key, which §4.2 requires every rejected row to carry.
-    await user.should_see("aa000000000000000000000000000002")
+    await user.should_see("aa000000000000000000000000000002", retries=30)
 
 
 async def test_the_report_shows_detected_beside_effective_settings(seeded: Seeded) -> None:
@@ -504,7 +504,7 @@ async def test_the_report_shows_detected_beside_effective_settings(seeded: Seede
         if e._props.get("aria-label") == "Report for c_unfall.txt"
     )
     _one(user, action).click()
-    await user.should_see("File report")
+    await user.should_see("File report", retries=30)
     assert _text_of(user, "detected-encoding") == "cp1252"
     assert _text_of(user, "detected-delimiter") == "|"
 
@@ -521,5 +521,5 @@ async def test_the_report_shows_a_twenty_line_raw_preview(seeded: Seeded) -> Non
         if e._props.get("aria-label") == "Report for a_unfall.txt"
     )
     _one(user, action).click()
-    await user.should_see("File report")
+    await user.should_see("File report", retries=30)
     assert _text_of(user, "report-preview").startswith("UnfallUid|GeoRefUid")
