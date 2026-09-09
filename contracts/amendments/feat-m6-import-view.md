@@ -1,10 +1,12 @@
-# Amendment: `ra2/services/delivery_service.py`, `ra2/services/corpus_service.py`, `ra2/ui/theme.py`
+# Amendment: `delivery_service.py`, `corpus_service.py`, `theme.py`, `components/primitives.py`
 
-Filed by `feat/m6-import-view` (M6, the Import view). Four items. Items 1, 2
+Filed by `feat/m6-import-view` (M6, the Import view). Five items. Items 1, 2
 and 4 are shimmed inside `ra2/ui/views/import_view.py` and are marked there
 with a pointer back to this file; item 3 is **not shimmable** — the layer rule
 forbids the only import that would implement it — and the one test that would
-cover it is `xfail(reason="amendment: feat/m6-import-view")`.
+cover it is `xfail(reason="amendment: feat/m6-import-view")`. Item 5 is a
+**bug** in the component kit, found while wiring this view, with no shim
+available from outside that file.
 
 ---
 
@@ -271,6 +273,70 @@ call, which is precisely what §8.2's "one injection" rule exists to prevent.
 and the deletion of `import_view.py`'s `_SHIM_CSS` block plus its
 `ui.add_css` call, renaming `ra2-ink2` / `ra2-ink3` / `ra2-accent` to
 `ink2` / `ink3` / `accent` at their six use sites.
+
+---
+
+## Item 5 — the "Rows per page" selector never reaches its callback
+
+### Which file
+
+`ra2/ui/components/primitives.py`, `_page_size_select`.
+
+### Why
+
+The selector asks the client for the event's `target`:
+
+```python
+select.on(
+    "change",
+    lambda event: on_page_size(int(event.args["target"]["value"])),
+    args=[["target", "value"]],
+)
+```
+
+`Element.on`'s `args` names **top-level keys of the event object** to send,
+one entry per event argument — so this asks for `event.target`, a live DOM
+node. It does not serialise, nothing arrives under that key, and every change
+of the page size raises
+
+```
+ERROR [nicegui] 'target'
+KeyError: 'target'
+```
+
+on the server while the UI silently does nothing. Reproduced in this
+milestone with the identical pattern in the Import view's intake dialog (the
+E2E run's captured stderr), and fixed there by emitting the value from the
+client instead. `pagination_row` is the component kit's, and the two Import
+file tables and the Corpora table all render it, so all three page-size
+selectors are inert today. Prev/next are unaffected — they are `on_page`, not
+`on_page_size` — which is why §11.3's "pagination disables rather than hides"
+still passes.
+
+### Proposed diff
+
+```python
+--- a/ra2/ui/components/primitives.py
++++ b/ra2/ui/components/primitives.py
+@@ def _page_size_select
+     if on_page_size is not None:
+-        select.on(
+-            "change",
+-            lambda event: on_page_size(int(event.args["target"]["value"])),
+-            args=[["target", "value"]],
+-        )
++        # The client emits the value itself. `args=[["target", "value"]]`
++        # looks equivalent and is not: it asks for the event's `target`, a
++        # DOM node that never survives serialisation.
++        select.on(
++            "change",
++            lambda event: on_page_size(int(event.args)),
++            js_handler="(e) => emit(e.target.value)",
++        )
+```
+
+A `tests/ui` test that clicks through a page-size change belongs with it;
+there is none today, which is why this shipped.
 
 ---
 
