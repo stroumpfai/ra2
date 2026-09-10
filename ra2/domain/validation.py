@@ -17,6 +17,12 @@ Set membership (SD6) is decided here too, for the same reason: which cantonal
 set an `objekt` file belongs to is a fact about *other files*, so it cannot be
 known during per-file analysis. It is resolved by FK reachability, never from a
 filename (§12.5).
+
+Column names are resolved per delivery, not hard-coded: a delivery is a single
+format (RADIS or Astrana), never mixed, so any one selected file of a given
+`FileKind` tells us the key/count column names every other reference to that
+kind in the delivery uses — including a foreign key in a child file, which
+reuses its parent's key-column name literally, in both formats.
 """
 
 from collections.abc import Iterable, Sequence
@@ -26,14 +32,7 @@ from ra2.domain.delivery import DeliveryAnalysis, FileAnalysis, FileKind
 from ra2.domain.findings import DEFAULT_SEVERITY, Finding, FindingCode
 from ra2.domain.ids import FileId
 from ra2.domain.parsing.analysis import ParsedFile
-from ra2.domain.parsing.headers import (
-    KEY_COLUMNS,
-    OBJEKT_KEY_COLUMN,
-    TEXT_KEY_COLUMN,
-    UNFALL_KEY_COLUMN,
-    UNFALL_OBJ_COUNT_COLUMN,
-    UNFALL_PERS_COUNT_COLUMN,
-)
+from ra2.domain.parsing.headers import CANONICAL_COLUMN_SETS, TEXT_KEY_COLUMN, ColumnSet
 
 __all__ = ["blocking_findings", "validate_delivery"]
 
@@ -62,13 +61,30 @@ def _of_kind(files: Iterable[ParsedFile], kind: FileKind) -> list[ParsedFile]:
     return [f for f in files if f.kind is kind]
 
 
+def _column_set(files: Sequence[ParsedFile], kind: FileKind) -> ColumnSet | None:
+    """The vocabulary this delivery uses for `kind`, from any selected file of
+    that kind that matched a header. `None` only when no such file is
+    selected at all."""
+    return next((f.column_set for f in files if f.kind is kind and f.column_set), None)
+
+
+def _key_column(files: Sequence[ParsedFile], kind: FileKind) -> str:
+    """This delivery's key-column name for `kind`.
+
+    Falls back to the RADIS name only when no file of `kind` is selected at
+    all — a lookup against it then matches nothing either way, so which
+    literal is used cannot change the outcome."""
+    column_set = _column_set(files, kind)
+    return column_set.key_column if column_set else CANONICAL_COLUMN_SETS[kind][0].key_column
+
+
 def _duplicate_keys(files: Sequence[ParsedFile], kind: FileKind) -> list[Finding]:
     """Duplicates of `kind`'s primary key across the **whole delivery**.
 
     Per-file uniqueness is not enough and is not what §4.1 asks for: the
     dangerous case is precisely the one that is fine inside each file.
     """
-    column = KEY_COLUMNS[kind]
+    column = _key_column(files, kind)
     seen: dict[str, list[str]] = {}
     for parsed in _of_kind(files, kind):
         filename = parsed.analysis.filename
@@ -97,23 +113,27 @@ def _orphans(
     files: Sequence[ParsedFile],
     *,
     child_kind: FileKind,
-    fk_column: str,
     parent_kind: FileKind,
 ) -> list[Finding]:
-    """Child rows whose foreign key reaches no parent row in the delivery."""
-    parent_column = KEY_COLUMNS[parent_kind]
+    """Child rows whose foreign key reaches no parent row in the delivery.
+
+    The foreign key column in the child file is named identically to the
+    parent's own key column — true in both RADIS and Astrana — so no separate
+    `fk_column` needs to be threaded in by the caller.
+    """
+    parent_column = _key_column(files, parent_kind)
     parents = {
         value
         for parent in _of_kind(files, parent_kind)
         for value in parent.values(parent_column)
         if value
     }
-    child_column = KEY_COLUMNS[child_kind]
+    child_column = _key_column(files, child_kind)
 
     findings: list[Finding] = []
     for child in _of_kind(files, child_kind):
         child_index = child.column(child_column)
-        fk_index = child.column(fk_column)
+        fk_index = child.column(parent_column)
         if fk_index is None:
             continue
         for row in child.rows:
@@ -130,7 +150,7 @@ def _orphans(
                     key=own_key,
                     detail={
                         "child_table": child_kind.value,
-                        "parent_key": fk_column,
+                        "parent_key": parent_column,
                         "parent_value": parent_value,
                         "orphan_key": parent_value,
                     },
@@ -142,7 +162,7 @@ def _orphans(
 def _resolve_sets(files: Sequence[ParsedFile]) -> tuple[dict[FileId, str], list[Finding]]:
     """Group the three structured files of one canton by FK reachability (SD6).
 
-    The `unfall` file names the set — from its own `KantonAusw`, which came
+    The `unfall` file names the set — from its own canton column, which came
     from the data. `objekt` joins the set whose `unfall` file holds its parent
     keys; `person` joins the set of the `objekt` file holding *its* parents.
     Nothing consults a filename.
@@ -155,16 +175,18 @@ def _resolve_sets(files: Sequence[ParsedFile]) -> tuple[dict[FileId, str], list[
         analysis = parsed.analysis
         set_key[analysis.file_id] = analysis.canton or f"set:{analysis.file_id}"
 
+    unfall_key_column = _key_column(files, FileKind.UNFALL)
     unfall_keys = {
-        parsed.analysis.file_id: set(parsed.values(UNFALL_KEY_COLUMN)) for parsed in unfall_files
+        parsed.analysis.file_id: set(parsed.values(unfall_key_column)) for parsed in unfall_files
     }
 
+    objekt_key_column = _key_column(files, FileKind.OBJEKT)
     objekt_files = _of_kind(files, FileKind.OBJEKT)
     objekt_keys: dict[FileId, set[str]] = {}
     for parsed in objekt_files:
-        own = set(parsed.values(OBJEKT_KEY_COLUMN))
+        own = set(parsed.values(objekt_key_column))
         objekt_keys[parsed.analysis.file_id] = own
-        parents = {v for v in parsed.values(UNFALL_KEY_COLUMN) if v}
+        parents = {v for v in parsed.values(unfall_key_column) if v}
         best = _best_overlap(parents, unfall_keys)
         if best is None:
             findings.append(
@@ -181,7 +203,7 @@ def _resolve_sets(files: Sequence[ParsedFile]) -> tuple[dict[FileId, str], list[
         set_key[parsed.analysis.file_id] = set_key[best]
 
     for parsed in _of_kind(files, FileKind.PERSON):
-        parents = {v for v in parsed.values(OBJEKT_KEY_COLUMN) if v}
+        parents = {v for v in parsed.values(objekt_key_column) if v}
         best = _best_overlap(parents, objekt_keys)
         if best is None or best not in set_key:
             findings.append(
@@ -212,58 +234,66 @@ def _best_overlap(needles: set[str], haystacks: dict[FileId, set[str]]) -> FileI
 
 
 def _count_mismatches(files: Sequence[ParsedFile]) -> list[Finding]:
-    """`AnzObjFeld` and `BeteiligtePersTotalFeld` against the real child counts.
+    """The declared object/person totals against the real child counts.
 
     Reported, never blocking: a declared count that disagrees with the delivered
     rows is a fact about the delivery the analyst needs, not a reason to refuse
     an import (mvp-spec.md §4.3).
     """
+    unfall_key_column = _key_column(files, FileKind.UNFALL)
+    objekt_key_column = _key_column(files, FileKind.OBJEKT)
+
     objekt_per_unfall: dict[str, int] = {}
     objekt_to_unfall: dict[str, str] = {}
     for parsed in _of_kind(files, FileKind.OBJEKT):
-        for row_key, row in parsed.keyed(UNFALL_KEY_COLUMN):
+        for row_key, row in parsed.keyed(unfall_key_column):
             if not row_key:
                 continue
             objekt_per_unfall[row_key] = objekt_per_unfall.get(row_key, 0) + 1
-            index = parsed.column(OBJEKT_KEY_COLUMN)
+            index = parsed.column(objekt_key_column)
             own = row[index] if index is not None and index < len(row) else ""
             if own:
                 objekt_to_unfall[own] = row_key
 
     person_per_unfall: dict[str, int] = {}
     for parsed in _of_kind(files, FileKind.PERSON):
-        for objekt_key in parsed.values(OBJEKT_KEY_COLUMN):
+        for objekt_key in parsed.values(objekt_key_column):
             unfall_key = objekt_to_unfall.get(objekt_key)
             if unfall_key:
                 person_per_unfall[unfall_key] = person_per_unfall.get(unfall_key, 0) + 1
 
     findings: list[Finding] = []
     for parsed in _of_kind(files, FileKind.UNFALL):
-        obj_index = parsed.column(UNFALL_OBJ_COUNT_COLUMN)
-        pers_index = parsed.column(UNFALL_PERS_COUNT_COLUMN)
-        for key, row in parsed.keyed(UNFALL_KEY_COLUMN):
+        column_set = parsed.column_set
+        obj_count_column = column_set.obj_count_column if column_set else None
+        pers_count_column = column_set.pers_count_column if column_set else None
+        obj_index = parsed.column(obj_count_column) if obj_count_column else None
+        pers_index = parsed.column(pers_count_column) if pers_count_column else None
+        for key, row in parsed.keyed(unfall_key_column):
             if not key:
                 continue
-            findings.extend(
-                _mismatch(
-                    code=FindingCode.COUNT_MISMATCH_OBJ,
-                    file_id=parsed.analysis.file_id,
-                    key=key,
-                    declared=_cell(row, obj_index),
-                    actual=objekt_per_unfall.get(key, 0),
-                    column=UNFALL_OBJ_COUNT_COLUMN,
+            if obj_count_column:
+                findings.extend(
+                    _mismatch(
+                        code=FindingCode.COUNT_MISMATCH_OBJ,
+                        file_id=parsed.analysis.file_id,
+                        key=key,
+                        declared=_cell(row, obj_index),
+                        actual=objekt_per_unfall.get(key, 0),
+                        column=obj_count_column,
+                    )
                 )
-            )
-            findings.extend(
-                _mismatch(
-                    code=FindingCode.COUNT_MISMATCH_PERS,
-                    file_id=parsed.analysis.file_id,
-                    key=key,
-                    declared=_cell(row, pers_index),
-                    actual=person_per_unfall.get(key, 0),
-                    column=UNFALL_PERS_COUNT_COLUMN,
+            if pers_count_column:
+                findings.extend(
+                    _mismatch(
+                        code=FindingCode.COUNT_MISMATCH_PERS,
+                        file_id=parsed.analysis.file_id,
+                        key=key,
+                        declared=_cell(row, pers_index),
+                        actual=person_per_unfall.get(key, 0),
+                        column=pers_count_column,
+                    )
                 )
-            )
     return findings
 
 
@@ -312,7 +342,8 @@ def _text_join(files: Sequence[ParsedFile]) -> list[Finding]:
         # every `unfall` row would otherwise be reported as textless.
         return []
 
-    unfall_keys = {v for parsed in unfall_files for v in parsed.values(UNFALL_KEY_COLUMN) if v}
+    unfall_key_column = _key_column(files, FileKind.UNFALL)
+    unfall_keys = {v for parsed in unfall_files for v in parsed.values(unfall_key_column) if v}
     text_keys: set[str] = set()
 
     findings: list[Finding] = []
@@ -332,14 +363,14 @@ def _text_join(files: Sequence[ParsedFile]) -> list[Finding]:
                 )
 
     for parsed in unfall_files:
-        for value in parsed.values(UNFALL_KEY_COLUMN):
+        for value in parsed.values(unfall_key_column):
             if value and value not in text_keys:
                 findings.append(
                     _finding(
                         FindingCode.UNFALL_WITHOUT_TEXT,
                         file_id=parsed.analysis.file_id,
                         key=value,
-                        detail={"column": UNFALL_KEY_COLUMN},
+                        detail={"column": unfall_key_column},
                     )
                 )
     return findings
@@ -348,11 +379,11 @@ def _text_join(files: Sequence[ParsedFile]) -> list[Finding]:
 def validate_delivery(files: Sequence[ParsedFile]) -> DeliveryAnalysis:
     """Cross-file validation over the **selected** files.
 
-    Blocking: duplicate `UnfallUid`/`ObjektUid`/`PersonUid` across the whole
-    delivery, orphan FKs, header mismatch.
+    Blocking: duplicate primary keys across the whole delivery, orphan FKs,
+    header mismatch.
 
-    Reported: `AnzObjFeld` and `BeteiligtePersTotalFeld` count mismatches, text
-    rows with no `unfall` row, `unfall` rows with no text, detected encodings.
+    Reported: object/person count mismatches, text rows with no `unfall` row,
+    `unfall` rows with no text, detected encodings.
 
     Deselected files stay in `DeliveryAnalysis.files` — the import view still
     lists them — but take no part in any cross-file check, so deselecting the
@@ -365,22 +396,8 @@ def validate_delivery(files: Sequence[ParsedFile]) -> DeliveryAnalysis:
     for kind in (FileKind.UNFALL, FileKind.OBJEKT, FileKind.PERSON):
         cross.extend(_duplicate_keys(selected, kind))
 
-    cross.extend(
-        _orphans(
-            selected,
-            child_kind=FileKind.OBJEKT,
-            fk_column=UNFALL_KEY_COLUMN,
-            parent_kind=FileKind.UNFALL,
-        )
-    )
-    cross.extend(
-        _orphans(
-            selected,
-            child_kind=FileKind.PERSON,
-            fk_column=OBJEKT_KEY_COLUMN,
-            parent_kind=FileKind.OBJEKT,
-        )
-    )
+    cross.extend(_orphans(selected, child_kind=FileKind.OBJEKT, parent_kind=FileKind.UNFALL))
+    cross.extend(_orphans(selected, child_kind=FileKind.PERSON, parent_kind=FileKind.OBJEKT))
     cross.extend(_count_mismatches(selected))
     cross.extend(_text_join(selected))
 

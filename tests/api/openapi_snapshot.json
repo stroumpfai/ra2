@@ -660,6 +660,7 @@
           "ROW_RECOVERED",
           "ROW_REJECTED_FIELD_COUNT",
           "ROW_REJECTED_PARSE_ERROR",
+          "ROW_BLANK_DROPPED",
           "DUP_KEY_CROSS_SET",
           "ORPHAN_FK",
           "SET_UNRESOLVED",

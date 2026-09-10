@@ -19,7 +19,12 @@ from types import ModuleType
 
 import pytest
 
-from ra2.domain.parsing.headers import CANONICAL_HEADERS
+from ra2.domain.parsing.headers import CANONICAL_COLUMN_SETS
+
+#: RADIS — index 0 of every kind's `ColumnSet` tuple, by construction.
+_RADIS = {kind: sets[0] for kind, sets in CANONICAL_COLUMN_SETS.items()}
+#: Astrana — index 1, only present for the three structured kinds.
+_ASTRANA = {kind: sets[1] for kind, sets in CANONICAL_COLUMN_SETS.items() if len(sets) > 1}
 
 GENERATOR = Path(__file__).resolve().parents[2] / "fixtures" / "deliveries" / "generate_hazards.py"
 
@@ -85,13 +90,20 @@ def test_the_fixtures_carry_only_synthetic_keys(hz):
             assert synthetic.match(key), (path.name, key)
 
 
-@pytest.mark.parametrize("kind", list(CANONICAL_HEADERS))
-def test_the_generator_builds_rows_at_the_canonical_width(kind):
-    """The fixtures take their width from `CANONICAL_HEADERS`, so a 67-column
-    file stays 67 columns without anybody counting."""
+@pytest.mark.parametrize("kind", list(_RADIS))
+def test_the_generator_builds_radis_rows_at_the_canonical_width(kind):
+    """The fixtures take their width from the RADIS `ColumnSet`, so a
+    67-column file stays 67 columns without anybody counting."""
     module = _generator()
     row = module._row(kind, "k", {})
-    assert len(row) == len(CANONICAL_HEADERS[kind])
+    assert len(row) == len(_RADIS[kind].columns)
+
+
+@pytest.mark.parametrize("kind", list(_ASTRANA))
+def test_the_generator_builds_astrana_rows_at_the_canonical_width(kind):
+    module = _generator()
+    row = module._astrana_row(kind, "k", {})
+    assert len(row) == len(_ASTRANA[kind].columns)
 
 
 def test_uid_refuses_a_tag_that_is_not_short_lowercase_hex():

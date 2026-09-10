@@ -97,11 +97,44 @@ One delivery is **N cantonal sets of three structured files, plus one text file
 covering all cantons**. All are imported into **one** corpus. **Nothing is ever read
 from a filename** — canton and language come from the data.
 
+Two structured-file formats are recognised, named RADIS and Astrana below.
+**A delivery is a single format, never mixed** — every structured file in it
+uses the same delimiter, header vocabulary and key layout. Format is decided
+per file from its header alone, the same way `unfall`/`objekt`/`person`/text
+is (§12.5) — it is never persisted or asked of the analyst.
+
+**RADIS** (the original contract):
+
 | File | Key | Delimiter | Quoting | Header case |
 |---|---|---|---|---|
 | `unfall` | `UnfallUid` (PK) | `\|` | selective, type-inconsistent | mixed (`UnfallUid`) |
 | `objekt` | `ObjektUid` (PK), `UnfallUid` (FK) | `\|` | selective | mixed |
 | `person` | `PersonUid` (PK), `ObjektUid` (FK) | `\|` | selective | mixed |
+
+**Astrana**: comma-delimited, every field RFC4180-quoted, German business-label
+headers. The `person` table is named `Mitfahrende`, and every key column sits
+further into the row than column 0 — `unfall`'s `Unfall-UID` is column 2, after
+`Jahr`/`Datum` (§4.2 point 3 generalises the key-anchor rule to any position,
+resolved from the matched format, precisely because of this).
+
+| File | Key | Delimiter | Quoting | Header case |
+|---|---|---|---|---|
+| `unfall` (`Unfall.csv`) | `Unfall-UID` (PK) | `,` | RFC4180, every field quoted | German labels (`Unfall-UID`, `Kanton Kürzel`) |
+| `objekt` (`Objekt.csv`) | `Objekt-UID` (PK), `Unfall-UID` (FK) | `,` | RFC4180, every field quoted | German labels |
+| `Mitfahrende` (kind `person`) | `Person-UID` (PK), `Objekt-UID` (FK) | `,` | RFC4180, every field quoted | German labels |
+
+Astrana's canton column is `Kanton Kürzel` (RADIS: `KantonAusw`); its object/
+person total columns are `Total Objekte`/`Total Personen` (RADIS: `AnzObjFeld`/
+`BeteiligtePersTotalFeld`). Astrana's column *set* is otherwise not a renaming
+of RADIS's — it is a different, narrower export (67/76/21 columns against
+RADIS's 67/77/18), with its own values for coded fields (`* UAP` columns)
+rather than RADIS's separate codelist join.
+
+**The text file does not vary by format** — it is the same `;`-delimited,
+two-column contract regardless of which structured format accompanies it:
+
+| File | Key | Delimiter | Quoting | Header case |
+|---|---|---|---|---|
 | text *(one file, all cantons)* | `UNFALLUID` | `;` | RFC4180, `"` doubled | upper (`UNFALLUID`) |
 
 The asymmetry matters: the single text file is the join target for every cantonal
@@ -116,8 +149,9 @@ detection and overridable in the import UI. Column names are matched
 `person` links to `objekt`, not to `unfall`: person→accident is a two-hop join, and
 a pedestrian still has an object row.
 
-Value formats: dates `YYYYMMDD` integers; times `"HH:MM"` strings; decimals with
-`.`; empty string means **no value provided** (§8.6).
+Value formats: dates `YYYYMMDD` integers (RADIS) or `DD.MM.YY` (Astrana); times
+`"HH:MM"` strings; decimals with `.`, optionally Swiss/German apostrophe-grouped
+thousands (`1'127'946.61`); empty string means **no value provided** (§8.6).
 
 ### 4.2 Parsing — strict first, recover second
 
@@ -125,12 +159,20 @@ Value formats: dates `YYYYMMDD` integers; times `"HH:MM"` strings; decimals with
    was detected. **Fail the file on undecodable bytes** — never substitute `U+FFFD`.
 2. Parse with a real RFC4180 parser using the file's delimiter and quote char.
 3. For any row that fails to parse, or whose field count ≠ the header's, apply
-   **key-anchored recovery**: `UnfallUid` is exactly 32 hex characters, so a line
-   that does not begin with `^[0-9A-Fa-f]{32}<delim>` is a **continuation of the
-   preceding record**, not a new row.
+   **key-anchored recovery**: the key column (`UnfallUid`/`ObjektUid`/`PersonUid`/
+   `UNFALLUID` for RADIS; `Unfall-UID`/`Objekt-UID`/`Person-UID` for Astrana) is
+   exactly 32 hex characters, so a row whose key field does not match
+   `^[0-9A-Fa-f]{32}$` is a **continuation of the preceding record**, not a new
+   row. The key field's position is resolved from the matched format — RADIS and
+   the text file always have it at column 0, Astrana does not (e.g. `unfall`'s
+   `Unfall-UID` is column 2).
    - Two-column text file: this repairs embedded newlines unambiguously.
    - Wide structured tables: this **detects** a stray delimiter; repair is not
      attempted. The row is rejected.
+   - A wholly-blank record (every field empty, or no fields at all — Astrana's
+     doubled-CRLF line terminator produces exactly this) is dropped **before**
+     recovery runs, so it cannot masquerade as a continuation of the row before
+     it. Still reported (never a silent drop), with its own finding and no key.
 4. Every recovered or rejected row is reported with its key in the import report.
    **Never silently repaired, never silently dropped.**
 
@@ -142,9 +184,11 @@ Blocking (import fails):
 - header not matching the expected column set for that table
 
 Reported but non-blocking (surfaced in the import report, stored on the corpus):
-- rows recovered or rejected by §4.2
-- `unfall.AnzObjFeld` ≠ count of child `objekt` rows
-- `unfall.BeteiligtePersTotalFeld` ≠ count of `person` rows via `objekt`
+- rows recovered, rejected or blank-dropped by §4.2
+- the declared object count (`unfall.AnzObjFeld` / Astrana `Total Objekte`) ≠
+  count of child `objekt` rows
+- the declared person count (`unfall.BeteiligtePersTotalFeld` / Astrana
+  `Total Personen`) ≠ count of `person` rows via `objekt`
 - text rows with no matching `unfall` row, and `unfall` rows with no text
 - per-file detected encoding
 

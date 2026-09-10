@@ -90,6 +90,13 @@ class FindingCode(StrEnum):
     #: detail: {"error": "..."}
     ROW_REJECTED_PARSE_ERROR = "ROW_REJECTED_PARSE_ERROR"
 
+    #: A wholly-blank record (every field empty, or no fields at all) — e.g.
+    #: the doubled-CRLF line terminator in some Astrana exports. Dropped
+    #: before key-anchored recovery ever sees it, since it is never a key
+    #: anchor and would otherwise be folded into the *next* real record as an
+    #: unrepairable continuation. Has no key of its own. detail: {}
+    ROW_BLANK_DROPPED = "ROW_BLANK_DROPPED"
+
     # --- cross-file validation, blocking (mvp-spec.md §4.3) ------------------
     #: The same `UnfallUid` / `ObjektUid` / `PersonUid` appears twice **across
     #: the whole delivery** — the collision that would attach one canton's
@@ -143,6 +150,7 @@ DEFAULT_SEVERITY: Final[dict[FindingCode, Severity]] = {
     FindingCode.ROW_RECOVERED: Severity.REPORTED,
     FindingCode.ROW_REJECTED_FIELD_COUNT: Severity.REPORTED,
     FindingCode.ROW_REJECTED_PARSE_ERROR: Severity.REPORTED,
+    FindingCode.ROW_BLANK_DROPPED: Severity.REPORTED,
     FindingCode.DUP_KEY_CROSS_SET: Severity.BLOCKING,
     FindingCode.ORPHAN_FK: Severity.BLOCKING,
     FindingCode.SET_UNRESOLVED: Severity.BLOCKING,

@@ -324,7 +324,66 @@ def test_h12_rows_are_not_key_anchored_when_the_kind_is_unknown(hz):
     assert hz.of_code(parsed.analysis.findings, FindingCode.ROW_REJECTED_PARSE_ERROR) == []
 
 
-# --- the rule underneath all twelve ---------------------------------------
+# --- h13 -------------------------------------------------------------------
+
+
+def test_h13_astrana_blank_row_is_dropped_and_reported_without_rejecting_the_real_rows(hz):
+    """Astrana's doubled-CRLF artifact follows every real row. Left in place
+    it would be folded into the *next* record as an unrepairable
+    continuation and reject the wrong row — dropping it before recovery
+    sees it keeps both real rows `OK`."""
+    parsed = hz.parse("h13_astrana_blank_row", "Unfall.csv")
+
+    assert parsed.analysis.kind is FileKind.UNFALL
+    assert parsed.analysis.ok_count == 2
+    assert parsed.analysis.rejected_count == 0
+    assert parsed.analysis.recovered_count == 0
+    assert hz.of_code(parsed.analysis.findings, FindingCode.ROW_REJECTED_FIELD_COUNT) == []
+
+    dropped = hz.of_code(parsed.analysis.findings, FindingCode.ROW_BLANK_DROPPED)
+    assert len(dropped) == 2
+    assert all(f.severity is Severity.REPORTED for f in dropped)
+    assert all(f.key is None for f in dropped)
+
+    assert {hz.uid("aa", 1), hz.uid("aa", 2)} <= set(parsed.values("Unfall-UID"))
+
+
+# --- h14 -------------------------------------------------------------------
+
+
+def test_h14_astrana_header_classifies_to_the_same_kinds_as_radis(hz):
+    """`Mitfahrende` -> `person`, same as RADIS's `person.txt` — the header,
+    not the filename, decides (SD5)."""
+    unfall = hz.parse("h14_astrana_header", "Unfall.csv")
+    objekt = hz.parse("h14_astrana_header", "Objekt.csv")
+    person = hz.parse("h14_astrana_header", "Mitfahrende.csv")
+
+    assert unfall.analysis.kind is FileKind.UNFALL
+    assert objekt.analysis.kind is FileKind.OBJEKT
+    assert person.analysis.kind is FileKind.PERSON
+    assert unfall.analysis.header_ok is True
+    assert objekt.analysis.header_ok is True
+    assert person.analysis.header_ok is True
+
+
+def test_h14_astrana_canton_comes_from_kanton_kuerzel_not_kantonausw(hz):
+    """Canton still comes from the data, never a filename — just a different
+    column name in this format (mvp-spec.md §4.1, SD §12.5)."""
+    parsed = hz.parse("h14_astrana_header", "Unfall.csv")
+    assert parsed.analysis.canton == "ZH"
+
+
+def test_h14_astrana_delivery_validates_clean(hz):
+    """A well-formed Astrana triplet has no blocking findings — the whole
+    point of resolving key/FK column names per delivery rather than always
+    assuming RADIS's."""
+    analysis = validate_delivery(hz.parse_all("h14_astrana_header"))
+    assert blocking_findings(analysis) == ()
+    assert hz.of_code(analysis.findings, FindingCode.ORPHAN_FK) == []
+    assert hz.of_code(analysis.findings, FindingCode.SET_UNRESOLVED) == []
+
+
+# --- the rule underneath all fourteen ---------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -376,13 +435,13 @@ def test_the_filename_never_decides_the_kind(hz, hazard, filename, expected):
 
 
 def test_every_hazard_directory_exists(hz):
-    """The twelve of sw-design.md §11.4, all committed, none quietly missing."""
+    """The fourteen of sw-design.md §11.4, all committed, none quietly missing."""
     found = sorted(p.name for p in hz.dir.iterdir() if p.is_dir())
-    assert [name[:3] for name in found] == [f"h{n:02d}" for n in range(1, 13)]
+    assert [name[:3] for name in found] == [f"h{n:02d}" for n in range(1, 15)]
 
 
 def test_no_hazard_row_outcome_is_unaccounted(hz):
-    """Every outcome the enum defines is exercised somewhere in the twelve."""
+    """Every outcome the enum defines is exercised somewhere in the fourteen."""
     seen = set()
     for directory in sorted(p for p in hz.dir.iterdir() if p.is_dir()):
         for path in sorted(directory.iterdir()):

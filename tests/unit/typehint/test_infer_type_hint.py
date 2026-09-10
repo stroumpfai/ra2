@@ -90,6 +90,72 @@ def test_mixed_shapes_fall_back_to_text():
     assert infer_type_hint("SomeFeld", ["1", "abc"]) == TypeHint.TEXT
 
 
+# --- Swiss/German grouped numbers and dotted dates -----------------------
+
+
+def test_apostrophe_grouped_integers_are_integer():
+    assert infer_type_hint("SomeFeld", ["40'367", "1'127'946"]) == TypeHint.INTEGER
+
+
+def test_mixed_grouped_and_plain_integers_are_integer():
+    """Swiss formatting only groups once a number reaches 1000+, so a column
+    is realistically a mix of grouped and ungrouped values."""
+    assert infer_type_hint("SomeFeld", ["367", "1'127'946"]) == TypeHint.INTEGER
+
+
+def test_negative_apostrophe_grouped_is_integer():
+    assert infer_type_hint("SomeFeld", ["-40'367"]) == TypeHint.INTEGER
+
+
+def test_apostrophe_grouped_decimals_are_decimal():
+    assert infer_type_hint("SomeFeld", ["602'378.61", "1'127'946.61"]) == TypeHint.DECIMAL
+
+
+def test_apostrophe_grouped_decimal_point_still_beats_integer():
+    """The existing "any `.` demotes from integer" rule still applies after
+    grouping normalisation."""
+    assert infer_type_hint("SomeFeld", ["1'000", "2.5"]) == TypeHint.DECIMAL
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "40'36",  # short group
+        "'367",  # leading apostrophe
+        "40''367",  # doubled apostrophe
+        "1'2345",  # 4-digit group
+    ],
+)
+def test_malformed_grouping_is_not_a_number(value):
+    assert infer_type_hint("SomeFeld", [value]) == TypeHint.TEXT
+
+
+def test_dotted_ddmmyy_date_is_date():
+    """Covers both sides of the century pivot: `23` -> 2023, `99` -> 1999."""
+    assert infer_type_hint("UnfallDatum", ["20.01.23", "15.06.99"]) == TypeHint.DATE
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "32.01.23",  # day 32
+        "20.13.23",  # month 13
+        "20.01.2",  # short year
+        "20-01-23",  # wrong separator
+    ],
+)
+def test_implausible_dotted_date_is_not_a_date(value):
+    assert infer_type_hint("SomeFeld", [value]) != TypeHint.DATE
+
+
+def test_ausw_suffix_beats_value_shape_even_when_values_look_like_apostrophe_grouped_numbers():
+    assert infer_type_hint("SomeAusw", ["40'367", "1'127'946"]) == TypeHint.ENUM
+
+
+def test_ausw_suffix_beats_value_shape_even_when_values_look_like_dotted_dates():
+    assert infer_type_hint("SomeAusw", ["20.01.23"]) == TypeHint.ENUM
+
+
 # --- empties -------------------------------------------------------------
 
 

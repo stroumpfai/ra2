@@ -11,7 +11,7 @@ from ra2.domain.delivery import FileKind, SourceKind
 from ra2.domain.findings import FindingCode, Severity
 from ra2.domain.ids import DeliveryId
 from ra2.domain.language import Language
-from ra2.domain.parsing.headers import CANONICAL_HEADERS
+from ra2.domain.parsing.headers import CANONICAL_COLUMN_SETS
 from ra2.persistence.models import (
     Corpus,
     ObjektCell,
@@ -28,6 +28,10 @@ from ra2.services.errors import (
 )
 
 pytestmark = pytest.mark.backend
+
+#: RADIS — index 0 of every kind's `ColumnSet` tuple. The golden hazard
+#: delivery (h01-h12) is RADIS-shaped.
+_RADIS_HEADERS = {kind: sets[0].columns for kind, sets in CANONICAL_COLUMN_SETS.items()}
 
 
 async def _count(session_factory: async_sessionmaker[AsyncSession], model: Any) -> int:
@@ -66,13 +70,13 @@ async def test_analyse_select_freeze_end_to_end_on_the_hazard_delivery(
         assert await session.scalar(select(func.count()).select_from(PersonRow)) == 2
         # EAV: every column of every row, empty cells included.
         assert await session.scalar(select(func.count()).select_from(UnfallRow)) == 2 * len(
-            CANONICAL_HEADERS[FileKind.UNFALL]
+            _RADIS_HEADERS[FileKind.UNFALL]
         )
         assert await session.scalar(select(func.count()).select_from(ObjektCell)) == 2 * len(
-            CANONICAL_HEADERS[FileKind.OBJEKT]
+            _RADIS_HEADERS[FileKind.OBJEKT]
         )
         assert await session.scalar(select(func.count()).select_from(PersonCell)) == 2 * len(
-            CANONICAL_HEADERS[FileKind.PERSON]
+            _RADIS_HEADERS[FileKind.PERSON]
         )
 
     _, called_corpus_id, census = census_materialiser.only
@@ -81,7 +85,7 @@ async def test_analyse_select_freeze_end_to_end_on_the_hazard_delivery(
     assert [t.table_name for t in census.tables] == ["unfall", "objekt", "person"]
     # The canonical header, not the observed cells: a column empty in every row
     # must still reach the census at 0 % (h08, M0-D9).
-    assert census.tables[0].columns == CANONICAL_HEADERS[FileKind.UNFALL]
+    assert census.tables[0].columns == _RADIS_HEADERS[FileKind.UNFALL]
 
 
 async def test_the_import_report_carries_the_non_blocking_findings_with_their_keys(

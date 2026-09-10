@@ -15,12 +15,13 @@ from ra2.domain.ids import CorpusId, DeliveryId, ObjektRowId, PersonRowId, Recor
 from ra2.domain.language import LanguageDetector
 from ra2.domain.parsing.analysis import ParsedFile
 from ra2.domain.parsing.headers import (
-    CANONICAL_HEADERS,
+    CANONICAL_COLUMN_SETS,
     OBJEKT_KEY_COLUMN,
     PERSON_KEY_COLUMN,
     TEXT_KEY_COLUMN,
     TEXT_NARRATIVE_COLUMN,
     UNFALL_KEY_COLUMN,
+    ColumnSet,
     column_index,
 )
 from ra2.domain.validation import validate_delivery
@@ -61,10 +62,6 @@ __all__ = ["CorpusService"]
 #: the delivered narrative, and a record built from it is flagged.
 UNFALL_ANONYMISED_TEXT_COLUMN = "UnfHergangTextAnonym"
 
-#: `objekt.ObjNr` / `person.PersNr` — the within-parent ordinals, kept as raw
-#: text (mvp-spec.md §16 flags that role codes may or may not map onto them).
-OBJEKT_ORDINAL_COLUMN = "ObjNrFeld"
-PERSON_ORDINAL_COLUMN = "PersNrFeld"
 
 #: `sort_key` -> the `CorpusView` attribute it sorts on. An unknown key falls
 #: back to `imported_at`, the Corpora table's default (sw-design.md §8.4).
@@ -301,9 +298,22 @@ class CorpusService:
         off `record` (mvp-spec.md §4.1): person -> accident is a two-hop join,
         and getting it wrong silently changes every person-grain aggregate.
         """
+        # A delivery is a single format, never mixed — any one selected file
+        # of a kind tells us the column names every other reference to that
+        # kind uses, including a foreign key in a child file (which reuses
+        # its parent's key-column name literally, in both formats).
+        unfall_set = _resolved_column_set(parsed, FileKind.UNFALL)
+        objekt_set = _resolved_column_set(parsed, FileKind.OBJEKT)
+        person_set = _resolved_column_set(parsed, FileKind.PERSON)
+        unfall_key_column = unfall_set.key_column if unfall_set else UNFALL_KEY_COLUMN
+        objekt_key_column = objekt_set.key_column if objekt_set else OBJEKT_KEY_COLUMN
+        person_key_column = person_set.key_column if person_set else PERSON_KEY_COLUMN
+        objekt_ordinal_column = objekt_set.ordinal_column if objekt_set else None
+        person_ordinal_column = person_set.ordinal_column if person_set else None
+
         narratives = _narratives(parsed)
-        objekt_by_unfall = _group(parsed, FileKind.OBJEKT, UNFALL_KEY_COLUMN)
-        person_by_objekt = _group(parsed, FileKind.PERSON, OBJEKT_KEY_COLUMN)
+        objekt_by_unfall = _group(parsed, FileKind.OBJEKT, unfall_key_column)
+        person_by_objekt = _group(parsed, FileKind.PERSON, objekt_key_column)
 
         records: list[Record] = []
         cells: dict[str, list[tuple[str, str]]] = {
@@ -314,7 +324,7 @@ class CorpusService:
 
         for unfall_file in _of_kind(parsed, FileKind.UNFALL):
             header = unfall_file.header
-            key_index = column_index(header, UNFALL_KEY_COLUMN)
+            key_index = column_index(header, unfall_key_column)
             if key_index is None:  # pragma: no cover - a header mismatch blocks first
                 continue
             for row in unfall_file.rows:
@@ -350,6 +360,10 @@ class CorpusService:
                     objekt_by_unfall.get(unfall_uid, ()),
                     person_by_objekt,
                     cells,
+                    objekt_key_column=objekt_key_column,
+                    objekt_ordinal_column=objekt_ordinal_column,
+                    person_key_column=person_key_column,
+                    person_ordinal_column=person_ordinal_column,
                 )
                 records.append(record)
 
@@ -360,13 +374,18 @@ class CorpusService:
                 tables=tuple(
                     CensusTableInput(
                         table_name=kind.value,
-                        # The canonical header, not the observed cells: a
-                        # column empty in every row must still appear at 0 %
-                        # (h08, M0-D9).
-                        columns=CANONICAL_HEADERS[kind],
+                        # This delivery's actual column vocabulary, not always
+                        # RADIS's: a column empty in every row must still
+                        # appear at 0 % (h08, M0-D9), and an Astrana delivery's
+                        # census columns must be Astrana's, not RADIS's.
+                        columns=column_set.columns,
                         cells=tuple(cells[kind.value]),
                     )
-                    for kind in (FileKind.UNFALL, FileKind.OBJEKT, FileKind.PERSON)
+                    for kind, column_set in (
+                        (FileKind.UNFALL, unfall_set or CANONICAL_COLUMN_SETS[FileKind.UNFALL][0]),
+                        (FileKind.OBJEKT, objekt_set or CANONICAL_COLUMN_SETS[FileKind.OBJEKT][0]),
+                        (FileKind.PERSON, person_set or CANONICAL_COLUMN_SETS[FileKind.PERSON][0]),
+                    )
                 ),
             ),
         )
@@ -377,10 +396,15 @@ class CorpusService:
         rows: Sequence[tuple[tuple[str, ...], tuple[str, ...]]],
         person_by_objekt: dict[str, list[tuple[tuple[str, ...], tuple[str, ...]]]],
         cells: dict[str, list[tuple[str, str]]],
+        *,
+        objekt_key_column: str,
+        objekt_ordinal_column: str | None,
+        person_key_column: str,
+        person_ordinal_column: str | None,
     ) -> list[ObjektRow]:
         built: list[ObjektRow] = []
         for header, row in rows:
-            objekt_uid = _value(header, row, OBJEKT_KEY_COLUMN)
+            objekt_uid = _value(header, row, objekt_key_column)
             if not objekt_uid:
                 continue
             objekt_row_id = ObjektRowId(self._ids.new_id())
@@ -389,7 +413,9 @@ class CorpusService:
                 id=objekt_row_id,
                 record_id=record_id,
                 objekt_uid=objekt_uid,
-                obj_nr=_value(header, row, OBJEKT_ORDINAL_COLUMN) or None,
+                obj_nr=(_value(header, row, objekt_ordinal_column) or None)
+                if objekt_ordinal_column
+                else None,
             )
             objekt.cells = [
                 ObjektCell(
@@ -400,7 +426,11 @@ class CorpusService:
             cells[FileKind.OBJEKT.value].extend((c.column_name, c.value_raw) for c in objekt_cells)
 
             objekt.person_rows = self._build_person_rows(
-                objekt_row_id, person_by_objekt.get(objekt_uid, ()), cells
+                objekt_row_id,
+                person_by_objekt.get(objekt_uid, ()),
+                cells,
+                person_key_column=person_key_column,
+                person_ordinal_column=person_ordinal_column,
             )
             built.append(objekt)
         return built
@@ -410,10 +440,13 @@ class CorpusService:
         objekt_row_id: ObjektRowId,
         rows: Sequence[tuple[tuple[str, ...], tuple[str, ...]]],
         cells: dict[str, list[tuple[str, str]]],
+        *,
+        person_key_column: str,
+        person_ordinal_column: str | None,
     ) -> list[PersonRow]:
         built: list[PersonRow] = []
         for header, row in rows:
-            person_uid = _value(header, row, PERSON_KEY_COLUMN)
+            person_uid = _value(header, row, person_key_column)
             if not person_uid:
                 continue
             person_row_id = PersonRowId(self._ids.new_id())
@@ -422,7 +455,9 @@ class CorpusService:
                 id=person_row_id,
                 objekt_row_id=objekt_row_id,
                 person_uid=person_uid,
-                pers_nr=_value(header, row, PERSON_ORDINAL_COLUMN) or None,
+                pers_nr=(_value(header, row, person_ordinal_column) or None)
+                if person_ordinal_column
+                else None,
             )
             person.cells = [
                 PersonCell(
@@ -445,6 +480,16 @@ class _Built:
 
 def _of_kind(parsed: Sequence[ParsedFile], kind: FileKind) -> list[ParsedFile]:
     return [p for p in parsed if p.kind is kind]
+
+
+def _resolved_column_set(parsed: Sequence[ParsedFile], kind: FileKind) -> ColumnSet | None:
+    """The vocabulary this delivery uses for `kind` — RADIS or Astrana, from
+    any selected file of that kind. `None` only when no such file is
+    selected (an edge case `validate_delivery` would already have blocked
+    via `SET_UNRESOLVED`/`HEADER_MISMATCH` for a real corpus, but freeze
+    still needs a column list to declare for that table's census, hence the
+    RADIS fallback at each call site)."""
+    return next((p.column_set for p in parsed if p.kind is kind and p.column_set), None)
 
 
 def _value(header: Sequence[str], row: Sequence[str], column: str) -> str:

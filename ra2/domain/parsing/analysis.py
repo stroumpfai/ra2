@@ -12,8 +12,10 @@ persistence, which is all a service should have.
 
 It is a **pure function of bytes**: no path, no filename-derived anything. The
 `filename` argument is carried through onto `FileAnalysis` for display and is
-never read for meaning (§12.5) — `FileKind` comes from the header, the canton
-comes from `unfall.KantonAusw`.
+never read for meaning (§12.5) — `FileKind` *and format* (RADIS or Astrana)
+both come from the header, the canton comes from whichever column that
+matched format uses (`unfall.KantonAusw` for RADIS, `unfall.Kanton Kürzel`
+for Astrana).
 """
 
 from collections.abc import Iterator
@@ -25,13 +27,8 @@ from ra2.domain.findings import DEFAULT_SEVERITY, Finding, FindingCode, Severity
 from ra2.domain.ids import FileId
 from ra2.domain.parsing.dialect import detect_dialect
 from ra2.domain.parsing.encoding import Undecodable, decode_strict, detect_encoding
-from ra2.domain.parsing.headers import (
-    UNFALL_CANTON_COLUMN,
-    canonical_field_count,
-    classify_header,
-    column_index,
-)
-from ra2.domain.parsing.reader import read_rows
+from ra2.domain.parsing.headers import ColumnSet, classify_header, column_index
+from ra2.domain.parsing.reader import RawRow, read_rows
 from ra2.domain.parsing.recovery import recover_rows
 
 __all__ = ["ParsedFile", "analyse_file"]
@@ -58,6 +55,10 @@ class ParsedFile:
     rows: tuple[tuple[str, ...], ...] = ()
     #: Deselected files stay in the delivery list and out of the corpus.
     selected: bool = True
+    #: The vocabulary this file's header matched — RADIS or Astrana — `None`
+    #: only for `FileKind.UNKNOWN`. Never persisted (a delivery is a single
+    #: format, never mixed); resolved fresh from the header, same as `kind`.
+    column_set: ColumnSet | None = None
 
     @property
     def kind(self) -> FileKind:
@@ -259,17 +260,46 @@ def analyse_file(
             )
         )
 
-    expected = canonical_field_count(kind) or len(header)
+    expected = (len(match.column_set.columns) if match.column_set else 0) or len(header)
+
+    # The key field's position within a row — 0 for RADIS and the text file,
+    # but further in for Astrana (e.g. `Unfall.csv`'s `Unfall-UID` follows
+    # `Jahr`/`Datum`). Resolved from the matched format, not assumed.
+    key_index = (
+        column_index(header, match.column_set.key_column) if match.column_set else None
+    ) or 0
+
+    # --- 3b. drop blank artifact rows before recovery ever sees them ------
+    # A wholly-blank record (e.g. Astrana's doubled-CRLF line terminator,
+    # `\r\r\n`) is never a key anchor, so left in place it would be folded
+    # into `recover_rows`'s continuation handling and reject the *preceding
+    # real* record rather than itself. It is still a dropped row (CLAUDE.md
+    # Do-NOT #6), so it still gets a Finding — just its own, here, rather
+    # than poisoning the row next to it.
+    data_rows: list[RawRow] = []
+    for row in raw[1:]:
+        if row.error is None and (not row.fields or all(field == "" for field in row.fields)):
+            findings.append(
+                _finding(
+                    FindingCode.ROW_BLANK_DROPPED,
+                    file_id=file_id,
+                    detail={},
+                    line_no=row.line_no,
+                )
+            )
+            continue
+        data_rows.append(row)
 
     # --- 4. recovery and per-row outcome (mvp-spec.md §4.2.3) -------------
     ok_rows: list[tuple[str, ...]] = []
     counts = dict.fromkeys(RowOutcome, 0)
     for recovered in recover_rows(
-        raw[1:],
+        data_rows,
         kind=kind,
         dialect=dialect,
         expected_field_count=expected,
         file_id=file_id,
+        key_index=key_index,
     ):
         counts[recovered.outcome] += 1
         findings.extend(recovered.findings)
@@ -279,9 +309,10 @@ def analyse_file(
     rows = tuple(ok_rows)
 
     # --- 5. canton, from the data (mvp-spec.md §4.1, §12.5) ---------------
+    canton_column = match.column_set.canton_column if match.column_set else None
     canton = (
-        _majority_canton(rows, column_index(header, UNFALL_CANTON_COLUMN))
-        if kind is FileKind.UNFALL
+        _majority_canton(rows, column_index(header, canton_column))
+        if kind is FileKind.UNFALL and canton_column
         else None
     )
 
@@ -303,4 +334,4 @@ def analyse_file(
         set_key=None,  # cross-file; assigned by validate_delivery (SD6)
         findings=tuple(findings),
     )
-    return ParsedFile(analysis=analysis, rows=rows, selected=selected)
+    return ParsedFile(analysis=analysis, rows=rows, selected=selected, column_set=match.column_set)

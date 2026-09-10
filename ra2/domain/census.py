@@ -259,6 +259,9 @@ _ENUM_SUFFIX = "Ausw"
 #: so `00000000` or `99999999` do not pass as dates.
 _DATE_PATTERN = re.compile(r"^\d{8}$")
 
+#: `DD.MM.YY`, dotted, two-digit year.
+_DOTTED_DATE_PATTERN = re.compile(r"^(\d{2})\.(\d{2})\.(\d{2})$")
+
 #: `HH:MM`, zero-padded 24-hour clock plus minutes.
 _TIME_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
@@ -267,11 +270,28 @@ _TIME_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _MIN_YEAR = 1900
 _MAX_YEAR = 2100
 
+#: Swiss/German thousands grouping: `40'367`, `1'127'946.61`. Anchored on the
+#: full shape (1-3 leading digits, then exact 3-digit groups) so a stray
+#: apostrophe in ordinary text never gets silently treated as a number.
+_GROUPED_NUMBER = re.compile(r"^-?\d{1,3}(?:'\d{3})*(?:\.\d+)?$")
+
+
+def _normalise_grouped_number(value: str) -> str:
+    """Strip grouping apostrophes when the value has exactly that shape;
+    otherwise return it unchanged so int()/float() reject it as today."""
+    return value.replace("'", "") if _GROUPED_NUMBER.match(value) else value
+
 
 def _is_plausible_date(value: str) -> bool:
-    if not _DATE_PATTERN.match(value):
-        return False
-    year, month, day = int(value[0:4]), int(value[4:6]), int(value[6:8])
+    if _DATE_PATTERN.match(value):
+        year, month, day = int(value[0:4]), int(value[4:6]), int(value[6:8])
+    else:
+        dotted = _DOTTED_DATE_PATTERN.match(value)
+        if not dotted:
+            return False
+        day, month, yy = (int(group) for group in dotted.groups())
+        # POSIX %y pivot (matches datetime.strptime): 00-68 -> 20xx, 69-99 -> 19xx.
+        year = 2000 + yy if yy <= 68 else 1900 + yy
     if not (_MIN_YEAR <= year <= _MAX_YEAR):
         return False
     if not (1 <= month <= 12):
@@ -284,6 +304,7 @@ def _is_time(value: str) -> bool:
 
 
 def _is_integer(value: str) -> bool:
+    value = _normalise_grouped_number(value)
     if "." in value:
         return False
     try:
@@ -294,6 +315,7 @@ def _is_integer(value: str) -> bool:
 
 
 def _is_decimal(value: str) -> bool:
+    value = _normalise_grouped_number(value)
     try:
         float(value)
     except ValueError:

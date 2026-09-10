@@ -9,15 +9,19 @@ other canton's record — and each file, checked alone, would look perfect.
 from ra2.domain.delivery import FileKind
 from ra2.domain.findings import FindingCode, Severity
 from ra2.domain.parsing.headers import (
+    CANONICAL_COLUMN_SETS,
     OBJEKT_KEY_COLUMN,
     PERSON_KEY_COLUMN,
     TEXT_KEY_COLUMN,
     TEXT_NARRATIVE_COLUMN,
     UNFALL_KEY_COLUMN,
-    UNFALL_OBJ_COUNT_COLUMN,
-    UNFALL_PERS_COUNT_COLUMN,
 )
 from ra2.domain.validation import blocking_findings, validate_delivery
+
+#: RADIS's `unfall` count columns — index 0 of the `ColumnSet` tuple.
+_RADIS_UNFALL = CANONICAL_COLUMN_SETS[FileKind.UNFALL][0]
+UNFALL_OBJ_COUNT_COLUMN = _RADIS_UNFALL.obj_count_column
+UNFALL_PERS_COUNT_COLUMN = _RADIS_UNFALL.pers_count_column
 
 # --- duplicate keys, blocking ----------------------------------------------
 

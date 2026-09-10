@@ -1,4 +1,4 @@
-"""Regenerate the twelve hazard fixtures (sw-design.md §11.4).
+"""Regenerate the fourteen hazard fixtures (sw-design.md §11.4).
 
 mvp-spec.md §15 is explicit that clean fixtures are not acceptable. The real
 delivery is classified and gitignored and must never reach a test (§12.11), so
@@ -34,25 +34,39 @@ The hazards, and what each one exists to prove:
 | h10_count_mismatch     | `AnzObjFeld` != child count       | reported, non-blocking      |
 | h11_unmatched_text_key | text row with no `unfall` row     | reported, non-blocking      |
 | h12_unknown_header     | header matching no table          | unknown; blocks if selected |
+| h13_astrana_blank_row  | Astrana's doubled-CRLF blank row   | dropped, real rows stay OK  |
+| h14_astrana_header     | Astrana `unfall`/`objekt`/`Mitfahrende` | classifies, freezes    |
 """
 
 import sys
+from collections.abc import Set as AbstractSet
 from pathlib import Path
 
 from ra2.domain.delivery import FileKind
 from ra2.domain.parsing.headers import (
-    CANONICAL_HEADERS,
+    CANONICAL_COLUMN_SETS,
     OBJEKT_KEY_COLUMN,
     PERSON_KEY_COLUMN,
     TEXT_KEY_COLUMN,
     TEXT_NARRATIVE_COLUMN,
-    UNFALL_CANTON_COLUMN,
     UNFALL_KEY_COLUMN,
-    UNFALL_OBJ_COUNT_COLUMN,
-    UNFALL_PERS_COUNT_COLUMN,
 )
 
 HAZARDS_DIR = Path(__file__).parent / "hazards"
+
+#: The RADIS column vocabulary — index 0 of each kind's `ColumnSet` tuple, by
+#: construction (`ra2.domain.parsing.headers`). h01-h12 are all RADIS-shaped.
+_RADIS = {kind: sets[0] for kind, sets in CANONICAL_COLUMN_SETS.items()}
+#: The Astrana column vocabulary — index 1. h13/h14 are Astrana-shaped.
+_ASTRANA = {kind: sets[1] for kind, sets in CANONICAL_COLUMN_SETS.items() if len(sets) > 1}
+
+_radis_unfall = _RADIS[FileKind.UNFALL]
+assert _radis_unfall.canton_column is not None
+assert _radis_unfall.obj_count_column is not None
+assert _radis_unfall.pers_count_column is not None
+UNFALL_CANTON_COLUMN: str = _radis_unfall.canton_column
+UNFALL_OBJ_COUNT_COLUMN: str = _radis_unfall.obj_count_column
+UNFALL_PERS_COUNT_COLUMN: str = _radis_unfall.pers_count_column
 
 #: The delivered files use CRLF. Fixtures do too, so the reader is exercised on
 #: the line ending it will actually meet.
@@ -104,7 +118,7 @@ def _synthetic(column: str, index: int, key: str) -> str:
 
 
 def _row(kind: FileKind, key: str, overrides: dict[str, str]) -> list[str]:
-    columns = CANONICAL_HEADERS[kind]
+    columns = _RADIS[kind].columns
     values = {c: _synthetic(c, i, key) for i, c in enumerate(columns)}
     values.update(overrides)
     return [values[c] for c in columns]
@@ -156,16 +170,110 @@ def person_row(key: str, *, objekt_key: str, extra: dict[str, str] | None = None
     )
 
 
+def astrana_unfall_row(
+    key: str,
+    *,
+    canton: str,
+    objekt_count: int = 0,
+    person_count: int = 0,
+    extra: dict[str, str] | None = None,
+) -> list[str]:
+    return _astrana_row(
+        FileKind.UNFALL,
+        key,
+        {
+            "Unfall-UID": key,
+            "Kanton Kürzel": canton,
+            "Total Objekte": str(objekt_count),
+            "Total Personen": str(person_count),
+            **(extra or {}),
+        },
+    )
+
+
+def astrana_objekt_row(
+    key: str, *, unfall_key: str, extra: dict[str, str] | None = None
+) -> list[str]:
+    return _astrana_row(
+        FileKind.OBJEKT,
+        key,
+        {"Objekt-UID": key, "Unfall-UID": unfall_key, **(extra or {})},
+    )
+
+
+def astrana_person_row(
+    key: str, *, unfall_key: str, objekt_key: str, extra: dict[str, str] | None = None
+) -> list[str]:
+    return _astrana_row(
+        FileKind.PERSON,
+        key,
+        {
+            "Person-UID": key,
+            "Objekt-UID": objekt_key,
+            "Unfall-UID": unfall_key,
+            **(extra or {}),
+        },
+    )
+
+
 # --------------------------------------------------------------------------
 # Serialisation
 # --------------------------------------------------------------------------
 
 
 def structured(kind: FileKind, rows: list[list[str]]) -> str:
-    """A `|`-delimited table, header first, unquoted — the delivered shape."""
-    lines = [STRUCTURED_DELIMITER.join(CANONICAL_HEADERS[kind])]
+    """A `|`-delimited table, header first, unquoted — the RADIS shape."""
+    lines = [STRUCTURED_DELIMITER.join(_RADIS[kind].columns)]
     lines += [STRUCTURED_DELIMITER.join(row) for row in rows]
     return CRLF.join(lines) + CRLF
+
+
+#: A blank artifact record: Astrana's doubled-CRLF (`\r\r\n`) line terminator
+#: splits into one bare-CR blank physical line and one real CRLF-terminated
+#: one (`ra2.domain.parsing.reader.split_physical_lines`). Written here as a
+#: literal extra `\r` before the line's own CRLF, matching the real export
+#: byte-for-byte rather than approximating it with an empty CSV row.
+_DOUBLED_CRLF = "\r" + CRLF
+
+
+def _astrana_row(kind: FileKind, key: str, overrides: dict[str, str]) -> list[str]:
+    columns = _ASTRANA[kind].columns
+    values = {c: _astrana_synthetic(c, key) for c in columns}
+    values.update(overrides)
+    return [values[c] for c in columns]
+
+
+def _astrana_synthetic(column: str, key: str) -> str:
+    """An invented Astrana-shaped value — see `_synthetic` for the RADIS one."""
+    if column.endswith("UID"):
+        return key
+    if column == "Datum":
+        return "20.01.23"
+    if column == "Unfallzeit":
+        return "07:45"
+    if column.endswith("UAP"):
+        return "1"
+    if column in ("Total Objekte", "Total Personen"):
+        return "0"
+    return f"synthetic-{column}"
+
+
+def astrana_csv(
+    kind: FileKind, rows: list[list[str]], *, doubled_after: AbstractSet[int] = frozenset()
+) -> bytes:
+    """A `,`-delimited, fully-quoted RFC4180 table — the Astrana shape.
+
+    `doubled_after` is a set of 0-based indices into `rows`: the real export's
+    doubled-CRLF artifact is written after those rows instead of a plain
+    CRLF, so a fixture can place a blank record exactly where a hazard needs
+    one.
+    """
+    columns = _ASTRANA[kind].columns
+    out = ",".join(f'"{c}"' for c in columns) + CRLF
+    for index, row in enumerate(rows):
+        line = ",".join(f'"{v}"' for v in row)
+        out += line + (_DOUBLED_CRLF if index in doubled_after else CRLF)
+    return out.encode("utf-8")
 
 
 def _quote(value: str) -> str:
@@ -405,6 +513,43 @@ def _h12_unknown_header() -> dict[str, bytes]:
     return {"unknown.csv": (CRLF.join(lines) + CRLF).encode("utf-8")}
 
 
+def _h13_astrana_blank_row() -> dict[str, bytes]:
+    """Astrana's doubled-CRLF (`\\r\\r\\n`) artifact after every real row.
+
+    Each blank record must be dropped (`ROW_BLANK_DROPPED`) *before* recovery
+    sees it — otherwise, since it is never a key anchor, it would be folded
+    into the *next* real record as an unrepairable continuation and reject
+    the wrong row. Both real rows must survive as `OK`.
+    """
+    rows = [
+        astrana_unfall_row(uid("aa", 1), canton="ZH"),
+        astrana_unfall_row(uid("aa", 2), canton="ZH"),
+    ]
+    return {"Unfall.csv": astrana_csv(FileKind.UNFALL, rows, doubled_after={0, 1})}
+
+
+def _h14_astrana_header() -> dict[str, bytes]:
+    """An Astrana-shaped `unfall`/`objekt`/`Mitfahrende` triplet.
+
+    Proves the second format classifies to the same `FileKind`s as RADIS
+    (`Mitfahrende` -> `person`), resolves canton from `Kanton Kürzel` (not
+    `KantonAusw`), and freezes with the Astrana column universe in its
+    census — not always RADIS's (the load-bearing fix, not a cosmetic one).
+    """
+    parent = uid("aa", 1)
+    objekt_key = uid("aa", 11)
+    person_key = uid("aa", 21)
+    unfall = astrana_csv(
+        FileKind.UNFALL, [astrana_unfall_row(parent, canton="ZH", objekt_count=1, person_count=1)]
+    )
+    objekt = astrana_csv(FileKind.OBJEKT, [astrana_objekt_row(objekt_key, unfall_key=parent)])
+    person = astrana_csv(
+        FileKind.PERSON,
+        [astrana_person_row(person_key, unfall_key=parent, objekt_key=objekt_key)],
+    )
+    return {"Unfall.csv": unfall, "Objekt.csv": objekt, "Mitfahrende.csv": person}
+
+
 #: Ordered, so a regenerated tree is byte-identical every time.
 HAZARDS = (
     ("h01_cp1252", _h01_cp1252),
@@ -419,6 +564,8 @@ HAZARDS = (
     ("h10_count_mismatch", _h10_count_mismatch),
     ("h11_unmatched_text_key", _h11_unmatched_text_key),
     ("h12_unknown_header", _h12_unknown_header),
+    ("h13_astrana_blank_row", _h13_astrana_blank_row),
+    ("h14_astrana_header", _h14_astrana_header),
 )
 
 

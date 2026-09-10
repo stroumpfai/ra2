@@ -17,10 +17,17 @@ no such argument — a stray `|` could have arrived in any of 67 fields, and any
 So the wide row is detected, rejected, and reported with its key, and a human
 decides.
 
-The anchor is applied to the **parsed first field**, not to the raw line. That
+The anchor is applied to the **parsed key field**, not to the raw line. That
 is the same rule and a slightly stronger one: `"<32 hex>"|...` is a legitimate
 row whose quoted key a literal `^[0-9A-Fa-f]{32}<delim>` regex over the raw
 line would miss.
+
+`key_index` (default `0`) is the position of the key field within a row, not
+always the first: RADIS's `UnfallUid`/`ObjektUid`/`PersonUid` and the text
+file's `UNFALLUID` are all column 0, but Astrana's key columns sit further
+into the row (e.g. `Unfall.csv`'s `Unfall-UID` is column 2, after `Jahr` and
+`Datum`) — the caller resolves the real index from the matched format's
+`ColumnSet` and this module stays position-agnostic.
 
 Nothing here ever drops a row and nothing here ever repairs one silently: every
 `RecoveredRow` whose outcome is not `OK` carries at least one `Finding`, and
@@ -60,9 +67,9 @@ class RecoveredRow:
     findings: tuple[Finding, ...] = ()
 
 
-def is_key_anchor(fields: tuple[str, ...]) -> bool:
-    """True when `fields` starts a record: field 0 is a 32-hex key."""
-    return bool(fields) and KEY_ANCHOR.match(fields[0]) is not None
+def is_key_anchor(fields: tuple[str, ...], key_index: int = 0) -> bool:
+    """True when `fields` starts a record: `fields[key_index]` is a 32-hex key."""
+    return key_index < len(fields) and KEY_ANCHOR.match(fields[key_index]) is not None
 
 
 def _finding(
@@ -98,6 +105,8 @@ class _Pending:
     line_no: int
     fields: list[str]
     line_span: int
+    #: Position of the key field within the row (see module docstring).
+    key_index: int = 0
     #: Continuation lines glued on by the key anchor (0 for a clean record).
     continuations: int = 0
     #: Set for a wide structured record that needed a continuation. Such a
@@ -107,7 +116,10 @@ class _Pending:
 
     @property
     def key(self) -> str | None:
-        return self.fields[0] if self.fields and KEY_ANCHOR.match(self.fields[0]) else None
+        if self.key_index >= len(self.fields):
+            return None
+        value = self.fields[self.key_index]
+        return value if KEY_ANCHOR.match(value) else None
 
 
 def _collapse_text_fields(fields: list[str], delimiter: str) -> tuple[list[str], bool]:
@@ -131,6 +143,7 @@ def recover_rows(
     dialect: Dialect,
     expected_field_count: int,
     file_id: FileId | None = None,
+    key_index: int = 0,
 ) -> Iterator[RecoveredRow]:
     """Reassemble continuations, reject what cannot be repaired.
 
@@ -239,13 +252,14 @@ def recover_rows(
             )
             continue
 
-        if not anchored or is_key_anchor(row.fields):
+        if not anchored or is_key_anchor(row.fields, key_index):
             if pending is not None:
                 yield flush(pending)
             pending = _Pending(
                 line_no=row.line_no,
                 fields=list(row.fields),
                 line_span=row.line_span,
+                key_index=key_index,
             )
             continue
 

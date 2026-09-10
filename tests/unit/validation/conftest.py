@@ -17,7 +17,7 @@ from ra2.domain.delivery import DeliveryAnalysis, Dialect, Encoding, FileAnalysi
 from ra2.domain.findings import Finding, FindingCode
 from ra2.domain.ids import FileId
 from ra2.domain.parsing.analysis import ParsedFile
-from ra2.domain.parsing.headers import CANONICAL_HEADERS
+from ra2.domain.parsing.headers import CANONICAL_COLUMN_SETS, ColumnSet
 
 PIPE = Dialect(delimiter="|")
 SEMI = Dialect(delimiter=";")
@@ -43,6 +43,7 @@ class Builder:
         canton: str | None = None,
         selected: bool = True,
         columns: tuple[str, ...] | None = None,
+        column_set: ColumnSet | None = None,
     ) -> ParsedFile:
         """One analysed file of `kind`, carrying `rows`.
 
@@ -51,12 +52,16 @@ class Builder:
         tested are real ones. Unnamed **key** columns are filled with `""`
         rather than a placeholder: empty means "no value provided" (§8.6), and
         it keeps a test about orphan keys from inventing keys of its own.
+
+        Defaults to the RADIS vocabulary for `kind`; pass `column_set` (e.g.
+        the Astrana one) to build a file in the other format instead.
         """
-        header = columns if columns is not None else CANONICAL_HEADERS[kind]
+        resolved_column_set = column_set or CANONICAL_COLUMN_SETS[kind][0]
+        header = columns if columns is not None else resolved_column_set.columns
         filename = name or f"{kind.value}.txt"
         cells = tuple(
             tuple(
-                row.get(column, "" if column.endswith("Uid") else f"x{index}")
+                row.get(column, "" if column.casefold().endswith("uid") else f"x{index}")
                 for index, column in enumerate(header)
             )
             for row in rows
@@ -75,7 +80,9 @@ class Builder:
             ok_count=len(cells),
             canton=canton,
         )
-        return ParsedFile(analysis=analysis, rows=cells, selected=selected)
+        return ParsedFile(
+            analysis=analysis, rows=cells, selected=selected, column_set=resolved_column_set
+        )
 
     @staticmethod
     def codes(analysis: DeliveryAnalysis) -> list[FindingCode]:
