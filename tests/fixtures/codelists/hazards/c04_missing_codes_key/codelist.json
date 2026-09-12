@@ -1,0 +1,23 @@
+{
+  "road_type": {
+    "codes": {
+      "01": {
+        "de": "Autobahn",
+        "fr": "Autoroute",
+        "it": "Autostrada"
+      }
+    },
+    "name": {
+      "de": "Strassenart",
+      "fr": "Type de route",
+      "it": "Tipo di strada"
+    }
+  },
+  "weather": {
+    "name": {
+      "de": "Wetter",
+      "fr": "Météo",
+      "it": "Meteo"
+    }
+  }
+}

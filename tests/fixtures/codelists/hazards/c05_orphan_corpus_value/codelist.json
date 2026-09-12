@@ -1,0 +1,26 @@
+{
+  "weather": {
+    "codes": {
+      "1": {
+        "de": "Klar",
+        "fr": "Clair",
+        "it": "Sereno"
+      },
+      "2": {
+        "de": "Regen",
+        "fr": "Pluie",
+        "it": "Pioggia"
+      },
+      "6": {
+        "de": "Starker Wind",
+        "fr": "Vent fort",
+        "it": "Vento forte"
+      }
+    },
+    "name": {
+      "de": "Wetter",
+      "fr": "Météo",
+      "it": "Meteo"
+    }
+  }
+}

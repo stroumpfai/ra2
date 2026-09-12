@@ -18,7 +18,7 @@ line 13).
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from pydantic import BaseModel, ConfigDict, RootModel
+from pydantic import BaseModel, ConfigDict, RootModel, ValidationError
 
 __all__ = [
     "CodeAttribute",
@@ -129,4 +129,42 @@ def validate_import(raw_json: str) -> CodeTableImportResult | list[CodeImportErr
     :returns: the validated attributes and codes, or every error found (not
         just the first) so the analyst sees the whole problem at once.
     """
-    raise NotImplementedError
+    try:
+        parsed = CodelistImportSchema.model_validate_json(raw_json)
+    except ValidationError as exc:
+        return [_to_import_error(error) for error in exc.errors()]
+
+    attributes = tuple(
+        CodeAttribute(key=key, chapter=schema.chapter, name=_labels(schema.name))
+        for key, schema in parsed.root.items()
+    )
+    values = tuple(
+        CodeValue(attribute_key=key, code=code, label=_labels(entry))
+        for key, schema in parsed.root.items()
+        for code, entry in schema.codes.items()
+    )
+    return CodeTableImportResult(attributes=attributes, values=values)
+
+
+def _labels(entry: CodeEntrySchema) -> Mapping[str, str]:
+    """Drop the languages that are absent rather than storing them as `None`."""
+    return {
+        lang: text
+        for lang, text in (("de", entry.de), ("fr", entry.fr), ("it", entry.it))
+        if text is not None
+    }
+
+
+def _to_import_error(error: Mapping[str, object]) -> CodeImportError:
+    """One pydantic error, as reported by `ValidationError.errors()`, to our shape.
+
+    `loc` is empty for a top-level problem (invalid JSON, or the document is
+    not even an object) and otherwise starts with the offending attribute key
+    — a JSON object key, always a `str`.
+    """
+    loc = error["loc"]
+    assert isinstance(loc, tuple)
+    attribute_key = str(loc[0]) if loc else None
+    path = ".".join(str(part) for part in loc) if loc else "$"
+    message = str(error["msg"])
+    return CodeImportError(attribute_key=attribute_key, path=path, message=message)

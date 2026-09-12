@@ -1,0 +1,20 @@
+{
+  "main_cause": {
+    "codes": {
+      "01": {
+        "de": "Missachten Vortritt",
+        "fr": "Non-respect priorité",
+        "it": "Precedenza"
+      },
+      "02": {
+        "de": "Unangepasste Geschwindigkeit",
+        "fr": "Vitesse inadaptée"
+      }
+    },
+    "name": {
+      "de": "Hauptursache",
+      "fr": "Cause principale",
+      "it": "Causa principale"
+    }
+  }
+}

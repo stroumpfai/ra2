@@ -1,0 +1,42 @@
+{
+  "accident_type": {
+    "chapter": "4.1.1",
+    "codes": {
+      "01": {
+        "de": "Auffahren",
+        "fr": "Collision par l'arrière",
+        "it": "Tamponamento"
+      },
+      "02": {
+        "de": "Frontalkollision",
+        "fr": "Collision frontale",
+        "it": "Scontro frontale"
+      }
+    },
+    "name": {
+      "de": "Unfallart",
+      "fr": "Type d'accident",
+      "it": "Tipo di incidente"
+    }
+  },
+  "road_type": {
+    "chapter": "4.1.2",
+    "codes": {
+      "01": {
+        "de": "Autobahn",
+        "fr": "Autoroute",
+        "it": "Autostrada"
+      },
+      "02": {
+        "de": "Hauptstrasse",
+        "fr": "Route principale",
+        "it": "Strada principale"
+      }
+    },
+    "name": {
+      "de": "Strassenart",
+      "fr": "Type de route",
+      "it": "Tipo di strada"
+    }
+  }
+}

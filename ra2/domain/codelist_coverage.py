@@ -81,4 +81,40 @@ def compute_coverage(
         even when `mapping` is not `None` (sw-design.md §14.2).
     :param language: the configured prompt language (`de` / `fr` / `it`).
     """
-    raise NotImplementedError
+    by_code = {code_value.code: code_value for code_value in code_values}
+    populated_count = sum(count for _, count in cells)
+
+    usages: list[CodeUsage] = []
+    for value_raw, count in cells:
+        code_value = by_code.get(value_raw)
+        share = (count / populated_count) if populated_count else 0.0
+        usages.append(
+            CodeUsage(
+                code=value_raw,
+                count=count,
+                share=share,
+                label=code_value.label.get(language) if code_value is not None else None,
+                in_codelist=code_value is not None,
+            )
+        )
+    usages.sort(key=lambda usage: usage.count, reverse=True)
+
+    total_count = len(usages)
+    labelled_count = sum(1 for usage in usages if usage.label is not None)
+    coverage_pct = (labelled_count / total_count) if total_count else 0.0
+
+    if mapping is None or not code_values:
+        status = CoverageStatus.MISSING
+    elif labelled_count < total_count:
+        status = CoverageStatus.PARTIAL
+    else:
+        status = CoverageStatus.OK
+
+    return ColumnCoverage(
+        status=status,
+        language=language,
+        codes=tuple(usages),
+        labelled_count=labelled_count,
+        total_count=total_count,
+        coverage_pct=coverage_pct,
+    )
