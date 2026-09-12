@@ -289,10 +289,14 @@ a seeded row.
 
 ## 7. Census
 
-- **Type hint**: the `Ausw`/`Feld` suffix rule first, then value-shape inspection —
-  all values `YYYYMMDD` in a plausible range → `date`; all `HH:MM` → `time`;
-  all integral → `integer`; decimal-parseable → `decimal`; else `text`. `Ausw`
-  columns are `enum`.
+- **Type hint**: the suffix rule first, then value-shape inspection — all values
+  `YYYYMMDD` in a plausible range → `date`; all `HH:MM` → `time`; all integral →
+  `integer`; decimal-parseable → `decimal`; else `text`. The suffix naming a
+  coded column differs by format: `Ausw` in RADIS (`UnfTypAusw`), `` UAP`` in
+  Astrana (`Witterung UAP`) — mvp-spec.md §4.1. Both are `enum`, and the name
+  always wins over the value shape, because Astrana's UAP codes are numeric in
+  some columns and alphanumeric in others. The column name is read, never the
+  file's format: the rule is one suffix tuple, not a per-format vocabulary.
 - **Populated** = non-empty string (§6). Empty means *no value provided*, never
   "not applicable" (§8.6) — the Census view says so in the Reminder card.
 - **Top values**: 20 stored, top 3 shown in the legend, top 4 shown as stacked-bar

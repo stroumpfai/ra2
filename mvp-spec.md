@@ -292,7 +292,8 @@ Runs over a corpus, needs no model and no GPU. Per table, per column:
 - populated count and rate (populated = non-empty string)
 - distinct value count
 - top 20 values with frequencies
-- inferred type hint (`Ausw`/`Feld` suffix, plus value-shape inspection)
+- inferred type hint (`Ausw`/`Feld` suffix in RADIS, `* UAP` in Astrana, plus
+  value-shape inspection)
 
 Exportable as CSV. **This is the input to feature selection** — the vision's
 sparsity finding means features are chosen by populated rate, not by what sounds

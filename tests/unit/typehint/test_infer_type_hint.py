@@ -37,6 +37,43 @@ def test_feld_suffix_falls_through_to_value_shape():
     assert infer_type_hint("AnzObjFeld", ["1", "2", "3"]) == TypeHint.INTEGER
 
 
+# --- the same rule in Astrana's vocabulary (mvp-spec.md §4.1) -----------
+#
+# RADIS spells a coded column `UnfTypAusw`; Astrana spells the same thing
+# `Unfalltyp UAP`. Every `Ausw` case above has a twin here, because a format
+# that reached the census with no enum column at all left the Codelists view
+# with nothing to map.
+
+
+def test_uap_suffix_is_always_enum():
+    assert infer_type_hint("Unfalltyp UAP", ["01", "02", "03"]) == TypeHint.ENUM
+
+
+def test_uap_suffix_beats_value_shape_even_when_values_look_integral():
+    """The load-bearing case, Astrana side: real UAP codes *are* integers —
+    `Witterung UAP` is 580/581/582 — and must still resolve to `enum`."""
+    assert infer_type_hint("Witterung UAP", ["580", "581", "582"]) == TypeHint.ENUM
+
+
+def test_uap_suffix_beats_value_shape_even_when_values_look_like_dates():
+    assert infer_type_hint("Irgendwas UAP", ["20230101", "20230102"]) == TypeHint.ENUM
+
+
+def test_uap_suffix_is_enum_when_codes_are_alphanumeric():
+    """Why this has to be a name rule and not a shape one: roughly half the
+    real delivery's UAP columns carry alphanumeric codes, which no value
+    inspection could tell apart from ordinary text."""
+    assert infer_type_hint("Fahrzeugart UAP", ["M5", "B2"]) == TypeHint.ENUM
+
+
+def test_astrana_label_column_falls_through_to_value_shape():
+    """The label half of an Astrana pair (`Witterung` beside `Witterung UAP`)
+    is not coded and must stay `text` — the suffix is matched, not searched
+    for."""
+    assert infer_type_hint("Witterung", ["schön", "bedeckt"]) == TypeHint.TEXT
+    assert infer_type_hint("Total Objekte", ["1", "2"]) == TypeHint.INTEGER
+
+
 # --- value-shape inspection, in priority order --------------------------
 
 

@@ -1747,7 +1747,7 @@
         "type": "string"
       },
       "TypeHint": {
-        "description": "Inferred column type (sw-design.md \u00a77).\n\nThe `Ausw`/`Feld` suffix rule runs **first**; value-shape inspection only\ndecides what the suffix leaves open. An `Ausw` column is `ENUM` even when\nevery value happens to look like an integer.",
+        "description": "Inferred column type (sw-design.md \u00a77).\n\nThe suffix rule runs **first**; value-shape inspection only decides what\nthe suffix leaves open. An `Ausw` column (RADIS) or a `* UAP` column\n(Astrana) is `ENUM` even when every value happens to look like an integer.",
         "enum": [
           "enum",
           "date",

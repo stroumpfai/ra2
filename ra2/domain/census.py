@@ -44,9 +44,9 @@ LONG_TAIL_MAX_TOP_SHARE: Final = 0.01
 class TypeHint(StrEnum):
     """Inferred column type (sw-design.md §7).
 
-    The `Ausw`/`Feld` suffix rule runs **first**; value-shape inspection only
-    decides what the suffix leaves open. An `Ausw` column is `ENUM` even when
-    every value happens to look like an integer.
+    The suffix rule runs **first**; value-shape inspection only decides what
+    the suffix leaves open. An `Ausw` column (RADIS) or a `* UAP` column
+    (Astrana) is `ENUM` even when every value happens to look like an integer.
     """
 
     ENUM = "enum"
@@ -250,10 +250,18 @@ def _bucket_label_for(column: ColumnCensus) -> CensusBucketLabel:
 # `typehint.infer_type_hint` is a thin public wrapper over it (sw-design.md
 # §7, mvp-spec.md §6).
 
-#: `unfall`/`objekt`/`person` columns ending in `Ausw` are enum-coded. This
-#: check runs before any value-shape inspection and always wins when they
-#: would disagree.
-_ENUM_SUFFIX = "Ausw"
+#: `unfall`/`objekt`/`person` columns ending in one of these are enum-coded:
+#: `Ausw` in RADIS's system field codes (`UnfTypAusw`), `` UAP`` in Astrana's
+#: German business labels (`Witterung UAP`) — the two formats' conventions for
+#: the same thing (mvp-spec.md §4.1). The `UAP` token carries its separating
+#: space because Astrana's names are space-separated and no column is named a
+#: bare `UAP`; matching `"UAP"` alone would be looser for no gain.
+#:
+#: This check runs before any value-shape inspection and always wins when they
+#: would disagree. It has to: Astrana's UAP codes are numeric in some columns
+#: (`Witterung UAP` -> 580) and alphanumeric in others, so no inspection of
+#: values could find them.
+_ENUM_SUFFIXES: Final = ("Ausw", " UAP")
 
 #: `YYYYMMDD`, digits only. Calendar-range plausibility is checked separately
 #: so `00000000` or `99999999` do not pass as dates.
@@ -325,7 +333,7 @@ def _is_decimal(value: str) -> bool:
 
 def _infer_type_hint(column_name: str, values: Iterable[str]) -> TypeHint:
     """The suffix rule, then value-shape inspection. See `typehint.py`."""
-    if column_name.endswith(_ENUM_SUFFIX):
+    if column_name.endswith(_ENUM_SUFFIXES):
         return TypeHint.ENUM
 
     populated = [value for value in values if value != ""]

@@ -184,7 +184,7 @@ async def test_non_enum_column_is_never_listed(
     codelist_service: CodelistService,
     seed_enum_column: Callable[..., Awaitable[None]],
 ) -> None:
-    """Only `type_hint == ENUM` columns appear — a `*Ausw` name is what
+    """Only `type_hint == ENUM` columns appear — an `Ausw`/`* UAP` name is what
     `infer_type_hint` keys off, so a plain-named column never shows up here
     even though it is stored in the same `unfall` EAV table."""
     await seed_enum_column("corpus-1", column_name="StrasseName", values=["Bahnhofstrasse"])
@@ -192,3 +192,21 @@ async def test_non_enum_column_is_never_listed(
     columns = await codelist_service.list_columns(CorpusId("corpus-1"), language="de")
 
     assert columns == []
+
+
+async def test_astrana_uap_column_is_listed(
+    codelist_service: CodelistService,
+    seed_enum_column: Callable[..., Awaitable[None]],
+) -> None:
+    """An Astrana corpus reaches this view through its `* UAP` columns, not
+    `*Ausw` ones (mvp-spec.md §4.1). This is the layer the format gap was
+    visible at: inference typed `Witterung UAP`'s integer codes `integer`, so
+    `list_columns` returned nothing and the Codelists view had nothing to map.
+    """
+    await seed_enum_column("corpus-1", column_name="Witterung UAP", values=["580", "581"])
+
+    columns = await codelist_service.list_columns(CorpusId("corpus-1"), language="de")
+
+    assert len(columns) == 1
+    assert columns[0].column_name == "Witterung UAP"
+    assert columns[0].distinct_in_corpus == 2
