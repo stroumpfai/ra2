@@ -19,19 +19,19 @@ because Import already can. Every other step — selecting the set, adding both
 features, freezing, and reading the frozen state back — goes through this
 view's own controls, which this branch does own.
 
-**This branch cannot make `/features` itself live.** `features_view.register()`
-is not wired into `ra2/ui/views/register_all()` — the lead does that
-centrally after merging this branch alongside G1's Codelists view (see
-`ra2/ui/views/features_view.py`'s module docstring and CLAUDE.md's ownership
-rule on `ra2/ui/shell.py` / `ra2/ui/views/__init__.py`). Until then, `/features`
-on the shared E2E server resolves to the `built=False` placeholder, not this
-view — this test is written to pass once that wiring lands, and the branch's
-final report says plainly that it could not be run to a genuine green inside
-this worktree for that reason.
+`/features` is live: `features_view.register()` is wired into
+`ra2/ui/views/register_all()` (it was not when this file was first written,
+which is why the journey below was authored against a placeholder route).
+
+The second journey walks the Census → Features hand-off, which is the only
+way `CensusColumnView.in_config` — and therefore the Census action column's
+other state — can be reached at all.
 """
 
 import json
+import re
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -51,6 +51,10 @@ DELIVERY: dict[str, str] = {
 }
 
 WEATHER_COLUMN = "Witter0Ausw"
+
+#: `test_j1_delivery_to_census.py`'s own selector, repeated rather than
+#: imported (tests/e2e has no shared helper module by design).
+CENSUS_TABLE = '[data-testid="table-census"]'
 
 
 @pytest.fixture
@@ -164,3 +168,55 @@ def test_build_two_features_and_freeze_the_set(
     page.wait_for_selector('[data-testid="frozen-banner"]')
     expect(page.locator('[data-testid="clone-feature-set"]')).to_be_visible()
     expect(page.locator('[aria-label="Add feature"]')).to_have_count(0)
+
+
+def test_use_as_feature_carries_a_census_column_into_a_new_feature(
+    page: Page, server_url: str, delivery_root: Path
+) -> None:
+    """The Census → Features hand-off, end to end, as a browser sees it.
+
+    `design/nav-import-census/README.md`, Interactions: ""use as feature"
+    navigates to Features with that column preselected; already-configured
+    columns show "in config" instead and their row is tinted." Both halves
+    are one loop — the second is only reachable by walking the first, because
+    `CensusColumnView.in_config` is computed from `feature.source_column`
+    (`census_service`), which is exactly what saving here writes.
+
+    The action is asserted to be a **real** `<a href>` the browser follows,
+    the J5 way (`test_j5_nav.py`'s own nav-link assertion): the UI-layer
+    suites can see a `ui.link`'s props, only a browser can see that clicking
+    it navigates.
+    """
+    _register_and_freeze_corpus(page, server_url, delivery_root)
+    # Created last, so it is the newest draft and the set the hand-off lands
+    # in (`features_view._load_selected_config`); the set J8's other journey
+    # freezes must not be the one this column arrives at.
+    _create_draft_feature_config(page, server_url, "J8 hand-off set")
+
+    page.goto(f"{server_url}/census")
+    page.wait_for_selector(f"{CENSUS_TABLE} tbody tr")
+    action = page.locator('[data-testid="use-as-feature"]').first
+    href = action.get_attribute("href")
+    assert href is not None, "the action must be a link, not a scripted button"
+    column = parse_qs(urlparse(href).query)["column"][0]
+
+    action.click()
+
+    page.wait_for_selector('[data-testid="source-column-select"]')
+    expect(page.locator('[data-testid="source-column-select"]')).to_have_value(column)
+    expect(page.locator('[data-testid="editing-feature-name"]')).to_have_text("(new feature)")
+    page.fill('[data-testid="feature-key"]', "from_census")
+    page.click('[data-testid="save-feature"]')
+    expect(page.locator('[data-testid="feature-count"]')).to_have_text("1 + 0 features")
+
+    # Back on Census the loop is closed: that column is in config, its row is
+    # tinted, and the action it was clicked through is gone.
+    page.goto(f"{server_url}/census")
+    page.wait_for_selector(f"{CENSUS_TABLE} tbody tr")
+    row = page.locator(f"{CENSUS_TABLE} tbody tr").filter(
+        has=page.locator(f'[data-testid="census-column-name"]:text-is("{column}")')
+    )
+    expect(row).to_have_count(1)
+    expect(row).to_have_class(re.compile(r"\bin-config\b"))
+    expect(row.locator('[data-testid="in-config"]')).to_have_text("in config")
+    expect(row.locator('[data-testid="use-as-feature"]')).to_have_count(0)

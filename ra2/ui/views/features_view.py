@@ -55,10 +55,12 @@ repeated in the branch's final report:**
   the same right-hand panel... not a modal" (README, Open question 2); an
   explicit action is the simpler, safer default and it is applied uniformly so
   the two modes behave identically.
-- *"open codelist ↗".* There is no cross-navigation infrastructure yet (the
-  same gap `census_view.py`'s "use as feature" hits from the other side) — so
-  this renders as a disabled-looking, non-interactive label, exactly as
-  `census_view._render_action` renders its own forward-reference.
+- *"open codelist ↗".* Still a disabled-looking, non-interactive label: the
+  Codelists direction of the cross-link is not designed (which column of which
+  corpus that screen should open on, and what it does with the mapping it
+  finds). The Census → Features direction **is** built — as a plain link
+  carrying `?corpus=&column=`, handled by `_Prefill` / `_apply_prefill` below —
+  and is the pattern to follow when this one is designed.
 - *The validate-against corpus picker* lives once, near the top of the edit
   zone's Source/Derivation section, rather than repeated per case — it feeds
   every case's `validate_against` argument alike (plan-phase-2.md C3), not
@@ -88,6 +90,7 @@ from typing import Final, cast
 from nicegui import app, ui
 from nicegui.element import Element
 
+from ra2.domain.census import TypeHint
 from ra2.domain.feature import (
     EXPLORATORY_FEATURE_CAP,
     DerivationSpec,
@@ -136,13 +139,16 @@ __all__ = [
     "DEFAULT_LANGUAGE",
     "FEATURE_KEY",
     "FILTERS_KEY",
+    "FROZEN_PREFILL",
     "LANGUAGE_KEY",
     "NEW_FEATURE_SENTINEL",
+    "NO_SET_PREFILL",
     "PAGE_SIZE",
     "PROMPT_LANGUAGES",
     "SET_KEY",
     "STATE_OPTIONS",
     "TYPE_OPTIONS",
+    "UNKNOWN_PREFILL",
     "VALIDATE_KEY",
     "FeatureFilters",
     "feature_filters",
@@ -254,11 +260,49 @@ FIELD_BOX_STYLE: Final = (
     "border:1px solid var(--rule);border-radius:3px;padding:10px 12px;background:var(--surface);"
 )
 
-#: "open codelist ↗" — no cross-navigation exists yet (see module docstring).
+#: "open codelist ↗" — the Codelists direction of the cross-link is not built
+#: (see module docstring); Census → here is, through `_Prefill` below.
 OPEN_CODELIST_LABEL: Final = "open codelist ↗"
 NO_SET_MESSAGE: Final = "No feature set yet — use “New set” below."
 NO_FEATURES_MESSAGE: Final = "No features match this filter."
 NO_FEATURE_SELECTED: Final = "Select a feature, or add one, to edit it here."
+
+#: Why a Census hand-off could not be applied. Rendered in the edit zone
+#: rather than raised as a `ui.notify`: a notification enqueued while the page
+#: is still being built has no connected client to reach, and "the column you
+#: clicked went nowhere" is exactly the kind of thing that must not be lost.
+UNKNOWN_PREFILL: Final = (
+    "“{column}” is not a column of this corpus — pick the corpus on Census, then try again."
+)
+NO_SET_PREFILL: Final = (
+    "“{column}” has nowhere to go yet: create a feature set with “New set” below, "
+    "then use “use as feature” again."
+)
+FROZEN_PREFILL: Final = (
+    "This set is frozen, so “{column}” cannot be added to it. Clone it, "
+    "then use “use as feature” again."
+)
+
+#: Which `Grain` a native column implies, by the source table it lives in
+#: (mvp-spec.md §8.2). `Grain.DERIVED` is never implied — a derived aggregate
+#: has no single source column to arrive from.
+_GRAIN_BY_TABLE: Final[dict[str, Grain]] = {
+    "unfall": Grain.ACCIDENT,
+    "objekt": Grain.OBJECT,
+    "person": Grain.PERSON,
+}
+#: Which `ValueType` a census `TypeHint` implies. Both vocabularies are small
+#: and closed, so this is a rendering-table-shaped lookup (`_GRAIN_LABELS`),
+#: not an inference: the census already decided the type hint (sw-design.md
+#: §7), and anything it has no opinion about starts as free text.
+_VALUE_TYPE_BY_TYPE_HINT: Final[dict[TypeHint, ValueType]] = {
+    TypeHint.ENUM: ValueType.ENUM,
+    TypeHint.DATE: ValueType.DATE,
+    TypeHint.TIME: ValueType.TIME,
+    TypeHint.INTEGER: ValueType.INTEGER,
+    TypeHint.DECIMAL: ValueType.DECIMAL,
+    TypeHint.TEXT: ValueType.FREE_TEXT,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -317,6 +361,26 @@ def _new_draft() -> _FeatureDraft:
     )
 
 
+def _prefilled_draft(column: CensusColumnView) -> _FeatureDraft:
+    """A new-feature draft for one census column — what Census's "use as
+    feature" link asks for (`design/nav-import-census/README.md`,
+    Interactions: "navigates to Features with that column preselected").
+
+    The column name is the only thing the URL carried; the grain and the value
+    type are read off the `CensusColumnView` the service just returned, so the
+    two dropdowns start where the data says rather than at `_new_draft()`'s
+    "accident / enum" default. The key stays empty: naming the feature is the
+    analyst's, and mvp-spec.md defines no column-name-to-key convention.
+    """
+    value_type = _VALUE_TYPE_BY_TYPE_HINT[TypeHint(column.type_hint)]
+    draft = _new_draft()
+    draft.grain = _GRAIN_BY_TABLE[column.table_name]
+    draft.value_type = value_type
+    draft.source_column = column.column_name
+    draft.matching_rule = _default_matching_rule(value_type)
+    return draft
+
+
 def _draft_from(feature: FeatureView) -> _FeatureDraft:
     return _FeatureDraft(
         feature_id=feature.feature_id,
@@ -331,10 +395,35 @@ def _draft_from(feature: FeatureView) -> _FeatureDraft:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _Prefill:
+    """One Census hand-off, as it arrived in the query string.
+
+    Both fields are **unvalidated text off a URL** and are checked against the
+    services before anything is prefilled: `corpus_id` must name a corpus the
+    corpus picker offers, `column_name` a column that corpus's census has.
+    Nothing is read *out of* the URL beyond the two names — the column's table
+    and type hint come from the census row (CLAUDE.md #5's spirit).
+    """
+
+    corpus_id: str | None
+    column_name: str
+
+
 def register(services: Services) -> None:
     @ui.page(_ITEM.path)
-    async def _page() -> None:
-        page = _FeaturesPage(services)
+    async def _page(corpus: str | None = None, column: str | None = None) -> None:
+        """`/features`, optionally `?corpus=<id>&column=<name>`.
+
+        The two query parameters are Census's "use as feature" link
+        (`census_view.FEATURES_PATH`, `CORPUS_PARAM`, `COLUMN_PARAM`); NiceGUI
+        binds them by name, so they are spelled out here rather than imported
+        from there. `column` alone is enough — the corpus then stays whatever
+        this client last validated against.
+        """
+        page = _FeaturesPage(
+            services, prefill=_Prefill(corpus, column) if column is not None else None
+        )
         await page.build()
 
 
@@ -342,8 +431,14 @@ class _FeaturesPage:
     """One client's Features view — built inside the page function, one
     instance per browser tab (§12.8), the same shape as `_CensusPage`."""
 
-    def __init__(self, services: Services) -> None:
+    def __init__(self, services: Services, *, prefill: _Prefill | None = None) -> None:
         self._services = services
+        #: A Census hand-off, applied **once** (`_apply_prefill`) and then
+        #: dropped, so no later reload can rebuild a draft over an edit.
+        self._prefill = prefill
+        #: Why a hand-off was not applied, shown in the edit zone until the
+        #: analyst does something else.
+        self._prefill_note: str | None = None
         self._sets: tuple[FeatureSetSummary, ...] = ()
         self._config: FeatureConfigView | None = None
         self._corpora: tuple[CorpusView, ...] = ()
@@ -389,6 +484,10 @@ class _FeaturesPage:
         """Re-read every service this view shows, then redraw — the same
         single-entry-point shape as `_CensusPage.reload`. Never touches
         `self._draft`: an in-progress edit survives a corpus/language pick."""
+        # A dropped hand-off's explanation is about the state this pass is
+        # replacing, so it goes before anything is re-read (and `_apply_prefill`
+        # below is what may set it again).
+        self._prefill_note = None
         self._sets = tuple(await self._services.feature.list_configs())
         self._config = await self._load_selected_config()
         set_id = self._config.feature_config_id if self._config is not None else None
@@ -398,8 +497,12 @@ class _FeaturesPage:
                 sort_key="imported_at", sort_dir=SortDir.DESC, page=1, page_size=CORPUS_CHOICES
             )
         ).items
+        # Before the column load, so a hand-off's corpus is the one whose
+        # columns get fetched; after it, so the column can be looked up.
+        self._adopt_prefill_corpus()
         await self._reload_corpus_scoped_columns()
         self._sync_selection()
+        self._apply_prefill()
         self._render()
 
     async def _load_selected_config(self) -> FeatureConfigView | None:
@@ -440,6 +543,43 @@ class _FeaturesPage:
         ):
             app.storage.client[FEATURE_KEY] = None
             self._draft = None
+
+    # --- the Census hand-off ---------------------------------------------------
+
+    def _adopt_prefill_corpus(self) -> None:
+        """Point `VALIDATE_KEY` at the corpus the link named, if it names one
+        this client can actually pick. An unknown id is ignored rather than
+        stored: the column lookup that follows then almost certainly fails, and
+        `_apply_prefill` says so once, in one place."""
+        prefill = self._prefill
+        if prefill is None or prefill.corpus_id is None:
+            return
+        if any(str(c.corpus_id) == prefill.corpus_id for c in self._corpora):
+            app.storage.client[VALIDATE_KEY] = prefill.corpus_id
+
+    def _apply_prefill(self) -> None:
+        """Open a new-feature draft on the column Census linked to — once.
+
+        Consuming `self._prefill` unconditionally is what makes it once: every
+        later `reload()` (a corpus pick, a save) runs this method too, and must
+        not rebuild a draft over an edit in progress.
+        """
+        prefill, self._prefill = self._prefill, None
+        if prefill is None:
+            return
+        column = _matching_census(self._census_columns, prefill.column_name)
+        if column is None:
+            self._prefill_note = UNKNOWN_PREFILL.format(column=prefill.column_name)
+            return
+        config = self._config
+        if config is None:
+            self._prefill_note = NO_SET_PREFILL.format(column=column.column_name)
+            return
+        if config.is_frozen:
+            self._prefill_note = FROZEN_PREFILL.format(column=column.column_name)
+            return
+        app.storage.client[FEATURE_KEY] = NEW_FEATURE_SENTINEL
+        self._draft = _prefilled_draft(column)
 
     # --- per-client state ------------------------------------------------------
 
@@ -702,6 +842,10 @@ class _FeaturesPage:
     # --- edit zone (detail pane) ---------------------------------------------
 
     def _render_edit_zone(self) -> None:
+        if self._prefill_note is not None:
+            ui.label(self._prefill_note).props('data-testid="prefill-note"').style(
+                NOTE_WARN_STYLE + "margin-bottom:12px;"
+            )
         config = self._config
         if config is None:
             ui.label(NO_SET_MESSAGE).style("color:var(--ink2);font-size:12.5px;")
@@ -1213,11 +1357,13 @@ class _FeaturesPage:
             return
         app.storage.client[FEATURE_KEY] = str(feature_id)
         self._draft = _draft_from(feature)
+        self._prefill_note = None
         self._render()
 
     def _start_new_feature(self) -> None:
         app.storage.client[FEATURE_KEY] = NEW_FEATURE_SENTINEL
         self._draft = _new_draft()
+        self._prefill_note = None
         self._render()
 
     # --- mutating actions --------------------------------------------------

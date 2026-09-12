@@ -6,7 +6,7 @@ Exactly the bullet list §11.3 names, against the **real** view driven by the
 - each chip refilters and resets to page 1;
 - default sort is Populated ▼;
 - in-config rows are tinted;
-- "use as feature" is disabled in phase 1.
+- "use as feature" links to Features with the column preselected.
 
 Nothing here stubs a service. `seeded` registers and analyses the committed
 hazard files through `DeliveryService` and freezes them into a corpus through
@@ -28,9 +28,10 @@ page in this file, the same shape as `tests/e2e/conftest.py`'s J4 harness.
 `test_no_real_column_is_in_config_in_phase_1` pins the other half: against
 this fixture set's data (no features), the tinted path is never taken.
 
-"use as feature" is asserted **present and non-interactive**, not absent: the
-design draws the affordance, and phase 1 draws it disabled rather than linking
-to a view that does not exist.
+"use as feature" is asserted as a **real link** whose target names the corpus
+and the column, which is the whole hand-off: what Features then does with the
+two parameters is `tests/ui/test_features_view.py`'s, and the loop closing
+back onto a tinted row is J8's.
 """
 
 import asyncio
@@ -38,6 +39,7 @@ import os
 from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
@@ -90,6 +92,12 @@ IN_CONFIG_PATH = "/_census/in-config"
 
 TINTED_COLUMN = "WitterungAusw"
 PLAIN_COLUMN = "UnfallTypAusw"
+
+#: The harness page renders the real `ColumnSpec`s, and the action column's
+#: link carries a corpus id — this one is never resolved, because the harness
+#: never follows the link (`test_use_as_feature_links_to_features` does, on
+#: the real view against the real corpus).
+HARNESS_CORPUS_ID = CorpusId("corpus-harness")
 
 
 @dataclass(frozen=True)
@@ -184,7 +192,7 @@ def _register_in_config_harness() -> None:
     @ui.page(IN_CONFIG_PATH)
     def _page() -> None:
         data_table(
-            columns=_census_columns(),
+            columns=_census_columns(HARNESS_CORPUS_ID),
             rows=(
                 _column_view(TINTED_COLUMN, in_config=True),
                 _column_view(PLAIN_COLUMN, in_config=False),
@@ -470,7 +478,7 @@ async def test_the_tinted_row_shows_in_config_instead_of_the_action(seeded: Seed
     assert len(_find(user, "use-as-feature")) == 1
 
 
-async def test_no_real_column_is_in_config_in_phase_1(seeded: Seeded) -> None:
+async def test_no_column_is_in_config_without_a_feature(seeded: Seeded) -> None:
     """The other half of the tinting bullet: against the real service the
     tinted path is never taken, because this fixture set's delivery creates
     no `Feature` row naming any of its columns (`in_config` is real from
@@ -481,22 +489,33 @@ async def test_no_real_column_is_in_config_in_phase_1(seeded: Seeded) -> None:
     assert len(_find(user, "use-as-feature")) == len(_column_names(user))
 
 
-# --- §11.3: "use as feature" is disabled in phase 1 --------------------------
+# --- §11.3: "use as feature" links to Features -------------------------------
 
 
-async def test_use_as_feature_is_disabled_in_phase_1(seeded: Seeded) -> None:
-    """The affordance is **drawn and inert**, not removed: Features arrives in
-    phase 2, and the design's action column is not empty until then."""
+async def test_use_as_feature_links_to_features_with_the_column(seeded: Seeded) -> None:
+    """README, Interactions: ""use as feature" navigates to Features with that
+    column preselected".
+
+    A `ui.link`, not a scripted button — the whole hand-off is the target,
+    which carries the corpus being profiled and the column name and nothing
+    else: `features_view` reads the column's table and type hint off the
+    census itself. That the rendered element is an `<a href>` a browser
+    follows is J5-style DOM ground truth, asserted in `tests/e2e`.
+    """
     user = seeded.user
     await user.open("/census")
     actions = _find(user, "use-as-feature")
     assert actions
-    for action in actions:
-        assert "disabled" in action._props
-        assert action._props["aria-disabled"] == "true"
-        assert action.tag == "button"
-        # Not a link: there is no route to navigate to.
-        assert "href" not in action._props
+    names = _column_names(user)
+    for action, name in zip(actions, names, strict=True):
+        assert isinstance(action, ui.link)
+        assert "disabled" not in action._props
+        target = urlparse(str(action._props["href"]))
+        assert target.path == "/features"
+        assert parse_qs(target.query) == {
+            "corpus": [seeded.corpus_id],
+            "column": [name],
+        }
 
 
 # --- the design's own copy, layout and numbers -------------------------------

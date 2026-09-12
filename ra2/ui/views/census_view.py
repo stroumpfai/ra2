@@ -29,11 +29,13 @@ decision: the populated-rate chip's threshold list (README shows only the
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Final, cast
+from urllib.parse import urlencode
 
 from nicegui import app, ui
 from nicegui.element import Element
 
 from ra2.domain.census import BUCKET_ORDER, CensusBucketLabel, ValueCount
+from ra2.domain.ids import CorpusId
 from ra2.services.container import Services
 from ra2.services.readmodels import CensusColumnView, CensusSummary, CorpusView, Page, SortDir
 from ra2.ui.components import (
@@ -53,9 +55,12 @@ from ra2.ui.state import TableState, set_table_state, table_state
 __all__ = [
     "BUCKET_LABELS",
     "CENSUS_TABLE",
+    "COLUMN_PARAM",
     "CONTENT_GAP",
     "CONTENT_PADDING",
     "CORPUS_KEY",
+    "CORPUS_PARAM",
+    "FEATURES_PATH",
     "FILTERS_KEY",
     "NO_COLUMNS_MESSAGE",
     "NO_CORPUS_MESSAGE",
@@ -138,11 +143,20 @@ REMINDER_BODY: Final = (
     "Empty means no value provided — not “not applicable”. Records with an "
     "empty cell leave that feature’s denominator entirely (§8.6)."
 )
-#: The action column, phase 1: Features/FeatureConfig does not exist yet, so
-#: the affordance renders **disabled** rather than as a link (plan-phase-1.md,
-#: "Deliberately deferred inside phase 1").
+#: The action column. README §2b: a mono 11px link "use as feature" →
+#: Features/FeatureConfig, or the static "in config" once some feature's
+#: `source_column` names this column. Phase 1 had no Features route and
+#: rendered the affordance disabled; phase 2 has one, so it is a real link.
 USE_AS_FEATURE: Final = "use as feature"
 IN_CONFIG: Final = "in config"
+
+#: Where "use as feature" goes, and the two query parameters it carries.
+#: `features_view` validates both against its own services before using them
+#: and reads the column's table and type hint from the census itself — the URL
+#: names the column, it does not describe it.
+FEATURES_PATH: Final = next(i for i in NAV_ITEMS if i.key == "features").path
+CORPUS_PARAM: Final = "corpus"
+COLUMN_PARAM: Final = "column"
 
 #: Undesigned states, in the tone README's "Loading / empty / error" section
 #: suggests: one centred line inside the well.
@@ -497,7 +511,9 @@ class _CensusPage:
         with card(flex="1", extra="min-height:0;overflow:hidden;"):
             with ui.element("div").style("flex:1;min-height:0;overflow:auto;"):
                 data_table(
-                    columns=_census_columns(),
+                    columns=_census_columns(
+                        self._corpus.corpus_id if self._corpus is not None else None
+                    ),
                     rows=rows,
                     state=state,
                     on_sort=_sync(self._sort),
@@ -625,8 +641,13 @@ class _CensusPage:
 # --- columns ------------------------------------------------------------------
 
 
-def _census_columns() -> tuple[ColumnSpec[CensusColumnView], ...]:
-    """The seven columns of README §2b, widths verbatim."""
+def _census_columns(corpus_id: CorpusId | None) -> tuple[ColumnSpec[CensusColumnView], ...]:
+    """The seven columns of README §2b, widths verbatim.
+
+    `corpus_id` reaches the action column only: "use as feature" links to
+    Features **for this corpus**, and a cell renderer is handed one row, never
+    the page it came from.
+    """
     return (
         ColumnSpec(
             key="column_name",
@@ -684,7 +705,11 @@ def _census_columns() -> tuple[ColumnSpec[CensusColumnView], ...]:
             width="286px",
             render=_render_distribution,
         ),
-        ColumnSpec(key="action", width="135px", render=_render_action),
+        ColumnSpec(
+            key="action",
+            width="135px",
+            render=lambda row: _render_action(row, corpus_id),
+        ),
     )
 
 
@@ -693,9 +718,9 @@ def _census_columns() -> tuple[ColumnSpec[CensusColumnView], ...]:
 
 def _render_column_name(column: CensusColumnView) -> None:
     """The column name, at weight 500 when the column is already configured
-    (README §2b). Dead in phase 1 — `in_config` is always `False` until
-    FeatureConfig exists — and implemented anyway, because the tint and the
-    weight are one state, not two."""
+    (README §2b). `in_config` is real from phase 2 on: it is `True` once some
+    feature's `source_column` names this column (`census_service`), which is
+    what the "use as feature" link creates."""
     ui.label(column.column_name).props('data-testid="census-column-name"').mark(
         "census-column-name"
     ).style("font-weight:500;" if column.in_config else "")
@@ -750,34 +775,36 @@ def _render_distribution(column: CensusColumnView) -> None:
         )
 
 
-def _render_action(column: CensusColumnView) -> None:
-    """ "use as feature", **disabled**, or the static "in config".
+def _render_action(column: CensusColumnView, corpus_id: CorpusId | None) -> None:
+    """ "use as feature" as a real link, or the static "in config".
 
-    The design links this to FeatureConfig. Phase 1 has no Features view and
-    no `FeatureConfig` — it is on plan-phase-1.md's "deliberately deferred"
-    list — so the affordance renders as a disabled control rather than as a
-    link to nowhere or as nothing at all. A real `<button disabled>`, so
-    "non-interactive" is a fact about the element and not a CSS impression.
+    A plain `<a href>` — the design's own element (README §2b: "mono 11px link
+    ... → Features/FeatureConfig") and the whole hand-off: no click handler, no
+    shared cross-view state, and the URL is something the analyst can keep.
+    `features_view` validates the two parameters against its own services
+    before prefilling anything.
+
+    An already-configured column renders the static text instead, as drawn —
+    the reverse cross-link ("which feature reads this column?") is a separate
+    question the design does not answer.
+
+    `corpus_id` is `None` only when no corpus is selected, and then the table
+    holds no rows for this renderer to be called on.
     """
     if column.in_config:
         ui.label(IN_CONFIG).classes("mono ink3").props('data-testid="in-config"').mark(
             "in-config"
         ).style("font-size:11px;")
         return
-    button = (
-        ui.element("button")
-        .classes("mono")
-        .props(
-            'type="button" disabled aria-disabled="true" '
-            'title="Features arrives in phase 2" data-testid="use-as-feature"'
-        )
-        .mark("use-as-feature")
-        .style(
-            "background:none;border:none;padding:0;font-size:11px;"
-            "color:var(--ink3);cursor:default;text-align:left;"
-        )
-    )
-    with button:
+    assert corpus_id is not None
+    query = urlencode({CORPUS_PARAM: corpus_id, COLUMN_PARAM: column.column_name})
+    link = ui.link(target=f"{FEATURES_PATH}?{query}")
+    link.classes(remove="nicegui-link", add="mono")
+    link.props('data-testid="use-as-feature"').mark("use-as-feature")
+    # Inline rather than a global `a` rule, because `theme.py` is frozen for
+    # this milestone; the colour and the 11px are the design's either way.
+    link.style("font-size:11px;color:var(--accent);text-decoration:none;")
+    with link:
         ui.label(USE_AS_FEATURE)
 
 

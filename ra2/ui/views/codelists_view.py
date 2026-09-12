@@ -43,8 +43,8 @@ point of decision:
   this column, and the copy naming a feature reflects that live state.
 - **"Add label"** is drawn disabled. mvp-spec.md §7 is explicit that no UI
   path writes `code_value`; the design draws the affordance, so it renders
-  inert with a title saying what to do instead, exactly as Census draws
-  "use as feature".
+  inert with a title saying what to do instead, exactly as `features_view`
+  draws "open codelist ↗".
 - **Loading / empty / error** are undesigned (README, "Interactions &
   Behavior"). Empty states are one centred line, in the tone that section
   suggests; a refused import is a **dialog** listing every structural error,
@@ -1181,8 +1181,10 @@ def _add_label_button() -> None:
 
     It is drawn **disabled**: mvp-spec.md §7 says there is no UI path that
     writes `code_value` — "a correction means importing a fixed file". The
-    same rule Census's "use as feature" follows: the affordance stays visible
-    and is inert, rather than vanishing or lying.
+    same rule `features_view`'s "open codelist ↗" follows: the affordance
+    stays visible and is inert, rather than vanishing or lying. (Census's
+    "use as feature" was this rule's other example until phase 2 gave it a
+    Features route to link to.)
     """
     button = (
         ui.element("button")

@@ -80,6 +80,14 @@ DELIVERY: dict[str, str] = {
 WEATHER_COLUMN = "Witter0Ausw"
 TIME_COLUMN = "UnfZeitFeld"
 
+#: Two columns of the same fixture no feature above names, used by the Census
+#: hand-off tests: an `unfall` `date` column (accident grain, date value type)
+#: and a `person` `enum` one (person grain, enum) — so the grain and the value
+#: type the hand-off derives are visibly the census's, not `_new_draft()`'s
+#: accident/enum default.
+DATE_COLUMN = "UnfDatumFeld"
+PERSON_ENUM_COLUMN = "PersArtAusw"
+
 #: `{attribute_key: {name: {...}, codes: {code: {lang: label}}}}`
 #: (`ra2.domain.codes.CodelistImportSchema`) — the corpus's one `Witter0Ausw`
 #: value ("6") is labelled, so Case A's coverage reads "1 of 1".
@@ -368,6 +376,18 @@ def _pick_select(user: User, testid: str, value: str) -> None:
     _one(user, element).trigger("change", args=value)
 
 
+def _selected_option(user: User, testid: str) -> str:
+    """The value of the `<option selected>` inside one `_select()` — what a
+    native `<select>` would submit, and therefore what the draft behind it
+    currently holds."""
+    (select,) = _find(user, testid)
+    return next(
+        str(option._props["value"])
+        for option in select.descendants()
+        if option.tag == "option" and "selected" in option._props
+    )
+
+
 async def _select_feature_row(user: User, key: str) -> None:
     button = next(
         e for e in _find(user, "feature-row") if e._props.get("aria-label") == f"Edit {key}"
@@ -521,3 +541,101 @@ async def test_the_frozen_variant_is_read_only_and_lists_its_evaluation(frozen: 
     assert _all_text(user, "frozen-feature-name") == "worst_injury"
     await user.should_see("Evaluations citing this config")
     await user.should_see("1 evaluation(s) cite this config.")
+
+
+# --- the Census hand-off ("use as feature") -----------------------------------
+
+
+async def test_a_census_hand_off_opens_a_prefilled_new_feature(seeded: Seeded) -> None:
+    """`design/nav-import-census/README.md`, Interactions: ""use as feature"
+    navigates to Features with that column preselected".
+
+    The link carries only the corpus and the column name
+    (`census_view._render_action`); the grain and the value type below are
+    read off the census row this view fetches for that corpus, which is why
+    an `unfall` `date` column opens as accident-grain/date rather than at
+    `_new_draft()`'s accident/enum default. The key stays the analyst's.
+    """
+    user = seeded.user
+    await user.open(f"/features?corpus={seeded.corpus_id}&column={DATE_COLUMN}")
+    await _until(lambda: bool(_find(user, "source-column-select")))
+
+    assert _all_text(user, "editing-feature-name") == "(new feature)"
+    assert _find(user, "prefill-note") == []
+    assert _selected_option(user, "validate-corpus-select") == str(seeded.corpus_id)
+    assert _selected_option(user, "source-column-select") == DATE_COLUMN
+    assert _selected_option(user, "grain-select") == Grain.ACCIDENT.value
+    assert _selected_option(user, "value-type-select") == ValueType.DATE.value
+    (key_input,) = _find(user, "feature-key")
+    assert key_input._props["value"] == ""
+
+
+async def test_a_census_hand_off_takes_the_grain_from_the_source_table(seeded: Seeded) -> None:
+    """mvp-spec.md §8.2: the grain is the source table's, so a `person`
+    column arrives person-grained. The table name comes from the census row,
+    never from the URL (CLAUDE.md #5)."""
+    user = seeded.user
+    await user.open(f"/features?corpus={seeded.corpus_id}&column={PERSON_ENUM_COLUMN}")
+    await _until(lambda: bool(_find(user, "source-column-select")))
+
+    assert _selected_option(user, "source-column-select") == PERSON_ENUM_COLUMN
+    assert _selected_option(user, "grain-select") == Grain.PERSON.value
+    assert _selected_option(user, "value-type-select") == ValueType.ENUM.value
+
+
+async def test_an_unknown_column_is_reported_not_half_applied(seeded: Seeded) -> None:
+    """Both query parameters are unvalidated text off a URL. A column this
+    corpus's census does not have opens no draft at all and says why, rather
+    than prefilling a name nothing can resolve."""
+    user = seeded.user
+    await user.open(f"/features?corpus={seeded.corpus_id}&column=NotAColumnFeld")
+    await _until(lambda: bool(_find(user, "prefill-note")))
+
+    assert "NotAColumnFeld" in _all_text(user, "prefill-note")
+    assert _find(user, "no-feature-selected")
+    assert _find(user, "source-column-select") == []
+
+
+async def test_a_hand_off_into_a_frozen_set_is_refused_with_a_reason(seeded: Seeded) -> None:
+    """`frozen_at` gates editing (plan-phase-2.md §2), and a hand-off is an
+    edit. The set stays frozen and the note names the clone that would take
+    the column."""
+    await seeded.services.feature.freeze(seeded.config.feature_config_id)
+    user = seeded.user
+    await user.open(f"/features?corpus={seeded.corpus_id}&column={DATE_COLUMN}")
+    await _until(lambda: bool(_find(user, "prefill-note")))
+
+    assert DATE_COLUMN in _all_text(user, "prefill-note")
+    assert "frozen" in _all_text(user, "prefill-note")
+    assert _find(user, "source-column-select") == []
+
+
+async def test_a_hand_off_with_no_feature_set_at_all_is_reported(seeded: Seeded) -> None:
+    """The column has nowhere to go. Census cannot know that — it never asks
+    `FeatureService` anything — so the answer is given here, once."""
+    await seeded.services.feature.delete(seeded.config.feature_config_id)
+    user = seeded.user
+    await user.open(f"/features?corpus={seeded.corpus_id}&column={DATE_COLUMN}")
+    await _until(lambda: bool(_find(user, "prefill-note")))
+
+    assert DATE_COLUMN in _all_text(user, "prefill-note")
+    assert "New set" in _all_text(user, "prefill-note")
+
+
+async def test_the_hand_off_is_applied_once_and_never_over_an_edit(seeded: Seeded) -> None:
+    """Every later `reload()` runs `_apply_prefill` too — picking a prompt
+    language is one — and must not rebuild the draft over what has been typed
+    into it since."""
+    user = seeded.user
+    await user.open(f"/features?corpus={seeded.corpus_id}&column={DATE_COLUMN}")
+    await _until(lambda: bool(_find(user, "source-column-select")))
+
+    (key_input,) = _find(user, "feature-key")
+    _one(user, key_input).trigger("input", args="accident_date")
+    _pick_select(user, "language-select", "fr")
+    await _until(lambda: _selected_option(user, "language-select") == "fr")
+
+    (key_input,) = _find(user, "feature-key")
+    assert key_input._props["value"] == "accident_date"
+    assert _selected_option(user, "source-column-select") == DATE_COLUMN
+    assert _selected_option(user, "value-type-select") == ValueType.DATE.value
