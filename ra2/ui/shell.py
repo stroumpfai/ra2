@@ -79,8 +79,8 @@ NAV_ITEMS: Final[tuple[NavItem, ...]] = (
         label="Codelists",
         path="/codelists",
         title="Codelists",
-        description="Code and label per source column; labels are editable.",
-        built=False,
+        description="Code-to-label tables the prompt reads, imported as JSON and read-only.",
+        built=True,
     ),
     NavItem(
         key="features",
@@ -89,7 +89,7 @@ NAV_ITEMS: Final[tuple[NavItem, ...]] = (
         path="/features",
         title="Features",
         description="What to extract: labelled features and exploratory attributes.",
-        built=False,
+        built=True,
     ),
     NavItem(
         key="evaluation",

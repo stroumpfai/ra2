@@ -65,9 +65,20 @@ def delivery_root(tmp_path: Path) -> Path:
 def _register_and_freeze_corpus(page: Page, server_url: str, root: Path) -> None:
     """Register + analyse + freeze one corpus through the Import UI —
     `test_j1_delivery_to_census.py`'s own first act, repeated rather than
-    imported (tests/ has no shared per-journey helper module by design)."""
+    imported (tests/ has no shared per-journey helper module by design).
+
+    Asserted as **one more row than before**, not as an absolute count: the
+    E2E server is session-scoped, and J1/J2/J7 legitimately leave corpora
+    behind by the time this journey runs (the same reasoning
+    `test_j2_blocking_validation.py`'s own `_corpus_rows` helper documents —
+    counting `[data-testid="corpus-name"]`, not `tbody tr`: an empty table
+    still renders one placeholder `<tr>`, so a plain row count cannot tell
+    "no corpora" and "one corpus" apart).
+    """
     page.goto(f"{server_url}/import")
     page.wait_for_selector('[data-testid="file-grid"]')
+    names = page.locator('[data-testid="table-corpora"] [data-testid="corpus-name"]')
+    before = names.count()
     page.click('[aria-label="Add set"]')
     page.fill('[data-testid="host-path"]', str(root))
     page.click('[data-testid="register-delivery"]')
@@ -77,7 +88,7 @@ def _register_and_freeze_corpus(page: Page, server_url: str, root: Path) -> None
     )
     expect(page.locator('[data-testid="create-corpus"]')).to_be_enabled(timeout=15_000)
     page.click('[data-testid="create-corpus"]')
-    expect(page.locator('[data-testid="table-corpora"] tbody tr')).to_have_count(1, timeout=15_000)
+    expect(names).to_have_count(before + 1, timeout=15_000)
 
 
 def _create_draft_feature_config(page: Page, server_url: str, name: str) -> str:

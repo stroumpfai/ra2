@@ -1232,7 +1232,7 @@ class _FeaturesPage:
             return
         try:
             if draft.feature_id is None:
-                await self._services.feature.add_feature(
+                updated = await self._services.feature.add_feature(
                     config.feature_config_id,
                     key=draft.key,
                     kind=draft.kind,
@@ -1245,7 +1245,7 @@ class _FeaturesPage:
                     validate_against=self._validate_against(),
                 )
             else:
-                await self._services.feature.edit_feature(
+                updated = await self._services.feature.edit_feature(
                     config.feature_config_id,
                     draft.feature_id,
                     key=draft.key,
@@ -1261,15 +1261,22 @@ class _FeaturesPage:
         except ServiceError as exc:
             ui.notify(str(exc), type="negative")
             return
-        saved_key = draft.key
+        # `reload()` ends by clearing and rebuilding every slot this handler's
+        # own triggering element (the Save button) lives inside — including
+        # it. Any `app.storage.client` write (which resolves the ambient
+        # "current slot" to reach the client) has to happen **before** that
+        # clear, not after: once `reload()` has torn the button's slot down,
+        # NiceGUI has nothing left to resolve `app.storage.client` through
+        # and raises "the parent element this slot belongs to has been
+        # deleted". `_sync_selection()` (inside `reload()`) then keeps
+        # whatever `FEATURE_KEY` already says, so setting it here rather than
+        # after is not just safe, it is what makes the post-save selection
+        # survive `reload()` at all.
+        saved = next((f for f in updated.features if f.key == draft.key), None)
+        if saved is not None:
+            app.storage.client[FEATURE_KEY] = str(saved.feature_id)
+            self._draft = _draft_from(saved)
         await self.reload()
-        config = self._config
-        if config is not None:
-            saved = next((f for f in config.features if f.key == saved_key), None)
-            if saved is not None:
-                self._select_feature(saved.feature_id)
-                return
-        self._render()
 
     async def _delete_feature(self, feature_id: FeatureId) -> None:
         config = self._config

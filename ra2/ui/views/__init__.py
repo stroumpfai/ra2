@@ -10,7 +10,7 @@ global). See CONTRACTS.md.
 
 from ra2.services.container import Services
 from ra2.ui.shell import NAV_ITEMS
-from ra2.ui.views import census_view, import_view, placeholder_view
+from ra2.ui.views import census_view, codelists_view, features_view, import_view, placeholder_view
 
 __all__ = ["register_all"]
 
@@ -23,6 +23,8 @@ def register_all(services: Services) -> None:
     """
     import_view.register(services)
     census_view.register(services)
+    codelists_view.register(services)
+    features_view.register(services)
     for item in NAV_ITEMS:
         if not item.built:
             placeholder_view.register(item)
