@@ -148,7 +148,15 @@ body,.q-layout,.nicegui-content{
 }
 .nicegui-content{padding:0;gap:0;}
 .q-page,.q-page-container{padding:0!important;min-height:0;}
-.ra2-root{display:flex;flex-direction:column;height:100vh;background:var(--bg);}
+/* NiceGUI's own stylesheet sets `.nicegui-content{align-items:flex-start}`
+   (nicegui.css, "flex containers"), so a flex child with no explicit width
+   sizes to its own content instead of filling the row — invisible on a page
+   whose content is naturally wide (a full census table), glaring the moment
+   a view's content is short (an empty "no corpus yet" state). `width:100%`
+   sidesteps the inherited `align-items` entirely rather than relying on
+   `align-self:stretch`, which only wins when nothing more specific set a
+   width — found via a real, near-empty Codelists render, not a design mock. */
+.ra2-root{display:flex;flex-direction:column;height:100vh;width:100%;background:var(--bg);}
 /* Quasar sizes `h1` at 6rem/6rem weight 300. Every heading in this design is
    set by its own rule, so the base is neutralised here rather than overridden
    six times. Without this the header block is 145px instead of ~60px. */
