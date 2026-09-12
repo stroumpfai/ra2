@@ -26,7 +26,7 @@ corpus across every model — GPU time this month does not have.
 |---|---|
 | F1 | Import N cantonal structured sets plus one shared text file into one immutable corpus |
 | F2 | Column-population census over an imported corpus |
-| F3 | Codelist import and label editing |
+| F3 | Code table import (fixed, versioned JSON) and corpus-column mapping (the Codelists view) |
 | F4 | Feature configuration: labelled (accident-level + derived aggregates) and exploratory |
 | F5 | Evaluation setup: one corpus + one frozen feature config + N models |
 | F6 | Extraction runs against a configurable local LLM endpoint |
@@ -55,12 +55,14 @@ modality · fine-tuning.
 | **Corpus** | An immutable snapshot produced by one import. Has an id and a version. |
 | **Record** | One accident: `unfall` row + its `objekt`/`person` rows + its narrative text. Keyed by `UnfallUid`. |
 | **Feature** | One configured thing to extract. Either **labelled** (has ground truth) or **exploratory** (does not). |
-| **Feature config** | An ordered set of features. Frozen when an evaluation's first run executes. |
+| **Feature config** | An ordered set of features. Frozen the moment it is created (the Features view's "Create a feature set"), before any evaluation cites it — not lazily at an evaluation's first run. |
 | **Fingerprint** | Hash over a feature's full definition. Identity for cross-evaluation comparison. |
 | **Evaluation** | one corpus + one feature config + N models. |
 | **Run** | One model executed once over one evaluation. Immutable. |
 | **Extraction** | One model's output for one (run, record). Immutable, stored raw and parsed. |
 | **Labelled case** | A (record, feature) pair where the structured column is populated. The denominator for all Goal 1/2 metrics. |
+| **Code table** | One attribute's `code → label` map (per language), sourced verbatim from the imported `codes-2018.json` (or a later dated successor). Read-only in the app. |
+| **Column mapping** | The analyst-authored link from a corpus's `source_column` to one code table. Editable; does not touch the code table itself. |
 
 ---
 
@@ -243,7 +245,12 @@ unfall_row(record_id, column_name, value_raw)      -- long/EAV form, 67 cols
 objekt_row(id, record_id, objekt_uid, obj_nr, ...) + objekt_cell(objekt_row_id, column_name, value_raw)
 person_row(id, objekt_row_id, person_uid, pers_nr, ...) + person_cell(...)
 
-codelist(id, corpus_id, source_column, code, label, label_language, edited_by_analyst)
+code_table_import(id, source_file, source_version, imported_at)   -- one row per codes-2018.json import
+code_attribute(id, code_table_import_id, key, chapter|NULL, name_json)   -- name_json = {lang: display name}
+code_value(id, code_attribute_id, code, label_json)                -- label_json = {lang: label}; langs may be a subset
+
+column_mapping(id, corpus_id, source_column, code_attribute_id, mapped_at)
+             -- analyst-authored; editable and re-editable, but never writes to code_value
 
 feature_config(id, name, created_at, frozen_at)
 feature(id, feature_config_id, ordinal, key, kind, description,
@@ -270,6 +277,12 @@ mismatch(id, run_id, record_id, feature_id, record_value, extracted_value,
 **Never overwrite an extraction.** A re-run creates a new `run` and new
 `extraction` rows. `run_id` is the discriminator everywhere.
 
+**Never edit `code_value` or `code_attribute`.** A superseding `codes-2019.json`
+(or a correction) is a new `code_table_import`, adding new rows — existing
+`code_attribute`/`code_value` rows, and any `column_mapping` pointing at them,
+are left alone. Re-pointing a mapping at the new import is an explicit analyst
+action in Codelists, not an automatic cutover.
+
 ---
 
 ## 6. Census (F2)
@@ -289,15 +302,41 @@ interesting. Deliverable in week one, before any extraction work.
 
 ## 7. Codelists (F3)
 
-- Imported per `source_column`, supplying `code → label`.
-- **Labels are editable in the configuration UI.** Rewriting `"M5"` as
-  `manual, 5-speed gearbox` is prompt engineering, not cosmetics.
-- If labels exist per language, all are stored; the prompt uses the configured
-  prompt language.
-- **The label text is hashed into the feature fingerprint** (§8.5). Two runs with
-  identical codes and different labels asked the model different questions.
-- A feature whose column has no codelist and whose type is `enum` **cannot be run**
-  — hard validation error at evaluation setup, not a silent degradation.
+**Code tables are imported, not authored.** The source is `codes-2018.json`
+(built once, outside the app, from the ASTRA/OFROU UAP instruction annexes —
+see `data/Codes/`): one JSON object per attribute (e.g. `accident_type`,
+`road_type`, `weather`), each holding its `code → label` map per language
+(`de`/`fr`/`it`, where the source annex exists — some attributes are `de`/`fr`
+only, see below). Importing this file is a one-time, app-level load
+(`code_table_import`, §5), independent of any corpus import (§4).
+
+- **Never edited in the app.** If a label is wrong or a new attribute is
+  needed, that is fixed in `data/Codes/codes-2018*.md`, regenerated into a new
+  `codes-2018.json` (or a dated successor), and re-imported as a new
+  `code_table_import` row. There is no inline label editing, and no UI path
+  that writes to `code_attribute` or `code_value` (Do-NOT list #2/#10 in
+  spirit: these rows behave like corpus data, not configuration).
+- **The Codelists view maps a corpus's `source_column` onto one imported code
+  attribute** (`column_mapping`, §5) — it does not touch the code table.
+  Different deliveries name or shape the same attribute differently (RADIS's
+  `*Ausw`/`*UAP` columns vs Astrana's narrower export, §4.1), so this mapping
+  is per corpus, analyst-set, and freely re-editable without affecting the
+  code table it points at.
+- A corpus `code` value with **no counterpart in the mapped attribute's code
+  table is a `Finding`** carrying the column, the value and the record key —
+  never silently dropped or coerced to the nearest code (Do-NOT list #6).
+- If labels exist for several languages, all are stored; the prompt uses the
+  configured prompt language. Where the mapped attribute has no label for that
+  language (the known gap: `main_cause`, `main_cause_subgroup`,
+  `main_cause_group` currently have no `it`), that is a validation error at
+  evaluation setup for a corpus/prompt-language combination that needs it —
+  not a fallback to another language.
+- **The label text is hashed into the feature fingerprint** (§8.5). Two runs
+  against different `code_table_import`s with the same codes and different
+  labels asked the model different questions.
+- A feature whose column has **no mapping**, or whose mapped attribute has
+  **no code table**, and whose type is `enum` **cannot be run** — hard
+  validation error at evaluation setup, not a silent degradation.
 
 ---
 
@@ -341,6 +380,10 @@ this catalogue is out of scope for the MVP.
 
 ### 8.4 Types and matching rules
 
+For `enum` features, the code table is whichever attribute the feature's
+`source_column` is mapped to in Codelists (§7) — never an inline list
+typed into the feature config.
+
 | Type | Normalisation | Match |
 |---|---|---|
 | `enum` | none — codes compared | exact on code |
@@ -364,6 +407,11 @@ worth evaluating, because it interacts with §4.4 damage.
 `matching_rule` (incl. parameters such as rounding and tolerance) ·
 `enum_codelist_json` **including label text** · `description`
 
+For `enum` features, `enum_codelist_json` is a **snapshot** of the mapped
+attribute's code table (§7) taken when the evaluation is created — it is a
+copy, not a live reference, so a later `code_table_import` never moves the
+fingerprint of an already-created evaluation.
+
 Computed when the evaluation is created; stored on the feature. Cross-evaluation
 views (post-MVP) join on this, never on the feature name.
 
@@ -383,8 +431,10 @@ the corpus size.
 
 > **evaluation = one corpus + one feature config + N models**
 
-- The feature config is **frozen when the first run executes**. Editing it
-  afterwards is blocked; the UI offers "clone into a new evaluation" instead.
+- The feature config is already **frozen from the moment it was created** (§2,
+  §8) — an evaluation only ever cites an already-frozen config, it never
+  freezes one itself. Editing a frozen config is blocked; the UI offers
+  "clone into a new evaluation" instead.
 - Corpus and config do not vary inside an evaluation. Only the model does — which
   is what makes the ranking valid.
 - A run over a corpus below the evaluation floor is marked **dev** and every view
@@ -417,7 +467,8 @@ for all inputs (no per-language routing in the MVP). It contains:
 
 - the narrative text, verbatim
 - per labelled feature: key, description, type, and for enums the **full
-  code → label list** as the analyst edited it
+  code → label list** from the mapped code table (§7), as snapshotted into
+  `enum_codelist_json` at evaluation creation
 - per exploratory attribute: key and the expert's description verbatim
 - instructions: emit the **code** for enums; `null` when the text does not support
   a value; an **evidence span quoted verbatim from the text** for every non-null
@@ -569,10 +620,14 @@ NiceGUI, single mode, no login, everything permitted.
 1. **Import** — file pickers, per-file detected encoding/delimiter with override,
    dry-run preview, import report (§4.3, §4.4).
 2. **Census** — per-column population table, sortable, exportable.
-3. **Codelists** — per column, code/label table, inline label editing.
+3. **Codelists** — per imported attribute, a read-only code/label table (all
+   languages); per corpus `source_column`, the current mapping to an imported
+   attribute, editable; unmapped columns and corpus code values absent from
+   the mapped attribute's code table are flagged.
 4. **Feature config** — add/edit features: kind, grain, column or derivation,
    type, matching rule, description; exploratory attributes with descriptions;
-   validation errors surfaced (missing codelist, non-scalar grain).
+   validation errors surfaced (unmapped or codeless column on an `enum`
+   feature, non-scalar grain).
 5. **Evaluation** — pick corpus + config + models; dev/evaluation marking; launch;
    live progress.
 6. **Results** — per-feature × per-model table with n, CI, tie marking; language
@@ -661,13 +716,13 @@ be changed silently.
 
 | # | Dependency | Blocks |
 |---|---|---|
-| B1 | **VUM codelists** | Every enum feature. Goal 1 cannot be prompted without them. |
+| B1 | **VUM codelists** — `codes-2018.json` (§7) covers the UAP-derived attributes (accident type, cause/main cause, and the 14 Titelblatt attributes in `de`/`fr`, `it` gap on causes); any other coded column (e.g. canton, vehicle make) still needs its code table sourced and imported the same way | Every `enum` feature over a column outside that coverage. Goal 1 cannot be prompted without them. |
 | B2 | **GPU model and VRAM confirmed** | Which models are testable at all |
 | B3 | **Air-gap status** | Whether weights must be side-loaded; changes setup entirely |
 | B4 | Real delivery files (not samples) | Import hardening, census |
 
-Open questions carried from the vision, none blocking the first commit: codelist
-label language · output language for normalised free text · `UnfHergangTextAnonym`
+Open questions carried from the vision, none blocking the first commit: output
+language for normalised free text · `UnfHergangTextAnonym`
 exact semantics · whether role codes (`B1`, `G1`, `P`) map to `ObjNr`/`PersNr` ·
 whether escaping in the text file is guaranteed or incidental · whether a UTF-8
 re-export upstream is possible.
@@ -682,10 +737,12 @@ The MVP is done when, on the target machine:
    imports into one corpus, with an import report naming every recovered row,
    rejected row, count mismatch, detected encoding and the cp1252 canary count.
 2. The census exports a per-column population table for all three structured tables.
-3. Codelists import, labels are editable, and an edit changes the affected
-   features' fingerprints.
+3. `codes-2018.json` imports into read-only code tables; mapping a corpus
+   column to one in Codelists, then re-pointing it at a different
+   imported attribute, changes the affected features' fingerprints — with no
+   UI path that edits a code table's labels directly.
 4. A feature config with ≥1 native accident-level feature, ≥1 derived aggregate and
-   ≥1 exploratory attribute validates and freezes on first run.
+   ≥1 exploratory attribute validates and freezes on creation.
 5. An evaluation runs ≥200 records across ≥2 models against a local endpoint, with
    visible progress, and survives a restart mid-run.
 6. Results show per-feature × per-model precision/recall/F1 with n and Wilson

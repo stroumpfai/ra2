@@ -327,11 +327,14 @@ a seeded row.
    verbatim.
 6. Views not yet built (Codelists, Features, Evaluation, Results, Mismatches) have
    real nav entries routing to `placeholder_view`. The shell is built **once**.
+   Codelists and Features now have a design package (`design/code-feature/`, §14) —
+   still unbuilt, but no longer undesigned.
 
 ### 8.2 Design fidelity
 
 The design is implemented **faithfully**: tokens, fixed sizes and layout rules from
-`design/nav-import-census/README.md` are requirements, not suggestions.
+`design/nav-import-census/README.md` (and, once that wave starts, from
+`design/code-feature/README.md`, §14) are requirements, not suggestions.
 
 - `theme.py` injects one stylesheet defining the oklch tokens as CSS custom
   properties and the utility classes (`.card .th .td .navitem .lbl .chip .btn .bar
@@ -566,3 +569,122 @@ Each is additive and cheap to reverse; none should change silently.
 columns are `UnfTypAusw`, `Witter0Ausw`, `LichtVerhAusw`, `UnfDatumFeld`. The design's
 fixtures are illustrative. **Column names are only ever read from the header.**
 The design's "162 columns" does check out: 67 + 77 + 18.
+
+---
+
+## 14. Codelists (F3)
+
+**Not yet built** — Import and Census are the only shipped views (§8.1). This
+section exists so the wave that builds Codelists starts from an architecture,
+not a blank page, now that `design/code-feature/README.md` (Screen 1) and
+`mvp-spec.md` §5/§7 exist. It also resolves the design's open question 1
+("codelist JSON schema... confirm against the real VUM export"): the schema
+below is the one actually produced by `data/Codes/codes-2018.json` and is
+taken as settled unless a real VUM export proves otherwise.
+
+### 14.1 Import is an upload, not a seed
+
+The design's "Import Codes as JSON" button (one file, all attributes) goes
+through the **same `FileStore` seam as delivery intake** (§6.1), not a
+baked-in app resource: `{RA2_DATA_DIR}/codelists/{code_table_import_id}/`.
+This matches how delivery files work — externally-sourced, versioned by
+upload, never committed to the repo — and it is why `data/Codes/*.json`
+being gitignored (per `.gitignore`'s blanket `data/` rule) is *correct*, not
+an oversight: it is the analyst's working copy, uploaded through the view
+like any other input, not a shipped resource under `ra2/`.
+
+Validated shape (Pydantic, `domain/codes.py`), matching `codes-2018.json`:
+
+```jsonc
+{
+  "<attribute_key>": {                    // e.g. "accident_type", "road_type"
+    "chapter": "4.1.4",                   // optional — absent for non-chapter attributes
+    "name": { "de": "...", "fr": "...", "it": "..." },   // languages present may vary
+    "codes": {
+      "<code>": { "de": "...", "fr": "...", "it": "..." }  // languages present may vary per code
+    }
+  }
+}
+```
+
+Import is a single transaction (mirrors corpus freeze, §6.3):
+
+1. Parse and validate against the schema above; any structural error **fails
+   the whole import** with a `Finding`-style report — no partial import, no
+   best-effort row skipping (Do-NOT list #6 applies to this data the same as
+   to a delivery row).
+2. Hash the uploaded file (`sha256`) into an additive column,
+   `code_table_import.source_hash`, absent from mvp-spec.md §5 (same pattern
+   as §4.3's additive columns on spec tables). If it matches the most recent
+   import's hash, the upload is a no-op (reported as "already current"), not
+   a duplicate generation.
+3. Otherwise, write one new `code_table_import` row plus its `code_attribute`
+   and `code_value` children — additive, per mvp-spec.md §5's "never edit
+   `code_value` or `code_attribute`" rule. Existing `column_mapping` rows are
+   left pointing at the old generation until an analyst re-points them.
+
+### 14.2 Mapping and coverage
+
+`column_mapping` (mvp-spec.md §5) is the only editable state this feature
+introduces — a `(corpus_id, source_column) → code_attribute_id` pointer nothing
+else reads destructively.
+
+**Coverage cannot be read off the materialised census.** `census_value` keeps
+only the top 20 values per column (§4.2) — enough for the Census view's
+long-tail question, not enough to say *every* code in, say, a 24-code
+attribute has a label, since a rare code can fall outside the top 20. Enum
+column cardinality is bounded by its code table (tens, not thousands), so
+`codelist_service.coverage(corpus_id, source_column)` computes a fresh
+`GROUP BY value_raw` over that column's EAV cells directly — cheap at this
+cardinality, and it is the only way to get an honest per-code count. This is
+a deliberate departure from "the census tables exist precisely so no view
+queries EAV directly" (§4.4): that rule holds for the Census view's own
+numbers, not for this one, narrower, small-cardinality read.
+
+Per mapped column, per configured prompt language:
+
+- **missing** — no `column_mapping` row, or the mapped `code_attribute` has
+  zero `code_value` rows.
+- **partial** — at least one `code_value` used by a corpus row has no label
+  in the configured language (the known case today: `main_cause`,
+  `main_cause_subgroup`, `main_cause_group` have no `it`, mvp-spec.md §7).
+- **ok** — every code appearing in the corpus has a label in that language.
+
+A code appearing in the corpus with **no row at all** in the mapped
+attribute's code table (not even in another language) is the `Finding`-grade
+case mvp-spec.md §7 already names — surfaced as the design's danger row
+("no label — not in the codelist"), not folded into "partial".
+
+`enum_codelist_json` (the fingerprint input, mvp-spec.md §8.5) is this
+coverage computation's `code_value` side only — the snapshot is taken once,
+at evaluation creation, exactly as §8.5 already specifies.
+
+### 14.3 Package layout additions
+
+```
+domain/
+  codes.py                  Pydantic schema for the imported JSON + validation
+  codelist_coverage.py       compute_coverage(cells, mapping, code_values) -> ColumnCoverage (pure)
+persistence/
+  repositories/
+    codelist_repo.py         code_table_import / code_attribute / code_value / column_mapping
+services/
+  codelist_service.py        import (§14.1), map, coverage query, unmap
+ui/
+  views/codelists_view.py    master/detail per design/code-feature/README.md Screen 1
+```
+
+`codelist_coverage.py` sits in `domain/` like `census.py` and `typehint.py` —
+pure, no SQLAlchemy — even though its caller (`codelist_service.py`) is the
+one running the `GROUP BY` query and handing it plain cell values.
+
+### 14.4 What this section deliberately does not decide
+
+- **Features' "used by" cross-links** (design Screen 1's "used by Right of
+  way") are inert until the Features view exists. `code_attribute`/
+  `column_mapping` carry no FK to a feature table yet — adding one is that
+  wave's job, not this one's.
+- **A second code source (e.g. a real VUM export)** is out of scope until B1
+  (mvp-spec.md §18) is resourced. The schema in §14.1 accommodates it: a
+  second `code_table_import` with different `attribute_key`s, mapped
+  independently per column.

@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <style>
+    :root{
+      --ink:oklch(0.22 0.012 260); --ink2:oklch(0.47 0.010 260); --ink3:oklch(0.63 0.008 260);
+      --rule:oklch(0.895 0.006 260); --rule2:oklch(0.945 0.004 260);
+      --bg:oklch(0.976 0.004 95); --surface:oklch(1 0 0);
+      --accent:oklch(0.50 0.008 260); --accent-soft:oklch(0.935 0.004 260);
+      --warn:oklch(0.56 0.13 72); --warn-soft:oklch(0.965 0.035 80);
+      --danger:oklch(0.53 0.15 27); --danger-soft:oklch(0.962 0.030 27);
+      --ok:oklch(0.50 0.11 152); --ok-soft:oklch(0.958 0.030 152);
+      --sans:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+      --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--bg);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased;}
+    a{color:var(--accent);text-decoration:none;} a:hover{color:var(--ink);text-decoration:underline;}
+    table{border-collapse:collapse;width:100%;}
+    .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink3);font-weight:500;white-space:nowrap;}
+    .mono{font-family:var(--mono);}
+    .card{background:var(--surface);border:1px solid var(--rule);border-radius:3px;}
+    .navitem{display:flex;align-items:center;gap:9px;padding:6px 14px;color:var(--ink2);font-size:12.5px;border-left:2px solid transparent;text-decoration:none;}
+    .navitem:hover{color:var(--ink);background:var(--rule2);text-decoration:none;}
+    .navitem.on{color:var(--ink);background:var(--accent-soft);border-left-color:var(--accent);font-weight:500;}
+    .sl{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid var(--rule);border-radius:3px;padding:6px 10px;background:var(--surface);font-family:var(--mono);font-size:12px;color:var(--ink);white-space:nowrap;}
+    .rof{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;border:1px solid var(--rule);border-radius:3px;padding:6px 10px;background:var(--surface);font-family:var(--mono);font-size:12px;color:var(--ink);}
+    .btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--rule);border-radius:3px;padding:7px 14px;font-size:12.5px;font-weight:500;background:var(--surface);color:var(--ink);white-space:nowrap;}
+    .btn.pri{background:var(--accent);color:var(--surface);border-color:var(--accent);}
+    .btn.sm{padding:4px 10px;font-size:11.5px;}
+    .stamp{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--ink3);border:1px dashed var(--rule);padding:3px 8px;border-radius:3px;white-space:nowrap;}
+    .pill{display:inline-flex;align-items:center;border-radius:3px;padding:2px 7px;font-family:var(--mono);font-size:10.5px;font-weight:500;}
+    .sth{font-family:var(--mono);font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink3);font-weight:500;white-space:nowrap;padding:9px 10px 7px;border-bottom:1px solid var(--rule);text-align:left;}
+    .std{padding:8px 10px;border-bottom:1px solid var(--rule2);font-size:12.5px;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .ibp{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border:1px solid var(--rule);border-radius:3px;color:var(--ink2);background:var(--surface);font-size:11px;flex:none;}
+    .row{padding:9px 16px;border-bottom:1px solid var(--rule2);display:flex;justify-content:space-between;align-items:center;gap:10px;}
+    .row:hover{background:var(--rule2);}
+    .rname{font-weight:500;font-size:12.5px;}
+    .rsub{font-family:var(--mono);font-size:10.5px;color:var(--ink3);margin-top:1px;}
+    .fp{font-family:var(--mono);font-size:10px;color:var(--ink3);white-space:nowrap;}
+    .seg{display:inline-flex;border:1px solid var(--rule);border-radius:3px;overflow:hidden;}
+    .seg > span{padding:5px 11px;font-size:12px;color:var(--ink2);background:var(--surface);border-right:1px solid var(--rule);}
+    .seg > span:last-child{border-right:none;}
+    .seg > span.on{background:var(--accent-soft);color:var(--ink);font-weight:500;}
+    .tok{font-family:var(--mono);font-size:12px;background:var(--surface);border:1px solid var(--rule);padding:5px 9px;border-radius:3px;display:inline-flex;align-items:center;gap:7px;}
+  </style>
+</helmet>
+
+<div style="display:flex;flex-direction:column;height:1180px;background:var(--bg);">
+
+  <header style="flex:none;display:flex;align-items:stretch;background:var(--surface);border-bottom:1px solid var(--rule);">
+    <div style="width:196px;flex:none;padding:14px;border-right:1px solid var(--rule);display:flex;flex-direction:column;justify-content:center;">
+      <div class="mono" style="font-size:15px;font-weight:600;letter-spacing:-.01em;">RA2</div>
+      <div class="lbl" style="margin-top:3px;">Accident report analysis</div>
+    </div>
+    <div style="flex:1;min-width:0;padding:14px 28px;display:flex;flex-direction:column;justify-content:center;">
+      <h1 style="margin:0;font-size:19px;font-weight:600;letter-spacing:-.012em;">Weather &amp; conditions <span class="mono" style="font-weight:500;color:var(--ink3);">v3</span></h1>
+      <div style="color:var(--ink2);font-size:12.5px;margin-top:2px;">Draft — 10 labelled · 4 exploratory · never run. Creating a feature set freezes this configuration.</div>
+    </div>
+  </header>
+
+  <div style="display:flex;flex:1;min-height:0;">
+
+    <nav style="width:196px;flex:none;background:var(--surface);border-right:1px solid var(--rule);display:flex;flex-direction:column;padding-bottom:14px;">
+      <div style="display:flex;flex-direction:column;gap:2px;padding-top:14px;">
+        <div class="lbl" style="padding:0 14px 6px;">Data</div>
+        <a href="Import.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"></path><path d="m8 10 4 4 4-4"></path><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"></path></svg>Import</a>
+        <a href="Census.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20V10"></path><path d="M10 20V4"></path><path d="M16 20v-7"></path><path d="M22 20H2"></path></svg>Census</a>
+        <a href="Codelists.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 6h13"></path><path d="M8 12h13"></path><path d="M8 18h13"></path><path d="M3 6h.01"></path><path d="M3 12h.01"></path><path d="M3 18h.01"></path></svg>Codelists</a>
+        <div class="lbl" style="padding:16px 14px 6px;">Configure</div>
+        <a href="FeatureConfig.dc.html" class="navitem on"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h10"></path><path d="M18 6h2"></path><path d="M4 12h4"></path><path d="M12 12h8"></path><path d="M4 18h12"></path><circle cx="16" cy="6" r="2"></circle><circle cx="10" cy="12" r="2"></circle><circle cx="18" cy="18" r="2"></circle></svg>Features</a>
+        <div class="lbl" style="padding:16px 14px 6px;">Run</div>
+        <a href="Evaluation.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="m10 8 6 4-6 4z"></path></svg>Evaluation</a>
+        <div class="lbl" style="padding:16px 14px 6px;">Review</div>
+        <a href="Main.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="1.5"></rect><path d="M3 10h18"></path><path d="M9 10v10"></path></svg>Results</a>
+        <a href="Mismatches.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 4.3 2.5 18a1.7 1.7 0 0 0 1.5 2.5h16a1.7 1.7 0 0 0 1.5-2.5L13.7 4.3a1.7 1.7 0 0 0-3 0Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>Mismatches</a>
+      </div>
+    </nav>
+
+    <main style="flex:1;min-width:0;display:flex;flex-direction:column;">
+
+      <div style="flex:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 28px;background:var(--surface);border-bottom:1px solid var(--rule);">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;">
+          <span class="sl" style="padding:4px 9px;font-size:11px;">set · Weather &amp; conditions <span class="mono" style="color:var(--ink3);">v3</span> <span style="color:var(--ink3);font-size:9px;">▼</span></span>
+          <span class="sl" style="padding:4px 9px;font-size:11px;">prompt language · de <span style="color:var(--ink3);font-size:9px;">▼</span></span>
+          <span style="display:inline-flex;align-items:center;gap:7px;background:var(--danger-soft);color:var(--danger);padding:3px 9px;border-radius:3px;font-size:11.5px;font-weight:500;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v6"></path><path d="M12 16h.01"></path></svg>
+            2 errors block set creation
+          </span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-left:auto;flex:none;">
+          <span class="stamp">WIREFRAME</span>
+          <span class="btn pri" style="padding:6px 13px;opacity:.45;">Create a feature set</span>
+        </div>
+      </div>
+
+      <div style="flex:1;min-height:0;display:flex;">
+
+        <div style="flex:0 1 452px;min-width:300px;border-right:1px solid var(--rule);display:flex;flex-direction:column;background:var(--surface);">
+          <div style="flex:none;height:46px;padding:0 16px;border-bottom:1px solid var(--rule);display:flex;justify-content:space-between;align-items:center;gap:10px;overflow:hidden;">
+            <span class="lbl" style="min-width:0;overflow:hidden;text-overflow:ellipsis;">10 + 4 features</span>
+            <div style="display:flex;align-items:center;gap:9px;flex:none;">
+              <span class="btn sm" style="gap:5px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>Add feature</span>
+            </div>
+          </div>
+
+          <div style="flex:none;padding:8px 16px;border-bottom:1px solid var(--rule2);display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:oklch(0.988 0.003 260);">
+            <span class="sl" style="padding:3px 8px;font-size:10.5px;">type · all <span style="color:var(--ink3);font-size:9px;">▼</span></span>
+            <span class="sl" style="padding:3px 8px;font-size:10.5px;">state · all <span style="color:var(--ink3);font-size:9px;">▼</span></span>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;">
+            <table style="table-layout:fixed;">
+              <thead>
+                <tr>
+                  <th class="sth" style="padding-left:16px;">Feature</th>
+                  <th class="sth" style="width:74px;">Type</th>
+                  <th class="sth" style="width:72px;padding-left:4px;padding-right:16px;"></th>
+                </tr>
+              </thead>
+              <tbody>
+              <tr>
+                <td class="std" style="padding-left:16px;">
+                  <div style="font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;">Weather</div>
+                  <div class="mono" style="font-size:10.5px;color:var(--ink3);margin-top:1px;overflow:hidden;text-overflow:ellipsis;">WitterungAusw</div>
+                </td>
+                <td class="std mono" style="font-size:10.5px;color:var(--ink2);">accident</td>
+                <td class="std" style="text-align:right;padding-left:4px;padding-right:16px;"><span class="fp">a91f4c</span></td>
+              </tr>
+              <tr>
+                <td class="std" style="padding-left:16px;">
+                  <div style="font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;">Light conditions</div>
+                  <div class="mono" style="font-size:10.5px;color:var(--ink3);margin-top:1px;overflow:hidden;text-overflow:ellipsis;">LichtverhaeltnisAusw</div>
+                </td>
+                <td class="std mono" style="font-size:10.5px;color:var(--ink2);">accident</td>
+                <td class="std" style="text-align:right;padding-left:4px;padding-right:16px;"><span class="fp">3d02b8</span></td>
+              </tr>
+              <tr style="background:var(--danger-soft);">
+                <td class="std" style="padding-left:16px;">
+                  <div style="font-weight:500;font-size:12.5px;color:var(--danger);overflow:hidden;text-overflow:ellipsis;">Right of way</div>
+                  <div class="mono" style="font-size:10.5px;color:var(--danger);margin-top:1px;overflow:hidden;text-overflow:ellipsis;">VortrittAusw · no codes</div>
+                </td>
+                <td class="std mono" style="font-size:10.5px;color:var(--ink2);">accident</td>
+                <td class="std" style="text-align:right;padding-left:4px;padding-right:16px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v6"></path><path d="M12 16h.01"></path></svg></td>
+              </tr>
+              <tr>
+                <td class="std" style="padding-left:16px;">
+                  <div style="font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;">Speed limit</div>
+                  <div class="mono" style="font-size:10.5px;color:var(--ink3);margin-top:1px;overflow:hidden;text-overflow:ellipsis;">HoechstGeschwKmHFeld</div>
+                </td>
+                <td class="std mono" style="font-size:10.5px;color:var(--ink2);">accident</td>
+                <td class="std" style="text-align:right;padding-left:4px;padding-right:16px;"><span class="fp">7e5511</span></td>
+              </tr>
+              <tr>
+                <td class="std" style="padding-left:16px;">
+                  <div style="font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;">Accident time</div>
+                  <div class="mono" style="font-size:10.5px;color:var(--ink3);margin-top:1px;overflow:hidden;text-overflow:ellipsis;">UnfallZeitFeld · ± 15 min</div>
+                </td>
+                <td class="std mono" style="font-size:10.5px;color:var(--ink2);">accident</td>
+                <td class="std" style="text-align:right;padding-left:4px;padding-right:16px;"><span class="fp">f10c73</span></td>
+              </tr>
+              <tr>
+                <td class="std" style="padding-left:16px;">
+                  <div style="font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;">Vehicles involved</div>
+                  <div class="mono" style="font-size:10.5px;color:var(--ink3);margin-top:1px;overflow:hidden;text-overflow:ellipsis;">native AnzObjFeld</div>
+                </td>
+                <td class="std mono" style="font-size:10.5px;color:var(--ink2);">derived</td>
+                <td class="std" style="text-align:right;padding-left:4px;padding-right:16px;"><span class="fp">c40ade</span></td>
+              </tr>
+              <tr style="background:var(--accent-soft);">
+                <td class="std" style="padding-left:16px;">
+                  <div style="font-weight:600;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;">Bicycle involved</div>
+                  <div class="mono" style="font-size:10.5px;color:var(--ink3);margin-top:1px;overflow:hidden;text-overflow:ellipsis;">any_object_matches</div>
+                </td>
+                <td class="std mono" style="font-size:10.5px;color:var(--ink2);">derived</td>
+                <td class="std" style="text-align:right;padding-left:4px;padding-right:16px;"><span class="fp">18bb90</span></td>
+              </tr>
+              <tr>
+                <td class="std" style="padding-left:16px;">
+                  <div style="font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;">Worst injury severity</div>
+                  <div class="mono" style="font-size:10.5px;color:var(--ink3);margin-top:1px;overflow:hidden;text-overflow:ellipsis;">max_ordinal · Verletzungsgrad</div>
+                </td>
+                <td class="std mono" style="font-size:10.5px;color:var(--ink2);">derived</td>
+                <td class="std" style="text-align:right;padding-left:4px;padding-right:16px;"><span class="fp">5a7e02</span></td>
+              </tr>
+              <tr>
+                <td class="std" style="padding-left:16px;">
+                  <div style="font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;">Vehicle type per object</div>
+                  <div class="mono" style="font-size:10.5px;color:var(--ink3);margin-top:1px;overflow:hidden;text-overflow:ellipsis;">objekt.FahrzeugartAusw</div>
+                </td>
+                <td class="std mono" style="font-size:10.5px;color:var(--ink2);">object</td>
+                <td class="std" style="text-align:right;padding-left:4px;padding-right:16px;"><span class="fp">—</span></td>
+              </tr>
+              <tr style="background:var(--danger-soft);">
+                <td class="std" style="padding-left:16px;">
+                  <div style="font-weight:500;font-size:12.5px;color:var(--danger);overflow:hidden;text-overflow:ellipsis;">Damage per vehicle</div>
+                  <div class="mono" style="font-size:10.5px;color:var(--danger);margin-top:1px;overflow:hidden;text-overflow:ellipsis;">objekt.SchadenAusw · non‑scalar</div>
+                </td>
+                <td class="std mono" style="font-size:10.5px;color:var(--ink2);">object</td>
+                <td class="std" style="text-align:right;padding-left:4px;padding-right:16px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v6"></path><path d="M12 16h.01"></path></svg></td>
+              </tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 16px;border-top:1px solid var(--rule);">
+            <div style="display:flex;align-items:center;gap:9px;">
+              <span class="lbl">Rows per page</span>
+              <span class="mono" style="display:inline-flex;align-items:center;gap:7px;font-size:11px;border:1px solid var(--rule);border-radius:3px;padding:3px 8px;">10 <span style="color:var(--ink3);font-size:9px;">▼</span></span>
+            </div>
+            <div style="display:flex;align-items:center;gap:9px;">
+              <span class="mono" style="font-size:11px;color:var(--ink2);white-space:nowrap;">1–10 of 14</span>
+              <span class="ibp" style="color:oklch(0.80 0.006 260);">‹</span>
+              <span class="ibp" style="">›</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="flex:1 1 520px;min-width:360px;padding:20px 28px;display:flex;flex-direction:column;gap:14px;overflow:auto;">
+
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+            <div>
+              <div class="lbl">Editing</div>
+              <h2 style="margin:3px 0 0;font-size:16px;font-weight:600;">Bicycle involved</h2>
+            </div>
+            <div style="text-align:right;flex:1 1 240px;min-width:0;">
+              <div class="lbl">Definition fingerprint <span style="color:var(--warn);">· preview</span></div>
+              <div class="mono" style="font-size:12px;margin-top:3px;color:var(--ink2);">18bb90c7a4e2…</div>
+              <div style="font-size:11px;color:var(--ink3);margin-top:2px;">Final value is computed when the evaluation is created.</div>
+            </div>
+          </div>
+
+          <section class="card" style="padding:16px;display:flex;flex-direction:column;gap:14px;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:14px;">
+              <div>
+                <div class="lbl" style="margin-bottom:6px;">Kind</div>
+                <span class="seg"><span class="on">Labelled</span><span>Exploratory</span></span>
+              </div>
+              <div>
+                <div class="lbl" style="margin-bottom:6px;">Grain</div>
+                <div class="rof">Derived aggregate <span style="color:var(--ink3);font-size:9px;">▼</span></div>
+              </div>
+              <div>
+                <div class="lbl" style="margin-bottom:6px;">Value type</div>
+                <div class="rof">boolean <span style="color:var(--ink3);font-size:9px;">▼</span></div>
+              </div>
+            </div>
+
+            <div>
+              <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:6px;">
+                <span class="lbl">Derivation — closed catalogue</span>
+                <span class="mono" style="font-size:10.5px;color:var(--ink3);">7 types · 6 operators</span>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:11px 12px;background:oklch(0.982 0.003 260);border:1px solid var(--rule);border-radius:3px;">
+                <span class="tok" style="font-weight:500;">any_object_matches <span style="color:var(--ink3);font-size:9px;">▼</span></span>
+                <span class="tok">objekt.FahrzeugartAusw <span style="color:var(--ink3);font-size:9px;">▼</span></span>
+                <span class="tok">in <span style="color:var(--ink3);font-size:9px;">▼</span></span>
+                <span class="tok">M12 <span style="color:var(--ink3);">×</span></span>
+                <span class="tok">M13 <span style="color:var(--ink3);">×</span></span>
+                <span class="tok" style="color:var(--ink3);border-style:dashed;">+ code</span>
+              </div>
+              <div style="display:flex;align-items:flex-start;gap:9px;margin-top:8px;">
+                <span class="lbl" style="padding-top:2px;">Saved as</span>
+                <span class="mono" style="font-size:11.5px;color:var(--ink2);">any_object_matches · objekt.FahrzeugartAusw in M12, M13 <span style="color:var(--ink3);">— Fahrrad, E‑Bike</span></span>
+              </div>
+            </div>
+
+            <div style="padding:10px 12px;background:var(--warn-soft);color:oklch(0.40 0.10 72);border-radius:3px;font-size:11.5px;display:flex;gap:8px;align-items:flex-start;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex:none;margin-top:1px;"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5" stroke-linecap="round"></path><path d="M12 8h.01" stroke-linecap="round"></path></svg>
+              <span style="flex:1;">No native <span class="mono">unfall</span> column carries this, so a derivation is right here. Where one does — as for <em>vehicles involved</em> (<span class="mono">AnzObjFeld</span>) — the builder offers the native column instead before you save: a column that is already there cannot be derived wrongly.</span>
+            </div>
+
+            <div>
+              <div class="lbl" style="margin-bottom:6px;">Description — goes into the prompt verbatim</div>
+              <div style="border:1px solid var(--rule);border-radius:3px;padding:10px 12px;font-size:12.5px;line-height:1.55;background:var(--surface);color:var(--ink);">Whether any bicycle or e‑bike took part in the accident, whether ridden or pushed, including where the rider is described only as a cyclist.</div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:14px;">
+              <div>
+                <div class="lbl" style="margin-bottom:6px;">Matching rule</div>
+                <div class="rof">exact <span style="color:var(--ink3);font-size:9px;">▼</span></div>
+                <div style="font-size:11px;color:var(--ink3);margin-top:4px;">boolean → truthy mapping, exact.</div>
+              </div>
+              <div>
+                <div class="lbl" style="margin-bottom:6px;">Parameter</div>
+                <div class="rof" style="color:var(--ink3);background:var(--rule2);border-style:dashed;">none for boolean</div>
+                <div style="font-size:11px;color:var(--ink3);margin-top:4px;">decimal → rounding · time → ± tolerance.</div>
+              </div>
+              <div>
+                <div class="lbl" style="margin-bottom:6px;">Scored in MVP</div>
+                <div class="rof" style="color:var(--ok);">Yes — scalar</div>
+              </div>
+            </div>
+          </section>
+
+          <section style="display:flex;gap:14px;align-items:stretch;flex-wrap:wrap;">
+            <div class="card" style="flex:1.3;padding:14px 16px;min-width:0;">
+              <div class="lbl" style="margin-bottom:8px;">Also captured, not scored</div>
+              <div style="font-size:12.5px;color:var(--ink2);line-height:1.6;">
+                The prompt asks for per‑vehicle and per‑person detail referenced by the narrative's role codes (<span class="mono" style="color:var(--ink);">B1</span>, <span class="mono" style="color:var(--ink);">G1</span>, <span class="mono" style="color:var(--ink);">P</span>), and the raw output is stored on every extraction. Only the aggregate above is scored. Set matching and per‑entity alignment are later scoring views — they need no re‑run.
+              </div>
+            </div>
+            <div class="card" style="flex:1;padding:14px 16px;min-width:0;">
+              <div class="lbl" style="margin-bottom:8px;">Reminder</div>
+              <div style="font-size:12.5px;color:var(--ink2);line-height:1.6;">Empty means <em>no value provided</em> — a record whose column is empty leaves that feature's denominator entirely, for every metric (§8.6).</div>
+            </div>
+          </section>
+
+        </div>
+      </div>
+
+      <div style="flex:none;margin-top:16px;border-top:1px solid var(--rule);background:var(--surface);display:flex;flex-direction:column;max-height:302px;">
+        <div style="flex:none;height:42px;padding:0 28px;display:flex;align-items:center;justify-content:space-between;gap:10px;overflow:hidden;border-bottom:1px solid var(--rule2);background:oklch(0.988 0.003 260);">
+          <span class="lbl" style="min-width:0;overflow:hidden;text-overflow:ellipsis;">Feature sets</span>
+          <span class="btn sm" style="gap:5px;flex:none;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>New set</span>
+        </div>
+        <div style="flex:1;min-height:0;overflow:auto;">
+          <table style="table-layout:fixed;">
+            <thead>
+              <tr>
+                <th class="sth" style="width:164px;padding-left:28px;">Set</th>
+                <th class="sth" style="width:132px;">Description</th>
+                <th class="sth" style="width:126px;">Created</th>
+                <th class="sth" style="width:66px;text-align:right;">Features</th>
+                <th class="sth" style="width:138px;">State</th>
+                <th class="sth" style="width:72px;"></th>
+                <th class="sth" style="min-width:28px;padding:0;"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="background:var(--accent-soft);">
+                <td class="std"><span style="font-weight:600;">Weather &amp; conditions</span> <span class="mono" style="font-size:10.5px;font-weight:500;color:var(--ink3);">v3</span></td>
+                <td class="std" style="color:var(--ink2);font-size:12px;">Conditions + probes</td>
+                <td class="std mono" style="font-size:11.5px;">2026‑09‑04 <span style="color:var(--ink3);">14:22</span></td>
+                <td class="std mono" style="text-align:right;">14</td>
+                <td class="std"><span class="mono" style="font-size:11px;color:var(--ink2);">draft · never run</span></td>
+                <td class="std" style="text-align:right;"><div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;">
+                  <span class="ibp" title="Rename"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"></path></svg></span>
+                  <span class="ibp" title="Delete" style="color:var(--danger);"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5 7h14"></path><path d="M9 7V5h6v2"></path><path d="M7 7l1 13h8l1-13"></path></svg></span>
+                </div></td>
+                <td class="std" style="padding:0;"></td>
+              </tr>
+              <tr>
+                <td class="std"><span style="font-weight:500;">Weather &amp; conditions</span> <span class="mono" style="font-size:10.5px;font-weight:500;color:var(--ink3);">v2</span></td>
+                <td class="std" style="color:var(--ink2);font-size:12px;">v3 predecessor</td>
+                <td class="std mono" style="font-size:11.5px;">2026‑08‑21 <span style="color:var(--ink3);">09:07</span></td>
+                <td class="std mono" style="text-align:right;">11</td>
+                <td class="std"><span class="pill" style="background:var(--accent-soft);color:var(--accent);">LOCKED · 2 evals</span></td>
+                <td class="std" style="text-align:right;"><a href="FeatureConfig -frozen-.dc.html" class="mono" style="font-size:11px;">open ↗</a></td>
+                <td class="std" style="padding:0;"></td>
+              </tr>
+              <tr>
+                <td class="std"><span style="font-weight:500;">Injury &amp; persons</span> <span class="mono" style="font-size:10.5px;font-weight:500;color:var(--ink3);">v1</span></td>
+                <td class="std" style="color:var(--ink2);font-size:12px;">Severity + counts</td>
+                <td class="std mono" style="font-size:11.5px;">2026‑08‑04 <span style="color:var(--ink3);">16:40</span></td>
+                <td class="std mono" style="text-align:right;">6</td>
+                <td class="std"><span class="pill" style="background:var(--accent-soft);color:var(--accent);">LOCKED · 1 eval</span></td>
+                <td class="std" style="text-align:right;"><span class="mono" style="font-size:11px;color:var(--ink3);">locked</span></td>
+                <td class="std" style="padding:0;"></td>
+              </tr>
+              <tr>
+                <td class="std"><span style="font-weight:500;">Scratch — objekt grain</span></td>
+                <td class="std" style="color:var(--ink2);font-size:12px;">Per‑vehicle damage</td>
+                <td class="std mono" style="font-size:11.5px;">2026‑09‑09 <span style="color:var(--ink3);">11:58</span></td>
+                <td class="std mono" style="text-align:right;">3</td>
+                <td class="std"><span class="mono" style="font-size:11px;color:var(--ink2);">draft · never run</span></td>
+                <td class="std" style="text-align:right;"><div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;">
+                  <span class="ibp" title="Rename"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"></path></svg></span>
+                  <span class="ibp" title="Delete" style="color:var(--danger);"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5 7h14"></path><path d="M9 7V5h6v2"></path><path d="M7 7l1 13h8l1-13"></path></svg></span>
+                </div></td>
+                <td class="std" style="padding:0;"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="flex:none;padding:8px 28px;border-top:1px solid var(--rule2);font-size:11px;color:var(--ink3);">A set locked by an evaluation cannot be renamed or deleted — its runs cite it by name.</div>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

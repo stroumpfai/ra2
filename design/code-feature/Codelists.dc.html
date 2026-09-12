@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <style>
+    :root{
+      --ink:oklch(0.22 0.012 260); --ink2:oklch(0.47 0.010 260); --ink3:oklch(0.63 0.008 260);
+      --rule:oklch(0.895 0.006 260); --rule2:oklch(0.945 0.004 260);
+      --bg:oklch(0.976 0.004 95); --surface:oklch(1 0 0);
+      --accent:oklch(0.50 0.008 260); --accent-soft:oklch(0.935 0.004 260);
+      --warn:oklch(0.56 0.13 72); --warn-soft:oklch(0.965 0.035 80);
+      --danger:oklch(0.53 0.15 27); --danger-soft:oklch(0.962 0.030 27);
+      --ok:oklch(0.50 0.11 152); --ok-soft:oklch(0.958 0.030 152);
+      --sans:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+      --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--bg);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased;}
+    a{color:var(--accent);text-decoration:none;} a:hover{color:var(--ink);text-decoration:underline;}
+    table{border-collapse:collapse;width:100%;}
+    .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink3);font-weight:500;white-space:nowrap;}
+    .th{font-family:var(--mono);font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink3);font-weight:500;white-space:nowrap;padding:0 10px 7px;border-bottom:1px solid var(--rule);text-align:left;}
+    .td{padding:8px 10px;border-bottom:1px solid var(--rule2);font-size:12.5px;vertical-align:middle;}
+    .mono{font-family:var(--mono);}
+    .card{background:var(--surface);border:1px solid var(--rule);border-radius:3px;}
+    .navitem{display:flex;align-items:center;gap:9px;padding:6px 14px;color:var(--ink2);font-size:12.5px;border-left:2px solid transparent;text-decoration:none;}
+    .navitem:hover{color:var(--ink);background:var(--rule2);text-decoration:none;}
+    .navitem.on{color:var(--ink);background:var(--accent-soft);border-left-color:var(--accent);font-weight:500;}
+    .chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--rule);border-radius:3px;padding:2px 7px;font-family:var(--mono);font-size:10.5px;color:var(--ink2);background:var(--surface);}
+    .sl{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid var(--rule);border-radius:3px;padding:4px 9px;background:var(--surface);font-family:var(--mono);font-size:11px;color:var(--ink);white-space:nowrap;}
+    .btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--rule);border-radius:3px;padding:7px 14px;font-size:12.5px;font-weight:500;background:var(--surface);color:var(--ink);white-space:nowrap;}
+    .btn.pri{background:var(--accent);color:var(--surface);border-color:var(--accent);}
+    .btn.sm{padding:4px 10px;font-size:11.5px;}
+    .stamp{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--ink3);border:1px dashed var(--rule);padding:3px 8px;border-radius:3px;white-space:nowrap;}
+    .bar{width:44px;height:6px;background:var(--rule2);border-radius:1px;overflow:hidden;flex:none;}
+    .pill{display:inline-flex;align-items:center;border-radius:3px;padding:2px 7px;font-family:var(--mono);font-size:10.5px;font-weight:500;white-space:nowrap;}
+    .row{padding:9px 16px;border-bottom:1px solid var(--rule2);display:flex;justify-content:space-between;align-items:center;gap:10px;}
+    .row:hover{background:var(--rule2);}
+    .rname{font-weight:500;font-size:12.5px;}
+    .rsub{font-family:var(--mono);font-size:10.5px;color:var(--ink3);margin-top:1px;}
+    .fld{font-size:12.5px;line-height:1.4;text-wrap:pretty;}
+    .sorth{display:inline-flex;align-items:center;gap:5px;}
+    .sarr{font-size:9px;letter-spacing:-1px;color:oklch(0.80 0.006 260);}
+    .sarr.on{color:var(--ink);}
+  </style>
+</helmet>
+
+<div style="display:flex;flex-direction:column;height:1080px;background:var(--bg);">
+
+  <header style="flex:none;display:flex;align-items:stretch;background:var(--surface);border-bottom:1px solid var(--rule);">
+    <div style="width:196px;flex:none;padding:14px;border-right:1px solid var(--rule);display:flex;flex-direction:column;justify-content:center;">
+      <div class="mono" style="font-size:15px;font-weight:600;letter-spacing:-.01em;">RA2</div>
+      <div class="lbl" style="margin-top:3px;">Accident report analysis</div>
+    </div>
+    <div style="flex:1;min-width:0;padding:14px 28px;display:flex;flex-direction:column;justify-content:center;">
+      <h1 style="margin:0;font-size:19px;font-weight:600;letter-spacing:-.012em;">Codelists</h1>
+      <div style="color:var(--ink2);font-size:12.5px;margin-top:2px;">Code → label tables the prompt reads. Imported as JSON; a changed label changes what every feature using it asks.</div>
+    </div>
+  </header>
+
+  <div style="display:flex;flex:1;min-height:0;">
+
+    <nav style="width:196px;flex:none;background:var(--surface);border-right:1px solid var(--rule);display:flex;flex-direction:column;padding-bottom:14px;">
+      <div style="display:flex;flex-direction:column;gap:2px;padding-top:14px;">
+        <div class="lbl" style="padding:0 14px 6px;">Data</div>
+        <a href="Import.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"></path><path d="m8 10 4 4 4-4"></path><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"></path></svg>Import</a>
+        <a href="Census.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20V10"></path><path d="M10 20V4"></path><path d="M16 20v-7"></path><path d="M22 20H2"></path></svg>Census</a>
+        <a href="Codelists.dc.html" class="navitem on"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 6h13"></path><path d="M8 12h13"></path><path d="M8 18h13"></path><path d="M3 6h.01"></path><path d="M3 12h.01"></path><path d="M3 18h.01"></path></svg>Codelists</a>
+        <div class="lbl" style="padding:16px 14px 6px;">Configure</div>
+        <a href="FeatureConfig.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h10"></path><path d="M18 6h2"></path><path d="M4 12h4"></path><path d="M12 12h8"></path><path d="M4 18h12"></path><circle cx="16" cy="6" r="2"></circle><circle cx="10" cy="12" r="2"></circle><circle cx="18" cy="18" r="2"></circle></svg>Features</a>
+        <div class="lbl" style="padding:16px 14px 6px;">Run</div>
+        <a href="Evaluation.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="m10 8 6 4-6 4z"></path></svg>Evaluation</a>
+        <div class="lbl" style="padding:16px 14px 6px;">Review</div>
+        <a href="Main.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="1.5"></rect><path d="M3 10h18"></path><path d="M9 10v10"></path></svg>Results</a>
+        <a href="Mismatches.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 4.3 2.5 18a1.7 1.7 0 0 0 1.5 2.5h16a1.7 1.7 0 0 0 1.5-2.5L13.7 4.3a1.7 1.7 0 0 0-3 0Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>Mismatches</a>
+      </div>
+    </nav>
+
+    <main style="flex:1;min-width:0;display:flex;flex-direction:column;">
+
+      <div style="flex:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 28px;background:var(--surface);border-bottom:1px solid var(--rule);">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;">
+          <span class="sl">corpus 2026‑09‑02 · v1 <span style="color:var(--ink3);font-size:9px;">▼</span></span>
+          <span class="sl">prompt language · de <span style="color:var(--ink3);font-size:9px;">▼</span></span>
+          <span class="sl">status · all <span class="mono" style="color:var(--ink2);">18</span> <span style="color:var(--ink3);font-size:9px;">▼</span></span>
+          <span style="display:inline-flex;align-items:center;gap:7px;background:var(--danger-soft);color:var(--danger);padding:3px 9px;border-radius:3px;font-size:11.5px;font-weight:500;white-space:nowrap;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v6"></path><path d="M12 16h.01"></path></svg>
+            2 columns have no codes · blocks 1 feature
+          </span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-left:auto;flex:none;">
+          <span class="stamp">WIREFRAME</span>
+        </div>
+      </div>
+
+      <div style="flex:1;min-height:0;display:flex;">
+
+        <div style="flex:0 1 452px;min-width:300px;border-right:1px solid var(--rule);display:flex;flex-direction:column;background:var(--surface);">
+          <div style="flex:none;height:46px;padding:0 16px;border-bottom:1px solid var(--rule);display:flex;justify-content:space-between;align-items:center;gap:10px;overflow:hidden;">
+            <span class="lbl" style="min-width:0;overflow:hidden;text-overflow:ellipsis;">18 columns</span>
+            <span class="btn sm" style="gap:5px;flex:none;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"></path><path d="m8 10 4 4 4-4"></path><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"></path></svg>Import Codes as JSON</span>
+          </div>
+
+          <div style="flex:1;min-height:0;overflow:auto;">
+            <div style="padding:12px 16px 6px;"><span class="lbl">2 missing — blocks any feature using it</span></div>
+            <div style="display:flex;flex-direction:column;">
+              <div class="row" style="background:var(--danger-soft);">
+                <div style="min-width:0;">
+                  <div class="rname" style="color:var(--danger);">VortrittAusw</div>
+                  <div class="rsub" style="color:var(--danger);">unfall · 4 distinct in corpus · used by <a href="FeatureConfig.dc.html" style="color:var(--danger);">Right of way</a></div>
+                </div>
+                <span class="pill" style="background:var(--surface);color:var(--danger);border:1px solid var(--danger);flex:none;">no codes</span>
+              </div>
+              <div class="row" style="background:var(--danger-soft);">
+                <div style="min-width:0;">
+                  <div class="rname" style="color:var(--danger);">objekt.SchadenAusw</div>
+                  <div class="rsub" style="color:var(--danger);">objekt · 6 distinct in corpus · unused</div>
+                </div>
+                <span class="pill" style="background:var(--surface);color:var(--danger);border:1px solid var(--danger);flex:none;">no codes</span>
+              </div>
+            </div>
+
+            <div style="padding:16px 16px 6px;"><span class="lbl">2 partial — codes with no label</span></div>
+            <div style="display:flex;flex-direction:column;">
+              <div class="row" style="background:var(--accent-soft);border-left:2px solid var(--accent);padding-left:14px;">
+                <div style="min-width:0;">
+                  <div class="rname" style="font-weight:600;">WitterungAusw</div>
+                  <div class="rsub" style="color:var(--ink2);">unfall · 8 of 9 labelled · used by <a href="FeatureConfig.dc.html">Weather</a></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:9px;flex:none;">
+                  <div class="bar"><div style="width:88.9%;height:100%;background:var(--warn);"></div></div>
+                  <span class="mono" style="font-size:11px;">88.9 %</span>
+                </div>
+              </div>
+              <div class="row">
+                <div style="min-width:0;">
+                  <div class="rname">HindernisAusw</div>
+                  <div class="rsub">unfall · 11 of 12 labelled · unused</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:9px;flex:none;">
+                  <div class="bar"><div style="width:91.7%;height:100%;background:var(--warn);"></div></div>
+                  <span class="mono" style="font-size:11px;">91.7 %</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="padding:16px 16px 6px;"><span class="lbl">14 ok — fully labelled</span></div>
+            <div style="display:flex;flex-direction:column;">
+              <div class="row">
+                <div style="min-width:0;">
+                  <div class="rname">LichtverhaeltnisAusw</div>
+                  <div class="rsub">unfall · 5 codes · used by <a href="FeatureConfig.dc.html">Light conditions</a></div>
+                </div>
+                <span class="pill" style="background:var(--ok-soft);color:var(--ok);flex:none;">100 %</span>
+              </div>
+              <div class="row">
+                <div style="min-width:0;">
+                  <div class="rname">UnfallTypAusw</div>
+                  <div class="rsub">unfall · 10 codes · unused</div>
+                </div>
+                <span class="pill" style="background:var(--ok-soft);color:var(--ok);flex:none;">100 %</span>
+              </div>
+              <div class="row">
+                <div style="min-width:0;">
+                  <div class="rname">StrassenzustandAusw</div>
+                  <div class="rsub">unfall · 6 codes · unused</div>
+                </div>
+                <span class="pill" style="background:var(--ok-soft);color:var(--ok);flex:none;">100 %</span>
+              </div>
+              <div class="row">
+                <div style="min-width:0;">
+                  <div class="rname">StrassenartAusw</div>
+                  <div class="rsub">unfall · 7 codes · unused</div>
+                </div>
+                <span class="pill" style="background:var(--ok-soft);color:var(--ok);flex:none;">100 %</span>
+              </div>
+              <div class="row">
+                <div style="min-width:0;">
+                  <div class="rname">objekt.FahrzeugartAusw</div>
+                  <div class="rsub">objekt · 23 codes · used by <a href="FeatureConfig.dc.html">Bicycle involved</a></div>
+                </div>
+                <span class="pill" style="background:var(--ok-soft);color:var(--ok);flex:none;">100 %</span>
+              </div>
+              <div class="row">
+                <div style="min-width:0;">
+                  <div class="rname">person.VerletzungsgradAusw</div>
+                  <div class="rsub">person · 4 codes · used by <a href="FeatureConfig.dc.html">Worst injury severity</a></div>
+                </div>
+                <span class="pill" style="background:var(--ok-soft);color:var(--ok);flex:none;">100 %</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 16px;border-top:1px solid var(--rule);">
+            <span class="lbl">Sorted by status</span>
+            <span class="mono" style="font-size:11px;color:var(--ink2);">10 of 18 shown</span>
+          </div>
+        </div>
+
+        <div style="flex:1 1 520px;min-width:360px;padding:20px 28px;display:flex;flex-direction:column;gap:14px;overflow:auto;">
+
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+            <div style="min-width:0;">
+              <div class="lbl">Codelist</div>
+              <h2 class="mono" style="margin:3px 0 0;font-size:16px;font-weight:600;">WitterungAusw</h2>
+              <div style="font-size:12px;color:var(--ink2);margin-top:2px;">unfall · 8 codes · used by <a href="FeatureConfig.dc.html">Weather</a></div>
+              <div class="mono" style="font-size:11px;color:var(--ink3);margin-top:3px;">mapped to <span style="color:var(--ink2);">witterung_codes</span> in codes‑vum‑2026‑09.json · 24 keys, 18 mapped</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex:1 1 auto;min-width:0;flex-wrap:wrap;justify-content:flex-end;">
+              <span class="lbl">Labels</span>
+              <div style="display:flex;gap:5px;">
+                <span class="chip" style="border-color:var(--accent);color:var(--ink);font-weight:500;">de</span>
+                <span class="chip">fr</span>
+                <span class="chip">it</span>
+              </div>
+              <span class="lbl">JSON key</span>
+              <span class="sl" style="max-width:210px;overflow:hidden;">witterung_codes <span class="mono" style="color:var(--ink3);">9</span> <span style="color:var(--ink3);font-size:9px;">▼</span></span>
+            </div>
+          </div>
+
+          <section class="card" style="flex:none;display:flex;flex-direction:column;min-width:0;">
+            <div style="overflow:auto;">
+              <table style="table-layout:fixed;">
+                <thead>
+                  <tr>
+                    <th class="th" style="padding-top:10px;width:44px;">Code</th>
+                    <th class="th" style="padding-top:10px;">Label · de <span style="text-transform:none;letter-spacing:0;color:var(--ink3);">(prompt)</span></th>
+                    <th class="th" style="padding-top:10px;width:66px;text-align:right;"><span class="sorth">Usage <span class="sarr on">▼</span></span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="td mono">1</td>
+                    <td class="td"><div class="fld">Trocken</div></td>
+                    <td class="td mono" style="text-align:right;"><div style="font-size:11.5px;">2 744</div><div style="font-size:10.5px;color:var(--ink3);">55.1 %</div></td>
+                  </tr>
+                  <tr>
+                    <td class="td mono">2</td>
+                    <td class="td"><div class="fld">Regen — anhaltender Niederschlag</div></td>
+                    <td class="td mono" style="text-align:right;"><div style="font-size:11.5px;">402</div><div style="font-size:10.5px;color:var(--ink3);">8.1 %</div></td>
+                  </tr>
+                  <tr>
+                    <td class="td mono">3</td>
+                    <td class="td"><div class="fld">Schneefall oder Schneeregen</div></td>
+                    <td class="td mono" style="text-align:right;"><div style="font-size:11.5px;">611</div><div style="font-size:10.5px;color:var(--ink3);">12.3 %</div></td>
+                  </tr>
+                  <tr>
+                    <td class="td mono">4</td>
+                    <td class="td"><div class="fld">Hagel</div></td>
+                    <td class="td mono" style="text-align:right;"><div style="font-size:11.5px;">18</div><div style="font-size:10.5px;color:var(--ink3);">0.4 %</div></td>
+                  </tr>
+                  <tr>
+                    <td class="td mono">5</td>
+                    <td class="td"><div class="fld">Nebel — Sichtweite unter 100 m</div></td>
+                    <td class="td mono" style="text-align:right;"><div style="font-size:11.5px;">144</div><div style="font-size:10.5px;color:var(--ink3);">2.9 %</div></td>
+                  </tr>
+                  <tr>
+                    <td class="td mono">6</td>
+                    <td class="td"><div class="fld">Starker Wind</div></td>
+                    <td class="td mono" style="text-align:right;"><div style="font-size:11.5px;">52</div><div style="font-size:10.5px;color:var(--ink3);">1.0 %</div></td>
+                  </tr>
+                  <tr style="background:var(--danger-soft);">
+                    <td class="td mono" style="color:var(--danger);">7</td>
+                    <td class="td"><div class="fld" style="color:var(--danger);">no label — not in the codelist</div></td>
+                    <td class="td mono" style="text-align:right;color:var(--danger);"><div style="font-size:11.5px;">31</div><div style="font-size:10.5px;">0.6 %</div></td>
+                  </tr>
+                  <tr>
+                    <td class="td mono">8</td>
+                    <td class="td"><div class="fld">Andere</div></td>
+                    <td class="td mono" style="text-align:right;"><div style="font-size:11.5px;">61</div><div style="font-size:10.5px;color:var(--ink3);">1.2 %</div></td>
+                  </tr>
+                  <tr>
+                    <td class="td mono" style="color:var(--ink3);">9</td>
+                    <td class="td"><div class="fld" style="color:var(--ink3);">Unbekannt</div></td>
+                    <td class="td mono" style="text-align:right;color:var(--ink3);"><div style="font-size:11.5px;">15</div><div style="font-size:10.5px;">0.3 %</div></td>
+                  </tr>
+                  <tr>
+                    <td class="td mono" style="color:var(--ink3);">0</td>
+                    <td class="td"><div class="fld" style="color:var(--ink3);">Nicht erhoben</div></td>
+                    <td class="td mono" style="text-align:right;color:var(--ink3);"><div style="font-size:11.5px;">0</div><div style="font-size:10.5px;">0 %</div></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div style="flex:none;display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border-top:1px solid var(--rule);background:var(--danger-soft);color:var(--danger);font-size:11.5px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="flex:none;margin-top:1px;"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v6"></path><path d="M12 16h.01"></path></svg>
+              <span style="flex:1;min-width:0;">Code <span class="mono">7</span> appears in 31 records but has no label. The prompt cannot name it, and those records score against an unnamed code.</span>
+              <span class="btn sm" style="border-color:var(--danger);color:var(--danger);flex:none;">Add label</span>
+            </div>
+
+            <div style="flex:none;display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border-top:1px solid var(--rule2);background:oklch(0.982 0.003 260);color:var(--ink2);font-size:11.5px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="flex:none;margin-top:1px;"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5"></path><path d="M12 8h.01"></path></svg>
+              <span style="flex:1;min-width:0;">Read‑only. Labels come from the imported JSON — to change one, import a corrected file. Any change gives <span class="mono">Weather</span> a new fingerprint, so runs before and after it are not comparable.</span>
+            </div>
+          </section>
+
+          <section style="display:flex;gap:14px;align-items:stretch;flex-wrap:wrap;">
+            <div class="card" style="flex:1.4 1 300px;padding:14px 16px;min-width:0;">
+              <div class="lbl">Prompt preview · what the model is shown</div>
+              <div class="mono" style="margin-top:7px;font-size:11.5px;color:var(--ink2);line-height:1.6;white-space:pre-wrap;">weather — enum. Emit the code.
+  1 = Trocken
+  2 = Regen — anhaltender Niederschlag
+  3 = Schneefall oder Schneeregen
+  …</div>
+            </div>
+            <div class="card" style="flex:1 1 240px;padding:14px 16px;min-width:0;">
+              <div class="lbl">Reminder</div>
+              <div style="color:var(--ink2);font-size:12.5px;margin-top:6px;">A label is prompt text, not a display string. All stored languages travel with the codelist; only the configured prompt language is sent (§7).</div>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
