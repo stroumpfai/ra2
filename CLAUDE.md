@@ -87,6 +87,12 @@ gate.
 
 - **Toolchain.** `uv` for everything Python (`uv sync --frozen`, `uv run …`);
   `just` for every command. Never bare `pip`, never `python -m venv`.
+- **Manual verification runs `just dev-agent`, never bare `just dev`.** `dev`
+  binds the fixed port 8080 and defaults `RA2_DATA_DIR` to `./var` — the same
+  port and the same real database a developer's own manual testing session
+  uses. `dev-agent` isolates both (a random free port, a throwaway temp data
+  dir) so an agent eyeballing a change in a browser cannot collide with the
+  developer's live test data the way one has before.
 - **Tests are the handshake.** You are done when your named tests are green in
   your own worktree *and* `just lint` and `just test` pass there. A pull
   request that adds behaviour without a test at the right layer is not

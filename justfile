@@ -16,6 +16,13 @@ default:
 dev:
     uv run uvicorn ra2.main:create_app --factory --reload --host 127.0.0.1 --port 8080
 
+# Same as `dev`, but on a random free port against a throwaway RA2_DATA_DIR.
+# Agents verifying a change run this, never bare `dev` — sharing port 8080 or
+# `./var` with a developer's own manual testing session has clobbered their
+# live test data before.
+dev-agent:
+    uv run python scripts/dev_agent.py
+
 # ---------------------------------------------------------------------------
 # Gates (sw-design.md §11.7)
 # ---------------------------------------------------------------------------
