@@ -11,13 +11,27 @@ The last group is the architectural one. A component that quietly grew a
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import pytest
 from nicegui import ui
 from nicegui.testing.user import User
 from nicegui.testing.user_interaction import UserInteraction
 
-from ra2.services.readmodels import SortDir
+from ra2.domain.feature import (
+    AnyObjectMatches,
+    AnyPersonMatches,
+    CountObjects,
+    CountPersons,
+    DerivationSpec,
+    DistinctCount,
+    Filter,
+    MaxOrdinal,
+    MinOrdinal,
+    Operator,
+)
+from ra2.domain.ids import FeatureConfigId
+from ra2.services.readmodels import FeatureSetSummary, SortDir
 from ra2.ui.components import (
     ColumnSpec,
     bar,
@@ -32,6 +46,8 @@ from ra2.ui.components import (
     pagination_row,
     tick,
 )
+from ra2.ui.components.derivation_builder import derivation_builder
+from ra2.ui.components.feature_sets_table import feature_sets_table
 from ra2.ui.components.primitives import (
     field_select,
     fingerprint_badge,
@@ -428,6 +444,321 @@ async def test_the_master_detail_split_never_wraps_and_floors_both_panes(user):
     assert "min-width:var(--split-detail-floor)" in STYLESHEET
 
 
+# --- derivation_builder (G3) -------------------------------------------------
+#
+# design/code-feature/README.md, Screen 2 · Case C: a tinted box of `.tok`
+# chips for the closed derivation catalogue. Every one of the seven
+# `DerivationSpec` shapes must round-trip through the chips without loss —
+# render with a given `value`, simulate one edit, and check `on_change` got a
+# new, fully-formed spec with the edited field changed and everything else
+# untouched.
+
+
+async def test_derivation_builder_round_trips_count_objects_operator_edit(user):
+    seen: list[DerivationSpec] = []
+    original = CountObjects(filter=Filter(column="AnzObjFeld", operator=Operator.EQ, value="3"))
+    page(
+        "/t/deriv/count-objects",
+        lambda: derivation_builder(value=original, on_change=seen.append),
+    )
+    await user.open("/t/deriv/count-objects")
+
+    user.find(marker="filter-operator").click()
+
+    assert seen == [
+        CountObjects(filter=Filter(column="AnzObjFeld", operator=Operator.NE, value="3"))
+    ]
+
+
+async def test_derivation_builder_adds_a_filter_starting_from_none(user):
+    """`CountPersons(filter=None)` is a valid, fully-formed spec on its own —
+    the "+ filter" chip is the edit that gives it one."""
+    seen: list[DerivationSpec] = []
+    original = CountPersons(filter=None)
+    page(
+        "/t/deriv/count-persons",
+        lambda: derivation_builder(value=original, on_change=seen.append),
+    )
+    await user.open("/t/deriv/count-persons")
+
+    user.find(marker="filter-add").click()
+
+    assert seen == [CountPersons(filter=Filter(column="", operator=Operator.EQ, value=""))]
+
+
+async def test_derivation_builder_round_trips_any_object_matches_add_code(user):
+    """The design's own example: `M12 ×  M13 ×  + code` on an `in` filter."""
+    seen: list[DerivationSpec] = []
+    original = AnyObjectMatches(
+        filter=Filter(column="objekt.FahrzeugartAusw", operator=Operator.IN, value=("M12", "M13"))
+    )
+    page(
+        "/t/deriv/any-object",
+        lambda: derivation_builder(value=original, on_change=seen.append),
+    )
+    await user.open("/t/deriv/any-object")
+
+    user.find(marker="filter-value-add").click()
+
+    assert seen == [
+        AnyObjectMatches(
+            filter=Filter(
+                column="objekt.FahrzeugartAusw",
+                operator=Operator.IN,
+                value=("M12", "M13", ""),
+            )
+        )
+    ]
+
+
+async def test_derivation_builder_round_trips_any_person_matches_column_edit(user):
+    seen: list[DerivationSpec] = []
+    original = AnyPersonMatches(
+        filter=Filter(column="person.VerletzungsgradAusw", operator=Operator.EQ, value="1")
+    )
+    page(
+        "/t/deriv/any-person",
+        lambda: derivation_builder(value=original, on_change=seen.append),
+    )
+    await user.open("/t/deriv/any-person")
+
+    user.find(marker="filter-column").trigger("change", args="person.AlterVFeld")
+
+    assert seen == [
+        AnyPersonMatches(filter=Filter(column="person.AlterVFeld", operator=Operator.EQ, value="1"))
+    ]
+
+
+async def test_derivation_builder_round_trips_max_ordinal_table_edit(user):
+    seen: list[DerivationSpec] = []
+    original = MaxOrdinal(
+        table="person", column="VerletzungsgradAusw", ordered_codes=("1", "2", "3")
+    )
+    page(
+        "/t/deriv/max-ordinal",
+        lambda: derivation_builder(value=original, on_change=seen.append),
+    )
+    await user.open("/t/deriv/max-ordinal")
+
+    user.find(marker="ordinal-table-chip").click()
+
+    assert seen == [
+        MaxOrdinal(table="objekt", column="VerletzungsgradAusw", ordered_codes=("1", "2", "3"))
+    ]
+
+
+async def test_derivation_builder_round_trips_min_ordinal_code_removal(user):
+    seen: list[DerivationSpec] = []
+    original = MinOrdinal(table="objekt", column="SchadenAusw", ordered_codes=("A", "B"))
+    page(
+        "/t/deriv/min-ordinal",
+        lambda: derivation_builder(value=original, on_change=seen.append),
+    )
+    await user.open("/t/deriv/min-ordinal")
+
+    user.find(marker="ordinal-code-0-remove").click()
+
+    assert seen == [MinOrdinal(table="objekt", column="SchadenAusw", ordered_codes=("B",))]
+
+
+async def test_derivation_builder_round_trips_distinct_count_table_edit(user):
+    seen: list[DerivationSpec] = []
+    original = DistinctCount(table="objekt", column="FahrzeugartAusw")
+    page(
+        "/t/deriv/distinct",
+        lambda: derivation_builder(value=original, on_change=seen.append),
+    )
+    await user.open("/t/deriv/distinct")
+
+    user.find(marker="distinct-table-chip").click()
+
+    assert seen == [DistinctCount(table="person", column="FahrzeugartAusw")]
+
+
+async def test_derivation_builder_renders_every_shape_faithfully(user):
+    """The "Saved as" mono line is assembled from `value` alone (design, Case
+    C) — one render per shape is enough to prove every field made it in."""
+    specs: list[DerivationSpec] = [
+        CountObjects(filter=None),
+        CountPersons(filter=Filter(column="col", operator=Operator.NOT_IN, value=("X", "Y"))),
+        AnyObjectMatches(
+            filter=Filter(
+                column="objekt.FahrzeugartAusw", operator=Operator.IN, value=("M12", "M13")
+            )
+        ),
+        AnyPersonMatches(filter=Filter(column="person.col", operator=Operator.IS_EMPTY)),
+        MaxOrdinal(table="person", column="VerletzungsgradAusw", ordered_codes=("1", "2")),
+        MinOrdinal(table="objekt", column="SchadenAusw", ordered_codes=("A",)),
+        DistinctCount(table="objekt", column="FahrzeugartAusw"),
+    ]
+
+    def build() -> None:
+        for spec in specs:
+            derivation_builder(value=spec, on_change=lambda _: None)
+
+    page("/t/deriv/all-shapes", build)
+    await user.open("/t/deriv/all-shapes")
+
+    expressions = [str(e.text) for e in _ordered(user.find(marker="derivation-expression"))]
+    assert expressions == [
+        "count_objects",
+        "count_persons · col not in X, Y",
+        "any_object_matches · objekt.FahrzeugartAusw in M12, M13",
+        "any_person_matches · person.col is empty",
+        "max_ordinal · person.VerletzungsgradAusw (1, 2)",
+        "min_ordinal · objekt.SchadenAusw (A)",
+        "distinct_count · objekt.FahrzeugartAusw",
+    ]
+
+
+# --- feature_sets_table (G3) --------------------------------------------------
+#
+# design/code-feature/README.md, Screen 2 · "Feature sets table": a
+# `table-layout:fixed` strip with a trailing filler column, and a locked row
+# whose rename/delete controls are **absent**, not disabled.
+
+_DRAFT_SET = FeatureSetSummary(
+    feature_config_id=FeatureConfigId("fc-draft"),
+    name="Weather & conditions",
+    version=3,
+    description="Conditions + probes",
+    created_at=datetime(2026, 9, 4, 14, 22, tzinfo=UTC),
+    feature_count=14,
+    frozen_at=None,
+)
+_LOCKED_SET = FeatureSetSummary(
+    feature_config_id=FeatureConfigId("fc-locked"),
+    name="Weather & conditions",
+    version=2,
+    description="v3 predecessor",
+    created_at=datetime(2026, 8, 21, 9, 7, tzinfo=UTC),
+    feature_count=11,
+    frozen_at=datetime(2026, 8, 21, 9, 30, tzinfo=UTC),
+    locked_by_evaluations=2,
+)
+
+
+def _noop_rename(_feature_config_id: str, _name: str) -> None:
+    return None
+
+
+async def test_feature_sets_table_filler_column_absorbs_width_not_a_gap(user):
+    """Mirrors `test_the_table_is_fixed_layout_with_the_designs_widths` above
+    and the Import view's own flexible-column pattern
+    (`tests/e2e/test_j4_layout.py`): every named column carries the design's
+    exact pixel width, and the trailing filler carries none, so `table-
+    layout:fixed` hands it all the slack instead of opening a gap."""
+    page(
+        "/t/fs/widths",
+        lambda: feature_sets_table(
+            sets=[_DRAFT_SET],
+            selected_id=None,
+            on_select=lambda _: None,
+            on_rename=_noop_rename,
+            on_delete=lambda _: None,
+            on_new_set=lambda: None,
+        ),
+    )
+    await user.open("/t/fs/widths")
+
+    (table,) = user.find(marker="feature-sets-table").elements
+    assert table._style["table-layout"] == "fixed"
+
+    widths = {
+        e._props["data-column"]: e._style.get("width")
+        for e in _all(user)
+        if e.tag == "th" and "data-column" in e._props
+    }
+    assert widths["set"] == "164px"
+    assert widths["description"] == "132px"
+    assert widths["created"] == "126px"
+    assert widths["features"] == "66px"
+    assert widths["state"] == "138px"
+    assert widths["action"] == "72px"
+    assert widths["filler"] is None
+
+
+async def test_feature_sets_table_locked_row_has_no_rename_or_delete_controls(user):
+    """Exit criterion: absent, not `disabled=True` (README, "Feature sets
+    table"; task brief)."""
+    page(
+        "/t/fs/locked",
+        lambda: feature_sets_table(
+            sets=[_LOCKED_SET],
+            selected_id=None,
+            on_select=lambda _: None,
+            on_rename=_noop_rename,
+            on_delete=lambda _: None,
+            on_new_set=lambda: None,
+        ),
+    )
+    await user.open("/t/fs/locked")
+
+    assert _with_marker(user, "rename-button") == []
+    assert _with_marker(user, "delete-button") == []
+    assert _with_marker(user, "rename-input") == []
+
+    (pill_element,) = user.find(marker="pill").elements
+    assert "pill-accent" in pill_element.classes
+    await user.should_see("LOCKED · 2 evals")
+
+
+async def test_feature_sets_table_draft_row_rename_and_delete_are_wired(user):
+    renamed: list[tuple[str, str]] = []
+    deleted: list[str] = []
+    page(
+        "/t/fs/draft",
+        lambda: feature_sets_table(
+            sets=[_DRAFT_SET],
+            selected_id=None,
+            on_select=lambda _: None,
+            on_rename=lambda feature_config_id, name: renamed.append((feature_config_id, name)),
+            on_delete=deleted.append,
+            on_new_set=lambda: None,
+        ),
+    )
+    await user.open("/t/fs/draft")
+    await user.should_see("draft · never run")
+
+    (rename_input,) = user.find(marker="rename-input").elements
+    assert rename_input._style.get("display") == "none"
+
+    user.find(marker="rename-button").click()
+    assert rename_input._style.get("display") == "inline-block"
+
+    user.find(marker="rename-input").trigger("change", args="Weather & conditions (renamed)")
+    assert renamed == [("fc-draft", "Weather & conditions (renamed)")]
+
+    user.find(marker="delete-button").click()
+    assert deleted == ["fc-draft"]
+
+
+async def test_feature_sets_table_row_select_and_new_set_button(user):
+    selected: list[str] = []
+    created: list[bool] = []
+    page(
+        "/t/fs/select",
+        lambda: feature_sets_table(
+            sets=[_DRAFT_SET],
+            selected_id=_DRAFT_SET.feature_config_id,
+            on_select=selected.append,
+            on_rename=_noop_rename,
+            on_delete=lambda _: None,
+            on_new_set=lambda: created.append(True),
+        ),
+    )
+    await user.open("/t/fs/select")
+
+    (row,) = user.find(marker="feature-set-row").elements
+    assert row._props["aria-pressed"] == "true"
+
+    user.find(marker="feature-set-row").click()
+    assert selected == [_DRAFT_SET.feature_config_id]
+
+    user.find(marker="new-set-button").click()
+    assert created == [True]
+
+
 # --- state ------------------------------------------------------------------
 
 
@@ -486,3 +817,14 @@ def _text(element: ui.element) -> str:
 
 def _row_names(user: User) -> list[str]:
     return [str(e.text) for e in _ordered(user.find(kind=ui.label, marker="filename"))]
+
+
+def _with_marker(user: User, marker: str) -> list[ui.element]:
+    """Elements carrying `marker`, or `[]` if none do.
+
+    `user.find(marker=...)` raises when nothing matches — the right default
+    for "select something to interact with", wrong for "prove this control
+    was never rendered" (the locked-row exit criterion). This is `_all`
+    filtered by marker instead of routed through `find`.
+    """
+    return [e for e in _all(user) if marker in e._markers]
