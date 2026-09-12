@@ -283,11 +283,17 @@ class Corpus(Base):
     #: `{"de": 2812, "fr": 1402, "it": 396}`.
     language_counts_json: Mapped[str | None] = mapped_column(default=None)
 
+    #: `passive_deletes=True`: a corpus delete lets SQLite's own `ON DELETE
+    #: CASCADE` (every FK down this tree declares it, and `session.py` turns
+    #: on `PRAGMA foreign_keys`) remove the whole record/EAV tree in one
+    #: statement, instead of the ORM loading every row into Python first to
+    #: issue a `DELETE` per object — a transaction long enough to blow past
+    #: `BUSY_TIMEOUT_MS` and raise "database is locked" on a real corpus.
     records: Mapped[list[Record]] = relationship(
-        back_populates="corpus", cascade="all, delete-orphan"
+        back_populates="corpus", cascade="all, delete-orphan", passive_deletes=True
     )
     census_columns: Mapped[list[CensusColumn]] = relationship(
-        back_populates="corpus", cascade="all, delete-orphan"
+        back_populates="corpus", cascade="all, delete-orphan", passive_deletes=True
     )
 
 
@@ -322,10 +328,10 @@ class Record(Base):
 
     corpus: Mapped[Corpus] = relationship(back_populates="records")
     unfall_cells: Mapped[list[UnfallRow]] = relationship(
-        back_populates="record", cascade="all, delete-orphan"
+        back_populates="record", cascade="all, delete-orphan", passive_deletes=True
     )
     objekt_rows: Mapped[list[ObjektRow]] = relationship(
-        back_populates="record", cascade="all, delete-orphan"
+        back_populates="record", cascade="all, delete-orphan", passive_deletes=True
     )
 
 
@@ -374,10 +380,10 @@ class ObjektRow(Base):
 
     record: Mapped[Record] = relationship(back_populates="objekt_rows")
     cells: Mapped[list[ObjektCell]] = relationship(
-        back_populates="objekt_row", cascade="all, delete-orphan"
+        back_populates="objekt_row", cascade="all, delete-orphan", passive_deletes=True
     )
     person_rows: Mapped[list[PersonRow]] = relationship(
-        back_populates="objekt_row", cascade="all, delete-orphan"
+        back_populates="objekt_row", cascade="all, delete-orphan", passive_deletes=True
     )
 
 
@@ -422,7 +428,7 @@ class PersonRow(Base):
 
     objekt_row: Mapped[ObjektRow] = relationship(back_populates="person_rows")
     cells: Mapped[list[PersonCell]] = relationship(
-        back_populates="person_row", cascade="all, delete-orphan"
+        back_populates="person_row", cascade="all, delete-orphan", passive_deletes=True
     )
 
 
@@ -500,6 +506,7 @@ class CensusColumn(Base):
         back_populates="census_column",
         cascade="all, delete-orphan",
         order_by="CensusValue.rank",
+        passive_deletes=True,
     )
 
 

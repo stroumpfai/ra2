@@ -67,7 +67,7 @@ from ra2.domain.language import Language
 from ra2.services.container import Services
 from ra2.services.errors import CodelistImportError, ServiceError
 from ra2.services.readmodels import CodeAttributeView, ColumnMappingView, CorpusView, SortDir
-from ra2.ui.components import bar, card, format_count
+from ra2.ui.components import bar, card, dialog_card, format_count
 from ra2.ui.components.icons import ALERT_TRIANGLE, DOWNLOAD, INFO, svg
 from ra2.ui.components.primitives import field_select, master_detail_split, pill
 from ra2.ui.shell import item_for_key, shell
@@ -1032,10 +1032,7 @@ class _CodelistsPage:
             # opened this dialog is redrawn by `reload()` mid-handler.
             self._root,
             ui.dialog().props('data-testid="import-dialog"') as dialog,
-            # Quasar re-enables pointer events by tag on `.q-dialog__inner >
-            # div`; a `<section class="card">` as the direct child is inert.
-            ui.element("div").style("border-radius:3px;"),
-            card(extra="width:520px;"),
+            dialog_card(extra="width:520px;max-height:88vh;overflow:auto;"),
         ):
             self._import_dialog = dialog
             with ui.element("div").style("padding:14px;"):
@@ -1380,8 +1377,7 @@ def _show_import_errors(errors: Sequence[CodeImportError], *, host: Element) -> 
         # See `_open_import` for why the dialog is parented to `host`.
         host,
         ui.dialog().props('data-testid="import-failed"') as dialog,
-        ui.element("div").style("border-radius:3px;"),
-        card(extra="width:640px;"),
+        dialog_card(extra="width:640px;max-height:88vh;overflow:auto;"),
     ):
         with ui.element("div").style("padding:14px;"):
             ui.label(IMPORT_FAILED_TITLE).props('data-testid="import-failed-title"').mark(

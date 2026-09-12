@@ -43,6 +43,7 @@ from ra2.ui.components import (
     card,
     card_header,
     data_table,
+    dialog_card,
     footnote,
     format_count,
     icon_button,
@@ -179,43 +180,60 @@ class _ImportPage:
 
         One place reads, so no handler has to work out which half of the page
         its action invalidated.
+
+        The body runs in **`_root`'s** context, not in the context of whatever
+        fired it. `table_state` and `_current_delivery` both read
+        `app.storage.client`, which NiceGUI resolves through the slot stack —
+        and an event handler's slot belongs to the element that fired it, an
+        element this method's own `_render()` is entitled to destroy. Two
+        events in flight at once is all it takes: the first one's redraw
+        deletes the second one's button, and the second one then raises "The
+        parent element this slot belongs to has been deleted" from whichever
+        storage read it happened to reach first. A manual-testing report
+        caught it on a double-clicked "Delete" — the corpus was deleted
+        correctly both times, and the crash came afterwards, out of the
+        orphaned handler. `_root` is built once in `build()` and never
+        cleared (only `_grid` and `_corpora_slot` are), so it outlives every
+        redraw and every button in it.
         """
-        self._delivery = await self._current_delivery()
-        if self._delivery is not None:
-            delivery_id = self._delivery.delivery_id
-            structured_state = table_state(
-                STRUCTURED_TABLE, sort_key="filename", page_size=PAGE_SIZE
+        assert self._root is not None  # built in `build()`, before any reload
+        with self._root:
+            self._delivery = await self._current_delivery()
+            if self._delivery is not None:
+                delivery_id = self._delivery.delivery_id
+                structured_state = table_state(
+                    STRUCTURED_TABLE, sort_key="filename", page_size=PAGE_SIZE
+                )
+                text_state = table_state(TEXT_TABLE, sort_key="filename", page_size=PAGE_SIZE)
+                self._structured = await self._services.delivery.files(
+                    delivery_id,
+                    exclude_kinds={FileKind.TEXT},
+                    sort_key=structured_state.sort_key,
+                    sort_dir=structured_state.sort_dir,
+                    page=structured_state.page,
+                    page_size=structured_state.page_size,
+                )
+                self._text = await self._services.delivery.files(
+                    delivery_id,
+                    kinds={FileKind.TEXT},
+                    sort_key=text_state.sort_key,
+                    sort_dir=text_state.sort_dir,
+                    page=text_state.page,
+                    page_size=text_state.page_size,
+                )
+            else:
+                self._structured = None
+                self._text = None
+            state = table_state(CORPORA_TABLE, sort_key="imported_at", page_size=PAGE_SIZE)
+            self._corpora = await self._services.corpus.list_corpora(
+                sort_key="imported_at",
+                sort_dir=SortDir.DESC,
+                page=state.page,
+                page_size=state.page_size,
             )
-            text_state = table_state(TEXT_TABLE, sort_key="filename", page_size=PAGE_SIZE)
-            self._structured = await self._services.delivery.files(
-                delivery_id,
-                exclude_kinds={FileKind.TEXT},
-                sort_key=structured_state.sort_key,
-                sort_dir=structured_state.sort_dir,
-                page=structured_state.page,
-                page_size=structured_state.page_size,
-            )
-            self._text = await self._services.delivery.files(
-                delivery_id,
-                kinds={FileKind.TEXT},
-                sort_key=text_state.sort_key,
-                sort_dir=text_state.sort_dir,
-                page=text_state.page,
-                page_size=text_state.page_size,
-            )
-        else:
-            self._structured = None
-            self._text = None
-        state = table_state(CORPORA_TABLE, sort_key="imported_at", page_size=PAGE_SIZE)
-        self._corpora = await self._services.corpus.list_corpora(
-            sort_key="imported_at",
-            sort_dir=SortDir.DESC,
-            page=state.page,
-            page_size=state.page_size,
-        )
-        summary = await self._services.corpus.summary()
-        self._corpus_total, self._corpus_locked = summary.total, summary.locked
-        self._render()
+            summary = await self._services.corpus.summary()
+            self._corpus_total, self._corpus_locked = summary.total, summary.locked
+            self._render()
 
     async def _current_delivery(self) -> DeliveryView | None:
         """The delivery the two file cards show.
@@ -654,11 +672,7 @@ class _ImportPage:
             # parented there would be destroyed mid-handler.
             self._root,
             ui.dialog().props('data-testid="intake"') as dialog,
-            # Quasar re-enables pointer events with `.q-dialog__inner > div`,
-            # by tag — a `<section class="card">` as the direct child renders
-            # correctly and is completely unclickable.
-            ui.element("div").style("border-radius:3px;"),
-            card(extra="width:560px;"),
+            dialog_card(extra="width:560px;max-height:88vh;overflow:auto;"),
         ):
             with ui.element("div").style("padding:14px;"):
                 ui.label("Add files").classes("lbl")
@@ -771,11 +785,27 @@ class _ImportPage:
         delivery's own status is **terminal**, and polls the status rather than
         the task table because the status is a service read model and
         `TaskProgress` is an `infra` type the layer rule keeps out of `ui/`.
+
+        Polling always starts here, unconditionally — a manual-testing report
+        found that adding a file to an **already-analysed** delivery could
+        leave a freshly-uploaded file stuck showing its pre-analysis category
+        (a text file rendered as structured) until a manual page reload. The
+        cause: this method's own `reload()` races the background task this
+        same call just scheduled — for a *fresh* delivery `status` starts at
+        `REGISTERED`, so `_settled` is safely `False` regardless of who wins
+        that race, but for a delivery analysed once already, `status` can
+        still read its **old** terminal value (`ANALYSED`) if `reload()` beats
+        `work()`'s first line (which sets `ANALYSING`) to the database —
+        making `_settled` true by mistake and skipping `_start_polling()`
+        right when a second round of analysis is what is actually running.
+        `_start_polling()`'s own timer already checks `_settled` on every
+        tick and stops itself the moment it is genuinely true, so starting it
+        unconditionally costs at most one harmless extra poll when nothing
+        was racing in the first place.
         """
         await self._services.delivery.analyse(delivery_id)
         await self.reload()
-        if not self._settled:
-            self._start_polling()
+        self._start_polling()
 
     @property
     def _settled(self) -> bool:
@@ -894,9 +924,7 @@ def _show_blocking(findings: Sequence[Finding], *, host: Element) -> None:
         # See `_open_intake` for why the dialog is parented to `host`.
         host,
         ui.dialog().props('data-testid="blocking"') as dialog,
-        # See `_open_intake`: the card cannot be the dialog's direct child.
-        ui.element("div").style("border-radius:3px;"),
-        card(extra="width:640px;"),
+        dialog_card(extra="width:640px;max-height:88vh;overflow:auto;"),
     ):
         with ui.element("div").style("padding:14px;"):
             ui.label("Corpus not created").props('data-testid="blocking-title"').mark(

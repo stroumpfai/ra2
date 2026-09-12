@@ -30,6 +30,7 @@ __all__ = [
     "card",
     "card_header",
     "chip",
+    "dialog_card",
     "distribution_bar",
     "field_select",
     "fingerprint_badge",
@@ -80,6 +81,46 @@ def card(*, flex: str = "none", extra: str = "") -> Element:
         .props('data-testid="card"')
         .style(f"display:flex;flex-direction:column;min-width:0;flex:{flex};{extra}")
     )
+
+
+@contextmanager
+def dialog_card(*, extra: str = "") -> Iterator[Element]:
+    """The div-then-card wrapper every `ui.dialog()` body needs, yielding the
+    card to build the dialog's content in.
+
+    Two Quasar defaults are being defeated here, both scoped to `.q-dialog__
+    inner > div` — the literal element this function creates:
+
+    - Quasar re-enables pointer events by *tag*, on that selector; a
+      `<section class="card">` as the dialog's direct child renders but is
+      completely unclickable, so the card has to go one level in.
+    - `.q-dialog__inner--minimized > div` — the same element — also carries a
+      hardcoded `max-width:560px` (plus `overflow:auto`), a Quasar default
+      that wins over any width the *card* declares, because the cap sits one
+      level higher, on this wrapper, not on the card. A card wider than
+      560px (everything but the narrowest dialog) rendered correctly-sized
+      but clipped, with a horizontal scrollbar standing in for the missing
+      ~200px — a manual-testing report on the file report modal (its 760px
+      card, the widest of the five) is where this was actually visible, but
+      every dialog with a card wider than 560px carries the same defect. The
+      wrapper's own inline `max-width:96vw` — which wins over Quasar's
+      class-based rule with no `!important` behind it — removes the cap
+      without reintroducing page-level scroll on a narrow window.
+
+    The card's own cap is `max-width:100%` **of the wrapper**, not a second,
+    independent `96vw`: `.q-dialog__inner` adds 24px of padding on each side,
+    so a card computing `96vw` straight off the viewport ignores that padding
+    and can still overflow the wrapper by ~48px at viewport widths where the
+    padding, not the `96vw` cap, is what makes the wrapper the narrower of
+    the two. Deriving the card's cap from the wrapper's own resolved box —
+    whatever produced it — keeps the two in agreement instead of each
+    independently guessing the same number.
+    """
+    with (
+        ui.element("div").style("border-radius:3px;max-width:96vw;"),
+        card(extra=f"max-width:100%;{extra}") as c,
+    ):
+        yield c
 
 
 @contextmanager

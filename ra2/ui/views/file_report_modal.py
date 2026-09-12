@@ -39,7 +39,7 @@ from ra2.domain.ids import FileId
 from ra2.services.container import Services
 from ra2.services.errors import ServiceError
 from ra2.services.readmodels import DeliveryFileView, DeliveryView
-from ra2.ui.components import card, format_count
+from ra2.ui.components import dialog_card, format_count
 
 __all__ = ["FINDING_LABELS", "PREVIEW_LINES", "open_file_report"]
 
@@ -146,14 +146,7 @@ class _FileReport:
         await self._load_preview()
         with self._host, ui.dialog().props('data-testid="file-report"') as dialog:
             self._dialog = dialog
-            # Quasar re-enables pointer events with `.q-dialog__inner > div`,
-            # by tag. A `<section class="card">` as the direct child renders
-            # correctly and is completely unclickable, so the card goes one
-            # level in.
-            with (
-                ui.element("div").style("border-radius:3px;"),
-                card(extra="width:760px;max-width:96vw;max-height:88vh;overflow:auto;"),
-            ):
+            with dialog_card(extra="width:760px;max-height:88vh;overflow:auto;"):
                 self._body = ui.element("div").style("display:flex;flex-direction:column;")
         self._render(file)
         dialog.value = True
