@@ -152,6 +152,8 @@ class _ImportPage:
         self._corpora: Page[CorpusView] | None = None
         self._corpus_total = 0
         self._corpus_locked = 0
+        self._corpus_busy = False
+        self._deleting_corpus_id: CorpusId | None = None
         self._root: Element | None = None
         self._grid: Element | None = None
         self._corpora_slot: Element | None = None
@@ -449,6 +451,12 @@ class _ImportPage:
             .props('type="button" data-testid="create-corpus"')
             .mark("create-corpus")
         )
+        if self._corpus_busy:
+            button.props("disabled").style("opacity:.5;cursor:default;")
+            with button:
+                ui.spinner(size="14px", color="white")
+                ui.label("Creating…").mark("create-corpus-label")
+            return
         if self._delivery is None or self._delivery.status is not DeliveryStatus.ANALYSED:
             button.props("disabled").style("opacity:.5;cursor:default;")
         else:
@@ -521,6 +529,15 @@ class _ImportPage:
             ui.label("delete blocked").classes("mono ink3").props(
                 'data-testid="delete-blocked"'
             ).mark("delete-blocked").style("font-size:11px;")
+            return
+        if self._deleting_corpus_id == row.corpus_id:
+            with (
+                ui.element("div")
+                .style("display:inline-flex;align-items:center;gap:5px;")
+                .props('data-testid="delete-corpus-busy"')
+            ):
+                ui.spinner(size="12px", color="var(--danger)")
+                ui.label("Deleting…").classes("mono danger").style("font-size:11px;")
             return
         button = (
             ui.element("button")
@@ -625,30 +642,53 @@ class _ImportPage:
 
     async def _create_corpus(self) -> None:
         """Freeze the selection. On a blocking failure **nothing was written**
-        and the findings go back to the analyst naming the offending key."""
+        and the findings go back to the analyst naming the offending key.
+
+        The button gives no feedback of its own between click and redraw —
+        `freeze()` can take a moment, and with nothing to show for it an
+        analyst could reasonably click again. `_corpus_busy` flips the button
+        to disabled + a spinner *before* the slow `await`, via a plain
+        `_render()` (not `reload()`): `_render()` touches no service or
+        `app.storage.client`, so it carries none of the slot-lifetime hazard
+        `reload()`'s own docstring describes for a redraw mid-handler.
+        """
         if self._delivery is None:
             return
+        self._corpus_busy = True
+        self._render()
         try:
             await self._services.corpus.freeze(self._delivery.delivery_id, name=self._delivery.name)
         except BlockingFindingsError as exc:
+            self._corpus_busy = False
+            self._render()
             assert self._root is not None
             _show_blocking(exc.findings, host=self._root)
             return
         except ServiceError as exc:
+            self._corpus_busy = False
+            self._render()
             ui.notify(str(exc), type="negative")
             return
         # `reload()` redraws the corpora card, which deletes the button that
         # fired this handler — so nothing follows it, and in particular no
         # toast, which would have no slot left to resolve. The new row in the
         # table is the feedback.
+        self._corpus_busy = False
         await self.reload()
 
     async def _delete_corpus(self, corpus_id: CorpusId) -> None:
+        """Mirrors `_create_corpus`'s busy handling, keyed by corpus id so
+        only the clicked row goes busy — other rows stay interactive."""
+        self._deleting_corpus_id = corpus_id
+        self._render()
         try:
             await self._services.corpus.delete(corpus_id)
         except ServiceError as exc:
+            self._deleting_corpus_id = None
+            self._render()
             ui.notify(str(exc), type="negative")
             return
+        self._deleting_corpus_id = None
         await self.reload()
 
     # --- intake (sw-design.md §6.1) ----------------------------------------
