@@ -181,7 +181,7 @@ async def test_freeze_passes_once_the_column_has_codes(
     )
 
     assert frozen.is_frozen is True
-    assert frozen.features[0].errors == ()
+    assert frozen.features[0].validation_errors == ()
 
 
 async def test_freeze_of_an_unknown_set_is_not_found(feature_service):

@@ -70,7 +70,7 @@ _FEATURE_KIND: Final = "feature"
 
 # --- validation messages ---------------------------------------------------
 #
-# `FeatureValidationError` and `FeatureView.errors` are frozen as plain
+# `FeatureValidationError` and `FeatureView.validation_errors` are frozen as plain
 # strings, so unlike a `Finding` there is no code to assert on. These four
 # templates are therefore the stable identifiers: tests and the UI format
 # them rather than re-typing the wording.
@@ -570,7 +570,7 @@ def _feature_view(feature: Feature, errors: tuple[str, ...]) -> FeatureView:
         enum_codelist=None,
         fingerprint=feature.fingerprint,
         fingerprint_preview=compute_fingerprint(_fingerprint_input(feature)),
-        errors=errors,
+        validation_errors=errors,
     )
 
 

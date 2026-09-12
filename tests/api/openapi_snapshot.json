@@ -346,16 +346,16 @@
             "title": "Detail",
             "type": "string"
           },
-          "errors": {
+          "import_errors": {
             "items": {
               "$ref": "#/components/schemas/CodeImportErrorResponse"
             },
-            "title": "Errors",
+            "title": "Import Errors",
             "type": "array"
           }
         },
         "required": [
-          "errors"
+          "import_errors"
         ],
         "title": "CodelistImportErrorResponse",
         "type": "object"
@@ -1238,13 +1238,6 @@
             "title": "Description",
             "type": "string"
           },
-          "errors": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Errors",
-            "type": "array"
-          },
           "feature_config_id": {
             "title": "Feature Config Id",
             "type": "string"
@@ -1298,6 +1291,13 @@
             ],
             "title": "Source Column"
           },
+          "validation_errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Validation Errors",
+            "type": "array"
+          },
           "value_type": {
             "title": "Value Type",
             "type": "string"
@@ -1327,16 +1327,16 @@
             "title": "Detail",
             "type": "string"
           },
-          "errors": {
+          "validation_errors": {
             "items": {
               "type": "string"
             },
-            "title": "Errors",
+            "title": "Validation Errors",
             "type": "array"
           }
         },
         "required": [
-          "errors"
+          "validation_errors"
         ],
         "title": "FeatureValidationErrorResponse",
         "type": "object"

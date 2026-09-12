@@ -51,7 +51,7 @@ async def test_a_labelled_feature_at_a_non_scalar_grain_blocks(
         validate_against=validation_corpus if with_corpus else None,
     )
 
-    assert view.features[0].errors == (
+    assert view.features[0].validation_errors == (
         FEATURE_ERROR_NON_SCALAR_GRAIN.format(key="damage_per_vehicle", grain=grain.value),
     )
 
@@ -60,7 +60,7 @@ async def test_a_labelled_feature_at_a_non_scalar_grain_blocks(
 async def test_a_labelled_feature_at_a_scalar_grain_is_clean(draft_with, grain):
     view = await draft_with({"grain": grain, "value_type": ValueType.INTEGER})
 
-    assert view.features[0].errors == ()
+    assert view.features[0].validation_errors == ()
 
 
 async def test_an_exploratory_feature_is_never_blocked_by_grain(draft_with):
@@ -68,7 +68,7 @@ async def test_an_exploratory_feature_is_never_blocked_by_grain(draft_with):
     at a non-scalar grain" cannot apply to one."""
     view = await draft_with({**EXPLORATORY, "grain": Grain.OBJECT})
 
-    assert view.features[0].errors == ()
+    assert view.features[0].validation_errors == ()
 
 
 async def test_the_exploratory_cap_blocks_the_twenty_first(feature_service, draft_with):
@@ -80,8 +80,8 @@ async def test_the_exploratory_cap_blocks_the_twenty_first(feature_service, draf
     )
 
     assert len(view.features) == EXPLORATORY_FEATURE_CAP + 1
-    assert all(f.errors == () for f in view.features[:EXPLORATORY_FEATURE_CAP])
-    assert view.features[EXPLORATORY_FEATURE_CAP].errors == (
+    assert all(f.validation_errors == () for f in view.features[:EXPLORATORY_FEATURE_CAP])
+    assert view.features[EXPLORATORY_FEATURE_CAP].validation_errors == (
         FEATURE_ERROR_EXPLORATORY_CAP.format(key="probe_20", cap=EXPLORATORY_FEATURE_CAP),
     )
 
@@ -92,7 +92,7 @@ async def test_labelled_features_do_not_count_against_the_cap(draft_with):
         *[{**EXPLORATORY, "key": f"probe_{n:02d}"} for n in range(EXPLORATORY_FEATURE_CAP)],
     )
 
-    assert all(f.errors == () for f in view.features)
+    assert all(f.validation_errors == () for f in view.features)
 
 
 async def test_an_unmapped_enum_column_is_silent_without_a_validation_corpus(
@@ -103,7 +103,7 @@ async def test_an_unmapped_enum_column_is_silent_without_a_validation_corpus(
     rather than treated as passing or failing."""
     view = await draft_with({"key": "right_of_way", "source_column": "VortrittAusw"})
 
-    assert view.features[0].errors == ()
+    assert view.features[0].validation_errors == ()
     assert codelist_provider.calls == []
 
 
@@ -117,7 +117,7 @@ async def test_an_unmapped_enum_column_blocks_against_a_corpus(
         validate_against=validation_corpus,
     )
 
-    assert view.features[0].errors == (
+    assert view.features[0].validation_errors == (
         FEATURE_ERROR_NO_CODELIST.format(key="right_of_way", column="VortrittAusw"),
     )
     assert codelist_provider.columns_asked == ["VortrittAusw"]
@@ -140,7 +140,7 @@ async def test_only_missing_coverage_blocks(
 
     view = await draft_with({"key": "weather"}, validate_against=validation_corpus)
 
-    assert bool(view.features[0].errors) is blocks
+    assert bool(view.features[0].validation_errors) is blocks
 
 
 async def test_a_non_enum_feature_is_never_asked_about_codes(
@@ -176,7 +176,7 @@ async def test_a_derived_enum_without_a_source_column_is_not_asked_about_codes(
         validate_against=validation_corpus,
     )
 
-    assert view.features[0].errors == ()
+    assert view.features[0].validation_errors == ()
     assert codelist_provider.calls == []
 
 
@@ -207,6 +207,6 @@ async def test_get_reports_the_corpus_independent_tier_only(
 
     read_back = await feature_service.get(view.feature_config_id)
 
-    assert len(read_back.features[0].errors) == 1
-    assert read_back.features[1].errors == ()
+    assert len(read_back.features[0].validation_errors) == 1
+    assert read_back.features[1].validation_errors == ()
     assert codelist_provider.calls == []

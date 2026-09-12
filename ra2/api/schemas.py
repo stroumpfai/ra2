@@ -306,7 +306,10 @@ class CodelistImportErrorResponse(_Schema):
     """422 from a malformed upload. **Nothing was imported** (sw-design.md §14.1)."""
 
     detail: str = "malformed codelist upload; nothing was imported"
-    errors: list[CodeImportErrorResponse]
+    #: Named to match `CodelistImportError.import_errors` (§12.4's banned
+    #: `errors=` keyword; Wave 2's amendment,
+    #: contracts/amendments/feat-p2-feature-service.md).
+    import_errors: list[CodeImportErrorResponse]
 
 
 class CodelistImportResponse(_Schema):
@@ -446,7 +449,9 @@ class FeatureResponse(_Schema):
     #: Always present — Q3's draft badge.
     fingerprint_preview: str
     #: Blocking validation messages; non-empty renders as an error row.
-    errors: list[str] = Field(default_factory=list)
+    #: Named to match `FeatureView.validation_errors` (§12.4's banned
+    #: `errors=` keyword; Wave 2's amendment).
+    validation_errors: list[str] = Field(default_factory=list)
 
 
 class CreateFeatureConfigRequest(_Schema):
@@ -489,4 +494,6 @@ class FeatureValidationErrorResponse(_Schema):
     """422 from a blocked freeze. **Nothing was frozen** (mvp-spec.md §7/§8.2)."""
 
     detail: str = "blocking feature validation errors; the set was not frozen"
-    errors: list[str]
+    #: Named to match `FeatureValidationError.validation_errors` (§12.4's
+    #: banned `errors=` keyword; Wave 2's amendment).
+    validation_errors: list[str]

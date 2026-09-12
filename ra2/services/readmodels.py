@@ -275,8 +275,12 @@ class FeatureView:
     #: "· preview" qualifier until frozen.
     fingerprint_preview: str
     #: Blocking validation messages (mvp-spec.md §7/§8.2). Non-empty rows
-    #: render as errors and block "Create a feature set".
-    errors: tuple[str, ...] = ()
+    #: render as errors and block "Create a feature set". Named to match
+    #: `FeatureValidationError.validation_errors`, which avoids the banned
+    #: `errors=` keyword for the same reason (§12.4) — Wave 2's amendment
+    #: (contracts/amendments/feat-p2-feature-service.md) finishes a rename
+    #: Wave 0 started in `services/errors.py` but missed here.
+    validation_errors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
