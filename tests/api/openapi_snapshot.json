@@ -2994,7 +2994,7 @@
     },
     "/api/v1/feature-configs/{feature_config_id}/clone": {
       "post": {
-        "description": "A frozen set only \u2014 the design's \"Clone to new evaluation.",
+        "description": "A frozen set only \u2014 the design's \"Clone to new evaluation.\" 422 (same\n`FeatureValidationErrorResponse` shape as `freeze`) when the source is\nstill a draft (`FEATURE_ERROR_CLONE_OF_DRAFT`).",
         "operationId": "clone_feature_config_api_v1_feature_configs__feature_config_id__clone_post",
         "parameters": [
           {
@@ -3032,11 +3032,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/FeatureValidationErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Content"
           }
         },
         "summary": "Clone Feature Config",
@@ -3057,6 +3057,22 @@
             "schema": {
               "title": "Feature Config Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "validate_against",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Validate Against"
             }
           }
         ],
@@ -3181,6 +3197,22 @@
               "title": "Feature Id",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "validate_against",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Validate Against"
+            }
           }
         ],
         "requestBody": {
@@ -3233,7 +3265,7 @@
     },
     "/api/v1/feature-configs/{feature_config_id}/freeze": {
       "post": {
-        "description": "422 with every blocking error and creates nothing (mirrors J2's\ncorpus-freeze contract).",
+        "description": "422 with every blocking error and creates nothing (mirrors J2's\ncorpus-freeze contract). 409 when the set is already frozen.",
         "operationId": "freeze_feature_config_api_v1_feature_configs__feature_config_id__freeze_post",
         "parameters": [
           {
@@ -3243,6 +3275,22 @@
             "schema": {
               "title": "Feature Config Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "validate_against",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Validate Against"
             }
           }
         ],
@@ -3256,6 +3304,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
