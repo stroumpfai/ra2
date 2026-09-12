@@ -19,14 +19,14 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ra2.domain.delivery import SourceKind
-from ra2.domain.ids import CorpusId, DeliveryId, EvaluationId
+from ra2.domain.ids import CorpusId, DeliveryId, EvaluationId, FeatureConfigId
 from ra2.infra.clock import FrozenClock
 from ra2.infra.config import Settings
 from ra2.infra.filestore import HostPathFileStore, UploadedFileStore
 from ra2.infra.idgen import SeededFactory
 from ra2.infra.lingua_detector import LinguaDetector
 from ra2.infra.tasks import InlineTaskRunner
-from ra2.persistence.models import Evaluation
+from ra2.persistence.models import Evaluation, FeatureConfig
 from ra2.services.corpus_service import CorpusService
 from ra2.services.delivery_service import DeliveryService
 from ra2.services.protocols import CensusInput
@@ -218,17 +218,38 @@ def analysed_golden_delivery(
 @pytest.fixture
 def seed_evaluation(
     db_session_factory: async_sessionmaker[AsyncSession],
+    clock: FrozenClock,
 ) -> Callable[..., Awaitable[EvaluationId]]:
     """Seed one `evaluation` row citing a corpus.
 
     Phase 1 never creates one; the table exists precisely so the delete guard
     is tested against a real row rather than a mock (M0-D1, sw-design.md §6.3).
+
+    Phase 2 (D3) makes `evaluation.feature_config_id` a real, non-nullable FK
+    onto `feature_config.id` — a trivial `FeatureConfig` row is seeded
+    alongside, since no real evaluation-creation flow exists yet to have
+    produced one (CLAUDE.md, feat/p2-persistence).
     """
 
     async def _seed(corpus_id: CorpusId, name: str = "eval-1") -> EvaluationId:
         evaluation_id = EvaluationId(f"eval-{name}")
+        feature_config_id = FeatureConfigId(f"fc-{name}")
         async with db_session_factory() as session:
-            session.add(Evaluation(id=evaluation_id, name=name, corpus_id=corpus_id))
+            session.add(
+                FeatureConfig(id=feature_config_id, name=f"fc-{name}", created_at=clock.now())
+            )
+            # Flushed separately: `feature_config_id` is a plain FK column with
+            # no ORM `relationship()`, so the unit of work has no dependency
+            # edge telling it `feature_config` must insert before `evaluation`.
+            await session.flush()
+            session.add(
+                Evaluation(
+                    id=evaluation_id,
+                    name=name,
+                    corpus_id=corpus_id,
+                    feature_config_id=feature_config_id,
+                )
+            )
             await session.commit()
         return evaluation_id
 

@@ -9,14 +9,15 @@ behaviour is B1's, asserted in `tests/backend/services/corpus/**`.
 """
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 import httpx
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ra2.domain.ids import CorpusId, EvaluationId
-from ra2.persistence.models import Corpus, Evaluation
+from ra2.domain.ids import CorpusId, EvaluationId, FeatureConfigId
+from ra2.persistence.models import Corpus, Evaluation, FeatureConfig
 
 pytestmark = pytest.mark.backend
 
@@ -189,7 +190,23 @@ async def test_delete_corpus_cited_by_an_evaluation_is_409(
 
     async with db_session_factory() as session:
         session.add(
-            Evaluation(id=EvaluationId("eval-1"), name="eval-1", corpus_id=CorpusId(corpus_id))
+            FeatureConfig(
+                id=FeatureConfigId("fc-eval-1"),
+                name="eval-1",
+                created_at=datetime(2026, 9, 2, 9, 30, tzinfo=UTC),
+            )
+        )
+        # Flushed separately: `feature_config_id` is a plain FK column with no
+        # ORM `relationship()`, so the unit of work does not know it must
+        # insert `feature_config` before `evaluation`.
+        await session.flush()
+        session.add(
+            Evaluation(
+                id=EvaluationId("eval-1"),
+                name="eval-1",
+                corpus_id=CorpusId(corpus_id),
+                feature_config_id=FeatureConfigId("fc-eval-1"),
+            )
         )
         await session.commit()
 

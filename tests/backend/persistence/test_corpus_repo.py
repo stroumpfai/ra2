@@ -6,8 +6,8 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ra2.domain.ids import CorpusId, EvaluationId
-from ra2.persistence.models import Corpus, Evaluation
+from ra2.domain.ids import CorpusId, EvaluationId, FeatureConfigId
+from ra2.persistence.models import Corpus, Evaluation, FeatureConfig
 from ra2.persistence.repositories.corpus_repo import CorpusRepository
 
 pytestmark = pytest.mark.backend
@@ -121,10 +121,18 @@ async def test_count_citing_evaluations_counts_a_seeded_row(
         repo = CorpusRepository(session)
         await repo.add(_make_corpus("corpus-1", name="AG 2024"))
         session.add(
+            FeatureConfig(id=FeatureConfigId("fc-baseline"), name="baseline", created_at=NOW)
+        )
+        # Flushed separately: `feature_config_id` is a plain FK column with no
+        # ORM `relationship()`, so the unit of work does not know it must
+        # insert `feature_config` before `evaluation`.
+        await session.flush()
+        session.add(
             Evaluation(
                 id=EvaluationId("eval-1"),
                 name="baseline",
                 corpus_id=corpus_id,
+                feature_config_id=FeatureConfigId("fc-baseline"),
                 is_dev=False,
             )
         )
