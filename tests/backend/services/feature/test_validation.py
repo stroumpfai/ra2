@@ -19,6 +19,7 @@ from ra2.domain.feature import (
     ValueType,
 )
 from ra2.services.feature_service import (
+    FEATURE_ERROR_ENUM_HAS_NO_COLUMN,
     FEATURE_ERROR_EXPLORATORY_CAP,
     FEATURE_ERROR_NO_CODELIST,
     FEATURE_ERROR_NON_SCALAR_GRAIN,
@@ -71,6 +72,31 @@ async def test_an_exploratory_feature_is_never_blocked_by_grain(draft_with):
     assert view.features[0].validation_errors == ()
 
 
+async def test_an_exploratory_feature_with_the_uis_literal_new_draft_defaults_is_clean(
+    draft_with, codelist_provider, validation_corpus
+):
+    """An E2E-caught regression: `features_view._new_draft()` defaults a
+    brand-new draft to `value_type=ENUM, source_column=None` regardless of
+    `kind`, and the design's "Add feature" toggles only `kind` to switch into
+    Case D — nothing in the UI clears `value_type` back to something enum
+    validation would ignore. `EXPLORATORY` has no ground truth to match at
+    all (Case D), so the codelist tier must not fire for it even when its
+    stored fields look exactly like an unmapped native-enum feature would."""
+    view = await draft_with(
+        {
+            "kind": Kind.EXPLORATORY,
+            "grain": Grain.ACCIDENT,
+            "source_column": None,
+            "value_type": ValueType.ENUM,
+            "matching_rule": MatchingRule(kind=MatchingRuleKind.EXACT),
+        },
+        validate_against=validation_corpus,
+    )
+
+    assert view.features[0].validation_errors == ()
+    assert codelist_provider.calls == []
+
+
 async def test_the_exploratory_cap_blocks_the_twenty_first(feature_service, draft_with):
     """§8.1 caps exploratory features at 20 per set. The cap is a property of
     the draft, so it is reported on the rows past it — what the design's
@@ -104,6 +130,28 @@ async def test_an_unmapped_enum_column_is_silent_without_a_validation_corpus(
     view = await draft_with({"key": "right_of_way", "source_column": "VortrittAusw"})
 
     assert view.features[0].validation_errors == ()
+    assert codelist_provider.calls == []
+
+
+async def test_a_native_enum_feature_with_no_source_column_always_blocks(
+    draft_with, codelist_provider
+):
+    """mvp-spec.md §7: "A feature whose column has no mapping... and whose
+    type is enum cannot be run — hard validation error." This is
+    corpus-independent (unlike `FEATURE_ERROR_NO_CODELIST`, which needs a
+    specific corpus to say whether a *named* column's mapping has codes) —
+    naming no column at all is wrong regardless of which corpus the set
+    might later run against, so it blocks even with no `validate_against`.
+
+    A code review found the original guard conflated this with the
+    legitimate "a derived feature has no source_column" exemption
+    (`test_a_derived_enum_without_a_source_column_is_not_asked_about_codes`),
+    silently exempting a native-column enum feature too."""
+    view = await draft_with({"key": "right_of_way", "source_column": None})
+
+    assert view.features[0].validation_errors == (
+        FEATURE_ERROR_ENUM_HAS_NO_COLUMN.format(key="right_of_way"),
+    )
     assert codelist_provider.calls == []
 
 

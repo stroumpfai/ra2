@@ -74,6 +74,41 @@ async def test_coverage_returns_a_real_columncoverage_for_a_mapped_column(
     assert result.language == "de"  # the protocol-shaped default (no language arg)
 
 
+async def test_coverage_attaches_record_keys_to_an_orphan_code(
+    codelist_service: CodelistService,
+    codelist_bytes: Callable[[str], bytes],
+    seed_enum_column: Callable[..., Awaitable[None]],
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """mvp-spec.md §7: an orphan code — one with no counterpart at all in the
+    mapped attribute — "is a Finding carrying the column, the value and the
+    record key". `compute_coverage` is pure and never sees a record, so
+    `coverage()` fills `record_keys` in afterwards, for the orphan row only.
+    A code review found this had never been wired at all: the danger row
+    carried a count but no way back to which records it named."""
+    await codelist_service.import_file("codelist.json", codelist_bytes("c01_minimal_valid"))
+    accident_type = next(
+        a for a in await codelist_service.list_attributes() if a.key == "accident_type"
+    )
+    # c01's `accident_type` only defines codes "01" and "02" — "99" on the
+    # second record (`corpus-1-u1`, per `seed_enum_column`'s own uid scheme)
+    # has no counterpart at all.
+    await seed_enum_column("corpus-1", column_name="UnfallartAusw", values=["01", "99"])
+    await codelist_service.map_column(
+        CorpusId("corpus-1"), "UnfallartAusw", accident_type.code_attribute_id
+    )
+
+    async with db_session_factory() as session:
+        result = await codelist_service.coverage(session, CorpusId("corpus-1"), "UnfallartAusw")
+
+    assert result is not None
+    by_code = {usage.code: usage for usage in result.codes}
+    assert by_code["01"].in_codelist is True
+    assert by_code["01"].record_keys == ()
+    assert by_code["99"].in_codelist is False
+    assert by_code["99"].record_keys == ("corpus-1-u1",)
+
+
 async def test_coverage_default_language_can_be_overridden(
     codelist_service: CodelistService,
     codelist_bytes: Callable[[str], bytes],

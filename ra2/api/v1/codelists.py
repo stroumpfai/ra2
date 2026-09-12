@@ -84,6 +84,7 @@ def _code_usage_response(usage: CodeUsage) -> CodeUsageResponse:
         share=usage.share,
         label=usage.label,
         in_codelist=usage.in_codelist,
+        record_keys=list(usage.record_keys),
     )
 
 

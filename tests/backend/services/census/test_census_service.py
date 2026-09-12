@@ -8,13 +8,17 @@ columns/summary round trip reuses the same hand-computed fixture
 below are not this file's own invention.
 """
 
+from datetime import UTC, datetime
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from tests.fixtures.factories import make_census_input, make_census_table_input, seed_corpus
 
 from ra2.domain.census import TypeHint
-from ra2.domain.ids import CorpusId
+from ra2.domain.feature import Grain, Kind, ValueType
+from ra2.domain.ids import CorpusId, FeatureConfigId, FeatureId
 from ra2.infra.idgen import SeededFactory
+from ra2.persistence.models import Feature, FeatureConfig
 from ra2.persistence.session import create_session_factory
 from ra2.services.census_materialiser import RelationalCensusMaterialiser
 from ra2.services.census_service import CensusService
@@ -107,6 +111,46 @@ async def test_columns_round_trips_the_hand_computed_fixture(
     assert strasse.populated_count == 0
     assert strasse.populated_rate == 0.0
     assert strasse.top_values == ()
+
+
+async def test_columns_in_config_reflects_a_real_feature(
+    db_session_factory: async_sessionmaker[AsyncSession],
+    census_service: CensusService,
+) -> None:
+    """`CensusColumnView.in_config` is real from phase 2 on — "True once
+    some feature's source_column names this column" — a code review found
+    it had never actually been wired to `feature.source_column`."""
+    await _seed_fixture_corpus(db_session_factory, "corpus-1")
+    async with db_session_factory() as session:
+        session.add(
+            FeatureConfig(
+                id=FeatureConfigId("fc-1"), name="draft set", created_at=datetime.now(UTC)
+            )
+        )
+        await session.flush()
+        session.add(
+            Feature(
+                id=FeatureId("feat-1"),
+                feature_config_id=FeatureConfigId("fc-1"),
+                ordinal=0,
+                key="weather",
+                kind=Kind.LABELLED,
+                description="weather",
+                grain=Grain.ACCIDENT,
+                source_column="WetterAusw",
+                value_type=ValueType.ENUM,
+                matching_rule='{"kind":"exact","tolerance_minutes":null,"decimal_precision":null}',
+            )
+        )
+        await session.commit()
+
+    page = await census_service.columns(
+        CorpusId("corpus-1"), sort_key="column_name", sort_dir=SortDir.ASC
+    )
+
+    by_name = {item.column_name: item for item in page.items}
+    assert by_name["WetterAusw"].in_config is True
+    assert by_name["UnfallUid"].in_config is False
 
 
 async def test_columns_top_values_come_from_stored_rows_with_no_recomputation(

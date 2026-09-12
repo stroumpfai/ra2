@@ -459,6 +459,38 @@ async def test_coverage_counts_scopes_to_the_given_corpus(
     assert result == [("01", 1)]
 
 
+async def test_coverage_counts_excludes_empty_cells(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """mvp-spec.md §8.6: empty means *no value was provided*, never a code of
+    its own — the same rule `compute_census` applies. A code review found
+    this repository reading every distinct `value_raw` including `""`,
+    which made any enum column with a blank cell report a phantom orphan
+    code (a danger row reading "no label — not in the codelist" for a code
+    that was never really there)."""
+    corpus_id = CorpusId("corpus-1")
+    async with db_session_factory() as session:
+        session.add(_make_corpus(corpus_id))
+        session.add(_make_record("record-1", corpus_id, unfall_uid="a" * 32))
+        session.add(_make_record("record-2", corpus_id, unfall_uid="b" * 32))
+        await session.flush()
+        session.add(
+            UnfallRow(record_id=RecordId("record-1"), column_name="UnfTypAusw", value_raw="01")
+        )
+        session.add(
+            UnfallRow(record_id=RecordId("record-2"), column_name="UnfTypAusw", value_raw="")
+        )
+        await session.commit()
+
+    async with db_session_factory() as session:
+        repo = CodelistRepository(session)
+        result = await repo.coverage_counts(
+            corpus_id, table_name="unfall", source_column="UnfTypAusw"
+        )
+
+    assert result == [("01", 1)]
+
+
 async def test_coverage_counts_over_objekt_table(
     db_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -560,6 +592,34 @@ async def test_coverage_counts_rejects_an_unknown_table_name(
             await repo.coverage_counts(
                 CorpusId("corpus-1"), table_name="not-a-table", source_column="x"
             )
+
+
+async def test_record_keys_for_value_finds_the_owning_records(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """mvp-spec.md §7: an orphan code carries "the column, the value and the
+    record key" — this is where the record key comes from. Two records
+    share the value; a third carries a different one and must not appear."""
+    corpus_id = CorpusId("corpus-1")
+    async with db_session_factory() as session:
+        session.add(_make_corpus(corpus_id))
+        session.add(_make_record("record-1", corpus_id, unfall_uid="a" * 32))
+        session.add(_make_record("record-2", corpus_id, unfall_uid="b" * 32))
+        session.add(_make_record("record-3", corpus_id, unfall_uid="c" * 32))
+        await session.flush()
+        for record_id, value in [("record-1", "99"), ("record-2", "99"), ("record-3", "01")]:
+            session.add(
+                UnfallRow(record_id=RecordId(record_id), column_name="UnfTypAusw", value_raw=value)
+            )
+        await session.commit()
+
+    async with db_session_factory() as session:
+        repo = CodelistRepository(session)
+        keys = await repo.record_keys_for_value(
+            corpus_id, table_name="unfall", source_column="UnfTypAusw", value_raw="99"
+        )
+
+    assert keys == ["a" * 32, "b" * 32]
 
 
 # ===========================================================================

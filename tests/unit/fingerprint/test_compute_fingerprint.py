@@ -104,19 +104,27 @@ def test_sensitivity_description() -> None:
 
 def test_matches_an_independently_computed_hash() -> None:
     """The canonical JSON and its sha256 were worked out independently (a
-    standalone `json.dumps(..., sort_keys=True, separators=(",", ":"),
+    standalone `json.dumps(..., sort_keys=False, separators=(",", ":"),
     ensure_ascii=False)` + `hashlib.sha256` script, never by calling
     `compute_fingerprint` itself) for this exact input:
 
-        {"derivation_json":null,"description":"Number of injured persons",
-         "enum_codelist_json":null,"grain":"accident","kind":"labelled",
+        {"kind":"labelled","grain":"accident","source_column":"UnfallartCode",
+         "derivation_json":null,"value_type":"integer",
          "matching_rule_json":"{\\"kind\\":\\"exact\\",\\"tolerance_minutes\\":
-         null,\\"decimal_precision\\":null}","source_column":"UnfallartCode",
-         "value_type":"integer"}
+         null,\\"decimal_precision\\":null}","enum_codelist_json":null,
+         "description":"Number of injured persons"}
 
-    This is the one test that would catch a subtly different but
-    internally-consistent canonicalisation choice (e.g. `sort_keys=False`,
-    `ensure_ascii=True`, or non-compact separators).
+    Key order matters here and is asserted by it: mvp-spec.md §8.5 names an
+    exact field order (kind, grain, source_column, derivation_json,
+    value_type, matching_rule_json, enum_codelist_json, description), so this
+    fixture is built with keys **in that literal order**, not alphabetical —
+    a code review found an earlier version of `compute_fingerprint` used
+    `sort_keys=True`, which is stable and sensitive (still true either way,
+    and the two properties the other tests in this file pin) but hashes the
+    fields alphabetically instead of in the order the spec actually states.
+    This is the one test that would catch that regressing, or any other
+    subtly different but internally-consistent canonicalisation choice
+    (`ensure_ascii=True`, non-compact separators, ...).
     """
     input_ = FingerprintInput(
         kind=Kind.LABELLED,
@@ -128,5 +136,5 @@ def test_matches_an_independently_computed_hash() -> None:
         enum_codelist_json=None,
         description="Number of injured persons",
     )
-    expected = "417d35b54e4efba71ec2345efb8cd694db35a63a0774af226b87022e23ca2c42"
+    expected = "4790871a61f1c98f3afb366ca3895405c1e219bbf89f52af35e64bb2daced4bc"
     assert compute_fingerprint(input_) == expected

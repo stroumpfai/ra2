@@ -3,11 +3,15 @@ hazard fixtures — one real corpus, one real mapping, no mocked repository.
 """
 
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ra2.domain.codelist_coverage import CoverageStatus
-from ra2.domain.ids import CorpusId
+from ra2.domain.feature import Grain, Kind, ValueType
+from ra2.domain.ids import CorpusId, FeatureConfigId, FeatureId
+from ra2.persistence.models import Feature, FeatureConfig
 from ra2.services.codelist_service import CodelistService
 
 pytestmark = pytest.mark.backend
@@ -30,6 +34,44 @@ async def test_unmapped_enum_column_has_no_coverage(
     assert column.mapped_attribute is None
     assert column.coverage is None
     assert column.used_by_features == ()
+
+
+async def test_used_by_features_reflects_a_real_feature(
+    codelist_service: CodelistService,
+    seed_enum_column: Callable[..., Awaitable[None]],
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """C5 / plan-phase-2.md §2: "computed from `feature.source_column`, not
+    stored" — this phase turns the cross-link on. A *draft* feature counts
+    too: it already depends on the column just as much as a frozen one, and
+    a `feature_config` needs no corpus of its own to reference one."""
+    await seed_enum_column("corpus-1", column_name="WetterAusw", values=["1", "2"])
+    async with db_session_factory() as session:
+        session.add(
+            FeatureConfig(
+                id=FeatureConfigId("fc-1"), name="draft set", created_at=datetime.now(UTC)
+            )
+        )
+        await session.flush()
+        session.add(
+            Feature(
+                id=FeatureId("feat-1"),
+                feature_config_id=FeatureConfigId("fc-1"),
+                ordinal=0,
+                key="weather",
+                kind=Kind.LABELLED,
+                description="weather",
+                grain=Grain.ACCIDENT,
+                source_column="WetterAusw",
+                value_type=ValueType.ENUM,
+                matching_rule='{"kind":"exact","tolerance_minutes":null,"decimal_precision":null}',
+            )
+        )
+        await session.commit()
+
+    columns = await codelist_service.list_columns(CorpusId("corpus-1"), language="de")
+
+    assert columns[0].used_by_features == ("weather",)
 
 
 async def test_mapping_to_c01_gives_ok_coverage(

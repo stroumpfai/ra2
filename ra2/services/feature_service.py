@@ -57,6 +57,7 @@ from ra2.services.readmodels import FeatureConfigView, FeatureSetSummary, Featur
 
 __all__ = [
     "FEATURE_ERROR_CLONE_OF_DRAFT",
+    "FEATURE_ERROR_ENUM_HAS_NO_COLUMN",
     "FEATURE_ERROR_EXPLORATORY_CAP",
     "FEATURE_ERROR_NON_SCALAR_GRAIN",
     "FEATURE_ERROR_NO_CODELIST",
@@ -86,6 +87,15 @@ FEATURE_ERROR_EXPLORATORY_CAP: Final = (
 #: mvp-spec.md §7 / the design's "Right of way `VortrittAusw · no codes`".
 FEATURE_ERROR_NO_CODELIST: Final = (
     "{key}: enum column {column} has no code table in the validation corpus."
+)
+#: mvp-spec.md §7: "A feature whose column has no mapping... and whose type
+#: is enum cannot be run — hard validation error." Corpus-independent (unlike
+#: `FEATURE_ERROR_NO_CODELIST` above, which needs `validate_against` to know
+#: whether a *specific* corpus's mapping has codes): a native-column enum
+#: feature naming no column at all is wrong regardless of which corpus it
+#: might later run against.
+FEATURE_ERROR_ENUM_HAS_NO_COLUMN: Final = (
+    "{key}: an enum feature needs a source column to look up its code table."
 )
 #: A draft is already editable; cloning one would only duplicate it.
 FEATURE_ERROR_CLONE_OF_DRAFT: Final = (
@@ -431,9 +441,25 @@ class FeatureService:
         cap in `ordinal` order — which is what the design's per-row error
         state renders.
 
-        **Codelist**, checked only when `validate_against` names a corpus —
-        an `enum` feature whose `source_column` has no mapping, or a mapping
-        with no usable codes, in that corpus (mvp-spec.md §7).
+        **Codelist**, an `enum` feature whose `source_column` has no mapping,
+        or a mapping with no usable codes (mvp-spec.md §7). Splits further:
+        a *native-column* enum feature (`grain` other than `DERIVED`) naming
+        no `source_column` at all is corpus-independent and always blocks —
+        mvp-spec.md §7's own words are "a feature whose column has no
+        mapping... cannot be run" — but whether a *named* column's mapping
+        actually has usable codes can only be answered against a specific
+        corpus, so that half only runs when `validate_against` names one.
+        Two kinds of feature are exempt from this whole tier, not just the
+        "no source column" half of it: a `DERIVED`-grain enum feature
+        (`max_ordinal`/`min_ordinal`) whose codes are the derivation's own
+        `ordered_codes`, never a column lookup (plan-phase-2.md Q1); and any
+        `EXPLORATORY` feature, which has no ground truth to match at all
+        (design's Case D: "n/a — no ground truth") regardless of what its
+        stored `value_type` happens to be — the UI's new-feature draft
+        defaults `value_type` to `ENUM` before an analyst picks anything
+        (`features_view._new_draft`), so an unmodified exploratory feature
+        would otherwise trip the "no source column" check above for no
+        reason connected to mvp-spec.md §7 at all.
         """
         errors: dict[str, list[str]] = {feature.id: [] for feature in features}
         exploratory_seen = 0
@@ -452,14 +478,16 @@ class FeatureService:
                             key=feature.key, cap=EXPLORATORY_FEATURE_CAP
                         )
                     )
-            if validate_against is None:
+            if (
+                kind is Kind.EXPLORATORY
+                or not requires_codelist(ValueType(feature.value_type))
+                or grain is Grain.DERIVED
+            ):
                 continue
-            # A feature with no `source_column` (a derived aggregate) has no
-            # mapped column to ask about: its codes come from the derivation,
-            # which nothing executes in phase 2 (plan-phase-2.md Q1). Not
-            # checking is deliberate — inventing an error there would block a
-            # legitimate `max_ordinal` feature.
-            if not requires_codelist(ValueType(feature.value_type)) or not feature.source_column:
+            if not feature.source_column:
+                errors[feature.id].append(FEATURE_ERROR_ENUM_HAS_NO_COLUMN.format(key=feature.key))
+                continue
+            if validate_against is None:
                 continue
             # The provider is handed *this* session and this transaction, the
             # same contract `CensusMaterialiser` has: it must not open its own

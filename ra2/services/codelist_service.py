@@ -18,14 +18,16 @@ coverage data" (`None`) rather than a guess.
 import hashlib
 import io
 import json
+from dataclasses import replace
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ra2.domain.census import TypeHint
 from ra2.domain.codelist_coverage import ColumnCoverage, compute_coverage
 from ra2.domain.codes import CodeAttribute as DomainCodeAttribute
+from ra2.domain.codes import CodeImportError, validate_import
 from ra2.domain.codes import CodeValue as DomainCodeValue
-from ra2.domain.codes import validate_import
 from ra2.domain.ids import CodeAttributeId, CodeTableImportId, ColumnMappingId, CorpusId, DeliveryId
 from ra2.domain.language import Language
 from ra2.infra.clock import Clock
@@ -37,6 +39,7 @@ from ra2.persistence.models import (
     CodeTableImport,
     CodeValue,
     ColumnMapping,
+    Feature,
 )
 from ra2.persistence.repositories.census_repo import CensusRepository
 from ra2.persistence.repositories.codelist_repo import CodelistRepository
@@ -88,10 +91,21 @@ class CodelistService:
         3. Otherwise write one new `code_table_import` plus its attributes
            and values — additive, existing `column_mapping` rows untouched.
 
-        :raises CodelistImportError: structural validation failed.
+        :raises CodelistImportError: structural validation failed (including
+            an upload that is not valid UTF-8 — a decode failure is a
+            structural problem with the file, reported the same loud,
+            explicit way as every other one Do-NOT list #6 names, not an
+            uncaught exception surfacing as a 500 past this boundary).
         """
         # --- 1. structural validation, before anything is touched ----------
-        text = content.decode("utf-8")
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise CodelistImportError(
+                import_errors=[
+                    CodeImportError(attribute_key=None, path="$", message=f"not valid UTF-8: {exc}")
+                ]
+            ) from exc
         parsed = validate_import(text)
         if isinstance(parsed, list):
             raise CodelistImportError(import_errors=parsed)
@@ -253,7 +267,36 @@ class CodelistService:
         attribute = await repo.get_attribute(CodeAttributeId(mapping.code_attribute_id))
         domain_attribute = _domain_attribute(attribute) if attribute is not None else None
         code_values = _domain_values(attribute) if attribute is not None else []
-        return compute_coverage(cells, domain_attribute, code_values, language)
+        coverage = compute_coverage(cells, domain_attribute, code_values, language)
+        return await self._with_orphan_record_keys(
+            session, coverage, corpus_id, table_name=table_name, source_column=source_column
+        )
+
+    async def _with_orphan_record_keys(
+        self,
+        session: AsyncSession,
+        coverage: ColumnCoverage,
+        corpus_id: CorpusId,
+        *,
+        table_name: str,
+        source_column: str,
+    ) -> ColumnCoverage:
+        """mvp-spec.md §7: an orphan code (`in_codelist=False`) is a
+        `Finding`-grade case carrying "the column, the value and the record
+        key". `compute_coverage` is pure and never sees a record, so this
+        fills `record_keys` in afterwards, only for the rows that need it —
+        one targeted query per orphan code, not per code (§14.2's own
+        cardinality argument)."""
+        repo = CodelistRepository(session)
+        codes = list(coverage.codes)
+        for index, usage in enumerate(codes):
+            if usage.in_codelist:
+                continue
+            record_keys = await repo.record_keys_for_value(
+                corpus_id, table_name=table_name, source_column=source_column, value_raw=usage.code
+            )
+            codes[index] = replace(usage, record_keys=tuple(record_keys))
+        return replace(coverage, codes=tuple(codes))
 
     # -- internals --------------------------------------------------------------
 
@@ -285,9 +328,7 @@ class CodelistService:
             mapping_id=ColumnMappingId(mapping.id) if mapping is not None else None,
             mapped_attribute=mapped_attribute_view,
             coverage=coverage,
-            # C5, plan-phase-2.md §2 — the "used by" cross-link is deferred
-            # until a Feature actually exists to populate it.
-            used_by_features=(),
+            used_by_features=await _features_using_column(session, column_name),
         )
 
 
@@ -343,6 +384,21 @@ async def _table_name_for(
     """
     census_column = await _matching_census_column(session, corpus_id, source_column)
     return census_column.table_name if census_column is not None else None
+
+
+async def _features_using_column(session: AsyncSession, column_name: str) -> tuple[str, ...]:
+    """The "used by" cross-link (design's Screen 1, C5/plan-phase-2.md §2):
+    "computed from `feature.source_column`, not stored." A feature carries no
+    FK back to a census column, so this reads live rather than joining —
+    every `feature` row (draft or frozen: a draft already depends on the
+    column just as much as a frozen one does) whose `source_column` names
+    this one, across every feature set, regardless of corpus (a
+    `feature_config` is corpus-independent, so "used by" is a property of the
+    column name, not of this one corpus's mapping).
+    """
+    stmt = select(Feature.key).where(Feature.source_column == column_name).order_by(Feature.key)
+    result = await session.scalars(stmt)
+    return tuple(result.all())
 
 
 def _attribute_view(attribute: CodeAttribute) -> CodeAttributeView:

@@ -157,13 +157,23 @@ class CodelistRepository:
             then ascending value — plain tuples, not ORM rows, so this can be
             handed straight to `codelist_service.coverage()` (Wave 2) without
             leaking a session-bound object past this layer.
+
+            Empty cells (`value_raw == ""`) are excluded, the same rule
+            `compute_census` applies (mvp-spec.md §8.6: empty means *no value
+            was provided*, never a code of its own) — a code review found
+            this missing here, which made every enum column with any blank
+            cells report a phantom "no label — not in the codelist" row.
         """
         if table_name == "unfall":
             count_col = func.count().label("cnt")
             stmt = (
                 select(UnfallRow.value_raw, count_col)
                 .join(Record, UnfallRow.record_id == Record.id)
-                .where(Record.corpus_id == corpus_id, UnfallRow.column_name == source_column)
+                .where(
+                    Record.corpus_id == corpus_id,
+                    UnfallRow.column_name == source_column,
+                    UnfallRow.value_raw != "",
+                )
                 .group_by(UnfallRow.value_raw)
                 .order_by(count_col.desc(), UnfallRow.value_raw.asc())
             )
@@ -173,7 +183,11 @@ class CodelistRepository:
                 select(ObjektCell.value_raw, count_col)
                 .join(ObjektRow, ObjektCell.objekt_row_id == ObjektRow.id)
                 .join(Record, ObjektRow.record_id == Record.id)
-                .where(Record.corpus_id == corpus_id, ObjektCell.column_name == source_column)
+                .where(
+                    Record.corpus_id == corpus_id,
+                    ObjektCell.column_name == source_column,
+                    ObjektCell.value_raw != "",
+                )
                 .group_by(ObjektCell.value_raw)
                 .order_by(count_col.desc(), ObjektCell.value_raw.asc())
             )
@@ -184,7 +198,11 @@ class CodelistRepository:
                 .join(PersonRow, PersonCell.person_row_id == PersonRow.id)
                 .join(ObjektRow, PersonRow.objekt_row_id == ObjektRow.id)
                 .join(Record, ObjektRow.record_id == Record.id)
-                .where(Record.corpus_id == corpus_id, PersonCell.column_name == source_column)
+                .where(
+                    Record.corpus_id == corpus_id,
+                    PersonCell.column_name == source_column,
+                    PersonCell.value_raw != "",
+                )
                 .group_by(PersonCell.value_raw)
                 .order_by(count_col.desc(), PersonCell.value_raw.asc())
             )
@@ -193,3 +211,54 @@ class CodelistRepository:
 
         rows = (await self._session.execute(stmt)).all()
         return [(value_raw, int(count)) for value_raw, count in rows]
+
+    async def record_keys_for_value(
+        self, corpus_id: CorpusId, *, table_name: str, source_column: str, value_raw: str
+    ) -> list[str]:
+        """Every `UnfallUid` of a record carrying this exact value in this
+        column — mvp-spec.md §7's "a Finding carrying the column, the value
+        and **the record key**", for the one case that names it: a code with
+        no counterpart at all in the mapped attribute (`CodeUsage.
+        in_codelist=False`). Deliberately narrow: called only for that
+        orphan case, never for every code, the same "cheap at this
+        cardinality, not at record cardinality" reasoning `coverage_counts`
+        itself is built on (sw-design.md §14.2).
+        """
+        if table_name == "unfall":
+            stmt = (
+                select(Record.unfall_uid)
+                .join(UnfallRow, UnfallRow.record_id == Record.id)
+                .where(
+                    Record.corpus_id == corpus_id,
+                    UnfallRow.column_name == source_column,
+                    UnfallRow.value_raw == value_raw,
+                )
+            )
+        elif table_name == "objekt":
+            stmt = (
+                select(Record.unfall_uid)
+                .join(ObjektRow, ObjektRow.record_id == Record.id)
+                .join(ObjektCell, ObjektCell.objekt_row_id == ObjektRow.id)
+                .where(
+                    Record.corpus_id == corpus_id,
+                    ObjektCell.column_name == source_column,
+                    ObjektCell.value_raw == value_raw,
+                )
+            )
+        elif table_name == "person":
+            stmt = (
+                select(Record.unfall_uid)
+                .join(ObjektRow, ObjektRow.record_id == Record.id)
+                .join(PersonRow, PersonRow.objekt_row_id == ObjektRow.id)
+                .join(PersonCell, PersonCell.person_row_id == PersonRow.id)
+                .where(
+                    Record.corpus_id == corpus_id,
+                    PersonCell.column_name == source_column,
+                    PersonCell.value_raw == value_raw,
+                )
+            )
+        else:
+            raise ValueError(f"table_name must be one of {_EAV_TABLE_NAMES}, got {table_name!r}")
+
+        result = await self._session.scalars(stmt.order_by(Record.unfall_uid).distinct())
+        return list(result.all())

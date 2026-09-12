@@ -439,8 +439,9 @@ async def test_each_group_carries_the_designs_status_marker(seeded: Seeded) -> N
 
 async def test_the_row_subtitles_say_a_different_thing_per_group(seeded: Seeded) -> None:
     """README's `.rsub`: distinct-in-corpus while missing, "N of M labelled"
-    while partial, "N codes" once ok — and "unused" throughout, because
-    `used_by_features` is inert in phase 2 (C5)."""
+    while partial, "N codes" once ok — and "unused" throughout, since this
+    fixture set seeds no `Feature` row naming any of these columns (C5:
+    `used_by_features` is computed live from `feature.source_column`)."""
     user = seeded.user
     await user.open("/codelists")
     subtitles = {

@@ -129,7 +129,12 @@ async def test_structural_error_raises_and_writes_nothing(
 async def test_non_utf8_encoding_is_not_silently_replaced(
     codelist_service: CodelistService,
 ) -> None:
-    """Do-NOT list #4: never `errors="replace"`. Invalid UTF-8 raises rather
-    than being silently repaired into replacement characters."""
-    with pytest.raises(UnicodeDecodeError):
+    """Do-NOT list #4: never `errors="replace"`. Invalid UTF-8 fails the
+    import loudly and explicitly — a `CodelistImportError` the API layer
+    already knows how to turn into a 422, not an uncaught `UnicodeDecodeError`
+    that would otherwise surface past the service as a 500 (a real gap a
+    code review found: F1's own exit criterion promises 422 for a malformed
+    upload, never a 500)."""
+    with pytest.raises(CodelistImportError) as exc_info:
         await codelist_service.import_file("codelist.json", b"\xff\xfe not utf-8 at all")
+    assert "not valid UTF-8" in exc_info.value.import_errors[0].message

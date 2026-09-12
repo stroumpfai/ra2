@@ -19,10 +19,16 @@ from ra2.domain.feature import Grain, Kind, ValueType
 
 __all__ = ["FingerprintInput", "compute_fingerprint"]
 
-#: Same convention as the `*_json` columns (M0-D8): the application controls
-#: key order and separators so the hash is reproducible byte-for-byte, and
-#: `ensure_ascii=False` so label text hashes as text, not `\uXXXX` escapes.
-_JSON_KWARGS: Final = {"sort_keys": True, "separators": (",", ":"), "ensure_ascii": False}
+#: The application controls key order and separators so the hash is
+#: reproducible byte-for-byte, and `ensure_ascii=False` so label text hashes
+#: as text, not `\uXXXX` escapes. **Not** `sort_keys=True` (unlike the
+#: `*_json` columns' own M0-D8 convention): §8.5 names an exact field order,
+#: and `payload` below is built with its keys in exactly that order, so
+#: preserving Python's own dict insertion order *is* "in order" — sorting
+#: them alphabetically instead was a code-review finding: still stable and
+#: still sensitive to every field (the two properties the tests actually
+#: pin), but not the order mvp-spec.md §8.5 states.
+_JSON_KWARGS: Final = {"sort_keys": False, "separators": (",", ":"), "ensure_ascii": False}
 
 
 @dataclass(frozen=True, slots=True)

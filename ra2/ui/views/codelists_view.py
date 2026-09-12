@@ -35,10 +35,12 @@ point of decision:
   §8.1.1 actually names). The status chip likewise filters that complete
   list by the status the service already assigned each row; `CodelistService`
   has no status parameter to push it into.
-- **"used by"** is inert. `used_by_features` is always empty in phase 2 (C5,
-  plan-phase-2.md §2) and computing it here would be exactly the business
-  logic §12.7 forbids, so every row reads "unused" until Features populates
-  it, and the copy that names a feature drops to its no-feature wording.
+- **"used by"** reads `used_by_features` verbatim — nothing here computes it
+  (that would be exactly the business logic §12.7 forbids). It started out
+  permanently empty (C5, plan-phase-2.md §2); `CodelistService.list_columns`
+  now populates it for real (a code review found the stub had never been
+  turned on), so a row reads "unused" only when no feature actually names
+  this column, and the copy naming a feature reflects that live state.
 - **"Add label"** is drawn disabled. mvp-spec.md §7 is explicit that no UI
   path writes `code_value`; the design draws the affordance, so it renders
   inert with a title saying what to do instead, exactly as Census draws
@@ -161,9 +163,8 @@ JSON_KEY_LABEL: Final = "JSON key"
 UNUSED: Final = "unused"
 USED_BY: Final = "used by"
 ADD_LABEL: Final = "Add label"
-#: The design names the one feature reading the column. Nothing populates
-#: `used_by_features` in phase 2 (C5), so the sentence keeps its meaning
-#: without naming one.
+#: The design names the one feature reading the column; kept generic here
+#: since a column can legitimately be `used_by_features` of more than one.
 NEUTRAL_FOOTER: Final = (
     "Read-only. Labels come from the imported JSON — to change one, import a "
     "corrected file. Any change gives every feature using it a new "
@@ -1296,12 +1297,8 @@ def _detail_subtitle(column: ColumnMappingView) -> str:
 
 
 def _used_by(column: ColumnMappingView) -> str:
-    """ "used by Weather", or the design's own "unused".
-
-    `used_by_features` is always empty in phase 2 (C5) — rendered, never
-    computed, so the day Features populates it this line starts working with
-    no change here.
-    """
+    """ "used by Weather", or the design's own "unused" — rendered, never
+    computed here; `CodelistService.list_columns` is what decides it (C5)."""
     if not column.used_by_features:
         return UNUSED
     return f"{USED_BY} {', '.join(column.used_by_features)}"

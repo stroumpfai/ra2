@@ -15,15 +15,18 @@ the view renders was computed by the pipeline under test, not by a fixture.
 
 **Two of the four bullets need a note.**
 
-`in_config` is `False` on every `CensusColumnView` the real service can
-produce: phase 1 has no FeatureConfig at all (`plan-phase-1.md`, "Deliberately
-deferred inside phase 1"), so no corpus can contain a configured column and no
-amount of seeding makes one. Faking a service to manufacture one would test
-the fake. So the tint is asserted where it is actually decided — the real
-`ColumnSpec`s and the real row decorators, rendered by the real `DataTable`
-onto a harness page in this file, the same shape as `tests/e2e/conftest.py`'s
-J4 harness. `test_no_real_column_is_in_config_in_phase_1` pins the other half:
-against real data the tinted path is never taken.
+`in_config` is `False` on every `CensusColumnView` **this file's fixtures**
+produce: the `seeded` fixture only registers, analyses and freezes a
+delivery through `DeliveryService`/`CorpusService` — it creates no `Feature`
+row, and `in_config` is real from phase 2 on (`CensusService` computes it
+from `feature.source_column`), so a column with no feature naming it is
+correctly untinted here, not untinted because nothing could ever populate
+it. Faking a service to manufacture a tinted row would test the fake. So
+the tint is asserted where it is actually decided — the real `ColumnSpec`s
+and the real row decorators, rendered by the real `DataTable` onto a harness
+page in this file, the same shape as `tests/e2e/conftest.py`'s J4 harness.
+`test_no_real_column_is_in_config_in_phase_1` pins the other half: against
+this fixture set's data (no features), the tinted path is never taken.
 
 "use as feature" is asserted **present and non-interactive**, not absent: the
 design draws the affordance, and phase 1 draws it disabled rather than linking
@@ -469,8 +472,9 @@ async def test_the_tinted_row_shows_in_config_instead_of_the_action(seeded: Seed
 
 async def test_no_real_column_is_in_config_in_phase_1(seeded: Seeded) -> None:
     """The other half of the tinting bullet: against the real service the
-    tinted path is never taken, because `in_config` is `False` on every row a
-    phase-1 census can produce."""
+    tinted path is never taken, because this fixture set's delivery creates
+    no `Feature` row naming any of its columns (`in_config` is real from
+    phase 2 on — see the module docstring)."""
     user = seeded.user
     await user.open("/census")
     assert _find(user, "in-config") == []

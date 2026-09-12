@@ -5,18 +5,34 @@ Reads the `census_*` tables only. **Nothing here aggregates EAV cells** — that
 happened once, at freeze.
 """
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ra2.domain.census import CensusBucket, CensusBucketLabel, TypeHint, ValueCount
 from ra2.domain.ids import CorpusId
-from ra2.persistence.models import CensusColumn
+from ra2.persistence.models import CensusColumn, Feature
 from ra2.persistence.repositories.census_repo import CensusRepository
 from ra2.services.readmodels import CensusColumnView, CensusSummary, Page, SortDir
 
 __all__ = ["CensusService"]
 
 
-def _to_column_view(row: CensusColumn) -> CensusColumnView:
+async def _columns_in_config(session: AsyncSession) -> frozenset[str]:
+    """Every column name at least one `feature.source_column` names —
+    phase 2 (M9)'s wiring of `CensusColumnView.in_config` (see its own
+    docstring): "computed from `feature.source_column`, never stored, since a
+    feature carries no FK back to a census column." Draft and frozen sets
+    both count, and this is corpus-independent (a `feature_config` names no
+    corpus of its own), matching `codelist_service`'s identical "used by"
+    cross-link.
+    """
+    result = await session.scalars(
+        select(Feature.source_column).where(Feature.source_column.is_not(None)).distinct()
+    )
+    return frozenset(name for name in result if name is not None)
+
+
+def _to_column_view(row: CensusColumn, *, columns_in_config: frozenset[str]) -> CensusColumnView:
     """The only place an ORM `CensusColumn` becomes a `CensusColumnView`.
 
     Every field is copied verbatim from the materialised row — nothing here
@@ -44,6 +60,7 @@ def _to_column_view(row: CensusColumn) -> CensusColumnView:
             ValueCount(value_raw=value.value_raw, count=value.count, share=value.share)
             for value in row.values
         ),
+        in_config=row.column_name in columns_in_config,
     )
 
 
@@ -83,8 +100,9 @@ class CensusService:
                 offset=offset,
                 limit=page_size,
             )
+            columns_in_config = await _columns_in_config(session)
         return Page(
-            items=tuple(_to_column_view(row) for row in rows),
+            items=tuple(_to_column_view(row, columns_in_config=columns_in_config) for row in rows),
             total=total,
             page=page,
             page_size=page_size,

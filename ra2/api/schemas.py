@@ -340,6 +340,9 @@ class CodeUsageResponse(_Schema):
     #: `false` is the danger row: the code has no row at all in the mapped
     #: attribute (sw-design.md §14.2) — distinct from merely unlabelled.
     in_codelist: bool
+    #: mvp-spec.md §7's "a Finding carrying the column, the value and the
+    #: record key" — always `[]` when `in_codelist` is `true`.
+    record_keys: list[str] = Field(default_factory=list)
 
 
 class ColumnCoverageResponse(_Schema):

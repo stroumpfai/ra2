@@ -38,6 +38,12 @@ class CodeUsage:
     `in_codelist=False` is the `Finding`-grade case mvp-spec.md §7 names: the
     code has **no row at all** in the mapped attribute, in any language —
     distinct from merely lacking a label in the configured language.
+    mvp-spec.md §7 asks that this case carry "the column, the value **and
+    the record key**" — `record_keys` is that key (or keys: a code can
+    appear on more than one record). Always `()` here — `compute_coverage`
+    is pure and only ever sees aggregated `(value, count)` pairs, never a
+    record — populated by `codelist_service.coverage()`, the one caller with
+    a session to look records up on, for `in_codelist=False` rows only.
     """
 
     code: str
@@ -47,6 +53,7 @@ class CodeUsage:
     #: The label in the requested language, or `None`.
     label: str | None
     in_codelist: bool
+    record_keys: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
