@@ -10,11 +10,19 @@ the hash is taken.
 **M9 freezes `FingerprintInput` and the signature. D2 writes the body.**
 """
 
+import hashlib
+import json
 from dataclasses import dataclass
+from typing import Final
 
 from ra2.domain.feature import Grain, Kind, ValueType
 
 __all__ = ["FingerprintInput", "compute_fingerprint"]
+
+#: Same convention as the `*_json` columns (M0-D8): the application controls
+#: key order and separators so the hash is reproducible byte-for-byte, and
+#: `ensure_ascii=False` so label text hashes as text, not `\uXXXX` escapes.
+_JSON_KWARGS: Final = {"sort_keys": True, "separators": (",", ":"), "ensure_ascii": False}
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,4 +58,15 @@ def compute_fingerprint(input: FingerprintInput) -> str:
     one of the eight fields changes the hash — the property that makes "two
     runs asked the model different questions" true.
     """
-    raise NotImplementedError
+    payload = {
+        "kind": input.kind.value,
+        "grain": input.grain.value,
+        "source_column": input.source_column,
+        "derivation_json": input.derivation_json,
+        "value_type": input.value_type.value,
+        "matching_rule_json": input.matching_rule_json,
+        "enum_codelist_json": input.enum_codelist_json,
+        "description": input.description,
+    }
+    canonical = json.dumps(payload, **_JSON_KWARGS)  # type: ignore[arg-type]
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
