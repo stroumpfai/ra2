@@ -16,18 +16,37 @@ from datetime import datetime
 from enum import StrEnum
 
 from ra2.domain.census import CensusBucket, TypeHint, ValueCount
+from ra2.domain.codelist_coverage import ColumnCoverage
+from ra2.domain.codes import CodeValue
 from ra2.domain.delivery import DeliveryStatus, FileKind, SourceKind
+from ra2.domain.feature import DerivationSpec, Grain, Kind, MatchingRule, ValueType
 from ra2.domain.findings import Finding
-from ra2.domain.ids import CensusColumnId, CorpusId, DeliveryId, FileId
+from ra2.domain.ids import (
+    CensusColumnId,
+    CodeAttributeId,
+    CodeTableImportId,
+    ColumnMappingId,
+    CorpusId,
+    DeliveryId,
+    FeatureConfigId,
+    FeatureId,
+    FileId,
+)
 
 __all__ = [
     "CensusBucket",
     "CensusColumnView",
     "CensusSummary",
+    "CodeAttributeView",
+    "CodelistImportResult",
+    "ColumnMappingView",
     "CorpusSummary",
     "CorpusView",
     "DeliveryFileView",
     "DeliveryView",
+    "FeatureConfigView",
+    "FeatureSetSummary",
+    "FeatureView",
     "Page",
     "SortDir",
 ]
@@ -157,8 +176,12 @@ class CensusColumnView:
     long_tail: bool
     #: Top 20 stored; top 4 rendered as bar segments, top 3 in the legend.
     top_values: tuple[ValueCount, ...] = ()
-    #: Phase 1 has no feature config, so this is always `False` and the
-    #: "use as feature" action renders disabled (plan-phase-1.md §1).
+    #: Phase 1 has no feature config, so this was always `False` (the "use as
+    #: feature" action rendered disabled, plan-phase-1.md §1). Phase 2 (M9)
+    #: turns this real: `True` once some feature's `source_column` names this
+    #: column (plan-phase-2.md §2, "deliberately deferred inside phase 2") —
+    #: computed from `feature.source_column`, never stored, since a feature
+    #: carries no FK back to a census column.
     in_config: bool = False
 
 
@@ -171,3 +194,123 @@ class CensusSummary:
     #: `{"unfall": 67, "objekt": 77, "person": 18}`.
     column_counts_by_table: Mapping[str, int]
     total_column_count: int
+
+
+# ===========================================================================
+# Codelists (F3) — phase 2, mvp-spec.md §7, sw-design.md §14.
+# ===========================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class CodeAttributeView:
+    """One imported attribute — the Codelists edit zone's JSON-key dropdown
+    options, and its "mapped to X · N keys, M mapped" header line."""
+
+    code_attribute_id: CodeAttributeId
+    key: str
+    chapter: str | None
+    name: Mapping[str, str]
+    code_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class ColumnMappingView:
+    """One row of the Codelists master list: one census `enum` column, its
+    mapping if any, and its coverage status (sw-design.md §14.2)."""
+
+    corpus_id: CorpusId
+    table_name: str
+    column_name: str
+    distinct_in_corpus: int
+    mapping_id: ColumnMappingId | None
+    mapped_attribute: CodeAttributeView | None
+    #: `None` exactly when `mapped_attribute` is `None`.
+    coverage: ColumnCoverage | None
+    #: Feature names reading this column (C5, plan-phase-2.md §2) — inert
+    #: (always empty) until a feature actually exists to populate it.
+    used_by_features: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class CodelistImportResult:
+    """What one "Import Codes as JSON" action returns.
+
+    `no_change=True` is not an error (F1, plan-phase-2.md §9): a re-upload of
+    the current file is reported "already current", not a new generation.
+    """
+
+    code_table_import_id: CodeTableImportId
+    source_hash: str
+    imported_at: datetime
+    attribute_count: int
+    no_change: bool = False
+
+
+# ===========================================================================
+# Features (F4) — phase 2, mvp-spec.md §8.
+# ===========================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class FeatureView:
+    """One row of the Features flat list, and the edit zone's content for it."""
+
+    feature_id: FeatureId
+    feature_config_id: FeatureConfigId
+    ordinal: int
+    key: str
+    kind: Kind
+    description: str
+    grain: Grain
+    source_column: str | None
+    derivation: DerivationSpec | None
+    value_type: ValueType
+    matching_rule: MatchingRule
+    #: The snapshot taken at evaluation creation (§8.5) — always `None` in
+    #: phase 2, since no evaluation exists yet to take one.
+    enum_codelist: tuple[CodeValue, ...] | None
+    #: The real value, set only once the enclosing set is frozen.
+    fingerprint: str | None
+    #: Q3 — always computable from the draft's current fields, shown with a
+    #: "· preview" qualifier until frozen.
+    fingerprint_preview: str
+    #: Blocking validation messages (mvp-spec.md §7/§8.2). Non-empty rows
+    #: render as errors and block "Create a feature set".
+    errors: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class FeatureConfigView:
+    """One feature set with its features — the Features toolbar/edit surface."""
+
+    feature_config_id: FeatureConfigId
+    name: str
+    version: int
+    description: str | None
+    created_at: datetime
+    frozen_at: datetime | None
+    locked_by_evaluations: int = 0
+    features: tuple[FeatureView, ...] = ()
+
+    @property
+    def is_frozen(self) -> bool:
+        return self.frozen_at is not None
+
+
+@dataclass(frozen=True, slots=True)
+class FeatureSetSummary:
+    """One row of the feature-sets strip below the Features split."""
+
+    feature_config_id: FeatureConfigId
+    name: str
+    version: int
+    description: str | None
+    created_at: datetime
+    feature_count: int
+    frozen_at: datetime | None
+    #: > 0 renders the `LOCKED · N eval` pill and disables rename/delete.
+    locked_by_evaluations: int = 0
+
+    @property
+    def is_frozen(self) -> bool:
+        return self.frozen_at is not None

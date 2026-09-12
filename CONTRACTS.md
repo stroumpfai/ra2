@@ -86,6 +86,69 @@ leave the protocols alone.
 
 ---
 
+## Phase 2 — owner: M9 (Wave 0), amendment only
+
+Re-established at tag `p2-frozen`, the same way M0 established the list
+above at `m0-frozen`. **Wave 0 of phase 2 may edit any file this document
+already lists**, including phase-1 files — re-establishing the frozen
+baseline for a new phase is Wave 0's job (plan-phase-2.md §4). After
+`p2-frozen`, everything below is frozen for Waves 1-4 exactly as the phase-1
+list is.
+
+**One migration author, one per phase.** A3 was phase 1's; **D3 is phase
+2's**. Nobody else runs `alembic revision` against a chain phase 2 has
+touched. No parallel heads (CLAUDE.md).
+
+### New files
+
+| File | Contents |
+|---|---|
+| `ra2/domain/codes.py` | `CodeAttribute`, `CodeValue`, `CodeImportError`, `CodeTableImportResult`, the `CodelistImportSchema` Pydantic shape matching `codes-2018.json` — **types and schema only**; `validate_import`'s body is D1's |
+| `ra2/domain/codelist_coverage.py` | `CoverageStatus`, `CodeUsage`, `ColumnCoverage` — **types and signature only**; `compute_coverage`'s body is D1's. Split from `codes.py` per sw-design.md §14.3 (see "Documented deviations" below) |
+| `ra2/domain/feature.py` | `Kind`, `Grain`, `ValueType`, `MatchingRuleKind`, `MatchingRule`, `Operator`, `Filter`, the seven `DerivationType`s and their dataclasses, `DerivationSpec`, `EXPLORATORY_FEATURE_CAP` — **shape only, no evaluator** (Q1) |
+| `ra2/domain/fingerprint.py` | `FingerprintInput` and the `compute_fingerprint` **signature only**; the body is D2's |
+| `ra2/services/codelist_service.py` | constructor + typed method signatures; bodies E1 |
+| `ra2/services/feature_service.py` | constructor + typed method signatures; bodies E2 |
+| `ra2/api/v1/codelists.py` | constructor-free stub router; bodies F1 |
+| `ra2/api/v1/features.py` | constructor-free stub router; bodies F2 |
+| `ra2/ui/components/derivation_builder.py` | **signature only** — the Wave 4 seam (plan-phase-2.md §3); body G3 |
+| `ra2/ui/components/feature_sets_table.py` | **signature only** — same seam; body G3 |
+| `ra2/persistence/migrations/versions/20260912_0000_4995824acfe4_*.py` | empty stub revision wired into the chain; D3 fills it in |
+
+### Amended files (already frozen at M0; re-frozen here)
+
+| File | What changed |
+|---|---|
+| `ra2/domain/ids.py` | + `CodeTableImportId`, `CodeAttributeId`, `ColumnMappingId`, `FeatureConfigId`, `FeatureId` |
+| `ra2/persistence/models.py` | + `CodeTableImport`, `CodeAttribute`, `CodeValue`, `ColumnMapping`, `FeatureConfig`, `Feature` ORM classes; `Evaluation.feature_config_id` becomes a real `ForeignKey("feature_config.id")` |
+| `ra2/services/protocols.py` | + `EnumCodeTableProvider` (the Wave 2 seam, plan-phase-2.md §3 / E6-style) |
+| `ra2/services/container.py` | + `codelist: CodelistService`, `feature: FeatureService` |
+| `ra2/services/errors.py` | + `CodelistImportError`, `FeatureValidationError`, `FeatureConfigFrozenError` |
+| `ra2/services/readmodels.py` | + `CodeAttributeView`, `ColumnMappingView`, `CodelistImportResult`, `FeatureView`, `FeatureConfigView`, `FeatureSetSummary`; `CensusColumnView.in_config`'s docstring now says phase 2 makes it real |
+| `ra2/api/schemas.py` | + every request/response model for the two new routers |
+| `ra2/api/deps.py` | + `CodelistServiceDep`, `FeatureServiceDep` |
+| `ra2/api/v1/router.py` | + the two new routers |
+| `ra2/infra/config.py` | + `Settings.codelists_dir` |
+| `ra2/main.py` | + `codelist_service`, `feature_service` construction and wiring into `Services` |
+
+### Stubs — a body is expected; the file is **not** frozen (phase 2)
+
+| Path | Owner |
+|---|---|
+| `ra2/domain/codes.py` *(`validate_import` body)*, `ra2/domain/codelist_coverage.py` *(`compute_coverage` body)* | D1 |
+| `ra2/domain/feature.py` *(catalogue validation helpers)*, `ra2/domain/fingerprint.py` *(body)* | D2 |
+| `ra2/persistence/repositories/{codelist,feature}_repo.py`, `ra2/persistence/migrations/versions/**` | D3 |
+| `ra2/ui/components/{seg,rof,readout,fingerprint_badge}.py` (or additions to `primitives.py`) | D4 |
+| `ra2/services/codelist_service.py` | E1 |
+| `ra2/services/feature_service.py` | E2 |
+| `ra2/api/v1/codelists.py` | F1 |
+| `ra2/api/v1/features.py` | F2 |
+| `ra2/ui/views/codelists_view.py` | G1 |
+| `ra2/ui/views/features_view.py`, `ra2/ui/state.py` *(additions)* | G2 |
+| `ra2/ui/components/{derivation_builder,feature_sets_table}.py` *(bodies)* | G3 |
+
+---
+
 ## The census seam
 
 The one that lets Wave 2 run in parallel (plan-m0-m5.md E6):
@@ -122,3 +185,18 @@ sw-design.md's own and were signed off on 2026-09-07 (P2).
 | **M0-D8** | `*_json` columns are `Text`, holding an app-serialised JSON string | B1's golden import report is asserted byte-for-byte, so the application must control key order and separators. A JSON-typed column would not let it. |
 | **M0-D9** | `compute_census(table_name, cells, *, columns, record_count, top_n)` takes `columns` explicitly | In EAV a column that is empty in every row can be absent from the scan entirely. h08 requires it to appear at 0 %, so the canonical header is an input, not an inference. |
 | **M0-D10** | `FindingCode` has 16 members, four beyond plan-m0-m5.md §3.1's list | `DIALECT_DETECTED`, `ROW_REJECTED_PARSE_ERROR`, `SET_UNRESOLVED` and `CP1252_CANARY_ZERO` are each required by a rule in mvp-spec.md §4.2-§4.4 or by SD6, and h09's canary expectation has no other code to assert on. |
+
+---
+
+## Documented deviations phase 2 (M9) introduces
+
+| # | Decision | Why |
+|---|---|---|
+| **P2-D1** | `feature_config.description` — additive beyond mvp-spec.md §5 | The design's feature-sets table has a "Description" column (e.g. "Conditions + probes") mvp-spec never named. Same pattern as SD4's additive `corpus` columns. |
+| **P2-D2** | `feature_config.version` — additive beyond mvp-spec.md §5 | The design shows "Weather & conditions v3" beside older v2/v1 sets sharing a name — the same monotonic-per-name shape `corpus.version` already has. Design fidelity is a requirement (sw-design.md §8.2). |
+| **P2-D3** | `compute_coverage` (and `ColumnCoverage`/`CoverageStatus`) live in a new `domain/codelist_coverage.py`, not in `domain/codes.py` | sw-design.md §14.3's package layout names two files with two concerns; plan-phase-2.md §5.1 named both bodies as `codes.py`'s. sw-design.md wins ties on *how* (CLAUDE.md, plan-phase-2.md line 13) — the split is followed as drawn. |
+| **P2-D4** | The features router is rooted at `/api/v1/feature-configs`, not `/api/v1/features` | plan-phase-2.md's own §3 (P17) and §9 (F2) name different base paths for the same router. `/feature-configs` matches the resource the router actually roots on (`feature_config`) and §9's F2 section is the more specific of the two statements. |
+| **P2-D5** | `ui/components/feature_sets_table.py`'s `sets` parameter is typed `FeatureSetSummary`, not `FeatureSetView` | plan-phase-2.md §3's snippet named `FeatureSetView` informally; the read model this wave actually defines (services/readmodels.py, matching the design's `FeatureSet` shape) is `FeatureSetSummary`. One type, not two to reconcile later. |
+| **P2-D6** | `code_value` has no dedicated id `NewType` | plan-phase-2.md §5.1 names five new ids, not six; nothing joins against a `code_value` by id outside its own attribute. Its ORM primary key is a plain `String`, same treatment as `delivery_file.set_key`. |
+| **P2-D7** | `services/readmodels.py` gains `CodelistImportResult`, beyond the five view types plan-phase-2.md §5.1 names | `codelist_service.import_file`'s return type needs a shape carrying `no_change` alongside the import's identity — same reasoning as M0-D2: declaring it now costs nothing and saves an amendment. |
+| **P2-D8** | `ra2/api/deps.py` gains `CodelistServiceDep`/`FeatureServiceDep`, though plan-phase-2.md §5.1 does not list `deps.py` as a Wave 0 deliverable | F1/F2 (Wave 3) do not own `deps.py` (§6's ownership matrix has no row for it) and cannot amend a frozen file to get their routers' dependency injection — Wave 0 is the only wave that can add it without an amendment. |

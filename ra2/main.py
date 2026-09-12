@@ -28,10 +28,12 @@ from ra2.infra.tasks import AsyncioTaskRunner, TaskRunner
 from ra2.persistence.session import create_engine, create_session_factory, ensure_database_dir
 from ra2.services.census_materialiser import RelationalCensusMaterialiser
 from ra2.services.census_service import CensusService
+from ra2.services.codelist_service import CodelistService
 from ra2.services.container import Services
 from ra2.services.corpus_service import CorpusService
 from ra2.services.delivery_service import DeliveryService
 from ra2.services.export_service import ExportService
+from ra2.services.feature_service import FeatureService
 from ra2.services.protocols import CensusMaterialiser
 from ra2.ui import views
 from ra2.ui.theme import FONTS_DIR, FONTS_URL_PATH
@@ -104,11 +106,31 @@ def create_app(
         corpus_service=corpus_service,
         clock=clock,
     )
+    # sw-design.md §14.1: the same FileStore seam as delivery intake, a
+    # different root — codelists are versioned uploads, never a shipped
+    # resource under ra2/.
+    codelist_store = UploadedFileStore(settings.codelists_dir, max_bytes=settings.max_upload_bytes)
+    codelist_service = CodelistService(
+        session_factory=session_factory,
+        upload_store=codelist_store,
+        clock=clock,
+        ids=ids,
+    )
+    # `codelist_service` satisfies `EnumCodeTableProvider` structurally
+    # (services/protocols.py) — feature_service never imports it directly.
+    feature_service = FeatureService(
+        session_factory=session_factory,
+        codelist_provider=codelist_service,
+        clock=clock,
+        ids=ids,
+    )
     services = Services(
         delivery=delivery_service,
         corpus=corpus_service,
         census=census_service,
         export=export_service,
+        codelist=codelist_service,
+        feature=feature_service,
     )
 
     app = FastAPI(

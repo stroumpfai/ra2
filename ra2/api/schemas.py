@@ -25,14 +25,32 @@ __all__ = [
     "CensusColumnResponse",
     "CensusPage",
     "CensusSummaryResponse",
+    "CloneFeatureConfigRequest",
+    "CodeAttributeResponse",
+    "CodeImportErrorResponse",
+    "CodeUsageResponse",
+    "CodelistImportErrorResponse",
+    "CodelistImportResponse",
+    "ColumnCoverageResponse",
+    "ColumnMappingResponse",
     "CorpusPage",
     "CorpusResponse",
     "CreateCorpusRequest",
+    "CreateFeatureConfigRequest",
     "DeliveryFileResponse",
     "DeliveryResponse",
+    "DerivationFilterSchema",
+    "DerivationSpecSchema",
     "ErrorResponse",
+    "FeatureConfigResponse",
+    "FeatureConfigSummaryResponse",
+    "FeatureRequest",
+    "FeatureResponse",
+    "FeatureValidationErrorResponse",
     "FileOverrideRequest",
     "FindingResponse",
+    "MapColumnRequest",
+    "MatchingRuleSchema",
     "PageMeta",
     "ProfileBucketResponse",
     "RegisterDeliveryRequest",
@@ -269,3 +287,206 @@ class TaskProgressResponse(_Schema):
     message: str = ""
     #: Set only when `status` is `failed`. A failure is a recorded outcome.
     error: str | None = None
+
+
+# ===========================================================================
+# /api/v1/codelists  (F1)
+# ===========================================================================
+
+
+class CodeImportErrorResponse(_Schema):
+    """One structural problem with an uploaded codelist file."""
+
+    attribute_key: str | None = None
+    path: str
+    message: str
+
+
+class CodelistImportErrorResponse(_Schema):
+    """422 from a malformed upload. **Nothing was imported** (sw-design.md §14.1)."""
+
+    detail: str = "malformed codelist upload; nothing was imported"
+    errors: list[CodeImportErrorResponse]
+
+
+class CodelistImportResponse(_Schema):
+    code_table_import_id: str
+    source_hash: str
+    imported_at: datetime
+    attribute_count: int
+    #: A re-upload of the current file is "already current", not an error.
+    no_change: bool = False
+
+
+class CodeAttributeResponse(_Schema):
+    """One imported attribute — the JSON-key mapping dropdown's options."""
+
+    code_attribute_id: str
+    key: str
+    chapter: str | None = None
+    name: dict[str, str] = Field(default_factory=dict)
+    code_count: int
+
+
+class CodeUsageResponse(_Schema):
+    code: str
+    count: int
+    #: `count / populated_count`, in [0, 1].
+    share: float
+    label: str | None = None
+    #: `false` is the danger row: the code has no row at all in the mapped
+    #: attribute (sw-design.md §14.2) — distinct from merely unlabelled.
+    in_codelist: bool
+
+
+class ColumnCoverageResponse(_Schema):
+    #: `missing` | `partial` | `ok` (sw-design.md §14.2).
+    status: str
+    language: str
+    codes: list[CodeUsageResponse] = Field(default_factory=list)
+    labelled_count: int
+    total_count: int
+    coverage_pct: float
+
+
+class ColumnMappingResponse(_Schema):
+    """One row of the Codelists master list."""
+
+    corpus_id: str
+    table_name: str
+    column_name: str
+    distinct_in_corpus: int
+    mapping_id: str | None = None
+    mapped_attribute: CodeAttributeResponse | None = None
+    coverage: ColumnCoverageResponse | None = None
+    #: Inert (always empty) until a feature exists to populate it (C5).
+    used_by_features: list[str] = Field(default_factory=list)
+
+
+class MapColumnRequest(_Schema):
+    corpus_id: str
+    source_column: str = Field(min_length=1, max_length=100)
+    code_attribute_id: str
+
+
+# ===========================================================================
+# /api/v1/feature-configs  (F2)
+#
+# Base path is `/feature-configs`, not `/features` (plan-phase-2.md §3's P17
+# table said the latter, §9's F2 section the former) — `/feature-configs`
+# matches the resource this router actually roots on (`feature_config`, the
+# thing created, frozen and cloned) and §9 is the more specific of the two.
+# ===========================================================================
+
+
+class DerivationFilterSchema(_Schema):
+    """`(column, op, value)` — mvp-spec.md §8.3."""
+
+    column: str
+    #: `eq` | `ne` | `in` | `not_in` | `is_empty` | `is_not_empty`.
+    operator: str
+    value: list[str] | str | None = None
+
+
+class DerivationSpecSchema(_Schema):
+    """One of the seven closed-catalogue derivation types (mvp-spec.md §8.3).
+
+    A loose envelope rather than seven distinct request models: `type`
+    selects which of the remaining fields apply, the same discriminated shape
+    `ra2.domain.feature.DerivationSpec` normalises into on the way in.
+    """
+
+    #: A `ra2.domain.feature.DerivationType` value.
+    type: str
+    #: `count_objects` / `count_persons` — optional; `any_object_matches` /
+    #: `any_person_matches` — required.
+    filter: DerivationFilterSchema | None = None
+    #: `max_ordinal` / `min_ordinal` / `distinct_count` only.
+    table: str | None = None
+    column: str | None = None
+    ordered_codes: list[str] | None = None
+
+
+class MatchingRuleSchema(_Schema):
+    #: `exact` | `within_tolerance` | `none`.
+    kind: str
+    tolerance_minutes: int | None = None
+    decimal_precision: int | None = None
+
+
+class FeatureRequest(_Schema):
+    """Add or edit one feature. Draft configs only."""
+
+    key: str = Field(min_length=1, max_length=100)
+    #: `labelled` | `exploratory`.
+    kind: str
+    description: str
+    #: `accident` | `derived` | `object` | `person`.
+    grain: str
+    source_column: str | None = None
+    derivation: DerivationSpecSchema | None = None
+    value_type: str
+    matching_rule: MatchingRuleSchema
+
+
+class FeatureResponse(_Schema):
+    feature_id: str
+    feature_config_id: str
+    ordinal: int
+    key: str
+    kind: str
+    description: str
+    grain: str
+    source_column: str | None = None
+    derivation: DerivationSpecSchema | None = None
+    value_type: str
+    matching_rule: MatchingRuleSchema
+    #: `None` until the enclosing set is frozen.
+    fingerprint: str | None = None
+    #: Always present — Q3's draft badge.
+    fingerprint_preview: str
+    #: Blocking validation messages; non-empty renders as an error row.
+    errors: list[str] = Field(default_factory=list)
+
+
+class CreateFeatureConfigRequest(_Schema):
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+
+
+class CloneFeatureConfigRequest(_Schema):
+    """ "Clone to new evaluation" (design's C4) — a frozen set only."""
+
+    name: str = Field(min_length=1, max_length=200)
+
+
+class FeatureConfigResponse(_Schema):
+    feature_config_id: str
+    name: str
+    version: int = 1
+    description: str | None = None
+    created_at: datetime
+    frozen_at: datetime | None = None
+    #: > 0 renders the `LOCKED · N eval` pill.
+    locked_by_evaluations: int = 0
+    features: list[FeatureResponse] = Field(default_factory=list)
+
+
+class FeatureConfigSummaryResponse(_Schema):
+    """One row of the feature-sets strip below the split."""
+
+    feature_config_id: str
+    name: str
+    version: int = 1
+    description: str | None = None
+    created_at: datetime
+    feature_count: int
+    frozen_at: datetime | None = None
+    locked_by_evaluations: int = 0
+
+
+class FeatureValidationErrorResponse(_Schema):
+    """422 from a blocked freeze. **Nothing was frozen** (mvp-spec.md §7/§8.2)."""
+
+    detail: str = "blocking feature validation errors; the set was not frozen"
+    errors: list[str]

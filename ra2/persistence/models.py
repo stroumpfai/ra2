@@ -45,11 +45,17 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from ra2.domain.census import TypeHint
 from ra2.domain.delivery import DeliveryStatus, FileKind, SourceKind
+from ra2.domain.feature import Grain, Kind, ValueType
 from ra2.domain.ids import (
     CensusColumnId,
+    CodeAttributeId,
+    CodeTableImportId,
+    ColumnMappingId,
     CorpusId,
     DeliveryId,
     EvaluationId,
+    FeatureConfigId,
+    FeatureId,
     FileId,
     ObjektRowId,
     PersonRowId,
@@ -61,10 +67,16 @@ __all__ = [
     "CensusBucketRow",
     "CensusColumn",
     "CensusValue",
+    "CodeAttribute",
+    "CodeTableImport",
+    "CodeValue",
+    "ColumnMapping",
     "Corpus",
     "Delivery",
     "DeliveryFile",
     "Evaluation",
+    "Feature",
+    "FeatureConfig",
     "ObjektCell",
     "ObjektRow",
     "PersonCell",
@@ -106,10 +118,18 @@ class Base(DeclarativeBase):
         PersonRowId: String(_ID_LEN),
         CensusColumnId: String(_ID_LEN),
         EvaluationId: String(_ID_LEN),
+        CodeTableImportId: String(_ID_LEN),
+        CodeAttributeId: String(_ID_LEN),
+        ColumnMappingId: String(_ID_LEN),
+        FeatureConfigId: String(_ID_LEN),
+        FeatureId: String(_ID_LEN),
         FileKind: String(16),
         SourceKind: String(16),
         DeliveryStatus: String(16),
         TypeHint: String(16),
+        Kind: String(16),
+        Grain: String(16),
+        ValueType: String(16),
         datetime: DateTime(timezone=True),
         str: Text(),
         int: Integer(),
@@ -549,8 +569,200 @@ class Evaluation(Base):
     #: RESTRICT, not CASCADE: the delete guard is enforced in the service with
     #: a clear 409, and the database refuses it too if anything slips past.
     corpus_id: Mapped[CorpusId] = mapped_column(ForeignKey("corpus.id", ondelete="RESTRICT"))
-    #: Phase 2. No FK yet — see the class docstring.
-    feature_config_id: Mapped[str | None] = mapped_column(String(_ID_LEN), default=None)
+    #: Phase 2 (M9): a real FK, replacing M0-D1's plain string. RESTRICT for
+    #: the same reason as `corpus_id` — a frozen config an evaluation cites
+    #: cannot be deleted out from under it (drafts still can be, per the
+    #: design's "drafts can be renamed and deleted").
+    feature_config_id: Mapped[FeatureConfigId] = mapped_column(
+        ForeignKey("feature_config.id", ondelete="RESTRICT")
+    )
     created_at: Mapped[datetime | None] = mapped_column(default=None)
     #: mvp-spec.md §9 — a run over a corpus below the floor is a smoke test.
     is_dev: Mapped[bool] = mapped_column(default=False)
+
+
+# ===========================================================================
+# Codelists — phase 2, mvp-spec.md §5/§7, sw-design.md §14. Additive, never
+# edited in place: a corrected import is a new `code_table_import` (Do-NOT #2).
+# ===========================================================================
+
+
+class CodeTableImport(Base):
+    """One `codes-2018.json` (or successor) upload (sw-design.md §14.1).
+
+    Never updated: a corrected file is a new row, and existing
+    `column_mapping` rows are left pointing at the old generation until an
+    analyst re-points them.
+    """
+
+    __tablename__ = "code_table_import"
+
+    id: Mapped[CodeTableImportId] = mapped_column(primary_key=True)
+    #: The uploaded filename. Display only, like `delivery_file.filename`.
+    source_file: Mapped[str] = mapped_column(String(400))
+    #: An analyst-facing label if one is ever supplied (e.g. "2018"); `None`
+    #: is the common case. Distinct from `source_hash`, which is what dedupe
+    #: actually keys on.
+    source_version: Mapped[str | None] = mapped_column(String(64), default=None)
+    #: sw-design.md §14.1 step 2 — additive beyond mvp-spec.md §5, the
+    #: no-op-reupload dedupe key.
+    source_hash: Mapped[str] = mapped_column(String(64))
+    imported_at: Mapped[datetime]
+
+    attributes: Mapped[list[CodeAttribute]] = relationship(
+        back_populates="code_table_import", cascade="all, delete-orphan"
+    )
+
+
+class CodeAttribute(Base):
+    """One top-level key of an imported codelist file (mvp-spec.md §5).
+
+    Distinct from `ra2.domain.codes.CodeAttribute`, the pure pre-persistence
+    shape `validate_import` produces.
+    """
+
+    __tablename__ = "code_attribute"
+    __table_args__ = (
+        UniqueConstraint("code_table_import_id", "key", name="uq_code_attribute_import_key"),
+        Index("ix_code_attribute_code_table_import_id", "code_table_import_id"),
+    )
+
+    id: Mapped[CodeAttributeId] = mapped_column(primary_key=True)
+    code_table_import_id: Mapped[CodeTableImportId] = mapped_column(
+        ForeignKey("code_table_import.id", ondelete="CASCADE")
+    )
+    key: Mapped[str] = mapped_column(String(100))
+    #: e.g. "4.1.4". Absent for non-chapter attributes.
+    chapter: Mapped[str | None] = mapped_column(String(32), default=None)
+    #: `{lang: display name}`, serialised (M0-D8 convention).
+    name_json: Mapped[str]
+
+    code_table_import: Mapped[CodeTableImport] = relationship(back_populates="attributes")
+    values: Mapped[list[CodeValue]] = relationship(
+        back_populates="code_attribute", cascade="all, delete-orphan"
+    )
+
+
+class CodeValue(Base):
+    """One `(attribute, code)` pair (mvp-spec.md §5). `label_json` may omit
+    languages — the known gap: `main_cause*` attributes have no `it`.
+
+    No dedicated id `NewType` (plan-phase-2.md §5.1 names five, not six):
+    nothing joins against a `code_value` by id outside its own attribute.
+    """
+
+    __tablename__ = "code_value"
+    __table_args__ = (
+        UniqueConstraint("code_attribute_id", "code", name="uq_code_value_attribute_code"),
+        Index("ix_code_value_code_attribute_id", "code_attribute_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(_ID_LEN), primary_key=True)
+    code_attribute_id: Mapped[CodeAttributeId] = mapped_column(
+        ForeignKey("code_attribute.id", ondelete="CASCADE")
+    )
+    code: Mapped[str] = mapped_column(String(32))
+    #: `{lang: label}`, serialised (M0-D8 convention).
+    label_json: Mapped[str]
+
+    code_attribute: Mapped[CodeAttribute] = relationship(back_populates="values")
+
+
+class ColumnMapping(Base):
+    """`(corpus_id, source_column) -> code_attribute_id` (mvp-spec.md §5).
+
+    The only editable table Codelists introduces — re-editable at will,
+    never writing to `code_value` or `code_attribute` (mvp-spec.md §7).
+    """
+
+    __tablename__ = "column_mapping"
+    __table_args__ = (
+        UniqueConstraint("corpus_id", "source_column", name="uq_column_mapping_corpus_column"),
+        Index("ix_column_mapping_corpus_id", "corpus_id"),
+    )
+
+    id: Mapped[ColumnMappingId] = mapped_column(primary_key=True)
+    corpus_id: Mapped[CorpusId] = mapped_column(ForeignKey("corpus.id", ondelete="CASCADE"))
+    source_column: Mapped[str] = mapped_column(String(100))
+    #: RESTRICT: `code_attribute` rows are never deleted (Do-NOT #2), but the
+    #: constraint costs nothing and matches the rest of the schema's caution.
+    code_attribute_id: Mapped[CodeAttributeId] = mapped_column(
+        ForeignKey("code_attribute.id", ondelete="RESTRICT")
+    )
+    mapped_at: Mapped[datetime]
+
+
+# ===========================================================================
+# Feature configuration — phase 2, mvp-spec.md §5/§8.
+# ===========================================================================
+
+
+class FeatureConfig(Base):
+    """One feature set, draft or frozen (mvp-spec.md §8).
+
+    `frozen_at` is set the moment "Create a feature set" is pressed (F2,
+    plan-phase-2.md §15) — not deferred until an evaluation first cites it.
+    """
+
+    __tablename__ = "feature_config"
+    __table_args__ = (UniqueConstraint("name", "version", name="uq_feature_config_name_version"),)
+
+    id: Mapped[FeatureConfigId] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    #: P2-D1 (CONTRACTS.md) — additive beyond mvp-spec.md §5: the design's
+    #: feature-sets table has a "Description" column mvp-spec never named.
+    description: Mapped[str | None] = mapped_column(default=None)
+    #: P2-D2 — additive, same reasoning as `corpus.version`: the design shows
+    #: "Weather & conditions v3" next to older v2/v1 sets sharing the name.
+    version: Mapped[int] = mapped_column(default=1)
+    created_at: Mapped[datetime]
+    frozen_at: Mapped[datetime | None] = mapped_column(default=None)
+
+    features: Mapped[list[Feature]] = relationship(
+        back_populates="feature_config",
+        cascade="all, delete-orphan",
+        order_by="Feature.ordinal",
+    )
+
+
+class Feature(Base):
+    """One thing the model is asked to extract (mvp-spec.md §8).
+
+    `matching_rule` holds serialised JSON (M0-D8 convention) despite lacking
+    the `_json` suffix its two siblings have — mvp-spec.md §5 names the
+    column that way and mvp-spec wins on *what* a column is called.
+    """
+
+    __tablename__ = "feature"
+    __table_args__ = (
+        UniqueConstraint("feature_config_id", "key", name="uq_feature_config_key"),
+        Index("ix_feature_feature_config_id", "feature_config_id"),
+    )
+
+    id: Mapped[FeatureId] = mapped_column(primary_key=True)
+    feature_config_id: Mapped[FeatureConfigId] = mapped_column(
+        ForeignKey("feature_config.id", ondelete="CASCADE")
+    )
+    #: Display and pagination order within the set.
+    ordinal: Mapped[int]
+    key: Mapped[str] = mapped_column(String(100))
+    kind: Mapped[Kind]
+    #: Sent to the model verbatim (mvp-spec.md §8, design §"Description").
+    description: Mapped[str]
+    grain: Mapped[Grain]
+    #: `None` for a derived-aggregate or exploratory feature.
+    source_column: Mapped[str | None] = mapped_column(String(100), default=None)
+    #: `None` unless `grain` is `derived`. Not executed in phase 2 (Q1).
+    derivation_json: Mapped[str | None] = mapped_column(default=None)
+    value_type: Mapped[ValueType]
+    #: Serialised `ra2.domain.feature.MatchingRule`, including its parameters.
+    matching_rule: Mapped[str]
+    #: `None` unless `value_type` is `enum`. A snapshot taken at evaluation
+    #: creation (§8.5) — phase 2 never sets this; only the preview fingerprint
+    #: is shown before that point exists.
+    enum_codelist_json: Mapped[str | None] = mapped_column(default=None)
+    #: `None` until frozen. The draft's "· preview" badge is computed on the
+    #: fly by `domain.fingerprint`, never stored ahead of the freeze.
+    fingerprint: Mapped[str | None] = mapped_column(String(64), default=None)
+
+    feature_config: Mapped[FeatureConfig] = relationship(back_populates="features")

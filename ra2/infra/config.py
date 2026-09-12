@@ -78,6 +78,13 @@ class Settings(BaseSettings):
         return self.data_dir / "exports"
 
     @property
+    def codelists_dir(self) -> Path:
+        """Where `codelist_service` stores uploads: `{data_dir}/codelists/
+        {code_table_import_id}/` (sw-design.md §14.1) — the same `FileStore`
+        seam as delivery intake, a different root."""
+        return self.data_dir / "codelists"
+
+    @property
     def database_url(self) -> str:
         """The async SQLAlchemy URL. `pathlib` only — no POSIX-only paths (N3)."""
         return f"sqlite+aiosqlite:///{self.database_path.as_posix()}"

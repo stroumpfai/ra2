@@ -17,9 +17,10 @@ from typing import Protocol, runtime_checkable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ra2.domain.codelist_coverage import ColumnCoverage
 from ra2.domain.ids import CorpusId
 
-__all__ = ["CensusInput", "CensusMaterialiser", "CensusTableInput"]
+__all__ = ["CensusInput", "CensusMaterialiser", "CensusTableInput", "EnumCodeTableProvider"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,4 +62,24 @@ class CensusMaterialiser(Protocol):
         Must not commit, must not open its own session: the freeze owns the
         transaction boundary.
         """
+        ...
+
+
+@runtime_checkable
+class EnumCodeTableProvider(Protocol):
+    """Feature validation needs a mapped column's coverage without
+    `feature_service` depending on `codelist_service` directly.
+
+    Declared here at M9 (plan-phase-2.md §3), the same reasoning as
+    `CensusMaterialiser`: E1 (`codelist_service`) and E2 (`feature_service`)
+    are built by different agents in the same wave, and this seam is what
+    lets neither wait on the other. `codelist_service.coverage()` implements
+    it; `feature_service` is handed one, injected, and never imports
+    `codelist_service`.
+    """
+
+    async def coverage(
+        self, session: AsyncSession, corpus_id: CorpusId, source_column: str
+    ) -> ColumnCoverage | None:
+        """`None` means no mapping at all for this column."""
         ...

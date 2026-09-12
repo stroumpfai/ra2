@@ -16,16 +16,20 @@ from fastapi import Depends, Request
 
 from ra2.infra.tasks import TaskRunner
 from ra2.services.census_service import CensusService
+from ra2.services.codelist_service import CodelistService
 from ra2.services.container import Services
 from ra2.services.corpus_service import CorpusService
 from ra2.services.delivery_service import DeliveryService
 from ra2.services.export_service import ExportService
+from ra2.services.feature_service import FeatureService
 
 __all__ = [
     "CensusServiceDep",
+    "CodelistServiceDep",
     "CorpusServiceDep",
     "DeliveryServiceDep",
     "ExportServiceDep",
+    "FeatureServiceDep",
     "TaskRunnerDep",
     "get_services",
 ]
@@ -55,8 +59,18 @@ def get_export_service(services: Annotated[Services, Depends(get_services)]) -> 
     return services.export
 
 
+def get_codelist_service(services: Annotated[Services, Depends(get_services)]) -> CodelistService:
+    return services.codelist
+
+
+def get_feature_service(services: Annotated[Services, Depends(get_services)]) -> FeatureService:
+    return services.feature
+
+
 DeliveryServiceDep = Annotated[DeliveryService, Depends(get_delivery_service)]
 CorpusServiceDep = Annotated[CorpusService, Depends(get_corpus_service)]
 CensusServiceDep = Annotated[CensusService, Depends(get_census_service)]
 ExportServiceDep = Annotated[ExportService, Depends(get_export_service)]
+CodelistServiceDep = Annotated[CodelistService, Depends(get_codelist_service)]
+FeatureServiceDep = Annotated[FeatureService, Depends(get_feature_service)]
 TaskRunnerDep = Annotated[TaskRunner, Depends(get_task_runner)]

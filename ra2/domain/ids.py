@@ -14,9 +14,14 @@ from typing import NewType
 
 __all__ = [
     "CensusColumnId",
+    "CodeAttributeId",
+    "CodeTableImportId",
+    "ColumnMappingId",
     "CorpusId",
     "DeliveryId",
     "EvaluationId",
+    "FeatureConfigId",
+    "FeatureId",
     "FileId",
     "ObjektRowId",
     "PersonRowId",
@@ -53,3 +58,24 @@ CensusColumnId = NewType("CensusColumnId", str)
 #: One evaluation. Phase 1 only ever seeds these, to exercise the corpus delete
 #: guard (sw-design.md §6.3).
 EvaluationId = NewType("EvaluationId", str)
+
+# --- phase 2 (M9, plan-phase-2.md §3) ---------------------------------------
+
+#: One `codes-2018.json` (or successor) upload (sw-design.md §14.1).
+CodeTableImportId = NewType("CodeTableImportId", str)
+
+#: One top-level key of an imported codelist file, e.g. `accident_type`.
+#: `code_value` rows have no dedicated id type — nothing joins against one by
+#: id outside its own attribute (plan-phase-2.md §5.1 names five new types,
+#: not six).
+CodeAttributeId = NewType("CodeAttributeId", str)
+
+#: One `(corpus_id, source_column) -> code_attribute_id` pointer (mvp-spec.md
+#: §5). The only editable table Codelists introduces.
+ColumnMappingId = NewType("ColumnMappingId", str)
+
+#: One feature set, draft or frozen (mvp-spec.md §8).
+FeatureConfigId = NewType("FeatureConfigId", str)
+
+#: One feature inside a `feature_config`.
+FeatureId = NewType("FeatureId", str)

@@ -96,8 +96,8 @@ gate.
   `tests/ui` NiceGUI `User` fixture · `tests/e2e` Playwright · `tests/eval`
   phase 3. `tests/conftest.py` is frozen; per-layer conftests belong to
   whoever owns that layer in the current wave.
-- **One migration author, ever, in phase 1** (A3). Nobody else runs
-  `alembic revision`. No parallel heads.
+- **One migration author, one per phase — A3 for phase 1, D3 for phase 2.**
+  Nobody else runs `alembic revision`. No parallel heads.
 - **Fixtures must contain the real hazards** — mixed encodings, a stray `|`, an
   embedded newline, an orphan key, a key duplicated across two cantonal sets,
   an all-empty column, French already lossy. Clean fixtures are not acceptable

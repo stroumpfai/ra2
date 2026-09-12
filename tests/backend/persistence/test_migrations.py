@@ -21,6 +21,22 @@ pytestmark = pytest.mark.backend
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+#: M9 (Wave 0) adds the phase-2 ORM classes to `models.py` (plan-phase-2.md
+#: §5.1) but deliberately leaves the phase-2 migration empty — D3 is phase
+#: 2's one migration author (CLAUDE.md), and plan-phase-2.md §5.1 is explicit
+#: that Wave 0's revision is "a stub is fine... D3 writes the real one." That
+#: opens an honest, temporary gap between `models.py` and the migration
+#: chain for exactly the six new tables, closed at `p2-frozen` -> Wave 1 by
+#: D3 (whose own exit criteria, plan-phase-2.md §7, require both tests below
+#: to pass again). Not an amendment — a same-wave sequencing choice the plan
+#: itself makes, documented here rather than silently broken.
+_PHASE_2_MIGRATION_IS_A_STUB = pytest.mark.xfail(
+    reason="D3 (Wave 1) writes the real phase-2 migration; see plan-phase-2.md §5.1/§7",
+    strict=True,
+)
+
+
+@_PHASE_2_MIGRATION_IS_A_STUB
 async def test_upgrade_head_creates_every_table(migrated_engine: AsyncEngine) -> None:
     """`alembic upgrade head` against a real temp-file SQLite database
     (never `:memory:`) produces every table `models.py` declares."""
@@ -32,6 +48,7 @@ async def test_upgrade_head_creates_every_table(migrated_engine: AsyncEngine) ->
     assert "alembic_version" in table_names
 
 
+@_PHASE_2_MIGRATION_IS_A_STUB
 async def test_alembic_check_reports_no_drift(
     migrated_engine: AsyncEngine, run_upgrade_head: Settings
 ) -> None:

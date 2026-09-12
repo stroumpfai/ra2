@@ -39,6 +39,20 @@
         "title": "BlockingFindingsResponse",
         "type": "object"
       },
+      "Body_import_codelist_api_v1_codelists_import_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_codelist_api_v1_codelists_import_post",
+        "type": "object"
+      },
       "Body_upload_file_api_v1_deliveries__delivery_id__files_post": {
         "properties": {
           "file": {
@@ -192,6 +206,304 @@
         "title": "CensusSummaryResponse",
         "type": "object"
       },
+      "CloneFeatureConfigRequest": {
+        "additionalProperties": false,
+        "description": "\"Clone to new evaluation\" (design's C4) \u2014 a frozen set only.",
+        "properties": {
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CloneFeatureConfigRequest",
+        "type": "object"
+      },
+      "CodeAttributeResponse": {
+        "additionalProperties": false,
+        "description": "One imported attribute \u2014 the JSON-key mapping dropdown's options.",
+        "properties": {
+          "chapter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter"
+          },
+          "code_attribute_id": {
+            "title": "Code Attribute Id",
+            "type": "string"
+          },
+          "code_count": {
+            "title": "Code Count",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Name",
+            "type": "object"
+          }
+        },
+        "required": [
+          "code_attribute_id",
+          "key",
+          "code_count"
+        ],
+        "title": "CodeAttributeResponse",
+        "type": "object"
+      },
+      "CodeImportErrorResponse": {
+        "additionalProperties": false,
+        "description": "One structural problem with an uploaded codelist file.",
+        "properties": {
+          "attribute_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribute Key"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "message"
+        ],
+        "title": "CodeImportErrorResponse",
+        "type": "object"
+      },
+      "CodeUsageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "in_codelist": {
+            "title": "In Codelist",
+            "type": "boolean"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          }
+        },
+        "required": [
+          "code",
+          "count",
+          "share",
+          "in_codelist"
+        ],
+        "title": "CodeUsageResponse",
+        "type": "object"
+      },
+      "CodelistImportErrorResponse": {
+        "additionalProperties": false,
+        "description": "422 from a malformed upload. **Nothing was imported** (sw-design.md \u00a714.1).",
+        "properties": {
+          "detail": {
+            "default": "malformed codelist upload; nothing was imported",
+            "title": "Detail",
+            "type": "string"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/CodeImportErrorResponse"
+            },
+            "title": "Errors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "errors"
+        ],
+        "title": "CodelistImportErrorResponse",
+        "type": "object"
+      },
+      "CodelistImportResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "attribute_count": {
+            "title": "Attribute Count",
+            "type": "integer"
+          },
+          "code_table_import_id": {
+            "title": "Code Table Import Id",
+            "type": "string"
+          },
+          "imported_at": {
+            "format": "date-time",
+            "title": "Imported At",
+            "type": "string"
+          },
+          "no_change": {
+            "default": false,
+            "title": "No Change",
+            "type": "boolean"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code_table_import_id",
+          "source_hash",
+          "imported_at",
+          "attribute_count"
+        ],
+        "title": "CodelistImportResponse",
+        "type": "object"
+      },
+      "ColumnCoverageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "codes": {
+            "items": {
+              "$ref": "#/components/schemas/CodeUsageResponse"
+            },
+            "title": "Codes",
+            "type": "array"
+          },
+          "coverage_pct": {
+            "title": "Coverage Pct",
+            "type": "number"
+          },
+          "labelled_count": {
+            "title": "Labelled Count",
+            "type": "integer"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_count": {
+            "title": "Total Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "language",
+          "labelled_count",
+          "total_count",
+          "coverage_pct"
+        ],
+        "title": "ColumnCoverageResponse",
+        "type": "object"
+      },
+      "ColumnMappingResponse": {
+        "additionalProperties": false,
+        "description": "One row of the Codelists master list.",
+        "properties": {
+          "column_name": {
+            "title": "Column Name",
+            "type": "string"
+          },
+          "corpus_id": {
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ColumnCoverageResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distinct_in_corpus": {
+            "title": "Distinct In Corpus",
+            "type": "integer"
+          },
+          "mapped_attribute": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeAttributeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mapping_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapping Id"
+          },
+          "table_name": {
+            "title": "Table Name",
+            "type": "string"
+          },
+          "used_by_features": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Used By Features",
+            "type": "array"
+          }
+        },
+        "required": [
+          "corpus_id",
+          "table_name",
+          "column_name",
+          "distinct_in_corpus"
+        ],
+        "title": "ColumnMappingResponse",
+        "type": "object"
+      },
       "CorpusPage": {
         "additionalProperties": false,
         "properties": {
@@ -323,6 +635,33 @@
           "name"
         ],
         "title": "CreateCorpusRequest",
+        "type": "object"
+      },
+      "CreateFeatureConfigRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CreateFeatureConfigRequest",
         "type": "object"
       },
       "DeliveryFileResponse": {
@@ -569,6 +908,104 @@
         "title": "DeliveryStatus",
         "type": "string"
       },
+      "DerivationFilterSchema": {
+        "additionalProperties": false,
+        "description": "`(column, op, value)` \u2014 mvp-spec.md \u00a78.3.",
+        "properties": {
+          "column": {
+            "title": "Column",
+            "type": "string"
+          },
+          "operator": {
+            "title": "Operator",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "column",
+          "operator"
+        ],
+        "title": "DerivationFilterSchema",
+        "type": "object"
+      },
+      "DerivationSpecSchema": {
+        "additionalProperties": false,
+        "description": "One of the seven closed-catalogue derivation types (mvp-spec.md \u00a78.3).\n\nA loose envelope rather than seven distinct request models: `type`\nselects which of the remaining fields apply, the same discriminated shape\n`ra2.domain.feature.DerivationSpec` normalises into on the way in.",
+        "properties": {
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DerivationFilterSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ordered_codes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ordered Codes"
+          },
+          "table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "DerivationSpecSchema",
+        "type": "object"
+      },
       "Encoding": {
         "description": "The only two encodings the pipeline tries, in this order.\n\nUndecodable bytes **fail the file**. There is no third fallback and\n`errors=\"replace\"` is banned (mvp-spec.md \u00a74.2.1, sw-design.md \u00a712.4).",
         "enum": [
@@ -591,6 +1028,317 @@
           "detail"
         ],
         "title": "ErrorResponse",
+        "type": "object"
+      },
+      "FeatureConfigResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "feature_config_id": {
+            "title": "Feature Config Id",
+            "type": "string"
+          },
+          "features": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureResponse"
+            },
+            "title": "Features",
+            "type": "array"
+          },
+          "frozen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frozen At"
+          },
+          "locked_by_evaluations": {
+            "default": 0,
+            "title": "Locked By Evaluations",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "default": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "feature_config_id",
+          "name",
+          "created_at"
+        ],
+        "title": "FeatureConfigResponse",
+        "type": "object"
+      },
+      "FeatureConfigSummaryResponse": {
+        "additionalProperties": false,
+        "description": "One row of the feature-sets strip below the split.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "feature_config_id": {
+            "title": "Feature Config Id",
+            "type": "string"
+          },
+          "feature_count": {
+            "title": "Feature Count",
+            "type": "integer"
+          },
+          "frozen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frozen At"
+          },
+          "locked_by_evaluations": {
+            "default": 0,
+            "title": "Locked By Evaluations",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "default": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "feature_config_id",
+          "name",
+          "created_at",
+          "feature_count"
+        ],
+        "title": "FeatureConfigSummaryResponse",
+        "type": "object"
+      },
+      "FeatureRequest": {
+        "additionalProperties": false,
+        "description": "Add or edit one feature. Draft configs only.",
+        "properties": {
+          "derivation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DerivationSpecSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "grain": {
+            "title": "Grain",
+            "type": "string"
+          },
+          "key": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "matching_rule": {
+            "$ref": "#/components/schemas/MatchingRuleSchema"
+          },
+          "source_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Column"
+          },
+          "value_type": {
+            "title": "Value Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "description",
+          "grain",
+          "value_type",
+          "matching_rule"
+        ],
+        "title": "FeatureRequest",
+        "type": "object"
+      },
+      "FeatureResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "derivation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DerivationSpecSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "feature_config_id": {
+            "title": "Feature Config Id",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
+          "fingerprint_preview": {
+            "title": "Fingerprint Preview",
+            "type": "string"
+          },
+          "grain": {
+            "title": "Grain",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "matching_rule": {
+            "$ref": "#/components/schemas/MatchingRuleSchema"
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "source_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Column"
+          },
+          "value_type": {
+            "title": "Value Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "feature_config_id",
+          "ordinal",
+          "key",
+          "kind",
+          "description",
+          "grain",
+          "value_type",
+          "matching_rule",
+          "fingerprint_preview"
+        ],
+        "title": "FeatureResponse",
+        "type": "object"
+      },
+      "FeatureValidationErrorResponse": {
+        "additionalProperties": false,
+        "description": "422 from a blocked freeze. **Nothing was frozen** (mvp-spec.md \u00a77/\u00a78.2).",
+        "properties": {
+          "detail": {
+            "default": "blocking feature validation errors; the set was not frozen",
+            "title": "Detail",
+            "type": "string"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "errors"
+        ],
+        "title": "FeatureValidationErrorResponse",
         "type": "object"
       },
       "FileKind": {
@@ -742,6 +1490,68 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "MapColumnRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "code_attribute_id": {
+            "title": "Code Attribute Id",
+            "type": "string"
+          },
+          "corpus_id": {
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "source_column": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Source Column",
+            "type": "string"
+          }
+        },
+        "required": [
+          "corpus_id",
+          "source_column",
+          "code_attribute_id"
+        ],
+        "title": "MapColumnRequest",
+        "type": "object"
+      },
+      "MatchingRuleSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "decimal_precision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decimal Precision"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "tolerance_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tolerance Minutes"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "MatchingRuleSchema",
         "type": "object"
       },
       "PageMeta": {
@@ -1260,6 +2070,211 @@
         "summary": "Get Summary",
         "tags": [
           "census"
+        ]
+      }
+    },
+    "/api/v1/codelists/attributes": {
+      "get": {
+        "operationId": "list_attributes_api_v1_codelists_attributes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CodeAttributeResponse"
+                  },
+                  "title": "Response List Attributes Api V1 Codelists Attributes Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Attributes",
+        "tags": [
+          "codelists"
+        ]
+      }
+    },
+    "/api/v1/codelists/columns": {
+      "get": {
+        "operationId": "list_columns_api_v1_codelists_columns_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "corpus_id",
+            "required": true,
+            "schema": {
+              "title": "Corpus Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "language",
+            "required": true,
+            "schema": {
+              "title": "Language",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ColumnMappingResponse"
+                  },
+                  "title": "Response List Columns Api V1 Codelists Columns Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Columns",
+        "tags": [
+          "codelists"
+        ]
+      }
+    },
+    "/api/v1/codelists/columns/mapping": {
+      "delete": {
+        "operationId": "unmap_column_api_v1_codelists_columns_mapping_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "corpus_id",
+            "required": true,
+            "schema": {
+              "title": "Corpus Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_column",
+            "required": true,
+            "schema": {
+              "title": "Source Column",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unmap Column",
+        "tags": [
+          "codelists"
+        ]
+      },
+      "put": {
+        "operationId": "map_column_api_v1_codelists_columns_mapping_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MapColumnRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnMappingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Map Column",
+        "tags": [
+          "codelists"
+        ]
+      }
+    },
+    "/api/v1/codelists/import": {
+      "post": {
+        "description": "sw-design.md \u00a714.1: fails whole, or writes whole. Never partial.",
+        "operationId": "import_codelist_api_v1_codelists_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_codelist_api_v1_codelists_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodelistImportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodelistImportErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "summary": "Import Codelist",
+        "tags": [
+          "codelists"
         ]
       }
     },
@@ -1824,6 +2839,438 @@
         "summary": "Set File Selection",
         "tags": [
           "deliveries"
+        ]
+      }
+    },
+    "/api/v1/feature-configs": {
+      "get": {
+        "operationId": "list_feature_configs_api_v1_feature_configs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FeatureConfigSummaryResponse"
+                  },
+                  "title": "Response List Feature Configs Api V1 Feature Configs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Feature Configs",
+        "tags": [
+          "feature-configs"
+        ]
+      },
+      "post": {
+        "operationId": "create_feature_config_api_v1_feature_configs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFeatureConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureConfigResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Feature Config",
+        "tags": [
+          "feature-configs"
+        ]
+      }
+    },
+    "/api/v1/feature-configs/{feature_config_id}": {
+      "delete": {
+        "description": "409 when the set is frozen.",
+        "operationId": "delete_feature_config_api_v1_feature_configs__feature_config_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_config_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Config Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Feature Config",
+        "tags": [
+          "feature-configs"
+        ]
+      },
+      "get": {
+        "operationId": "get_feature_config_api_v1_feature_configs__feature_config_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_config_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Config Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureConfigResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Feature Config",
+        "tags": [
+          "feature-configs"
+        ]
+      }
+    },
+    "/api/v1/feature-configs/{feature_config_id}/clone": {
+      "post": {
+        "description": "A frozen set only \u2014 the design's \"Clone to new evaluation.",
+        "operationId": "clone_feature_config_api_v1_feature_configs__feature_config_id__clone_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_config_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Config Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloneFeatureConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureConfigResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clone Feature Config",
+        "tags": [
+          "feature-configs"
+        ]
+      }
+    },
+    "/api/v1/feature-configs/{feature_config_id}/features": {
+      "post": {
+        "description": "Validation problems surface as error rows on the response; only\n`freeze` blocks on them (mvp-spec.md \u00a77/\u00a78.2).",
+        "operationId": "add_feature_api_v1_feature_configs__feature_config_id__features_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_config_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Config Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureConfigResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Feature",
+        "tags": [
+          "feature-configs"
+        ]
+      }
+    },
+    "/api/v1/feature-configs/{feature_config_id}/features/{feature_id}": {
+      "delete": {
+        "operationId": "delete_feature_api_v1_feature_configs__feature_config_id__features__feature_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_config_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Config Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Feature",
+        "tags": [
+          "feature-configs"
+        ]
+      },
+      "put": {
+        "operationId": "edit_feature_api_v1_feature_configs__feature_config_id__features__feature_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_config_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Config Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureConfigResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edit Feature",
+        "tags": [
+          "feature-configs"
+        ]
+      }
+    },
+    "/api/v1/feature-configs/{feature_config_id}/freeze": {
+      "post": {
+        "description": "422 with every blocking error and creates nothing (mirrors J2's\ncorpus-freeze contract).",
+        "operationId": "freeze_feature_config_api_v1_feature_configs__feature_config_id__freeze_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_config_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Config Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureConfigResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureValidationErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "summary": "Freeze Feature Config",
+        "tags": [
+          "feature-configs"
         ]
       }
     },
