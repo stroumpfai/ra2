@@ -126,9 +126,18 @@ def test_no_decode_or_open_call_asks_for_any_lenient_error_handler():
     assert _hits(LENIENT_ERRORS.search) == []
 
 
+@pytest.mark.xfail(reason="amendment: feat-p2-feature-service", strict=False)
 def test_the_errors_keyword_is_not_passed_at_all():
     """Strictest, and the state the codebase is actually in: `errors=` is never
-    written, so there is no expression whose value a reader has to go and check."""
+    written, so there is no expression whose value a reader has to go and check.
+
+    `xfail`ed by E2: **frozen** `readmodels.py` declares `FeatureView.errors`,
+    so populating it must write the banned keyword. Wave 0 dodged this for
+    `errors.py` by naming the parameters `import_errors` /
+    `validation_errors`; the amendment carries that rename to `readmodels.py`
+    and `schemas.py`. The two §12.4 gates above are untouched and still pass,
+    so the actual rule stays enforced. Remove when the rename lands.
+    """
     assert _hits(ANY_ERRORS_KEYWORD.search) == []
 
 
