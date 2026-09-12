@@ -31,11 +31,17 @@ __all__ = [
     "card_header",
     "chip",
     "distribution_bar",
+    "field_select",
+    "fingerprint_badge",
     "footnote",
     "format_count",
+    "frozen_readout",
     "icon_button",
     "long_tail_bar",
+    "master_detail_split",
     "pagination_row",
+    "pill",
+    "segmented_control",
     "tick",
 ]
 
@@ -374,3 +380,161 @@ def footnote(text: str, *, tone: str = "muted") -> Element:
         )
         ui.label(text)
     return element
+
+
+# --- Phase 2 (Codelists, Features) additions --------------------------------
+#
+# design/code-feature/README.md, "New utility classes worth naming in the
+# implementation": `.seg`, `.rof`/`.ro`, `.fp`, `.pill`, and the master/detail
+# split both screens share. Same rules as everything above this line: plain
+# `ui.element`, a `data-testid` and a `.mark()` on every node, nothing here
+# computes a value it wasn't handed.
+
+_PILL_TONES: Final[frozenset[str]] = frozenset({"ok", "danger", "accent"})
+
+
+def segmented_control(
+    *,
+    options: Sequence[str],
+    value: str,
+    label: str,
+    on_change: Callable[[str], None] | None = None,
+) -> Element:
+    """A `.seg` two-segment toggle — the Features edit zone's Kind field,
+    `Labelled | Exploratory` (README, "Kind / Grain / Value type").
+
+    Real `<button>`s in a `role="group"`, not a styled `<div>`: Tab reaches
+    every segment and the active one carries `aria-pressed="true"`. Which
+    option is active is the caller's fact; this only reports a click.
+    """
+    group = (
+        ui.element("div")
+        .classes("seg")
+        .props(f'role="group" aria-label="{label}" data-testid="seg"')
+        .mark("seg")
+    )
+    with group:
+        for option in options:
+            active = option == value
+            button = (
+                ui.element("button")
+                .classes(f"seg-btn{' on' if active else ''}")
+                .props(
+                    'type="button" '
+                    f'aria-pressed="{"true" if active else "false"}" '
+                    'data-testid="seg-option"'
+                )
+                .mark("seg-option", f"seg-{option.lower().replace(' ', '-')}")
+            )
+            if on_change is not None:
+                button.on("click", lambda _, o=option: on_change(o))
+            with button:
+                ui.label(option)
+    return group
+
+
+def field_select(
+    text: str,
+    *,
+    label: str | None = None,
+    disabled: bool = False,
+    on_click: Callable[[], None] | None = None,
+) -> Element:
+    """A `.rof` full-width field readout — the editable half of the
+    Codelists/Features select pair (`display:flex; width:100%;
+    justify-content:space-between`). **Not** `.sl`/`chip`, which must stay
+    `nowrap` for toolbars (README, Design Tokens).
+
+    A real `<button>` when interactive, so Tab reaches it; opening an actual
+    option list is a later wave's job — this renders the closed, current
+    value. `disabled=True` is the exploratory board's dashed, inert state
+    (README, Case D).
+    """
+    interactive = on_click is not None and not disabled
+    classes = "rof disabled" if disabled else "rof"
+    tag = "button" if interactive else "span"
+    element = ui.element(tag).classes(classes).props('data-testid="rof"').mark("rof")
+    if interactive:
+        assert on_click is not None
+        element.props(f'type="button" aria-label="{label or text}"')
+        element.on("click", lambda _: on_click())
+    with element:
+        ui.label(text)
+        if not disabled:
+            ui.label("▾").classes("caret")
+    return element
+
+
+def frozen_readout(text: str) -> Element:
+    """A `.ro` frozen static readout — same visual family as `field_select`,
+    no caret, not interactive. Used throughout the design's "frozen state"
+    board, where every control becomes read-only (README, "Frozen state")."""
+    element = ui.element("span").classes("ro").props('data-testid="ro"').mark("ro")
+    with element:
+        ui.label(text)
+    return element
+
+
+def fingerprint_badge(fingerprint: str, *, preview: bool = False) -> Element:
+    """A `.fp` 6-character truncated hash in mono type (Features toolbar and
+    edit-zone header), with an optional "· preview" qualifier in `--warn` for
+    a fingerprint that is not final yet (README, "Definition fingerprint").
+
+    The truncation is a display clamp, exactly like `bar()`'s percentage
+    clamp — the full fingerprint is a service's value.
+    """
+    element = ui.element("span").classes("fp mono").props('data-testid="fp"').mark("fp")
+    with element:
+        ui.label(fingerprint[:6])
+        if preview:
+            ui.label("· preview").classes("fp-preview").props('data-testid="fp-preview"').mark(
+                "fp-preview"
+            )
+    return element
+
+
+def pill(text: str, *, tone: str) -> Element:
+    """A small bordered/filled `.pill` status label, reused across three
+    states: `tone="ok"` ("100%"), `tone="danger"` ("no codes", outline),
+    `tone="accent"` ("LOCKED · 2 evals") (README, Design Tokens).
+
+    One component parameterised by tone rather than three near-duplicates —
+    the tone is the caller's classification, never computed here.
+    """
+    if tone not in _PILL_TONES:
+        raise ValueError(f"unknown pill tone: {tone!r} (expected one of {sorted(_PILL_TONES)})")
+    element = (
+        ui.element("span")
+        .classes(f"pill pill-{tone}")
+        .props(f'data-testid="pill" data-tone="{tone}"')
+        .mark("pill")
+    )
+    with element:
+        ui.label(text)
+    return element
+
+
+def master_detail_split() -> tuple[Element, Element]:
+    """The master/detail shell Codelists and Features both use: `flex:1;
+    min-height:0; display:flex; flex-wrap:nowrap` — a list pane floored at
+    300px, an edit/detail pane floored at 360px. Must never wrap, down to
+    1024px (README, "Layout" and "Responsive behaviour").
+
+    Returns `(list_pane, detail_pane)`, both already mounted in the split;
+    the caller fills each with `with list_pane: ...` / `with detail_pane:`.
+    """
+    split = ui.element("div").classes("split").props('data-testid="split"').mark("split")
+    with split:
+        list_pane = (
+            ui.element("div")
+            .classes("split-list")
+            .props('data-testid="split-list"')
+            .mark("split-list")
+        )
+        detail_pane = (
+            ui.element("div")
+            .classes("split-detail")
+            .props('data-testid="split-detail"')
+            .mark("split-detail")
+        )
+    return list_pane, detail_pane

@@ -32,7 +32,16 @@ from ra2.ui.components import (
     pagination_row,
     tick,
 )
+from ra2.ui.components.primitives import (
+    field_select,
+    fingerprint_badge,
+    frozen_readout,
+    master_detail_split,
+    pill,
+    segmented_control,
+)
 from ra2.ui.state import TableState, set_table_state, table_state
+from ra2.ui.theme import STYLESHEET
 
 pytestmark = pytest.mark.ui
 
@@ -271,6 +280,152 @@ async def test_the_chip_and_the_footnote_render_their_copy(user):
 def test_format_count_uses_the_designs_thousands_separator():
     assert format_count(4978) == "4 978"
     assert format_count(162) == "162"
+
+
+# --- Phase 2 (Codelists, Features) component-kit additions ------------------
+#
+# design/code-feature/README.md, "New utility classes worth naming in the
+# implementation": `.seg`, `.rof`/`.ro`, `.fp`, `.pill`, and the master/detail
+# split both screens share.
+
+
+async def test_the_segmented_control_is_real_buttons_with_one_active(user):
+    seen: list[str] = []
+
+    def build() -> None:
+        segmented_control(
+            options=["Labelled", "Exploratory"],
+            value="Labelled",
+            label="Kind",
+            on_change=seen.append,
+        )
+
+    page("/t/seg", build)
+    await user.open("/t/seg")
+
+    (group,) = user.find(marker="seg").elements
+    assert group._props["role"] == "group"
+    labelled, exploratory = _ordered(user.find(marker="seg-option"))
+    assert labelled._props["aria-pressed"] == "true"
+    assert "on" in labelled.classes
+    assert exploratory._props["aria-pressed"] == "false"
+    assert "on" not in exploratory.classes
+
+    user.find(marker="seg-exploratory").click()
+    assert seen == ["Exploratory"]
+
+
+async def test_field_select_is_a_real_button_the_caller_can_click(user):
+    seen: list[str] = []
+
+    def build() -> None:
+        field_select("Accident level", label="Grain", on_click=lambda: seen.append("clicked"))
+
+    page("/t/rof-click", build)
+    await user.open("/t/rof-click")
+
+    (editable,) = user.find(marker="rof").elements
+    assert editable.tag == "button"
+    assert "disabled" not in editable.classes
+    assert "▾" in _text(editable)
+
+    user.find(marker="rof").click()
+    assert seen == ["clicked"]
+
+
+async def test_field_select_disabled_and_frozen_readout_are_not_interactive(user):
+    def build() -> None:
+        field_select("n/a — no ground truth", disabled=True)
+        frozen_readout("Accident level")
+
+    page("/t/rof-frozen", build)
+    await user.open("/t/rof-frozen")
+
+    (disabled,) = user.find(marker="rof").elements
+    assert disabled.tag == "span"
+    assert "disabled" in disabled.classes
+    assert "▾" not in _text(disabled)
+
+    (readout,) = user.find(marker="ro").elements
+    assert readout.tag == "span"
+    assert "▾" not in _text(readout)
+    await user.should_see("Accident level")
+
+
+async def test_the_fingerprint_badge_truncates_to_six_chars_and_flags_a_preview(user):
+    def build() -> None:
+        fingerprint_badge("a91f4c9e2b77")
+        fingerprint_badge("7e551190aa22", preview=True)
+
+    page("/t/fp", build)
+    await user.open("/t/fp")
+
+    final, draft = _ordered(user.find(marker="fp"))
+    assert _text(final) == "a91f4c"
+    assert _text(draft) == "7e5511 · preview"
+    (qualifier,) = user.find(marker="fp-preview").elements
+    assert "fp-preview" in qualifier.classes
+    assert "fp-preview{color:var(--warn)" in STYLESHEET.replace(" ", "").replace("\n", "")
+
+
+async def test_the_pill_is_one_component_across_three_tones(user):
+    def build() -> None:
+        pill("100%", tone="ok")
+        pill("no codes", tone="danger")
+        pill("LOCKED · 2 evals", tone="accent")
+
+    page("/t/pill", build)
+    await user.open("/t/pill")
+
+    ok, danger, accent = _ordered(user.find(marker="pill"))
+    assert "pill-ok" in ok.classes and ok._props["data-tone"] == "ok"
+    assert "pill-danger" in danger.classes and danger._props["data-tone"] == "danger"
+    assert "pill-accent" in accent.classes and accent._props["data-tone"] == "accent"
+    await user.should_see("100%")
+    await user.should_see("no codes")
+    await user.should_see("LOCKED · 2 evals")
+
+
+def test_the_pill_rejects_an_unknown_tone():
+    with pytest.raises(ValueError, match="unknown pill tone"):
+        pill("???", tone="purple")
+
+
+async def test_the_master_detail_split_never_wraps_and_floors_both_panes(user):
+    """`tests/ui` runs against NiceGUI's in-process `User` — there is no real
+    browser here to resize a page down to 1024px and measure boxes, the way
+    `tests/e2e/test_j4_layout.py` does for the Import view's two cards
+    (README, "Responsive behaviour": "the Features split and the Codelists
+    split must never wrap; the list shrinks to 300px, the edit zone to
+    360px"). The equivalent check at this layer: the container carries the
+    right classes, and `flex-wrap:nowrap` plus both panes' floor widths are
+    wired into the one shared stylesheet every page injects (`theme.inject`).
+    """
+
+    def build() -> None:
+        list_pane, detail_pane = master_detail_split()
+        with list_pane:
+            ui.label("18 columns")
+        with detail_pane:
+            ui.label("WitterungAusw")
+
+    page("/t/split", build)
+    await user.open("/t/split")
+
+    (split,) = user.find(marker="split").elements
+    (list_pane_el,) = user.find(marker="split-list").elements
+    (detail_pane_el,) = user.find(marker="split-detail").elements
+    assert "split" in split.classes
+    assert "split-list" in list_pane_el.classes
+    assert "split-detail" in detail_pane_el.classes
+    await user.should_see("18 columns")
+    await user.should_see("WitterungAusw")
+
+    assert ".split{flex:1;min-height:0;display:flex;flex-wrap:nowrap;}" in STYLESHEET
+    assert "--split-list-floor:300px;" in STYLESHEET
+    assert "--split-detail-floor:360px;" in STYLESHEET
+    assert "min-width:var(--split-list-floor)" in STYLESHEET
+    assert "min-width:var(--split-detail-floor)" in STYLESHEET
 
 
 # --- state ------------------------------------------------------------------

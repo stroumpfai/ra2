@@ -13,6 +13,12 @@ Every value below is `design/nav-import-census/README.md` §"Design Tokens" and
 §"Fixed sizes worth keeping", transcribed. Nothing here is invented; where the
 README and the `.dc.html` prototypes disagree (the prototype's `--accent` is a
 blue left over from an earlier pass), **the README wins** — it is the handoff.
+
+Phase 2 (Codelists, Features) adds a handful of tokens its own
+`design/code-feature/README.md` §"Design Tokens" calls out as missing from the
+phase-1 set: `--ok-soft`, the warn-panel note ink, the field/tint background
+and the strip-header tint. They are appended additively below — nothing
+phase 1 defined is renamed or removed (CLAUDE.md ownership rule).
 """
 
 from pathlib import Path
@@ -29,6 +35,8 @@ __all__ = [
     "FONTS_DIR",
     "FONTS_URL_PATH",
     "IMPORT_WELL_HEIGHT_PX",
+    "SPLIT_DETAIL_FLOOR_PX",
+    "SPLIT_LIST_FLOOR_PX",
     "STYLESHEET",
     "inject",
 ]
@@ -47,6 +55,11 @@ BAR_WIDTH_PX: Final = 78
 BAR_HEIGHT_PX: Final = 6
 DIST_BAR_HEIGHT_PX: Final = 8
 DIST_BAR_MAX_WIDTH_PX: Final = 230
+#: Codelists/Features master/detail split (design/code-feature/README.md,
+#: "Layout" + "Responsive behaviour"): the split never wraps, down to 1024px;
+#: these are the two panes' floor widths when it shrinks.
+SPLIT_LIST_FLOOR_PX: Final = 300
+SPLIT_DETAIL_FLOOR_PX: Final = 360
 
 #: Stacked-bar segment shades, in rank order (README "distribution shades").
 DIST_SHADES: Final[tuple[str, ...]] = (
@@ -90,12 +103,16 @@ _TOKENS: Final = """
   --accent:oklch(0.50 0.008 260);
   --accent-soft:oklch(0.935 0.004 260);
   --ok:oklch(0.50 0.11 152);
+  --ok-soft:oklch(0.958 0.030 152);
   --warn:oklch(0.56 0.13 72);
   --warn-soft:oklch(0.965 0.035 80);
+  --warn-ink:oklch(0.40 0.10 72);
   --danger:oklch(0.53 0.15 27);
   --danger-soft:oklch(0.962 0.030 27);
   --note-ink:oklch(0.38 0.10 255);
   --muted-arrow:oklch(0.80 0.006 260);
+  --field-tint:oklch(0.982 0.003 260);
+  --strip-tint:oklch(0.988 0.003 260);
   --dist-1:oklch(0.47 0.010 260);
   --dist-2:oklch(0.70 0.008 260);
   --dist-3:oklch(0.80 0.006 260);
@@ -110,6 +127,8 @@ _TOKENS: Final = """
   --bar-h:6px;
   --dist-bar-h:8px;
   --dist-bar-max-w:230px;
+  --split-list-floor:300px;
+  --split-detail-floor:360px;
 }
 """
 
@@ -242,6 +261,50 @@ _UTILITIES: Final = """
 .accent{color:var(--accent);}
 """
 
+# Phase 2 (Codelists, Features) additions — design/code-feature/README.md,
+# "New utility classes worth naming in the implementation". Additive only:
+# nothing above this point is touched (CLAUDE.md ownership rule, D4).
+_UTILITIES_P2: Final = """
+.seg{
+  display:inline-flex;border:1px solid var(--rule);border-radius:3px;overflow:hidden;
+  flex:none;
+}
+.seg-btn{
+  font-family:var(--sans);font-size:12px;font-weight:500;color:var(--ink2);
+  background:var(--surface);border:none;padding:6px 12px;cursor:pointer;
+}
+.seg-btn+.seg-btn{border-left:1px solid var(--rule);}
+.seg-btn.on{background:var(--accent-soft);color:var(--ink);}
+.rof{
+  display:flex;width:100%;justify-content:space-between;align-items:center;gap:8px;
+  border:1px solid var(--rule);border-radius:3px;padding:7px 10px;background:var(--surface);
+  font-family:var(--sans);font-size:12.5px;color:var(--ink);cursor:pointer;
+}
+.rof .caret{color:var(--ink3);font-size:9px;}
+.rof.disabled{
+  color:var(--ink3);background:var(--field-tint);border-style:dashed;cursor:default;
+}
+.ro{
+  display:flex;width:100%;justify-content:space-between;align-items:center;gap:8px;
+  border:1px solid var(--rule2);border-radius:3px;padding:7px 10px;
+  background:var(--field-tint);font-family:var(--sans);font-size:12.5px;color:var(--ink2);
+}
+.fp{font-family:var(--mono);font-size:10px;color:var(--ink3);white-space:nowrap;}
+.fp .fp-preview{color:var(--warn);margin-left:4px;}
+.pill-ok{background:var(--ok-soft);color:var(--ok);border:1px solid transparent;}
+.pill-danger{background:var(--surface);color:var(--danger);border:1px solid var(--danger);}
+.pill-accent{background:var(--accent-soft);color:var(--accent);border:1px solid transparent;}
+.split{flex:1;min-height:0;display:flex;flex-wrap:nowrap;}
+.split-list{
+  flex:0 1 452px;min-width:var(--split-list-floor);border-right:1px solid var(--rule);
+  background:var(--surface);display:flex;flex-direction:column;min-height:0;
+}
+.split-detail{
+  flex:1 1 520px;min-width:var(--split-detail-floor);padding:20px 28px;
+  overflow:auto;min-height:0;
+}
+"""
+
 # Focus is undesigned in the mock (README §"`.navitem` states"). One token,
 # one rule, visible on every interactive element — keyboard nav is obvious.
 _FOCUS: Final = """
@@ -254,7 +317,7 @@ _FOCUS: Final = """
 """
 
 #: The single stylesheet. One injection, not scattered across components (§8.2).
-STYLESHEET: Final = _FONTS + _TOKENS + _RESET + _UTILITIES + _FOCUS
+STYLESHEET: Final = _FONTS + _TOKENS + _RESET + _UTILITIES + _UTILITIES_P2 + _FOCUS
 
 
 def inject() -> None:
