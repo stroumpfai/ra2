@@ -185,8 +185,14 @@ def test_the_nav_has_eight_items_with_prompts_after_features():
     assert prompts.group == "Configure"
     assert prompts.path == "/prompts"
     assert prompts.label == "Prompts"
-    #: Routed to `placeholder_view` until L1 flips this in Wave 4 (§6.1).
-    assert prompts.built is False
+    #: `built` is deliberately **not** asserted here. It is wave sequencing,
+    #: not a contract: §6.1's two-line exception exists precisely so L1 flips
+    #: it in Wave 4, and pinning either value makes this frozen, lead-owned
+    #: file need an amendment the moment the declared exception is used —
+    #: which is what L1 hit (contracts/amendments/feat-p3-prompts-view.md).
+    #: What *is* the contract is the entry's identity and position, asserted
+    #: above, plus the route resolving at all, which
+    #: `test_m0_contract.py`'s NAV_ROUTES asserts whether it is built or not.
 
 
 def test_the_slot_catalogue_is_closed_and_matches_the_design():
