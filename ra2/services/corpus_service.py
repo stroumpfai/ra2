@@ -258,6 +258,29 @@ class CorpusService:
                     locked += 1
             return CorpusSummary(total=len(corpora), locked=locked)
 
+    async def first_record(self, corpus_id: CorpusId) -> RecordId | None:
+        """The corpus's first record by id — the design's "record 1".
+
+        `design/prompt-evaluation/README.md` §1's "Preview with record 1",
+        and plan-phase-3.md C4's Prompts half. Added by amendment
+        (`contracts/amendments/feat-p3-prompts-view.md`): `PromptService.
+        preview` needs a `RecordId`, and **no read model reachable from
+        `ui/` carried one** — `CorpusView` has `record_count` and never an
+        id, and `EvaluationService.record_scope` was the only source in the
+        service layer, which requires an evaluation to exist. So the Prompts
+        view could only preview once an unrelated evaluation had been
+        created, which is not what the design describes.
+
+        `None` when the corpus has no records.
+
+        :raises NotFoundError: no such corpus.
+        """
+        async with self._session_factory() as session:
+            repo = CorpusRepository(session)
+            if await repo.get(corpus_id) is None:
+                raise NotFoundError("corpus", corpus_id)
+            return await repo.first_record_id(corpus_id)
+
     async def delete(self, corpus_id: CorpusId) -> None:
         """Refused when any evaluation cites the corpus.
 

@@ -118,12 +118,23 @@ class Seeded:
 
 
 async def _seed_citation(
-    app: FastAPI, *, template: PromptTemplateView, clock: Clock, with_record: bool
+    app: FastAPI,
+    *,
+    template: PromptTemplateView,
+    clock: Clock,
+    with_record: bool,
+    with_evaluation: bool = True,
 ) -> None:
     """A `corpus` + `feature_config` + `evaluation` + `run` citing `template`.
 
     See the module docstring: `locked` is a live `COUNT(run …)`, so the only
     honest way to reach that marker is a real row.
+
+    `with_evaluation=False` stops after the corpus, the record and the feature
+    set — the state a fresh install is in before anyone has created an
+    evaluation, which is the path `_preview_inputs` falls back to once L1's
+    `CorpusService.first_record` amendment landed. No evaluation means no run,
+    so nothing is `locked` in that variant.
     """
     services: Services = app.state.services
     config = await services.feature.create_draft(name="prompts-fixture")
@@ -151,6 +162,9 @@ async def _seed_citation(
                     text_raw="Am 14.03.2026 gegen 07:40 Uhr, bei starkem Regen.",
                 )
             )
+        if not with_evaluation:
+            await session.commit()
+            return
         session.add(
             Evaluation(
                 id=EvaluationId(EVALUATION_ID),
@@ -186,6 +200,7 @@ async def _build(
     cite: int | None,
     activate: int | None,
     with_record: bool = False,
+    with_evaluation: bool = True,
 ) -> AsyncIterator[Seeded]:
     with nicegui_reset_globals():
         os.environ["NICEGUI_USER_SIMULATION"] = "true"
@@ -205,6 +220,7 @@ async def _build(
                         template=saved[cite - 1],
                         clock=frozen_clock,
                         with_record=with_record,
+                        with_evaluation=with_evaluation,
                     )
                 if activate is not None:
                     await services.prompt.activate(saved[activate - 1].prompt_template_id)
@@ -262,6 +278,25 @@ async def previewable(
         cite=1,
         activate=1,
         with_record=True,
+    ):
+        yield seeded
+
+
+@pytest.fixture
+async def previewable_without_an_evaluation(
+    app_factory: Callable[..., FastAPI], migrated_db: Settings, frozen_clock: Clock
+) -> AsyncIterator[Seeded]:
+    """A corpus with a record and a feature set, but **no evaluation** — a
+    fresh install that has imported data and configured features but not yet
+    set up a run."""
+    async for seeded in _build(
+        app_factory,
+        frozen_clock=frozen_clock,
+        versions=(hazard("p01_valid_all_slots"),),
+        cite=1,
+        activate=1,
+        with_record=True,
+        with_evaluation=False,
     ):
         yield seeded
 
@@ -769,6 +804,31 @@ async def test_preview_with_record_1_hands_the_panel_a_resolved_prompt(
     assert "Am 14.03.2026" in resolved.text
     assert "{{narrative}}" not in resolved.text
     assert resolved.token_estimate > 0
+    assert not _find(user, "resolved-empty")
+
+
+async def test_preview_with_record_1_works_before_any_evaluation_exists(
+    previewable_without_an_evaluation: Seeded, stub_preview_panel: list[ResolvedPromptView]
+) -> None:
+    """The design's "Preview with record 1" means the corpus's first record —
+    not "the first record of some evaluation you happen to have created".
+
+    This is what L1's accepted amendment bought (`CorpusService.first_record`,
+    contracts/amendments/feat-p3-prompts-view.md): before it, authoring a
+    template on a fresh install and pressing Preview showed an empty state,
+    for a reason the analyst could not see.
+    """
+    user = previewable_without_an_evaluation.user
+    await user.open("/prompts")
+    await user.should_see(SOURCE_TITLE)
+
+    _one(user, _find(user, "preview-template")[0]).click()
+    await _until(lambda: bool(_find(user, "resolved-panel")))
+
+    (resolved,) = stub_preview_panel
+    assert resolved.record_key == "prompts-u1"
+    assert "Am 14.03.2026" in resolved.text
+    assert "{{narrative}}" not in resolved.text
     assert not _find(user, "resolved-empty")
 
 

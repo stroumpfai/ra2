@@ -337,6 +337,12 @@ def register(services: Services) -> None:
         await page.build()
 
 
+#: The language a preview resolves in when no evaluation has chosen one
+#: yet. `evaluation.prompt_language` is the real home for this (§15 F10);
+#: this is only the fallback for the no-evaluation-yet preview path, and it
+#: matches `evaluation_service`'s own default so the two never disagree.
+_PREVIEW_FALLBACK_LANGUAGE: Final = "de"
+
 class _PromptsPage:
     """One client's Prompts view.
 
@@ -893,17 +899,36 @@ class _PromptsPage:
 
     async def _preview_inputs(self) -> tuple[FeatureConfigId, RecordId, str] | None:
         """The feature set, the record and the prompt language to resolve
-        against: the most recent evaluation that has any records in scope.
+        against — the design's "Preview with record 1".
 
-        Taking all three from one evaluation is what keeps them consistent —
-        `PromptService.preview` resolves enum labels from *the record's own
-        corpus*, so a feature set chosen independently of the record could be
-        previewed against labels from a different corpus entirely.
+        **An evaluation first, the newest corpus second.** When one exists,
+        all three come from a single evaluation, which is what keeps them
+        consistent: `PromptService.preview` resolves enum labels from *the
+        record's own corpus*, so a feature set chosen independently of the
+        record could be previewed against labels from a different corpus
+        entirely. That is the more faithful preview, so it wins where it is
+        available.
+
+        With no evaluation yet, "record 1" is the newest corpus's first
+        record by id (`CorpusService.first_record`, added by L1's accepted
+        amendment) and the newest feature set — which is what the design
+        actually describes, and what makes Preview work on a fresh install
+        instead of showing an empty state for a reason the analyst cannot
+        see.
         """
         for draft in await self._services.evaluation.list_evaluations():
             scope = await self._services.evaluation.record_scope(draft.evaluation_id)
             if scope:
                 return draft.feature_config_id, scope[0], draft.prompt_language
+
+        configs = await self._services.feature.list_configs()
+        if not configs:
+            return None
+        corpora = await self._services.corpus.list_corpora()
+        for corpus in corpora.items:
+            record_id = await self._services.corpus.first_record(corpus.corpus_id)
+            if record_id is not None:
+                return configs[0].feature_config_id, record_id, _PREVIEW_FALLBACK_LANGUAGE
         return None
 
 

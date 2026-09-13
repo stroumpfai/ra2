@@ -1,5 +1,19 @@
 # Amendments: `feat/p3-prompts-view`
 
+> **BOTH APPLIED at Wave 4 integration.**
+> **1** was resolved differently from the proposed diff: rather than flipping
+> `assert prompts.built is False` to `is True`, the assertion was **removed**.
+> `built` is wave sequencing, not a contract, and pinning either value leaves
+> the same trap for L2 and for every view phase 4 adds. See commit
+> "Stop the p3 contract test pinning a nav flag Wave 4 must change".
+> **2** was applied as proposed, as `CorpusRepository.first_record_id` plus
+> `CorpusService.first_record` — the query in the repository, which is where
+> every other corpus query lives. `prompts_view._preview_inputs` now tries an
+> evaluation first (all three inputs from one evaluation, which is the more
+> faithful preview) and falls back to the newest corpus's first record, so
+> Preview works on a fresh install. Covered by
+> `test_preview_with_record_1_works_before_any_evaluation_exists`.
+
 Two, independent of each other:
 
 1. **`tests/test_p3_contract.py`** — `assert prompts.built is False` is the

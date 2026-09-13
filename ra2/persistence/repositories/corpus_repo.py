@@ -4,8 +4,8 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ra2.domain.ids import CorpusId
-from ra2.persistence.models import Corpus, Evaluation
+from ra2.domain.ids import CorpusId, RecordId
+from ra2.persistence.models import Corpus, Evaluation, Record
 
 __all__ = ["CorpusRepository"]
 
@@ -39,6 +39,19 @@ class CorpusRepository:
         stmt = select(func.count()).select_from(Evaluation).where(Evaluation.corpus_id == corpus_id)
         count = await self._session.scalar(stmt)
         return int(count or 0)
+
+    async def first_record_id(self, corpus_id: CorpusId) -> RecordId | None:
+        """The corpus's first record **by id**, or `None` when it has none.
+
+        Ordered by id, which is the same ordering `ExtractionRepository.
+        pending_record_ids` fixes a dev scope with — so "record 1" means the
+        same record in a preview and in the run that preview is previewing.
+        A preview showing a different record than the run would start on is
+        worse than no preview (amendment: feat/p3-prompts-view).
+        """
+        stmt = select(Record.id).where(Record.corpus_id == corpus_id).order_by(Record.id).limit(1)
+        row = await self._session.scalar(stmt)
+        return None if row is None else RecordId(row)
 
     async def delete(self, corpus_id: CorpusId) -> None:
         """Only ever reached after the guard says no evaluation cites it."""
