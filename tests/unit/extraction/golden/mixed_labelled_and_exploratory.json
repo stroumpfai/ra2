@@ -1,0 +1,113 @@
+{
+  "$defs": {
+    "EntityAnswer": {
+      "description": "One vehicle or person, referenced by the role codes the anonymisation\nuses (`B1`, `G1`, `P`). Captured, never scored (mvp-spec.md §10.3).",
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "ref": {
+          "title": "Ref",
+          "type": "string"
+        },
+        "attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Attributes",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "ref"
+      ],
+      "title": "EntityAnswer",
+      "type": "object"
+    },
+    "ExtractionFeatures": {
+      "additionalProperties": false,
+      "properties": {
+        "UnfallartCode": {
+          "$ref": "#/$defs/FeatureAnswer"
+        },
+        "AnzObjFeld": {
+          "$ref": "#/$defs/FeatureAnswer"
+        },
+        "weather_mentioned": {
+          "$ref": "#/$defs/FeatureAnswer"
+        }
+      },
+      "required": [
+        "UnfallartCode",
+        "AnzObjFeld",
+        "weather_mentioned"
+      ],
+      "title": "ExtractionFeatures",
+      "type": "object"
+    },
+    "FeatureAnswer": {
+      "description": "One feature's answer. `value` is the **code** for an enum.\n\n`evidence` is a span quoted **verbatim from the narrative** and is\nrequired for every non-null value (mvp-spec.md §10.2). `present` is the\nper-feature presence flag, scored as Goal 2 in phase 4.",
+      "properties": {
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        },
+        "present": {
+          "default": false,
+          "title": "Present",
+          "type": "boolean"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence"
+        }
+      },
+      "title": "FeatureAnswer",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "features": {
+      "$ref": "#/$defs/ExtractionFeatures"
+    },
+    "entities": {
+      "items": {
+        "$ref": "#/$defs/EntityAnswer"
+      },
+      "title": "Entities",
+      "type": "array"
+    }
+  },
+  "required": [
+    "features",
+    "entities"
+  ],
+  "title": "ExtractionSchema",
+  "type": "object"
+}
