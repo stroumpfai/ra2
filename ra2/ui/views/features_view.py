@@ -86,6 +86,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from html import escape
 from typing import Final, cast
+from urllib.parse import urlencode
 
 from nicegui import app, ui
 from nicegui.element import Element
@@ -169,6 +170,11 @@ FEATURE_KEY: Final = "ra2.features.feature"
 FILTERS_KEY: Final = "ra2.features.filters"
 LANGUAGE_KEY: Final = "ra2.features.language"
 VALIDATE_KEY: Final = "ra2.features.validate_against"
+
+#: The query parameter this view both reads (`_page`) and writes
+#: (`_pick_validate_corpus`). Spelled out rather than imported from
+#: `census_view`, the same way `_page`'s two parameter names are.
+CORPUS_PARAM: Final = "corpus"
 
 #: `FEATURE_KEY`'s value while the edit zone is in "Add feature" mode — never
 #: a real `FeatureId`, so it can share the one storage key.
@@ -397,33 +403,47 @@ def _draft_from(feature: FeatureView) -> _FeatureDraft:
 
 @dataclass(frozen=True, slots=True)
 class _Prefill:
-    """One Census hand-off, as it arrived in the query string.
+    """One hand-off, as it arrived in the query string.
 
     Both fields are **unvalidated text off a URL** and are checked against the
     services before anything is prefilled: `corpus_id` must name a corpus the
     corpus picker offers, `column_name` a column that corpus's census has.
     Nothing is read *out of* the URL beyond the two names — the column's table
     and type hint come from the census row (CLAUDE.md #5's spirit).
+
+    `column_name is None` is the corpus-only case: the validate-against corpus
+    this view wrote into its own URL (`_pick_validate_corpus`), not a Census
+    hand-off. It adopts the corpus and opens no draft.
     """
 
     corpus_id: str | None
-    column_name: str
+    column_name: str | None
 
 
 def register(services: Services) -> None:
     @ui.page(_ITEM.path)
     async def _page(corpus: str | None = None, column: str | None = None) -> None:
-        """`/features`, optionally `?corpus=<id>&column=<name>`.
+        """`/features`, optionally `?corpus=<id>` and/or `?column=<name>`.
 
         The two query parameters are Census's "use as feature" link
         (`census_view.FEATURES_PATH`, `CORPUS_PARAM`, `COLUMN_PARAM`); NiceGUI
         binds them by name, so they are spelled out here rather than imported
         from there. `column` alone is enough — the corpus then stays whatever
         this client last validated against.
+
+        **`corpus` alone is what makes the picked corpus outlive a reload.**
+        `app.storage.client`, where every other selection on this screen lives,
+        is discarded the moment the socket closes — which is exactly what a
+        reload does — so a corpus picked here and read back after F5 would come
+        up "none" (and read as the save having dropped it). The picker writes
+        its choice into this query parameter instead (`_pick_validate_corpus`),
+        which the browser carries across the reload and hands straight back
+        here. It is also per tab, needs no storage of any lifetime, and makes
+        the URL shareable — the same reasoning that already puts Census's
+        hand-off in the query string rather than in a server-side dict.
         """
-        page = _FeaturesPage(
-            services, prefill=_Prefill(corpus, column) if column is not None else None
-        )
+        prefill = _Prefill(corpus, column) if column is not None or corpus is not None else None
+        page = _FeaturesPage(services, prefill=prefill)
         await page.build()
 
 
@@ -565,7 +585,9 @@ class _FeaturesPage:
         not rebuild a draft over an edit in progress.
         """
         prefill, self._prefill = self._prefill, None
-        if prefill is None:
+        if prefill is None or prefill.column_name is None:
+            # Corpus-only: `_adopt_prefill_corpus` has already done the whole
+            # job. There is no column to open a draft on and nothing to explain.
             return
         column = _matching_census(self._census_columns, prefill.column_name)
         if column is None:
@@ -1311,8 +1333,23 @@ class _FeaturesPage:
 
     async def _pick_validate_corpus(self, corpus_id: str) -> None:
         app.storage.client[VALIDATE_KEY] = corpus_id or None
+        self._remember_validate_corpus_in_url(corpus_id)
         await self._reload_corpus_scoped_columns()
         self._render()
+
+    def _remember_validate_corpus_in_url(self, corpus_id: str) -> None:
+        """Mirror the pick into this tab's own URL, so a reload brings it back
+        (`_page`'s docstring). `replace`, not `push`: picking a validation
+        corpus is not a navigation the back button should have to walk, and it
+        must not reload the page — an in-progress `_FeatureDraft` is staged in
+        memory and a real navigation would throw it away.
+
+        `column` is deliberately dropped: a Census hand-off is consumed once
+        (`_apply_prefill`), so carrying it in the URL would re-open the same
+        new-feature draft on every later reload.
+        """
+        query = f"?{urlencode({CORPUS_PARAM: corpus_id})}" if corpus_id else ""
+        ui.navigate.history.replace(f"{_ITEM.path}{query}")
 
     async def _pick_type_filter(self, value: str) -> None:
         current = feature_filters()
@@ -1735,13 +1772,16 @@ def _text_input(
     element = (
         ui.element("input")
         .classes("chip")
-        .props(
-            f'type="text" value="{escape(value, quote=True)}" '
-            f'placeholder="{escape(placeholder, quote=True)}" data-testid="{testid}"'
-        )
+        .props(f'type="text" data-testid="{testid}"')
         .mark(testid)
         .style("width:100%;")
     )
+    # Analyst-typed text goes through the props *dict*, never the props
+    # string: the string is parsed, so a value carrying a newline breaks the
+    # parse and the page silently never renders. The dict is serialised as
+    # JSON, so any text survives it unescaped — see `_textarea`.
+    element.props["value"] = value
+    element.props["placeholder"] = placeholder
     element.on(
         "input", lambda event: on_input(str(event.args)), js_handler="(e) => emit(e.target.value)"
     )
@@ -1758,15 +1798,18 @@ def _textarea(*, value: str, on_input: Callable[[str], None], testid: str) -> El
             "font-family:var(--sans);font-size:12.5px;line-height:1.55;resize:vertical;"
         )
     )
+    # A `<textarea>`'s initial text content only becomes its value while the
+    # HTML *parser* is building the element. Every element here is created
+    # afterwards by Vue, so a child node — `ui.html(...)` inside `with
+    # element:` — renders an inert `<div>` the textarea never reads, and the
+    # box comes up empty however much prose is stored. Setting the DOM
+    # property is what actually fills it; Vue assigns `value` on a textarea as
+    # a property, and the props dict is JSON, so `<`, `&`, quotes and newlines
+    # all round-trip byte-for-byte without escaping.
+    element.props["value"] = value
     element.on(
         "input", lambda event: on_input(str(event.args)), js_handler="(e) => emit(e.target.value)"
     )
-    with element:
-        # A `<textarea>`'s default value is its text content, not a `value=`
-        # attribute — escaped here (never trusted `sanitize=False` HTML, since
-        # `value` is analyst-typed prose) so the initial render round-trips a
-        # description containing `<`, `>` or `&` byte-for-byte.
-        ui.html(escape(value), sanitize=False)
     return element
 
 
