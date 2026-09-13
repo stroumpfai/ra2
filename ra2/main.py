@@ -39,7 +39,7 @@ from ra2.services.evaluation_service import EvaluationService
 from ra2.services.export_service import ExportService
 from ra2.services.feature_service import FeatureService
 from ra2.services.prompt_service import PromptService
-from ra2.services.protocols import CensusMaterialiser
+from ra2.services.protocols import CensusMaterialiser, PromptResolver
 from ra2.services.run_service import RunService
 from ra2.ui import views
 from ra2.ui.theme import FONTS_DIR, FONTS_URL_PATH
@@ -62,6 +62,7 @@ def create_app(
     llm_client: LLMClient | None = None,
     model_catalog: ModelCatalog | None = None,
     gpu_probe: GpuProbe | None = None,
+    prompt_resolver: PromptResolver | None = None,
     mount_ui: bool = True,
 ) -> FastAPI:
     """Build the application.
@@ -158,11 +159,16 @@ def create_app(
         settings=settings,
     )
     # `prompt_service` satisfies `PromptResolver` (services/protocols.py)
-    # structurally — `run_service` never imports it directly.
+    # structurally — `run_service` never imports it directly. It arrives as a
+    # defaulted keyword argument like every other adapter (§12.12): the seam
+    # exists so the two sides can be built by different agents, and a seam a
+    # test cannot substitute through the composition root is a seam only
+    # production uses. I3 had to reach for a private attribute without this.
+    prompt_resolver = prompt_resolver or prompt_service
     run_service = RunService(
         session_factory=session_factory,
         llm_client=llm_client,
-        prompt_resolver=prompt_service,
+        prompt_resolver=prompt_resolver,
         gpu_probe=gpu_probe,
         task_runner=task_runner,
         clock=clock,

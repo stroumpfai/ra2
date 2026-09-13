@@ -248,11 +248,11 @@ async def build_app(
     in-memory "runs I am executing" set is empty, which is how a run left
     `running` by a dead process is recognised as interrupted rather than live.
 
-    `create_app()` is frozen and takes no `prompt_resolver` keyword (the seam
-    is satisfied structurally by `prompt_service`, which I1 is implementing in
-    this same wave), so the resolver is substituted on the built service here.
-    That is the shim CLAUDE.md's ownership rule asks for instead of editing a
-    frozen file, and it lives in this test package only.
+    The resolver goes in through `create_app()`'s `prompt_resolver` keyword,
+    like every other adapter (§12.12). I3 originally had to set it on the
+    built service, because the seam had no composition-root parameter — the
+    lead added one at integration on I3's own flag, since a seam a test cannot
+    substitute through the composition root is a seam only production uses.
     """
     built: list[FastAPI] = []
 
@@ -270,9 +270,9 @@ async def build_app(
             llm_client=llm_client,
             model_catalog=StaticModelCatalog(),
             gpu_probe=gpu,
+            prompt_resolver=resolver,
             mount_ui=False,
         )
-        app.state.services.run._prompt_resolver = resolver
         built.append(app)
         return app
 
