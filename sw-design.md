@@ -567,6 +567,11 @@ Each is additive and cheap to reverse; none should change silently.
 | SD8 | Long tail defined as `distinct > 20 and top_value_share < 0.01` | The design states the rendering, not the threshold |
 | SD9 | Minimum spec for the file report modal (§8.3) | The design defers it, but the Import row action opens it |
 | SD10 | The API is built in phase 1, not deferred | It is how E2E seeds state, and it is the same services either way |
+| SD11 | `prompt_template` is a **table**, not the on-disk template `mvp-spec.md` §10.2 describes (§15.1) | Citation counts, an active flag and "delete only when uncited" are enforceable only where the citations are |
+| SD12 | `evaluation_feature` — the per-evaluation `enum_codelist_json` snapshot and final fingerprint, which `mvp-spec.md` §5 puts on `feature` (§15.2) | A frozen `feature_config` is corpus-independent, so the snapshot cannot resolve until an evaluation fixes a corpus |
+| SD13 | `evaluation` gains the draft/decoding columns, `run` gains `prompt_template_id` and `status` (§15.2) | The design's "Save draft" means the row exists before the inputs are final; a version integer alone cannot resolve exact text |
+| SD14 | The `openai` SDK alone; **PydanticAI dropped** from `mvp-spec.md` §3's stack (§15.5) | One call, one schema, one response — and a second provider client is what Do-NOT list #1 exists to prevent |
+| SD15 | VRAM and GPU name **probed** via NVML library bindings, with a config override (§15.6) | The design disables models that exceed VRAM; Ollama does not report it. A `ctypes` library load is not the shell-out N3 forbids |
 
 **Note on the design's fixture column names.** `UnfallTypAusw`, `WitterungAusw`,
 `LichtverhaeltnisAusw` and `UnfallDatumFeld` do not exist in the delivery; the real
@@ -692,3 +697,314 @@ one running the `GROUP BY` query and handing it plain cell values.
   (mvp-spec.md §18) is resourced. The schema in §14.1 accommodates it: a
   second `code_table_import` with different `attribute_key`s, mapped
   independently per column.
+
+---
+
+## 15. Prompts and Evaluation (F5, F6)
+
+**Not yet built** — Codelists and Features shipped in phase 2, and the nav's
+Run group still routes to `placeholder_view` (§8.1). This section exists so
+the wave that builds Prompts and Evaluation starts from an architecture rather
+than a blank page, now that `design/prompt-evaluation/README.md` and
+`mvp-spec.md` §9/§10 exist. It is also the first section in this document to
+describe code that **makes an outbound request** and code that **runs for an
+hour**, which is why it spends most of its length on two boundaries: the
+transaction boundary (§15.3) and the process boundary (§15.5).
+
+It resolves three of the design's open questions: prompt language belongs to
+the **evaluation** (§15.2), template naming stays a **bare integer lineage**
+(§15.1), and an unreachable endpoint **blocks Launch** with the reason beside
+the endpoint line (§15.5). Its own deferrals are §15.8.
+
+### 15.1 The prompt template is a row, not a file
+
+`mvp-spec.md` §10.2 says "a versioned **on-disk** template". That is wrong for
+what the design asks of it, and this section corrects it (**SD11**): the
+design's version list carries a citation count per version, an active flag, a
+per-version fingerprint, and "delete only when nothing cites it". Each of
+those is one foreign key in a table and one filesystem convention on disk, and
+the one that matters — a cited version can never be edited or deleted — is
+enforceable only where the citations are.
+
+```
+prompt_template(id, version, source, created_at, activated_at, fingerprint)
+               -- IMMUTABLE. version UNIQUE. A save is a new row, never an UPDATE.
+```
+
+**Copy-on-write, not versioning-by-convention.** Saving is `INSERT` at
+`version + 1`; the previous row's `source` stays **byte-identical**, because
+the runs citing it must keep resolving to the exact text they used. There is
+no `PATCH` route and no service method that updates a `source` — the absence
+is the contract (§15.7's package list has no `update_template`). Deleting is
+allowed only when no `run` cites the row; otherwise the version renders
+`locked`, exactly as the design draws it. `activated_at` marks the one version
+new evaluations default to; activating another clears it. One lineage,
+integers `v1…vN`, **no names** — names are what a forked template needs, and
+nothing in the MVP forks one.
+
+**The slot catalogue is closed**, and lives in `domain/prompt.py`:
+
+| Slot | Required | Resolves to |
+|---|---|---|
+| `{{feature_block}}` | yes | one `name — type` line per labelled feature, plus the **full code → label list** per enum feature from `enum_codelist_json` (`mvp-spec.md` §10.2), plus each exploratory attribute's description verbatim |
+| `{{narrative}}` | yes | `record.text_raw`, **verbatim** |
+| `{{language}}` | no | the evaluation's `prompt_language` (§15.2) |
+
+Validation runs on save and **blocks** it: an unknown slot, a missing required
+slot, or a malformed half-brace (`{{narrative}`) is an error carrying the slot
+name. A duplicated slot is legal. Resolution is **single-pass** substitution —
+a narrative containing `{{` is text, not a slot, and must never be
+re-expanded.
+
+**Two fingerprints, one algorithm.** `compute_template_fingerprint(source)` is
+sha256 over the exact source bytes, through the same canonicalisation
+`domain/fingerprint.py` already uses for features (`mvp-spec.md` §8.5), so the
+two cannot drift. Whitespace is part of a prompt: a template differing by one
+space is a different template, and its fingerprint says so.
+
+**Token counts are estimates, and say so.** An exact count needs the model's
+tokeniser, and every tokeniser package downloads its vocabulary — egress, N1.
+`estimate_tokens()` is pure and arithmetic; the preview renders `≈ N tokens`.
+The **real** counts come back from the endpoint per call and are stored per
+extraction, which is where a number has to be right.
+
+### 15.2 An evaluation pins; a launch snapshots
+
+`mvp-spec.md` §9's "one corpus + one feature config + N models" is the whole
+of what an evaluation is — but the design also has a **"Save draft"** button,
+so the row exists before the inputs are final. The spec's `evaluation` table
+grows the setup it was always implying (**SD13**):
+
+```
+evaluation(id, name, corpus_id, feature_config_id, prompt_template_id,
+           prompt_language, temperature, seed, size, selected_models_json,
+           created_at, launched_at, is_dev)
+          -- editable while launched_at IS NULL; immutable after
+run(... , prompt_template_id, status)
+          -- status: queued | running | done | failed | interrupted
+```
+
+`run.prompt_template_version` (`mvp-spec.md` §5) stays as the human-facing
+citation; `prompt_template_id` is added beside it because a version integer
+alone cannot resolve exact text once a lineage is long.
+
+**`prompt_language` lives here, not on the template.** It is the first
+persistent home for a value `codelists_view` and `features_view` already
+select and store nowhere, and it belongs with the other per-evaluation
+resolutions for the same reason they do: the codelist labels the prompt
+carries are language-specific, and which language is a property of the
+question being asked, not of the wording asking it.
+
+**The launch transaction is where fingerprints resolve.** §14.2 says
+`enum_codelist_json` is snapshotted "once, at evaluation creation, exactly as
+`mvp-spec.md` §8.5 already specifies", and phase 2 then decided a frozen
+`feature_config` is corpus-**independent** and reusable across evaluations. Both
+hold, and together they mean the snapshot cannot live on `feature`: the same
+frozen config cited against two corpora has two different `column_mapping`
+generations under it, and therefore two different codelist snapshots and two
+different fingerprints. So a new table carries the per-evaluation resolution
+(**SD12**):
+
+```
+evaluation_feature(evaluation_id, feature_id, enum_codelist_json, fingerprint)
+                  -- written once, inside the launch transaction
+```
+
+"Evaluation creation" in §8.5's sense is therefore the **launch commit** — the
+moment the inputs stop being editable — not the moment a draft row appears. A
+draft is a saved setup; an evaluation is a pinned one. `feature.fingerprint`
+(phase 2) remains the draft-time **preview**: the same function over the same
+inputs minus the codelist snapshot, which is exactly why a preview badge and a
+run's fingerprint can legitimately differ.
+
+In one transaction, launch: verifies the cited `feature_config` is frozen
+(refusing an unfrozen one, creating nothing), writes `evaluation_feature` for
+every feature, sets `is_dev` from the size choice against
+`RA2_EVAL_RECORD_MIN` / `RA2_DEV_RECORD_MAX`, stamps `launched_at`, and
+creates one `queued` `run` per selected model. After it, every edit path
+raises.
+
+**A dev run's record selection is deterministic** — the first
+`RA2_DEV_RECORD_MAX` records by id. "A re-run is a check, not a new sample"
+(the design's own purpose line) is false the moment the selection is random:
+the seed fixes what the model does with what it sees, and determinism has to
+cover what it is *shown* too.
+
+### 15.3 Extraction — one record, one transaction
+
+`mvp-spec.md` §10.1 fixes one LLM call per (record, model) covering all
+features, and N5 makes extractions immutable. This section fixes the
+**boundary**, because that is what makes N6's restart-safety true rather than
+aspirational:
+
+> One `extraction` row, its `extraction_value` children and its
+> `extraction_entity` children are committed **together, per record**. Nothing
+> batches across records, and nothing holds a transaction open across an LLM
+> call.
+
+```
+extraction(... )              -- UNIQUE (run_id, record_id)
+extraction_value(...)         -- one per (extraction, feature)
+extraction_entity(...)        -- captured, never scored (mvp-spec.md §10.3)
+```
+
+`UNIQUE (run_id, record_id)` **is the resume key**. Resume is "the record ids
+in this run's scope with no `extraction` row", which is a query, not
+bookkeeping — and the constraint means a double write raises instead of
+quietly updating (Do-NOT list #2). Note the resume set can have **holes** in
+the middle, not just a missing tail: a record whose retries were exhausted
+leaves one, and resume must find it.
+
+**Progress is derived, never counted.** `records_done` is
+`COUNT(extraction WHERE run_id = …)` over an indexed column. A counter column
+would be a second source of truth that a restart can disagree with, and being
+wrong about how much work is done is the one thing this worker cannot afford.
+
+**A parse failure is a datum, not an exception.** `parse_ok = False`,
+`parse_error` set, `raw_output_text` stored verbatim, and the run
+**continues** (`mvp-spec.md` §10.4). `domain/extraction.py`'s `parse_output`
+never raises and never repairs: a missing key, an extra key, a non-null value
+with no evidence span, an enum value outside the snapshotted codelist are each
+a typed, recorded outcome. This is how Do-NOT list #6 lands on model output —
+the row carrying the evidence *is* the finding, which is why this phase adds
+no `FindingCode` values.
+
+`build_output_schema(features)` builds the `mvp-spec.md` §10.3 shape for *this*
+feature set with `pydantic.create_model`, and its **key order is stable**
+across calls: the schema goes to the endpoint as the constrained-decoding
+format, and two runs must ask the same question.
+
+### 15.4 The run worker
+
+The worker is the `TaskRunner` seam (SD7) with a persistent tail — one
+submitted job per `run`, `ProgressReporter` for the UI, and the `run` /
+`extraction` tables for everything that has to survive the process.
+`GET /api/v1/tasks/{id}` (§9) is unchanged; the UI polls it with `ui.timer`
+exactly as Import does. No streaming, no websocket push.
+
+- **Serial.** One model at a time, `RA2_RUN_CONCURRENCY` defaulting to 1. The
+  GPU is the bottleneck; two models sharing 24 GB is slower than two in
+  sequence, and it is what the design draws (one `running`, the rest
+  `queued`).
+- **Retries bounded and counted.** `RA2_LLM_MAX_RETRIES`, the count carried
+  back on the `Extraction` and rendered in the progress card's metrics line —
+  never a retry-until-quiet loop (`mvp-spec.md` §10.4).
+- **Provenance written at run start**, not at completion: model + digest,
+  template version + fingerprint, temperature, seed, config id, corpus id +
+  version, host platform, GPU name, endpoint. A run that dies mid-corpus is
+  still a reproducible run (`mvp-spec.md` §19.8).
+- **Interrupted, then resumed explicitly.** A process death leaves the run
+  `interrupted` and the view offers **Resume**. N6 asks for restart-*safe* and
+  resumable, which this is; it does not ask for automatic, and a run that
+  restarts itself whenever the app starts burns GPU hours on work the user may
+  have abandoned.
+
+### 15.5 The LLM adapter — the one place `openai` exists
+
+`infra/ollama_client.py` implements both `domain/llm.py` protocols:
+`LLMClient` (unchanged since phase 1 — `extract(text, schema, model, *,
+temperature, seed)` takes the resolved prompt as `text`, and the timeout
+belongs to construction, not to a call) and the new `ModelCatalog`
+(`models() -> tuple[ModelInfo, ...]`, `reachable() -> EndpointStatus`). It is
+the only module in the repo permitted to import `openai`, which
+`import-linter`'s `one-llm-seam` contract enforces against every other
+package.
+
+**The `openai` SDK alone; PydanticAI is dropped** (**SD14**). `mvp-spec.md` §3
+names both. The one call this product makes is "one prompt, one JSON Schema,
+one response" — PydanticAI's value is an agent loop nobody here wants, and it
+would be a *second* place a provider client gets constructed, which is what
+Do-NOT list #1 exists to prevent. Pydantic model → JSON Schema → the
+endpoint's constrained decoding, through `/v1`, as §3 already describes.
+
+**The loopback guard.** The client refuses **at construction** a `base_url`
+whose host is not loopback (`127.0.0.1`, `::1`, `localhost`), raising
+`LlmEndpointError` naming N1. `mvp-spec.md` §19.10 permits egress to "the
+configured LLM endpoint" and N1 forbids data leaving the host; a configurable
+URL with no guard satisfies neither, and a typo or a copied `.env` would ship
+accident narratives to a LAN address. **There is deliberately no opt-out
+setting** — an opt-out is how "no data leaves the host" becomes "no data
+leaves the host by default". This is also why phase 1's "no egress at all"
+posture ends here rather than lapsing: the rule becomes *loopback only*, and
+the guard plus `import-linter` are what make it a gate.
+
+**Unreachable is a state, not an error.** `reachable()` returns a status; the
+service hands the view an empty model list and a reason; the view renders it
+beside the endpoint line and **disables Launch**. Never a toast, never a 502 —
+a 502 would force exactly the toast the design rejects.
+
+### 15.6 The GPU probe
+
+The design disables a model that "exceeds 24 GB VRAM". Ollama reports tag,
+digest and size; it does not report the host's VRAM. So VRAM is probed
+(**SD15**), behind a protocol like every other host fact:
+
+```python
+# infra/gpu.py
+class GpuProbe(Protocol):
+    def describe(self) -> GpuInfo | None: ...   # None = no NVIDIA GPU, or NVML absent
+```
+
+`NvmlGpuProbe` reads GPU name and total VRAM through the **NVML library
+bindings** (`nvidia-ml-py` — a `ctypes` load of `libnvidia-ml`, present
+wherever the GPU is, on Windows and Linux alike). **Never `nvidia-smi`, never
+any subprocess**: N3 forbids shell-outs, and a library load is not one. Read
+this rule as written — the next reader reaching for `nvidia-smi` because "it
+is only a probe" is the failure mode this paragraph exists to prevent.
+
+`StaticGpuProbe` serves both the `RA2_GPU_VRAM_GB` / `RA2_GPU_NAME` overrides
+and the tests. `None` is not an error: no NVIDIA GPU means no `fits_vram`
+judgement, every model selectable, and the design's disabled row simply does
+not occur. Declared capability beats guessed capability, and "unknown" beats
+either when it is the truth.
+
+### 15.7 Package layout additions
+
+```
+domain/
+  prompt.py                 slot catalogue, validate/resolve/render, fingerprint, estimate_tokens (pure)
+  extraction.py             mvp-spec.md §10.3 shapes, build_output_schema, parse_output (pure)
+  llm.py                    + ModelInfo, EndpointStatus, ModelCatalog (LLMClient unchanged)
+persistence/
+  repositories/
+    prompt_repo.py          prompt_template + citation counts
+    evaluation_repo.py      evaluation, the launch transaction, evaluation_feature
+    run_repo.py             run, status transitions, progress counts
+    extraction_repo.py      the per-record write, and the resume query
+services/
+  prompt_service.py         versions, copy-on-write save, activate, delete, resolve (PromptResolver)
+  evaluation_service.py     drafts, model list + VRAM fit, connection status, launch
+  run_service.py            launch_runs, the worker body, resume
+  protocols.py              + PromptResolver — run_service never imports prompt_service
+api/
+  v1/prompt_templates.py  v1/evaluations.py  v1/runs.py  v1/models.py
+infra/
+  ollama_client.py          the only module that imports openai (§15.5)
+  gpu.py                    GpuProbe, NvmlGpuProbe, StaticGpuProbe (§15.6)
+ui/
+  views/prompts_view.py     master/detail per design/prompt-evaluation/README.md §1
+  views/evaluation_view.py  setup/progress split per the same README §2
+  components/               progress_card, ollama_settings, prompt_preview
+```
+
+`prompt.py` and `extraction.py` sit in `domain/` like `census.py` and
+`codelist_coverage.py` — pure, no SQLAlchemy, no network — even though their
+callers are the ones holding sessions and sockets.
+
+### 15.8 What this section deliberately does not decide
+
+- **Scoring, Results and Mismatches** (`mvp-spec.md` F7–F11). Runs produce
+  `extraction*` rows and stop there; nothing reads them yet. The `score` and
+  `mismatch` tables stay unbuilt.
+- **Concurrency above 1, and streaming progress.** Both are config lines or
+  additive endpoints on top of what §15.4 fixes, and neither is worth
+  designing before one real corpus has been run end to end.
+- **Batched feature prompts** — `mvp-spec.md` §10.1's named fallback if
+  adherence proves poor. The batch composition would be part of the template
+  version, so this section's copy-on-write already accommodates it.
+- **Template variants with names.** §15.1 assumes one lineage. A fork needs a
+  name and a parent pointer; it does not need them yet.
+- **The Ollama settings dialog beyond its three controls** (endpoint, timeout,
+  refresh) — the design does not draw it, and three controls are the three
+  settings the adapter takes. VRAM reporting inside that dialog is out until
+  §15.6's probe has met a machine that is not the target one.

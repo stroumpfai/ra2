@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+  <style>
+    :root{
+      --ink:oklch(0.22 0.012 260); --ink2:oklch(0.47 0.010 260); --ink3:oklch(0.63 0.008 260);
+      --rule:oklch(0.895 0.006 260); --rule2:oklch(0.945 0.004 260);
+      --bg:oklch(0.976 0.004 95); --surface:oklch(1 0 0);
+      --accent:oklch(0.50 0.008 260); --accent-soft:oklch(0.935 0.004 260);
+      --danger:oklch(0.53 0.15 27); --danger-soft:oklch(0.962 0.030 27);
+      --warn:oklch(0.56 0.13 72); --warn-soft:oklch(0.965 0.035 80);
+      --sans:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+      --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--bg);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased;}
+    a{color:var(--accent);text-decoration:none;} a:hover{text-decoration:underline;}
+    table{border-collapse:collapse;width:100%;}
+    .lbl{white-space:nowrap;font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink3);font-weight:500;}
+    .th{font-family:var(--mono);font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink3);font-weight:500;padding:0 12px 7px;border-bottom:1px solid var(--rule);text-align:left;}
+    .td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:9px 12px;border-bottom:1px solid var(--rule2);font-size:12.5px;vertical-align:middle;}
+    .mono{font-family:var(--mono);}
+    .card{background:var(--surface);border:1px solid var(--rule);border-radius:3px;}
+    .navitem{display:flex;align-items:center;gap:9px;padding:6px 14px;color:var(--ink2);font-size:12.5px;border-left:2px solid transparent;text-decoration:none;}
+    .navitem:hover{color:var(--ink);background:var(--rule2);text-decoration:none;}
+    .navitem.on{color:var(--ink);background:var(--accent-soft);border-left-color:var(--accent);font-weight:500;}
+    .chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--rule);border-radius:3px;padding:2px 7px;font-family:var(--mono);font-size:10.5px;color:var(--ink2);background:var(--surface);}
+    .btn{white-space:nowrap;display:inline-flex;align-items:center;gap:7px;border:1px solid var(--rule);border-radius:3px;padding:7px 14px;font-size:12.5px;font-weight:500;background:var(--surface);color:var(--ink);}
+    .btn.pri{background:var(--ink);color:var(--surface);border-color:var(--ink);}
+    .stamp{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--ink3);border:1px dashed var(--rule);padding:3px 8px;border-radius:3px;}
+    .sel{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--rule);border-radius:3px;padding:7px 10px;background:var(--surface);font-family:var(--mono);font-size:11.5px;}
+    .bar{height:6px;background:var(--rule2);border-radius:1px;overflow:hidden;}
+    .bar>i{display:block;height:100%;background:var(--ink3);}
+    .tick{width:13px;height:13px;border:1px solid var(--ink3);border-radius:2px;flex:none;}
+    .tick.on{background:var(--ink);border-color:var(--ink);}
+  </style>
+</helmet>
+
+<div style="display:flex;flex-direction:column;height:1230px;background:var(--bg);">
+
+  <header style="flex:none;display:flex;align-items:stretch;background:var(--surface);border-bottom:1px solid var(--rule);">
+    <div style="width:196px;flex:none;padding:14px;border-right:1px solid var(--rule);display:flex;flex-direction:column;justify-content:center;">
+      <div class="mono" style="font-size:15px;font-weight:600;letter-spacing:-.01em;">RA2</div>
+      <div class="lbl" style="margin-top:3px;">Accident report analysis</div>
+    </div>
+    <div style="flex:1;min-width:0;padding:14px 28px;display:flex;flex-direction:column;justify-content:center;">
+      <h1 style="margin:0;font-size:19px;font-weight:600;letter-spacing:-.012em;">Evaluation</h1>
+      <div style="color:var(--ink2);font-size:12.5px;margin-top:2px;">One corpus and one feature set, run across several models.</div>
+    </div>
+  </header>
+
+
+    <div style="display:flex;flex:1;min-height:0;">
+
+
+  <nav style="width:196px;flex:none;background:var(--surface);border-right:1px solid var(--rule);display:flex;flex-direction:column;padding-bottom:14px;">
+    <div style="display:flex;flex-direction:column;gap:2px;padding-top:14px;">
+      <div class="lbl" style="padding:0 14px 6px;">Data</div>
+      <a href="Import.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"></path><path d="m8 10 4 4 4-4"></path><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"></path></svg>Import</a>
+      <a href="Census.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20V10"></path><path d="M10 20V4"></path><path d="M16 20v-7"></path><path d="M22 20H2"></path></svg>Census</a>
+      <a href="Codelists.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 6h13"></path><path d="M8 12h13"></path><path d="M8 18h13"></path><path d="M3 6h.01"></path><path d="M3 12h.01"></path><path d="M3 18h.01"></path></svg>Codelists</a>
+      <div class="lbl" style="padding:16px 14px 6px;">Configure</div>
+      <a href="FeatureConfig.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h10"></path><path d="M18 6h2"></path><path d="M4 12h4"></path><path d="M12 12h8"></path><path d="M4 18h12"></path><circle cx="16" cy="6" r="2"></circle><circle cx="10" cy="12" r="2"></circle><circle cx="18" cy="18" r="2"></circle></svg>Features</a>
+      <a href="PromptTemplate - A source.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16"></path><path d="M4 10h10"></path><path d="M4 15h13"></path><path d="M4 20h7"></path></svg>Prompts</a>
+      <div class="lbl" style="padding:16px 14px 6px;">Run</div>
+      <a href="Evaluation.dc.html" class="navitem on"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="m10 8 6 4-6 4z"></path></svg>Evaluation</a>
+      <div class="lbl" style="padding:16px 14px 6px;">Review</div>
+      <a href="Main.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="1.5"></rect><path d="M3 10h18"></path><path d="M9 10v10"></path></svg>Results</a>
+      <a href="Mismatches.dc.html" class="navitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 4.3 2.5 18a1.7 1.7 0 0 0 1.5 2.5h16a1.7 1.7 0 0 0 1.5-2.5L13.7 4.3a1.7 1.7 0 0 0-3 0Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>Mismatches</a>
+    </div>
+  </nav>
+
+  <main style="flex:1;min-width:0;display:flex;flex-direction:column;">
+
+    <div style="flex:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 28px;background:var(--surface);border-bottom:1px solid var(--rule);">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;">
+        <span class="mono" style="font-size:11px;color:var(--ink2);">Weather &amp; conditions · v2 — only the model varies</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-left:auto;flex:none;">
+        <span class="stamp">WIREFRAME</span>
+        <span class="btn">Save draft</span>
+      </div>
+    </div>
+
+    <div style="flex:1;min-height:0;display:flex;gap:0;">
+
+      <section style="flex:0 1 430px;min-width:320px;align-self:flex-start;border-right:1px solid var(--rule);padding:16px 20px 20px;display:flex;flex-direction:column;gap:14px;overflow:hidden;">
+
+        <div>
+          <div class="lbl" style="margin-bottom:6px;">1 · Corpus</div>
+          <div class="sel"><span>corpus 2026‑09‑02 · v1 · 4 978 records</span><span style="color:var(--ink3);font-size:9px;">▼</span></div>
+          
+        </div>
+
+        <div>
+          <div class="lbl" style="margin-bottom:6px;">2 · Feature set</div>
+          <div class="sel"><span>set · Weather &amp; conditions v2</span><span style="color:var(--ink3);font-size:9px;">▼</span></div>
+          <div style="color:var(--warn);font-size:11.5px;margin-top:6px;">Freezes when the first run executes. After that, editing is blocked — clone into a new evaluation instead.</div>
+        </div>
+
+        <div>
+          <div class="lbl" style="margin-bottom:6px;">3 · Prompt</div>
+          <div class="sel"><span>template · v4 <span class="mono" style="color:var(--ink3);">active</span></span><span style="color:var(--ink3);font-size:9px;">▼</span></div>
+          <div style="color:var(--ink2);font-size:11.5px;margin-top:6px;">The wording around the feature descriptions. Travels in the run's fingerprint.</div>
+        </div>
+
+        <div>
+          <div class="lbl" style="margin-bottom:6px;">4 · Models</div>
+          <div class="card" style="overflow:hidden;display:flex;flex-direction:column;">
+            <div style="max-height:196px;overflow-y:auto;">
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid var(--rule2);">
+              <span class="tick on"></span>
+              <div style="flex:1;min-width:0;">
+                <div class="mono" style="font-size:12px;">llama3.1:8b-instruct-q8_0</div>
+                <div class="mono" style="font-size:10.5px;color:var(--ink3);">digest 8fa1c3d0 · 8.5 GB</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid var(--rule2);">
+              <span class="tick on"></span>
+              <div style="flex:1;min-width:0;">
+                <div class="mono" style="font-size:12px;">qwen2.5:14b-instruct-q6_K</div>
+                <div class="mono" style="font-size:10.5px;color:var(--ink3);">digest c17b904e · 12.1 GB</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid var(--rule2);">
+              <span class="tick on"></span>
+              <div style="flex:1;min-width:0;">
+                <div class="mono" style="font-size:12px;">mistral-nemo:12b-instruct-2407-q8_0</div>
+                <div class="mono" style="font-size:10.5px;color:var(--ink3);">digest 5d2e71ab · 13.0 GB</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid var(--rule2);opacity:.55;">
+              <span class="tick"></span>
+              <div style="flex:1;min-width:0;">
+                <div class="mono" style="font-size:12px;">llama3.3:70b-instruct-q4_K_M</div>
+                <div class="mono" style="font-size:10.5px;color:var(--warn);">42.5 GB — exceeds 24 GB VRAM</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid var(--rule2);">
+              <span class="tick"></span>
+              <div style="flex:1;min-width:0;">
+                <div class="mono" style="font-size:12px;">gemma2:27b-instruct-q5_K_M</div>
+                <div class="mono" style="font-size:10.5px;color:var(--ink3);">digest 9b3fd402 · 19.2 GB</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 11px;">
+              <span class="tick"></span>
+              <div style="flex:1;min-width:0;">
+                <div class="mono" style="font-size:12px;">phi4:14b-q8_0</div>
+                <div class="mono" style="font-size:10.5px;color:var(--ink3);">digest 2ac8e611 · 15.4 GB</div>
+              </div>
+            </div>
+            </div>
+            <div style="flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 8px 7px 11px;border-top:1px solid var(--rule);">
+              <span class="mono" style="font-size:10.5px;color:var(--ink3);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">6 available · 3 selected</span>
+              <span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:1px solid var(--rule);border-radius:3px;color:var(--ink2);background:var(--surface);flex:none;" title="Ollama connection settings"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"></path></svg></span>
+            </div>
+          </div>
+          <div class="mono" style="font-size:10.5px;color:var(--ink3);margin-top:6px;">endpoint http://127.0.0.1:11434/v1 · reachable</div>
+        </div>
+
+        <div>
+          <div class="lbl" style="margin-bottom:6px;">5 · Determinism</div>
+          <div style="display:flex;gap:10px;">
+            <div style="flex:1;min-width:0;">
+              <div class="lbl" style="color:var(--ink3);margin-bottom:4px;">Temperature</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid var(--rule);border-radius:3px;padding:5px 8px;background:var(--surface);"><span class="mono" style="font-size:12.5px;color:var(--ink);">0.0</span><span style="color:var(--ink3);font-size:9px;">▼</span></div>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="lbl" style="color:var(--ink3);margin-bottom:4px;">Seed</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid var(--rule);border-radius:3px;padding:5px 8px;background:var(--surface);"><span class="mono" style="font-size:12.5px;color:var(--ink);">42</span><span class="mono" style="font-size:10px;color:var(--ink3);">edit</span></div>
+            </div>
+          </div>
+          <div style="font-size:11.5px;color:var(--ink2);margin-top:5px;">Temperature <span class="mono" style="color:var(--ink);">0.0</span> takes the most likely token every time; the <span class="mono" style="color:var(--ink);">seed</span> fixes what remains random. Same inputs, same output — a re-run is a check, not a new sample.</div>
+        </div>
+
+        <div>
+          <div class="lbl" style="margin-bottom:6px;">6 · Size</div>
+          <div style="display:flex;gap:8px;">
+            <div class="sel" style="flex:1;border-color:var(--ink);"><span>Evaluation · all 4 978</span><span>●</span></div>
+            <div class="sel" style="flex:1;color:var(--ink3);"><span>Dev · 40 records</span><span>○</span></div>
+          </div>
+          <div style="color:var(--ink2);font-size:11.5px;margin-top:5px;">Below 200 records a run is marked <em>dev</em> and every view carries “smoke test, not a result”.</div>
+        </div>
+
+        <div style="margin-top:auto;display:flex;gap:8px;">
+          <span class="btn pri" style="flex:1;justify-content:center;">Launch 3 runs</span>
+          <span class="btn">Preview prompt</span>
+        </div>
+      </section><section style="flex:1 1 520px;min-width:360px;padding:16px 28px 20px;display:flex;flex-direction:column;gap:12px;overflow:auto;">
+
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:14px;">
+          <div class="lbl">In progress</div>
+          <div class="mono" style="font-size:11px;color:var(--ink3);">in-process asyncio worker · restart-safe · resumes from last committed extraction</div>
+        </div>
+
+        <div class="card" style="padding:14px;display:flex;flex-direction:column;gap:14px;">
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;">
+              <span class="mono" style="font-size:12.5px;">llama3.1:8b-instruct-q8_0</span>
+              <span class="mono" style="font-size:11.5px;color:var(--ink2);">4 978 / 4 978 · done · 1 h 12 m</span>
+            </div>
+            <div class="bar" style="margin-top:6px;"><i style="width:100%"></i></div>
+            <div class="mono" style="font-size:10.5px;color:var(--ink3);margin-top:4px;">parse failures 14 (0.3 %) · median latency 812 ms · 2.1 M prompt tok</div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;">
+              <span class="mono" style="font-size:12.5px;">qwen2.5:14b-instruct-q6_K</span>
+              <span class="mono" style="font-size:11.5px;color:var(--ink);">3 106 / 4 978 · running · ETA 38 m</span>
+            </div>
+            <div class="bar" style="margin-top:6px;"><i style="width:62%"></i></div>
+            <div class="mono" style="font-size:10.5px;color:var(--ink3);margin-top:4px;">parse failures 6 · retries 11 (bounded, counted) · median latency 1 340 ms</div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;">
+              <span class="mono" style="font-size:12.5px;color:var(--ink2);">mistral-nemo:12b-instruct-2407-q8_0</span>
+              <span class="mono" style="font-size:11.5px;color:var(--ink3);">queued</span>
+            </div>
+            <div class="bar" style="margin-top:6px;"><i style="width:0%"></i></div>
+          </div>
+        </div>
+
+
+        <div class="card" style="flex:none;display:flex;flex-direction:column;overflow:hidden;">
+          <div style="flex:none;height:42px;padding:0 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;overflow:hidden;border-bottom:1px solid var(--rule2);background:oklch(0.988 0.003 260);">
+            <span class="lbl" style="min-width:0;overflow:hidden;text-overflow:ellipsis;">Runs in this evaluation</span>
+            <span class="mono" style="font-size:10.5px;color:var(--ink3);flex:none;">14 · 2 dev · 1 failed</span>
+          </div>
+          <div style="overflow:auto;">
+            <table style="table-layout:fixed;width:100%;min-width:508px;">
+              <thead>
+                <tr>
+                  <th class="th" style="padding-top:11px;width:74px;">Run</th>
+                  <th class="th" style="padding-top:11px;width:132px;">Model</th>
+                  <th class="th" style="padding-top:11px;width:66px;text-align:right;">Records</th>
+                  <th class="th" style="padding-top:11px;width:152px;">Start time</th>
+                  <th class="th" style="padding-top:11px;width:84px;">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="td"><a href="Main.dc.html" class="mono" style="font-size:11.5px;">r‑0412</a></td>
+                  <td class="td mono" style="color:var(--ink2);">llama3.1:8b</td>
+                  <td class="td mono" style="text-align:right;">4 978</td>
+                  <td class="td mono" style="font-size:11.5px;color:var(--ink3);">04.09.26 - 08:12:04</td>
+                  <td class="td mono">done</td>
+                </tr>
+                <tr>
+                  <td class="td"><a href="Main.dc.html" class="mono" style="font-size:11.5px;">r‑0413</a></td>
+                  <td class="td mono" style="color:var(--ink2);">qwen2.5:14b</td>
+                  <td class="td mono" style="text-align:right;">3 106</td>
+                  <td class="td mono" style="font-size:11.5px;color:var(--ink3);">04.09.26 - 09:31:17</td>
+                  <td class="td mono">running</td>
+                </tr>
+                <tr>
+                  <td class="td"><a href="Main.dc.html" class="mono" style="font-size:11.5px;">r‑0414</a></td>
+                  <td class="td mono" style="color:var(--ink2);">mistral-nemo:12b</td>
+                  <td class="td mono" style="text-align:right;">—</td>
+                  <td class="td mono" style="color:var(--ink3);">—</td>
+                  <td class="td mono" style="color:var(--ink3);">queued</td>
+                </tr>
+                <tr style="background:var(--warn-soft);">
+                  <td class="td"><a href="Main.dc.html" class="mono" style="font-size:11.5px;">r‑0409</a></td>
+                  <td class="td mono" style="color:var(--ink2);">llama3.1:8b</td>
+                  <td class="td mono" style="text-align:right;">40</td>
+                  <td class="td mono" style="font-size:11.5px;color:var(--ink3);">03.09.26 - 16:40:52</td>
+                  <td class="td mono" style="color:var(--warn);">DEV</td>
+                </tr>
+                <tr>
+                  <td class="td"><a href="Main.dc.html" class="mono" style="font-size:11.5px;">r‑0408</a></td>
+                  <td class="td mono" style="color:var(--ink2);">qwen2.5:14b</td>
+                  <td class="td mono" style="text-align:right;">4 978</td>
+                  <td class="td mono" style="font-size:11.5px;color:var(--ink3);">03.09.26 - 11:05:33</td>
+                  <td class="td mono">done</td>
+                </tr>
+                <tr>
+                  <td class="td"><a href="Main.dc.html" class="mono" style="font-size:11.5px;">r‑0407</a></td>
+                  <td class="td mono" style="color:var(--ink2);">mistral-nemo:12b</td>
+                  <td class="td mono" style="text-align:right;">4 978</td>
+                  <td class="td mono" style="font-size:11.5px;color:var(--ink3);">02.09.26 - 19:44:08</td>
+                  <td class="td mono">done</td>
+                </tr>
+                <tr style="background:var(--danger-soft);">
+                  <td class="td"><a href="Main.dc.html" class="mono" style="font-size:11.5px;">r‑0406</a></td>
+                  <td class="td mono" style="color:var(--ink2);">llama3.1:8b</td>
+                  <td class="td mono" style="text-align:right;">2 140</td>
+                  <td class="td mono" style="font-size:11.5px;color:var(--ink3);">02.09.26 - 14:18:41</td>
+                  <td class="td mono" style="color:var(--danger);">FAILED</td>
+                </tr>
+                <tr>
+                  <td class="td"><a href="Main.dc.html" class="mono" style="font-size:11.5px;">r‑0405</a></td>
+                  <td class="td mono" style="color:var(--ink2);">gemma2:27b</td>
+                  <td class="td mono" style="text-align:right;">4 978</td>
+                  <td class="td mono" style="font-size:11.5px;color:var(--ink3);">01.09.26 - 22:07:12</td>
+                  <td class="td mono">done</td>
+                </tr>
+                <tr style="background:var(--warn-soft);">
+                  <td class="td"><a href="Main.dc.html" class="mono" style="font-size:11.5px;">r‑0404</a></td>
+                  <td class="td mono" style="color:var(--ink2);">phi4:14b</td>
+                  <td class="td mono" style="text-align:right;">40</td>
+                  <td class="td mono" style="font-size:11.5px;color:var(--ink3);">01.09.26 - 09:52:29</td>
+                  <td class="td mono" style="color:var(--warn);">DEV</td>
+                </tr>
+                <tr>
+                  <td class="td"><a href="Main.dc.html" class="mono" style="font-size:11.5px;">r‑0403</a></td>
+                  <td class="td mono" style="color:var(--ink2);">llama3.1:8b</td>
+                  <td class="td mono" style="text-align:right;">4 978</td>
+                  <td class="td mono" style="font-size:11.5px;color:var(--ink3);">31.08.26 - 17:30:05</td>
+                  <td class="td mono">done</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 14px;border-top:1px solid var(--rule);">
+            <div style="display:flex;align-items:center;gap:9px;min-width:0;">
+              <span class="lbl">Rows per page</span>
+              <span class="mono" style="display:inline-flex;align-items:center;gap:7px;font-size:11px;border:1px solid var(--rule);border-radius:3px;padding:3px 8px;flex:none;">10 <span style="color:var(--ink3);font-size:9px;">▼</span></span>
+            </div>
+            <div style="display:flex;align-items:center;gap:9px;flex:none;">
+              <span class="mono" style="font-size:11px;color:var(--ink2);white-space:nowrap;">1–10 of 14</span>
+              <span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:1px solid var(--rule);border-radius:3px;color:oklch(0.80 0.006 260);background:var(--surface);flex:none;">‹</span>
+              <span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:1px solid var(--rule);border-radius:3px;color:var(--ink2);background:var(--surface);flex:none;">›</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="padding:11px 14px;">
+          <div class="lbl">Stored on every run — enough to reproduce it</div>
+          <div class="mono" style="font-size:11px;color:var(--ink2);margin-top:6px;line-height:1.65;">model + digest · prompt template v4 · temperature 0.0 · seed 42 · cfg 4f9a2c1e + per-feature fingerprints · corpus 2026‑09‑02 v1 · host win11‑x64 · gpu RTX 4090 24 GB · endpoint 127.0.0.1:11434</div>
+          <div style="font-size:11.5px;color:var(--ink2);margin-top:8px;">The <span class="mono" style="color:var(--ink);">prompt template</span> is the wording around your feature descriptions — the instructions, the output format, where the narrative is placed. It is versioned separately because changing it changes every answer without any feature changing.</div>
+        </div>
+
+      </section>
+
+      
+    </div>
+
+  </main>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
