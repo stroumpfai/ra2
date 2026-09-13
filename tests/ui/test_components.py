@@ -52,9 +52,14 @@ from ra2.ui.components.primitives import (
     field_select,
     fingerprint_badge,
     frozen_readout,
+    labeled_field,
     master_detail_split,
     pill,
+    radio_option,
+    scroll_well,
     segmented_control,
+    slot_highlighted_block,
+    step_label,
 )
 from ra2.ui.state import TableState, set_table_state, table_state
 from ra2.ui.theme import STYLESHEET
@@ -442,6 +447,163 @@ async def test_the_master_detail_split_never_wraps_and_floors_both_panes(user):
     assert "--split-detail-floor:360px;" in STYLESHEET
     assert "min-width:var(--split-list-floor)" in STYLESHEET
     assert "min-width:var(--split-detail-floor)" in STYLESHEET
+
+
+# --- Phase 3 (Prompts, Evaluation) component-kit additions (H5) -------------
+#
+# design/prompt-evaluation/README.md §1 (Prompts) and §2 (Evaluation): the
+# label-above-field pair, the radio-style `.sel` option, the scroll well, the
+# slot-highlighting mono block, the numbered step label, and the parameter
+# `master_detail_split` gained for the Evaluation view's narrower split.
+
+
+async def test_labeled_field_draws_the_label_above_the_control(user):
+    """Step 5's Temperature/Seed pair, drawn with the label above the field
+    "so input and label can't be confused" — never beside it."""
+
+    def build() -> None:
+        with labeled_field("Temperature"):
+            ui.label("0.0").mark("temp-value")
+
+    page("/t/labeled-field", build)
+    await user.open("/t/labeled-field")
+
+    (wrapper,) = user.find(marker="labeled-field").elements
+    assert wrapper._style["display"] == "flex"
+    assert wrapper._style["flex-direction"] == "column"
+
+    label_el = next(e for e in _all(user) if "lbl" in e.classes)
+    (value_el,) = _ordered(user.find(marker="temp-value"))
+    assert label_el.id < value_el.id, "the label must render above the field, not beside it"
+    assert label_el._style["margin-bottom"] == "4px"
+    await user.should_see("Temperature")
+    await user.should_see("0.0")
+
+
+async def test_radio_option_shows_the_selected_and_unselected_glyphs(user):
+    """Step 6's full/dev choice: a filled `●` and `border-color:--ink` when
+    selected, an outline `○` in `--ink3` otherwise (Evaluation README §2)."""
+
+    def build() -> None:
+        radio_option("Evaluation · all 4 978", selected=True)
+        radio_option("Dev · 40 records", selected=False)
+
+    page("/t/radio", build)
+    await user.open("/t/radio")
+
+    selected_el, unselected_el = _ordered(user.find(marker="sel-radio"))
+    assert selected_el._props["aria-checked"] == "true"
+    assert unselected_el._props["aria-checked"] == "false"
+    assert "●" in _text(selected_el)
+    assert "○" in _text(unselected_el)
+    assert selected_el._style["border-color"] == "var(--ink)"
+    assert unselected_el._style["color"] == "var(--ink3)"
+
+
+async def test_radio_option_reports_its_click(user):
+    """Which option is selected is the caller's decision — this only reports
+    that the option was clicked, exactly like `field_select`."""
+    seen: list[str] = []
+    page(
+        "/t/radio-click",
+        lambda: radio_option(
+            "Dev · 40 records", selected=False, on_click=lambda: seen.append("dev")
+        ),
+    )
+    await user.open("/t/radio-click")
+
+    user.find(marker="sel-radio").click()
+    assert seen == ["dev"]
+
+
+async def test_scroll_well_caps_height_in_pixels_for_models_and_version_list(user):
+    """The design's own arithmetic: the models card's 4 rows = 196px, the
+    Prompts version list's 10 × 53px rows = 530px (Evaluation README §2 step
+    4; Prompts README §1). Asserted in pixels, not in a row count this
+    component never receives."""
+
+    def build() -> None:
+        with scroll_well(max_height_px=196):
+            ui.label("6 models")
+        with scroll_well(max_height_px=530):
+            ui.label("4 versions")
+
+    page("/t/scroll-well", build)
+    await user.open("/t/scroll-well")
+
+    models_well, versions_well = _ordered(user.find(marker="scroll-well"))
+    assert models_well._style["max-height"] == "196px"
+    assert versions_well._style["max-height"] == "530px"
+    assert models_well._style["overflow-y"] == "auto"
+    await user.should_see("6 models")
+    await user.should_see("4 versions")
+
+
+async def test_slot_highlighted_block_picks_out_every_slot_token(user):
+    """The Source card body: `{{slot}}` tokens on `--accent-soft`, plain text
+    everywhere else, single-pass — a `{{` inside plain text that is not a
+    closed `{{name}}` shape is left untouched (README §1, "Source card")."""
+
+    def build() -> None:
+        slot_highlighted_block("Hello {{narrative}} and {{feature_block}} end")
+
+    page("/t/slot-block", build)
+    await user.open("/t/slot-block")
+
+    tokens = [str(e.text) for e in _ordered(user.find(marker="slot-token"))]
+    assert tokens == ["{{narrative}}", "{{feature_block}}"]
+    for token_el in _ordered(user.find(marker="slot-token")):
+        assert token_el._style["background"] == "var(--accent-soft)"
+    await user.should_see("Hello")
+    await user.should_see("end")
+
+
+async def test_step_label_renders_the_numbered_title(user):
+    """The setup column's "N · Title" header, one string not two (Evaluation
+    README §2)."""
+    page("/t/step-label", lambda: step_label(4, "Models"))
+    await user.open("/t/step-label")
+
+    (label_el,) = user.find(marker="step-label").elements
+    assert str(label_el.text) == "4 · Models"
+    assert "lbl" in label_el.classes
+    assert label_el._style["margin-bottom"] == "6px"
+
+
+async def test_master_detail_split_can_take_the_evaluations_narrower_setup_floor(user):
+    """The Evaluation view's setup/progress split is not Codelists/Features/
+    Prompts's 452px/300px + 520px/360px geometry — it floors its left pane
+    10px narrower and sizes it to its own content (Evaluation README §2,
+    "Layout"). Rather than a sibling split component, `master_detail_split`
+    takes an inline-style override per pane; the test above (with no
+    override) proves the old geometry is unaffected."""
+
+    def build() -> None:
+        setup_pane, progress_pane = master_detail_split(
+            list_extra="flex:0 1 430px;min-width:320px;align-self:flex-start;",
+            detail_extra="flex:1 1 520px;min-width:360px;",
+        )
+        with setup_pane:
+            ui.label("6 steps")
+        with progress_pane:
+            ui.label("progress")
+
+    page("/t/split-eval", build)
+    await user.open("/t/split-eval")
+
+    (split_el,) = user.find(marker="split").elements
+    (setup_el,) = user.find(marker="split-list").elements
+    (progress_el,) = user.find(marker="split-detail").elements
+
+    assert "split" in split_el.classes
+    assert ".split{flex:1;min-height:0;display:flex;flex-wrap:nowrap;}" in STYLESHEET
+    assert setup_el._style["flex"] == "0 1 430px"
+    assert setup_el._style["min-width"] == "320px"
+    assert setup_el._style["align-self"] == "flex-start"
+    assert progress_el._style["flex"] == "1 1 520px"
+    assert progress_el._style["min-width"] == "360px"
+    await user.should_see("6 steps")
+    await user.should_see("progress")
 
 
 # --- derivation_builder (G3) -------------------------------------------------

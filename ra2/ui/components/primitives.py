@@ -13,6 +13,7 @@ and turn them into DOM. Rates, totals, selections and sort decisions arrive
 from a service (§8.1.1).
 """
 
+import re
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from typing import Final
@@ -38,11 +39,16 @@ __all__ = [
     "format_count",
     "frozen_readout",
     "icon_button",
+    "labeled_field",
     "long_tail_bar",
     "master_detail_split",
     "pagination_row",
     "pill",
+    "radio_option",
+    "scroll_well",
     "segmented_control",
+    "slot_highlighted_block",
+    "step_label",
     "tick",
 ]
 
@@ -555,11 +561,24 @@ def pill(text: str, *, tone: str) -> Element:
     return element
 
 
-def master_detail_split() -> tuple[Element, Element]:
-    """The master/detail shell Codelists and Features both use: `flex:1;
-    min-height:0; display:flex; flex-wrap:nowrap` — a list pane floored at
-    300px, an edit/detail pane floored at 360px. Must never wrap, down to
-    1024px (README, "Layout" and "Responsive behaviour").
+def master_detail_split(*, list_extra: str = "", detail_extra: str = "") -> tuple[Element, Element]:
+    """The master/detail shell Codelists, Features and Prompts all use:
+    `flex:1; min-height:0; display:flex; flex-wrap:nowrap` — a list pane
+    floored at 300px, an edit/detail pane floored at 360px. Must never wrap,
+    down to 1024px (README, "Layout" and "Responsive behaviour").
+
+    `list_extra` / `detail_extra` are optional inline-style overrides, added
+    on top of the two panes' base classes, for a caller whose split needs a
+    different geometry than that 452px/300px + 520px/360px default — the
+    Evaluation view's setup/progress split floors its left pane 10px
+    narrower (`design/prompt-evaluation/README.md` §2, "Layout": setup
+    basis 430px, min 320px; progress basis 520px, min 360px) and sizes the
+    setup pane to its own content (`align-self:flex-start`). Inline style
+    wins over the class, so passing e.g.
+    `list_extra="flex:0 1 430px;min-width:320px;align-self:flex-start;"`
+    repoints just the numbers that differ. Passing nothing reproduces
+    today's geometry exactly — a parameter added to an existing primitive,
+    not a new sibling split (CLAUDE.md, "extend, don't replace").
 
     Returns `(list_pane, detail_pane)`, both already mounted in the split;
     the caller fills each with `with list_pane: ...` / `with detail_pane:`.
@@ -572,10 +591,158 @@ def master_detail_split() -> tuple[Element, Element]:
             .props('data-testid="split-list"')
             .mark("split-list")
         )
+        if list_extra:
+            list_pane.style(list_extra)
         detail_pane = (
             ui.element("div")
             .classes("split-detail")
             .props('data-testid="split-detail"')
             .mark("split-detail")
         )
+        if detail_extra:
+            detail_pane.style(detail_extra)
     return list_pane, detail_pane
+
+
+# --- Phase 3 (Prompts, Evaluation) additions --------------------------------
+#
+# design/prompt-evaluation/README.md, §1 (Prompts) and §2 (Evaluation): the
+# primitives those two views need that the kit above lacks. Every one of
+# these bakes its CSS inline rather than naming a new class in `theme.py` —
+# H5 owns `primitives.py` and this test file only (CLAUDE.md, the ownership
+# rule); `theme.py` is untouched this wave, so nothing here can add to the
+# shared stylesheet. The numbers themselves (196px, 530px, 320px/360px, the
+# `{{slot}}` highlight colour) are transcribed from the README, not invented.
+
+#: A `{{name}}`-shaped run. Whether a given name is one of the prompt's
+#: **closed** slots is `domain/prompt.py`'s validation concern (sw-design.md
+#: §15.1) — this only recognises the shape the design's mock highlights.
+_SLOT_PATTERN: Final = re.compile(r"\{\{\w+\}\}")
+
+#: The design's `.sel` base look (`PromptTemplate - A source.dc.html` /
+#: `Evaluation.dc.html`, `<style>` block), transcribed verbatim since there is
+#: no shared `.sel` class to hang it on yet.
+_SEL_BASE: Final = (
+    "display:flex;align-items:center;justify-content:space-between;"
+    "border:1px solid var(--rule);border-radius:3px;padding:7px 10px;"
+    "background:var(--surface);font-family:var(--mono);font-size:11.5px;"
+)
+
+
+@contextmanager
+def labeled_field(label: str, *, extra: str = "") -> Iterator[None]:
+    """A field with its label drawn **above** the control, not beside it —
+    the Determinism step's Temperature/Seed pair, drawn that way explicitly
+    "so input and label can't be confused" (Evaluation README §2, step 5).
+
+    Yields nothing; build the field control itself as the `with` block's
+    body. The label is the same `.lbl` strip every other label in the kit
+    uses, at the 4px gap the design specifies (`margin-bottom:6px` is a
+    *step* label's gap, `step_label` below — this is the field's own,
+    smaller one, and the two must not be confused with each other either).
+    """
+    with (
+        ui.element("div")
+        .props('data-testid="labeled-field"')
+        .mark("labeled-field")
+        .style(f"display:flex;flex-direction:column;min-width:0;{extra}")
+    ):
+        ui.label(label).classes("lbl").style("margin-bottom:4px;")
+        yield
+
+
+def radio_option(
+    text: str, *, selected: bool, on_click: Callable[[], None] | None = None
+) -> Element:
+    """A `.sel` radio-style option — the Size step's full/dev choice
+    (Evaluation README §2, step 6): a filled `●` and `border-color:--ink`
+    when selected, an outline `○` in `--ink3` otherwise. A real `<button>`
+    role="radio", so Tab and Enter both reach it; which option is selected
+    is the caller's fact, never decided here.
+    """
+    skin = "flex:1;border-color:var(--ink);" if selected else "flex:1;color:var(--ink3);"
+    element = (
+        ui.element("button")
+        .props(
+            'type="button" role="radio" '
+            f'aria-checked="{"true" if selected else "false"}" '
+            f'aria-label="{text}" data-testid="sel-radio"'
+        )
+        .mark("sel-radio")
+        .style(f"{_SEL_BASE}{skin}width:100%;cursor:pointer;")
+    )
+    if on_click is not None:
+        element.on("click", lambda _: on_click())
+    with element:
+        ui.label(text)
+        ui.label("●" if selected else "○")
+    return element
+
+
+def scroll_well(*, max_height_px: int, extra: str = "") -> Element:
+    """A scrolling well capped at a fixed row count, expressed as the
+    resulting pixel height the design already computed — the models card's 4
+    visible rows (196px, Evaluation README §2 step 4) and the Prompts
+    version list's 10 × 53px rows (530px, README §1). This only draws the
+    box at whatever height the caller hands it; how many rows fit is the
+    design's arithmetic, never this component's.
+    """
+    return (
+        ui.element("div")
+        .props(f'data-testid="scroll-well" data-max-height-px="{max_height_px}"')
+        .mark("scroll-well")
+        .style(f"max-height:{max_height_px}px;overflow-y:auto;min-height:0;{extra}")
+    )
+
+
+def slot_highlighted_block(text: str, *, extra: str = "") -> Element:
+    """The Prompts editor's Source/Resolved card body (README §1, "Source
+    card"): mono, `white-space:pre-wrap` text with every `{{slot}}`-shaped
+    token picked out on `--accent-soft`. Matching is purely the literal
+    `{{...}}` shape the design's own mock highlights — which names are
+    *valid* slots is `domain/prompt.py`'s closed catalogue (sw-design.md
+    §15.1), a validation question this rendering-only component has no part
+    in answering.
+    """
+    element = (
+        ui.element("div")
+        .classes("mono")
+        .props('data-testid="slot-block"')
+        .mark("slot-block")
+        .style(f"white-space:pre-wrap;line-height:1.75;font-size:12px;color:var(--ink);{extra}")
+    )
+    with element:
+        pos = 0
+        for match in _SLOT_PATTERN.finditer(text):
+            if match.start() > pos:
+                _slot_text(text[pos : match.start()])
+            _slot_token(match.group())
+            pos = match.end()
+        if pos < len(text):
+            _slot_text(text[pos:])
+    return element
+
+
+def _slot_text(segment: str) -> None:
+    ui.label(segment).style("display:inline;white-space:pre-wrap;")
+
+
+def _slot_token(token: str) -> None:
+    ui.label(token).props('data-testid="slot-token"').mark("slot-token").style(
+        "display:inline;background:var(--accent-soft);padding:1px 4px;border-radius:2px;"
+    )
+
+
+def step_label(number: int, title: str) -> Element:
+    """The setup column's "N · Title" header (Evaluation README §2, the six
+    numbered steps) — the same `.lbl` mono/uppercase treatment as every other
+    label in the kit, with the ordinal folded into the one string the design
+    always renders as a single strip, not a number plus a separate title.
+    """
+    return (
+        ui.label(f"{number} · {title}")
+        .classes("lbl")
+        .props('data-testid="step-label"')
+        .mark("step-label")
+        .style("margin-bottom:6px;")
+    )
