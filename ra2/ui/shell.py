@@ -106,7 +106,7 @@ NAV_ITEMS: Final[tuple[NavItem, ...]] = (
             "The wording around your feature descriptions. Versioned, because "
             "changing it changes every answer."
         ),
-        built=False,
+        built=True,
     ),
     NavItem(
         key="evaluation",
