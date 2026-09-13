@@ -3950,7 +3950,7 @@
         ]
       },
       "put": {
-        "description": "409 once `launched_at` is set \u2014 an evaluation is immutable after.",
+        "description": "409 once `launched_at` is set \u2014 an evaluation is immutable after. 422\nwhen the edit selects a model the host is known not to have the VRAM\nfor.",
         "operationId": "update_draft_api_v1_evaluations__evaluation_id__put",
         "parameters": [
           {
@@ -3984,15 +3984,25 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/FeatureValidationErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Content"
           }
         },
         "summary": "Update Draft",
@@ -4003,7 +4013,7 @@
     },
     "/api/v1/evaluations/{evaluation_id}/launch": {
       "post": {
-        "description": "Pin the inputs, snapshot the codelists and fingerprints, create one\n`queued` run per selected model \u2014 then submit the worker.\n\nThe snapshot and the runs land in **one transaction**\n(`EvaluationService.launch`); submitting the work is a second step, so a\nfailed submit cannot leave a half-pinned evaluation.",
+        "description": "Pin the inputs, snapshot the codelists and fingerprints, create one\n`queued` run per selected model \u2014 then submit the worker.\n\nThe snapshot and the runs land in **one transaction**\n(`EvaluationService.launch`); submitting the work is a second step, so a\nfailed submit cannot leave a half-pinned evaluation. The returned\n`evaluation` reflects the state right after that transaction commits \u2014\nnot after the (possibly already-finished, on a synchronous task runner)\nwork \u2014 the UI polls `task_id` for progress.",
         "operationId": "launch_api_v1_evaluations__evaluation_id__launch_post",
         "parameters": [
           {
@@ -4026,6 +4036,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -4536,7 +4556,7 @@
     },
     "/api/v1/models": {
       "get": {
-        "description": "Tag, digest, size and `fits_vram` per model, plus the connection line.\n\n`refresh` is the settings dialog's \"refresh model list\" \u2014 reachability is\nre-checked on view load and on that press, **never on a timer**.",
+        "description": "Tag, digest, size and `fits_vram` per model, plus the connection line.\n\n`refresh` is the settings dialog's \"refresh model list\" \u2014 there is no\ncache to bypass here (`connection_status()`/`list_models()` always ask\nthe catalogue fresh), so the parameter exists for the UI's intent and the\nOpenAPI contract rather than to select a different code path: reachability\nis re-checked on **every** call, on view load and on that press, **never\non a timer** (plan-phase-3.md C3).",
         "operationId": "list_models_api_v1_models_get",
         "parameters": [
           {
