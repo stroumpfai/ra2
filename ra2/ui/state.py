@@ -18,11 +18,23 @@ from nicegui import app
 
 from ra2.services.readmodels import SortDir
 
-__all__ = ["STORAGE_KEY", "TableState", "set_table_state", "table_state"]
+__all__ = [
+    "EVALUATION_KEY",
+    "STORAGE_KEY",
+    "EvaluationSetup",
+    "TableState",
+    "evaluation_setup",
+    "set_evaluation_setup",
+    "set_table_state",
+    "table_state",
+]
 
 #: One namespace inside `app.storage.client`, so view state never collides
 #: with anything NiceGUI itself keeps there.
 STORAGE_KEY: Final = "ra2.tables"
+
+#: The Evaluation view's own namespace, beside the tables' one.
+EVALUATION_KEY: Final = "ra2.evaluation"
 
 
 @dataclass(slots=True)
@@ -72,3 +84,52 @@ def set_table_state(name: str, state: TableState) -> None:
     """Replace this client's `TableState` for `name`."""
     tables: dict[str, TableState] = app.storage.client.setdefault(STORAGE_KEY, {})
     tables[name] = state
+
+
+# --- Phase 3 (Evaluation) additions -----------------------------------------
+#
+# Additive only: nothing above this line is touched. `TableState` covers a
+# table's sort and page; the Evaluation view needs one more per-client fact —
+# *which* evaluation this browser tab is looking at — plus the two picks that
+# have to exist before the evaluation row does (design/prompt-evaluation/
+# README.md §2, steps 1 and 2: "Save draft" is what creates the row, and the
+# corpus and feature set it cites are chosen before it is pressed).
+
+
+@dataclass(slots=True)
+class EvaluationSetup:
+    """Which evaluation this client is looking at, and the picks that precede
+    it existing.
+
+    All three are plain `str` rather than their `NewType` ids: this is a
+    `app.storage.client` payload, and NiceGUI serialises it — a value that
+    survives a round trip as a string is stored as one, and the view narrows
+    it back to `CorpusId`/`FeatureConfigId`/`EvaluationId` at the service call,
+    where the type is actually load-bearing.
+
+    Empty (`EvaluationSetup()`) is the honest state of a fresh tab, and of a
+    tab whose remembered evaluation has since been deleted.
+    """
+
+    #: `None` until an evaluation exists, or once the remembered one is gone.
+    evaluation_id: str | None = None
+    #: Step 1's pick while `evaluation_id` is `None`; afterwards the
+    #: evaluation's own `corpus_id` is the truth and this is only an echo.
+    corpus_id: str | None = None
+    #: Step 2's pick, under the same rule.
+    feature_config_id: str | None = None
+
+
+def evaluation_setup() -> EvaluationSetup:
+    """This client's `EvaluationSetup`, created empty on first use."""
+    stored = app.storage.client.get(EVALUATION_KEY)
+    if isinstance(stored, EvaluationSetup):
+        return stored
+    setup = EvaluationSetup()
+    app.storage.client[EVALUATION_KEY] = setup
+    return setup
+
+
+def set_evaluation_setup(setup: EvaluationSetup) -> None:
+    """Replace this client's `EvaluationSetup`."""
+    app.storage.client[EVALUATION_KEY] = setup
