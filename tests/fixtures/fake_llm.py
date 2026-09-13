@@ -33,25 +33,20 @@ reproduces the M17 behaviour exactly. Nothing here changes what
   handling is exercised, not a stand-in;
 - **a latency model** — `latencies=[...]` cycles per call, so a progress
   card's elapsed/ETA line has something that moves;
-- **the retry count**, via `RetriedExtraction` — see below.
+- **the retry count**, on `domain.llm.Extraction.retry_count` — the field
+  H4's amendment added to the frozen domain type, so the double and the
+  real adapter return one type with no subclass in between.
 
 `StaticModelCatalog` gains a mutable status (`set_status`, so a test can press
 "refresh" and have the endpoint come back) and two call counters, because
 "never on a timer" (plan-phase-3.md C3) is a claim about *how many times*
 `reachable()` is called.
-
-**`RetriedExtraction` is a shim.** The frozen `domain.llm.Extraction` has no
-field for the retry count that sw-design.md §15.4 requires be "carried back on
-the `Extraction`". It is imported from `ra2.infra.ollama_client` rather than
-redeclared here so the double and the real adapter return **one** type;
-`contracts/amendments/feat-p3-llm-adapter.md` proposes the field, after which
-both the import and the subclass go away and `Extraction` is used directly.
 """
 
 from collections.abc import Mapping, Sequence
 
 from ra2.domain.llm import EndpointStatus, Extraction, ModelInfo
-from ra2.infra.ollama_client import LlmEndpointError, RetriedExtraction
+from ra2.infra.ollama_client import LlmEndpointError
 
 __all__ = [
     "DEFAULT_ENDPOINT",
@@ -184,7 +179,7 @@ class FakeLLMClient:
             # (sw-design.md §15.3). The real adapter draws the same line.
             raise failure
         response = self.response_for(text, index)
-        return RetriedExtraction[T](
+        return Extraction[T](
             value=None,
             raw_output_text=response,
             parse_ok=self._parse_ok,

@@ -25,7 +25,6 @@ package above `ra2/infra/`.
 
 from contextlib import suppress
 from dataclasses import dataclass
-from importlib import import_module
 from typing import Protocol, runtime_checkable
 
 __all__ = ["GpuInfo", "GpuProbe", "NvmlGpuProbe", "StaticGpuProbe", "probe_for"]
@@ -108,21 +107,8 @@ class NvmlGpuProbe:
         # imports this module on every start, including on hosts where
         # `libnvidia-ml` is absent, and an import-time failure there would turn
         # "no GPU" into "the app does not boot".
-        #
-        # SHIM — see `contracts/amendments/feat-p3-llm-adapter.md`.
-        # The honest spelling is `import pynvml`, and it is what the amendment
-        # restores. It cannot be used yet: `.importlinter`'s `one-llm-seam`
-        # contract lists `pynvml` against `ra2.services` *without*
-        # `allow_indirect_imports = True` — which the two sibling `forbidden`
-        # contracts in the same file both set — so the legitimate, layer-rule
-        # sanctioned `services -> infra.gpu` protocol import turns a static
-        # `infra.gpu -> pynvml` edge into three broken-contract chains
-        # (verified, not assumed). `import_module` keeps `just lint` green
-        # meanwhile, and the gate it hides from is restored — more strictly,
-        # covering `importlib` and `__import__` too — by
-        # `tests/backend/infra/test_gpu_probe.py::test_nvml_is_named_only_by_this_module`.
         try:
-            pynvml = import_module("pynvml")
+            import pynvml  # type: ignore[import-untyped]  # noqa: PLC0415
         except ImportError:
             return None
 

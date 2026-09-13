@@ -9,7 +9,7 @@ from collections.abc import Sequence
 
 from ra2.domain.codes import CodeImportError
 from ra2.domain.findings import Finding
-from ra2.domain.llm import EndpointStatus
+from ra2.domain.llm import LlmEndpointError
 from ra2.domain.prompt import PromptValidationError
 
 __all__ = [
@@ -169,24 +169,19 @@ class EvaluationLockedError(ServiceError):
         self.evaluation_id = evaluation_id
 
 
-class LlmEndpointError(ServiceError):
-    """The configured endpoint cannot be used. -> HTTP 422 at construction.
-
-    Two causes, one type:
-
-    - `REFUSED_NOT_LOOPBACK` — the configured `base_url`'s host is not
-      loopback. Raised by `OllamaLLMClient` **at construction**, naming N1.
-      There is deliberately **no opt-out setting**: an opt-out is how "no data
-      leaves the host" becomes "no data leaves the host by default"
-      (mvp-spec.md §19.10, sw-design.md §15.5).
-    - `UNREACHABLE` — nothing is listening. This one is normally **not** an
-      exception at all: `evaluation_service` hands the view an empty model
-      list and a reason, and the view disables Launch beside the endpoint
-      line. `GET /api/v1/models` returns 200 with `reachable: false`, never a
-      502 — a 502 would force exactly the toast the design rejects.
-    """
-
-    def __init__(self, base_url: str, status: EndpointStatus) -> None:
-        super().__init__(f"llm endpoint {base_url}: {status.value}")
-        self.base_url = base_url
-        self.status = status
+# `LlmEndpointError` is **not defined here** — it lives in `ra2/domain/llm.py`,
+# beside `EndpointStatus` and the `LLMClient` protocol whose implementations
+# raise it, and is re-exported above so both adapters keep one import site.
+#
+# It moved down by amendment (feat/p3-llm-adapter). M17 put it here and
+# documented it as "raised by `OllamaLLMClient` at construction" — but
+# `ra2/infra/` may import `domain` only, so the module that raises it could
+# not import it. The alternative was an `ignore_imports` edge inverting the
+# layer rule permanently; moving the class costs four lines and puts the
+# exception with the protocol it guards.
+#
+# It is deliberately **not** a `ServiceError`: nothing catches it. A
+# non-loopback endpoint fails `create_app()` outright, and "unreachable" is
+# not an exception at all — `GET /api/v1/models` returns 200 with
+# `reachable: false`, because a 502 would force exactly the toast the design
+# rejects (sw-design.md §15.5).

@@ -117,3 +117,16 @@ forbidden_modules =
     openai
     ollama
     pynvml
+# Direct imports only, for the same reason as the ui and api contracts above.
+# `ra2.services` legitimately imports the `GpuProbe` **protocol** from
+# `ra2.infra.gpu` — the layer rule says so in as many words ("`ra2/services/`:
+# `domain`, `persistence`, `infra` protocols") — so without this, the static
+# `import pynvml` inside the probe reads as three broken `services -> pynvml`
+# chains. The comment above always reasoned in terms of direct imports; this
+# line is what makes that true (amendment: feat/p3-llm-adapter).
+#
+# The gate is not weakened. `tests/test_p3_contract.py` asserts on the **AST**
+# that `openai` and `pynvml` are each named by exactly one module across all of
+# `ra2/`, and `tests/backend/infra/test_gpu_probe.py` covers `importlib` and
+# `__import__` besides — all three stricter than what a linter contract sees.
+allow_indirect_imports = True

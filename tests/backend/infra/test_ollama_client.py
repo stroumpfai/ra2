@@ -28,7 +28,6 @@ from ra2.infra.ollama_client import (
     LlmEndpointError,
     OllamaLLMClient,
     OllamaModelCatalog,
-    RetriedExtraction,
     native_api_url,
     require_loopback,
 )
@@ -368,7 +367,7 @@ async def test_a_parse_failure_is_never_retried() -> None:
     result = await client.extract("prompt", Output, "m", temperature=0.0, seed=1)
 
     assert len(stub.chat_requests) == 1
-    assert isinstance(result, RetriedExtraction)
+    assert isinstance(result, Extraction)
     assert result.retry_count == 0
 
 
@@ -405,7 +404,7 @@ async def test_the_retry_count_reaches_the_extraction() -> None:
     assert len(stub.chat_requests) == 3
     assert result.parse_ok is True
     assert isinstance(result, Extraction)
-    assert isinstance(result, RetriedExtraction)
+    assert isinstance(result, Extraction)
     assert result.retry_count == 2
 
 
@@ -415,7 +414,7 @@ async def test_a_call_that_needs_no_retry_reports_zero() -> None:
 
     result = await client.extract("prompt", Output, "m", temperature=0.0, seed=1)
 
-    assert isinstance(result, RetriedExtraction)
+    assert isinstance(result, Extraction)
     assert result.retry_count == 0
 
 

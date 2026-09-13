@@ -38,18 +38,18 @@ frozen after this wave.
 
 ## What H4 added, and why (read before changing any of it)
 
-**Amendments are open against the frozen contract**
-(`contracts/amendments/feat-p3-llm-adapter.md`). Until they land, two names
-below are shims, each marked `SHIM`:
+**H4's two amendments were applied at integration**
+(`contracts/amendments/feat-p3-llm-adapter.md`), so the shims they stood in
+for are gone:
 
-1. `LlmEndpointError` — sw-design.md §15.5 and `ra2/services/errors.py`'s own
-   docstring both say this module raises `services.errors.LlmEndpointError`.
-   `ra2/infra/` may import `domain` only, so `lint-imports` rejects that
-   import today. The shim is a structurally identical local class with the
-   same name, the same constructor and the same message.
-2. `RetriedExtraction` — §15.4 requires the retry count "carried back on the
-   `Extraction`", and the frozen `domain.llm.Extraction` has no field for it.
-   The shim is a subclass that adds `retry_count`.
+1. `LlmEndpointError` moved **down to `ra2/domain/llm.py`**, beside
+   `EndpointStatus` and the protocol it guards, and is imported from there.
+   M17 had put it in `services/errors.py` and documented it as raised here —
+   which `ra2/infra/` may not import. It is re-exported from
+   `services/errors.py`, so both adapters keep one import site.
+2. `domain.llm.Extraction` gained `retry_count`, the field §15.4 always said
+   the count is "carried back on" — it had a column, a read model and an API
+   field already, and was missing only from the type crossing this seam.
 
 **One HTTP client per adapter, and both hold the guard.** The catalogue opens
 a socket too, so it checks the same `base_url` through the same
@@ -78,7 +78,6 @@ Do-NOT #1.
 """
 
 import time
-from dataclasses import dataclass
 from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
 
@@ -91,7 +90,7 @@ import httpx2
 # reached through this name, so the seam is visible at every use site.
 import openai
 
-from ra2.domain.llm import EndpointStatus, Extraction, ModelInfo
+from ra2.domain.llm import EndpointStatus, Extraction, LlmEndpointError, ModelInfo
 
 __all__ = [
     "LOOPBACK_HOSTS",
@@ -99,7 +98,6 @@ __all__ = [
     "LlmEndpointError",
     "OllamaLLMClient",
     "OllamaModelCatalog",
-    "RetriedExtraction",
     "native_api_url",
     "require_loopback",
 ]
@@ -127,47 +125,6 @@ _NATIVE_TAGS_PATH = "/api/tags"
 #: The SDK refuses to construct without a key. Ollama ignores it entirely, and
 #: no credential of the user's is ever put on the wire (N1/N2).
 _UNUSED_API_KEY = "ollama"
-
-
-class LlmEndpointError(Exception):
-    """SHIM — see `contracts/amendments/feat-p3-llm-adapter.md`.
-
-    This *should* be `ra2.services.errors.LlmEndpointError`, which
-    sw-design.md §15.5 names and whose own docstring says it is "raised by
-    `OllamaLLMClient` at construction". `ra2/infra/` may import `domain` only,
-    so `lint-imports` rejects `ra2.infra.ollama_client -> ra2.services.errors`
-    (verified, not assumed). The amendment proposes the one `ignore_imports`
-    line that permits it — the mirror image of the M0-D4 deviation already
-    recorded in `CONTRACTS.md`.
-
-    Deliberately the **same name, constructor and message** as the real one, so
-    applying the amendment deletes this class and adds one import, and changes
-    nothing else here or in the tests.
-    """
-
-    def __init__(self, base_url: str, status: EndpointStatus) -> None:
-        super().__init__(f"llm endpoint {base_url}: {status.value}")
-        self.base_url = base_url
-        self.status = status
-
-
-@dataclass(frozen=True, slots=True)
-class RetriedExtraction[T](Extraction[T]):
-    """SHIM — see `contracts/amendments/feat-p3-llm-adapter.md`.
-
-    sw-design.md §15.4: "`RA2_LLM_MAX_RETRIES`, the count carried back on the
-    `Extraction` and rendered in the progress card's metrics line". The frozen
-    `domain.llm.Extraction` has no field to carry it, and
-    `persistence.models.extraction.retry_count`, `readmodels` and
-    `api.schemas` all expect the number — so the seam between them is the one
-    place it is missing. The amendment proposes `retry_count: int = 0` on
-    `Extraction` itself; this subclass is what makes the run work meanwhile,
-    and is a `domain.llm.Extraction` for every purpose.
-    """
-
-    #: Retries **performed**, not attempts made: `0` means the first call
-    #: answered. Bounded by `RA2_LLM_MAX_RETRIES`.
-    retry_count: int = 0
 
 
 class _JsonSchemaModel(Protocol):
@@ -389,7 +346,7 @@ class OllamaLLMClient:
         raw_output_text = _first_content(completion)
         prompt_tokens, completion_tokens = _token_counts(completion)
         parsed, parse_error = _parse(schema, raw_output_text)
-        return RetriedExtraction[T](
+        return Extraction[T](
             value=parsed,
             raw_output_text=raw_output_text,
             parse_ok=parse_error is None,

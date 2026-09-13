@@ -1,5 +1,14 @@
 # Amendment — `feat/p3-llm-adapter` (H4)
 
+> **APPLIED at Wave 1 integration.** Items 1 and 2 were applied as proposed.
+> Item 3 was applied as **option B**, not the recommended option A: the
+> exception moved down to `ra2/domain/llm.py` rather than an `ignore_imports`
+> edge being added to the layers contract. See `CONTRACTS.md` **P3-D12** for
+> why. All three shims in `ra2/infra/` were removed at the same time, so the
+> downstream trap this file warns about in item 3 no longer exists — a Wave-2
+> or Wave-4 agent writing `from ra2.services.errors import LlmEndpointError`
+> catches exactly what the adapter raises.
+
 Three frozen files, three small changes. Each was found by building
 sw-design.md §15.5/§15.6 literally, and each is a place where a Wave-0
 contract and the design it encodes disagree.

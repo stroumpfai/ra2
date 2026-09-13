@@ -9,7 +9,7 @@ import pytest
 from ra2.domain.findings import Finding, FindingCode, Severity
 from ra2.domain.llm import EndpointStatus
 from ra2.domain.prompt import PromptValidationCode, PromptValidationError
-from ra2.services.errors import (
+from ra2.services.errors import (  # LlmEndpointError re-exported from ra2.domain.llm (P3-D12)
     BlockingFindingsError,
     CorpusLockedError,
     DeliveryNotAnalysedError,
@@ -80,13 +80,38 @@ def test_delivery_not_analysed_names_the_delivery():
 
 
 def test_the_phase_3_errors_are_one_family_too():
+    """`LlmEndpointError` is deliberately absent — see the test below."""
     for error in (
         PromptTemplateInvalidError,
         PromptTemplateCitedError,
         EvaluationLockedError,
-        LlmEndpointError,
     ):
         assert issubclass(error, ServiceError)
+
+
+def test_llm_endpoint_error_is_one_class_and_deliberately_not_a_service_error():
+    """P3-D12, and H4's amendment item 3.
+
+    It lives in `ra2/domain/llm.py` because `ra2/infra/` — the layer that
+    raises it — may import `domain` only. `services/errors.py` re-exports it
+    so both adapters keep one import site, and **all three names must be the
+    same class**: a second class with the same name is exactly the trap H4's
+    shim warned about, where `except LlmEndpointError` silently catches
+    nothing.
+
+    It is **not** a `ServiceError` because nothing catches it. A non-loopback
+    endpoint fails `create_app()` outright, and "unreachable" is not an
+    exception at all — `GET /api/v1/models` answers 200 with
+    `reachable: false`, because a 502 would force the toast the design
+    rejects (sw-design.md §15.5).
+    """
+    from ra2.domain.llm import LlmEndpointError as from_domain
+    from ra2.infra.ollama_client import LlmEndpointError as from_infra
+
+    assert LlmEndpointError is from_domain is from_infra
+    assert from_domain.__module__ == "ra2.domain.llm"
+    assert not issubclass(LlmEndpointError, ServiceError)
+    assert issubclass(LlmEndpointError, Exception)
 
 
 def test_prompt_template_invalid_carries_the_typed_payloads_immutably():

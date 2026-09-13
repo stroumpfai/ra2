@@ -20,7 +20,14 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
-__all__ = ["EndpointStatus", "Extraction", "LLMClient", "ModelCatalog", "ModelInfo"]
+__all__ = [
+    "EndpointStatus",
+    "Extraction",
+    "LLMClient",
+    "LlmEndpointError",
+    "ModelCatalog",
+    "ModelInfo",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +47,15 @@ class Extraction[T]:
     latency_ms: int | None = None
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    #: Retries **performed**, not attempts made: `0` means the first call
+    #: answered. Bounded by `RA2_LLM_MAX_RETRIES` and never silent — this is
+    #: the number `extraction.retry_count` stores and the progress card's
+    #: "retries N (bounded, counted)" line renders (mvp-spec.md §10.4,
+    #: sw-design.md §15.4). Added by amendment: M17 gave the count a column, a
+    #: read model and an API field, and left it off the one type that crosses
+    #: the seam where the retries actually happen (amendment:
+    #: feat/p3-llm-adapter).
+    retry_count: int = 0
 
 
 @runtime_checkable
@@ -116,3 +132,34 @@ class ModelCatalog(Protocol):
         """Ask the endpoint, now. Re-checked on view load and when the
         settings dialog's "refresh" is pressed — never on a timer."""
         ...
+
+
+class LlmEndpointError(Exception):
+    """The configured endpoint cannot be used.
+
+    Lives here rather than in `services/errors.py` (where M17 first put it)
+    because `ra2/infra/` may import `domain` only, and the module that raises
+    it is `ra2/infra/ollama_client.py`. The exception belongs with the
+    protocol it guards — the same shape `domain.codes.CodeImportError` has
+    (amendment: feat/p3-llm-adapter). `services/errors.py` re-exports it so
+    both adapters keep one import site.
+
+    Two causes, one type:
+
+    - `REFUSED_NOT_LOOPBACK` — the configured `base_url`'s host is not
+      loopback. Raised by `OllamaLLMClient` **at construction**, naming N1.
+      There is deliberately **no opt-out setting**: an opt-out is how "no data
+      leaves the host" becomes "no data leaves the host by default"
+      (mvp-spec.md §19.10, sw-design.md §15.5). It is not caught anywhere —
+      an app configured this way does not start, which is the point.
+    - `UNREACHABLE` — nothing is listening. This one is normally **not** an
+      exception at all: `evaluation_service` hands the view an empty model
+      list and a reason, and the view disables Launch beside the endpoint
+      line. `GET /api/v1/models` returns 200 with `reachable: false`, never a
+      502 — a 502 would force exactly the toast the design rejects.
+    """
+
+    def __init__(self, base_url: str, status: EndpointStatus) -> None:
+        super().__init__(f"llm endpoint {base_url}: {status.value}")
+        self.base_url = base_url
+        self.status = status
