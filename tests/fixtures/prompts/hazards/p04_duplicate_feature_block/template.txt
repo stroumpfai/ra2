@@ -1,0 +1,8 @@
+{{feature_block}}
+
+Reminder — the same feature list again, for emphasis:
+
+{{feature_block}}
+
+--- narrative ---
+{{narrative}}

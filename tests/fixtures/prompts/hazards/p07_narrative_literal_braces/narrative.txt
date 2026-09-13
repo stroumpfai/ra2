@@ -1,0 +1,1 @@
+The driver reported the dashcam overlay read "{{narrative}}" in the corner of the frame just before impact.
