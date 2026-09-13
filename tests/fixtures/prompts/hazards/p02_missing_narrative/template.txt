@@ -1,0 +1,5 @@
+You extract structured facts from Swiss accident reports.
+
+{{feature_block}}
+
+Answer as JSON only, one key per feature, no prose.

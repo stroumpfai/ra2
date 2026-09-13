@@ -1,0 +1,4 @@
+{{feature_block}}
+
+--- narrative ---
+{{narrative}}

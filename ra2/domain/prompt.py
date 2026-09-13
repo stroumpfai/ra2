@@ -27,6 +27,8 @@ and sockets (sw-design.md §15.7).
 **M17 freezes the types and the signatures. H1 writes the bodies.**
 """
 
+import hashlib
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -184,6 +186,20 @@ class ResolvedPrompt:
     slots_used: tuple[SlotName, ...]
 
 
+#: A well-formed slot: `{{`, one or more word characters, `}}`, with nothing
+#: in between. Matched first so its spans can be excluded when hunting for
+#: malformed half-braces below.
+_WELLFORMED_SLOT: Final = re.compile(r"\{\{(\w+)\}\}")
+
+#: Any `{{` opening, well-formed or not — used to find the ones
+#: `_WELLFORMED_SLOT` did not already account for.
+_OPEN_BRACE: Final = re.compile(r"\{\{")
+
+#: The malformed opening's would-be slot name, e.g. `narrative` out of
+#: `{{narrative}` or `{{narrative` — best-effort, for the error's `slot` field.
+_MALFORMED_NAME: Final = re.compile(r"\{\{(\w*)")
+
+
 def validate_template(source: str) -> tuple[PromptValidationError, ...]:
     """Every reason this template cannot be saved, or an empty tuple.
 
@@ -201,8 +217,58 @@ def validate_template(source: str) -> tuple[PromptValidationError, ...]:
     sees the whole thing at once (`validate_import`'s rule).
 
     Pure: no I/O, and it never raises on arbitrary input.
+
+    A required slot that appears only in **malformed** form (e.g. the whole
+    source is just `{{narrative}`) is reported once, as `MALFORMED_SLOT` —
+    not *also* as `MISSING_REQUIRED_SLOT` for the same name. The two codes
+    point at two different fixes (fix the typo / add the slot); reporting
+    both for one broken token would send the analyst chasing a slot that is
+    actually there, just spelled wrong.
     """
-    raise NotImplementedError
+    if not source or not source.strip():
+        return (PromptValidationError(code=PromptValidationCode.EMPTY_SOURCE),)
+
+    errors: list[PromptValidationError] = []
+    wellformed_spans: list[tuple[int, int]] = []
+    present_names: set[str] = set()
+
+    for match in _WELLFORMED_SLOT.finditer(source):
+        wellformed_spans.append(match.span())
+        name = match.group(1)
+        present_names.add(name)
+        if name not in set(SlotName):
+            errors.append(
+                PromptValidationError(
+                    code=PromptValidationCode.UNKNOWN_SLOT, slot=name, offset=match.start()
+                )
+            )
+
+    malformed_names: set[str] = set()
+    for open_match in _OPEN_BRACE.finditer(source):
+        start = open_match.start()
+        if any(span_start <= start < span_end for span_start, span_end in wellformed_spans):
+            continue  # already accounted for as a well-formed token
+        name_match = _MALFORMED_NAME.match(source, start)
+        name = name_match.group(1) if name_match else ""
+        malformed_names.add(name)
+        errors.append(
+            PromptValidationError(
+                code=PromptValidationCode.MALFORMED_SLOT, slot=name or None, offset=start
+            )
+        )
+
+    for required in REQUIRED_SLOTS:
+        if required.value in present_names:
+            continue
+        if required.value in malformed_names:
+            continue  # already reported as MALFORMED_SLOT above
+        errors.append(
+            PromptValidationError(
+                code=PromptValidationCode.MISSING_REQUIRED_SLOT, slot=required.value
+            )
+        )
+
+    return tuple(errors)
 
 
 def render_feature_block(
@@ -222,8 +288,33 @@ def render_feature_block(
     Pure and deterministic: the same features in the same order render the
     same bytes, because those bytes travel in the template's resolved text and
     two runs must ask the same question.
+
+    Format, one blank line between features:
+
+    - a `Kind.LABELLED` feature: `"{key} — {value_type}"`, and when
+      `value_type` is `ENUM`, one further indented line per code in
+      `enum_codelist`, in snapshot order: `"  {code} — {label}"`. A code
+      whose label map has no entry for `language` falls back to the visible
+      marker `"[no {language} label]"` — never an empty string, and never a
+      silently substituted other language (mvp-spec.md §10.2, phase-2's
+      `partial` coverage case).
+    - a `Kind.EXPLORATORY` attribute: `"{key}: {description}"`, the expert's
+      wording verbatim, no type line — it has no structured counterpart.
     """
-    raise NotImplementedError
+    blocks: list[str] = []
+    for feature in features:
+        if feature.kind is Kind.EXPLORATORY:
+            blocks.append(f"{feature.key}: {feature.description}")
+            continue
+
+        lines = [f"{feature.key} — {feature.value_type.value}"]
+        if feature.value_type is ValueType.ENUM and feature.enum_codelist:
+            for code_value in feature.enum_codelist:
+                label = code_value.label.get(language, f"[no {language} label]")
+                lines.append(f"  {code_value.code} — {label}")
+        blocks.append("\n".join(lines))
+
+    return "\n\n".join(blocks)
 
 
 def resolve_template(source: str, blocks: Mapping[SlotName, str]) -> ResolvedPrompt:
@@ -238,8 +329,33 @@ def resolve_template(source: str, blocks: Mapping[SlotName, str]) -> ResolvedPro
     A slot with no entry in `blocks` resolves to the empty string rather than
     raising — `validate_template` is what refuses a template, at save time,
     where the analyst can act on it.
+
+    An unrecognised `{{token}}` (one `validate_template` would flag as
+    `UNKNOWN_SLOT`) is left exactly as written — this function does not
+    re-validate, it only expands what it recognises.
+
+    Single-pass by construction: `re.sub` walks `source` once and substitutes
+    into the *result* string without rescanning it, so a slot value that
+    itself contains `{{narrative}}`-shaped text (record text can, verbatim)
+    is never re-expanded.
     """
-    raise NotImplementedError
+    slots_used: set[SlotName] = set()
+
+    def _expand(match: re.Match[str]) -> str:
+        try:
+            slot = SlotName(match.group(1))
+        except ValueError:
+            return match.group(0)  # not one of ours — leave the literal text
+        slots_used.add(slot)
+        return blocks.get(slot, "")
+
+    text = _WELLFORMED_SLOT.sub(_expand, source)
+    ordered_slots_used = tuple(slot.name for slot in SLOTS if slot.name in slots_used)
+    return ResolvedPrompt(
+        text=text,
+        token_estimate=estimate_tokens(text),
+        slots_used=ordered_slots_used,
+    )
 
 
 def estimate_tokens(text: str) -> int:
@@ -247,8 +363,14 @@ def estimate_tokens(text: str) -> int:
 
     Pure arithmetic, no vocabulary, no download, no model. The preview renders
     it as `≈ N tokens`, never as an exact figure, because it is not one.
+
+    Heuristic: roughly four characters per token, the same rule of thumb
+    every "how many tokens is this" back-of-envelope uses for English-like
+    text, rounded up so a non-empty string never estimates to zero tokens.
     """
-    raise NotImplementedError
+    if not text:
+        return 0
+    return -(-len(text) // 4)  # ceiling division without importing math
 
 
 def compute_template_fingerprint(source: str) -> str:
@@ -258,5 +380,12 @@ def compute_template_fingerprint(source: str) -> str:
     functions in this codebase cannot drift apart. Stable across calls, and
     sensitive to **every** byte: a template differing by one space is a
     different template, and every run stores this beside the model digest.
+
+    `compute_fingerprint` (features, mvp-spec.md §8.5) canonicalises *eight
+    fields* into one JSON document before this same `hashlib.sha256(...
+    .encode("utf-8")).hexdigest()` call. A template is already exactly one
+    field — its source text — so there is nothing to canonicalise into: the
+    "canonicalisation" that must not drift between the two functions is this
+    hashing step itself, reused verbatim rather than re-implemented.
     """
-    raise NotImplementedError
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()

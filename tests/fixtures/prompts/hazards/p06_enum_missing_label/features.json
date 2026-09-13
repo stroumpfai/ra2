@@ -1,0 +1,47 @@
+{
+  "features": [
+    {
+      "description": "Weather condition at the time of the accident",
+      "enum_codelist": [
+        {
+          "code": "01",
+          "label": {
+            "de": "Klar",
+            "fr": "Clair",
+            "it": "Chiaro"
+          }
+        },
+        {
+          "code": "02",
+          "label": {
+            "de": "Regen",
+            "it": "Pioggia"
+          }
+        }
+      ],
+      "grain": "accident",
+      "key": "weather",
+      "kind": "labelled",
+      "matching_rule": {
+        "decimal_precision": null,
+        "kind": "exact",
+        "tolerance_minutes": null
+      },
+      "value_type": "enum"
+    },
+    {
+      "description": "Anything unusual about the road surface, verbatim from the expert.",
+      "enum_codelist": null,
+      "grain": "accident",
+      "key": "road_notes",
+      "kind": "exploratory",
+      "matching_rule": {
+        "decimal_precision": null,
+        "kind": "none",
+        "tolerance_minutes": null
+      },
+      "value_type": "free_text"
+    }
+  ],
+  "language": "fr"
+}

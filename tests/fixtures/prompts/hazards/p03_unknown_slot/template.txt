@@ -1,0 +1,8 @@
+You extract structured facts from Swiss accident reports.
+
+Corpus: {{corpus}}
+
+{{feature_block}}
+
+--- narrative ---
+{{narrative}}
