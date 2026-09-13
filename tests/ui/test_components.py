@@ -12,12 +12,14 @@ The last group is the architectural one. A component that quietly grew a
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 from nicegui import ui
 from nicegui.testing.user import User
 from nicegui.testing.user_interaction import UserInteraction
 
+from ra2.domain.extraction import RunStatus
 from ra2.domain.feature import (
     AnyObjectMatches,
     AnyPersonMatches,
@@ -30,8 +32,15 @@ from ra2.domain.feature import (
     MinOrdinal,
     Operator,
 )
-from ra2.domain.ids import FeatureConfigId
-from ra2.services.readmodels import FeatureSetSummary, SortDir
+from ra2.domain.ids import FeatureConfigId, RunId
+from ra2.domain.llm import EndpointStatus
+from ra2.services.readmodels import (
+    ConnectionView,
+    FeatureSetSummary,
+    ResolvedPromptView,
+    RunProgressView,
+    SortDir,
+)
 from ra2.ui.components import (
     ColumnSpec,
     bar,
@@ -48,6 +57,7 @@ from ra2.ui.components import (
 )
 from ra2.ui.components.derivation_builder import derivation_builder
 from ra2.ui.components.feature_sets_table import feature_sets_table
+from ra2.ui.components.ollama_settings import ollama_settings_dialog
 from ra2.ui.components.primitives import (
     field_select,
     fingerprint_badge,
@@ -61,6 +71,8 @@ from ra2.ui.components.primitives import (
     slot_highlighted_block,
     step_label,
 )
+from ra2.ui.components.progress_card import progress_card
+from ra2.ui.components.prompt_preview import prompt_preview_panel
 from ra2.ui.state import TableState, set_table_state, table_state
 from ra2.ui.theme import STYLESHEET
 
@@ -919,6 +931,348 @@ async def test_feature_sets_table_row_select_and_new_set_button(user):
 
     user.find(marker="new-set-button").click()
     assert created == [True]
+
+
+# --- progress_card (L3) ------------------------------------------------------
+#
+# design/prompt-evaluation/README.md §2, "Per-model progress card": model
+# tag, a right-aligned status line, a 6px `.bar`, and — for active/finished
+# runs only — a metrics line. Rendered from `RunProgressView` alone, no
+# service call inside the component (Do-NOT #7). Numbers below are chosen to
+# keep every derived percentage a clean, unambiguous figure rather than
+# reproducing the design's own fixtures verbatim.
+
+_QUEUED_PROGRESS = RunProgressView(
+    run_id=RunId("r-queued"), model_tag="phi4:14b-q8_0", status=RunStatus.QUEUED, done=0, total=5000
+)
+_RUNNING_PROGRESS = RunProgressView(
+    run_id=RunId("r-running"),
+    model_tag="llama3.1:8b-instruct-q8_0",
+    status=RunStatus.RUNNING,
+    done=2500,
+    total=5000,
+    parse_failures=5,
+    median_latency_ms=800,
+    prompt_tokens=1_500_000,
+    eta_ms=38 * 60_000,
+)
+_DONE_PROGRESS = RunProgressView(
+    run_id=RunId("r-done"),
+    model_tag="qwen2.5:14b-instruct-q6_K",
+    status=RunStatus.DONE,
+    done=5000,
+    total=5000,
+    parse_failures=15,
+    retries=11,
+    median_latency_ms=1340,
+    elapsed_ms=72 * 60_000,
+)
+_FAILED_PROGRESS = RunProgressView(
+    run_id=RunId("r-failed"),
+    model_tag="gemma2:27b-instruct-q5_K_M",
+    status=RunStatus.FAILED,
+    done=1000,
+    total=4000,
+    parse_failures=3,
+    elapsed_ms=15 * 60_000,
+)
+
+
+async def test_progress_card_renders_all_four_states_from_the_read_model_alone(user):
+    """Exit criterion: all four states (`queued`, `running`, `done`,
+    `failed`) render correctly from `RunProgressView` alone. `queued` gets a
+    0 % bar and no metrics line — "there is nothing honest to put in one
+    yet" (README §2)."""
+    page(
+        "/t/progress/all",
+        lambda: [
+            progress_card(progress=p)
+            for p in (_QUEUED_PROGRESS, _RUNNING_PROGRESS, _DONE_PROGRESS, _FAILED_PROGRESS)
+        ],
+    )
+    await user.open("/t/progress/all")
+
+    statuses = [str(e.text) for e in _ordered(user.find(marker="progress-card-status"))]
+    assert statuses == [
+        "queued",
+        "2 500 / 5 000 · running · ETA 38 m",
+        "5 000 / 5 000 · done · 1 h 12 m",
+        "1 000 / 4 000 · failed · 15 m",
+    ]
+
+    fills = [e for e in _all(user) if e.tag == "i"]
+    assert [f._style["width"] for f in fills] == ["0%", "50%", "100%", "25%"]
+    # The bar's own *container* always spans the card, in every state — only
+    # the fill inside it (asserted above) carries the percentage.
+    bars = _ordered(user.find(marker="bar"))
+    assert all(b._style["width"] == "100%" for b in bars)
+
+    metrics = [str(e.text) for e in _ordered(user.find(marker="progress-card-metrics"))]
+    assert metrics == [
+        "parse failures 5 (0.2 %) · median latency 800 ms · 1.5 M prompt tok",
+        "parse failures 15 (0.3 %) · retries 11 (bounded, counted) · median latency 1 340 ms",
+        "parse failures 3 (0.3 %)",
+    ], "queued must be the only card without a metrics line"
+
+    model_labels = _ordered(user.find(marker="progress-card-model"))
+    assert model_labels[0]._style["color"] == "var(--ink2)", "queued is dimmed"
+    assert all(label._style["color"] == "var(--ink)" for label in model_labels[1:])
+
+    status_labels = _ordered(user.find(marker="progress-card-status"))
+    assert status_labels[3]._style["color"] == "var(--danger)", "failed reads as an error"
+    assert all(label._style["color"] == "var(--ink3)" for label in status_labels[:3])
+
+
+async def test_progress_card_never_calls_a_service(user):
+    """Do-NOT #7, mechanically: the component's only input is the read
+    model, and rendering it twice with the same value produces the same
+    output — nothing here reaches out for fresher data on its own."""
+    page(
+        "/t/progress/pure",
+        lambda: [
+            progress_card(progress=_RUNNING_PROGRESS),
+            progress_card(progress=_RUNNING_PROGRESS),
+        ],
+    )
+    await user.open("/t/progress/pure")
+
+    statuses = [str(e.text) for e in _ordered(user.find(marker="progress-card-status"))]
+    assert statuses[0] == statuses[1]
+
+
+# --- prompt_preview_panel (L3) ------------------------------------------------
+#
+# design/prompt-evaluation/README.md §1, "Resolved card" (C4): one component,
+# two entry points (Prompts' "Preview with record 1", Evaluation's "Preview
+# prompt"), rendering byte-identical output for the same `ResolvedPromptView`.
+
+_RESOLVED = ResolvedPromptView(
+    text="You extract structured facts. --- narrative --- Car left the road, weather clear.",
+    token_estimate=1842,
+    record_key="R-2026-0031",
+    feature_count=13,
+)
+
+#: One golden string both entry points must reproduce exactly (exit
+#: criterion). `_text()` joins every descendant label's own text with " ".
+_GOLDEN_PREVIEW_TEXT = (
+    "Resolved — record R-2026-0031, all 13 features "
+    "≈ 1 842 tokens "
+    "You extract structured facts. --- narrative --- Car left the road, weather clear."
+)
+
+
+async def test_prompt_preview_panel_renders_the_header_and_the_token_estimate(user):
+    """The header assembles "record " + the read model's own key + "all N
+    features" — `record_key` itself is a raw record identifier (e.g. an
+    `unfall_uid`), not a pre-formatted sentence (`services/prompt_service.py`).
+    The token figure is `≈ N tokens`, an estimate and labelled as one (C6),
+    and the body sits in a well capped at the design's 210px."""
+    page("/t/preview/one", lambda: prompt_preview_panel(resolved=_RESOLVED))
+    await user.open("/t/preview/one")
+
+    (title,) = user.find(marker="prompt-preview-title").elements
+    assert str(title.text) == "Resolved — record R-2026-0031, all 13 features"
+    (tokens,) = user.find(marker="prompt-preview-tokens").elements
+    assert str(tokens.text) == "≈ 1 842 tokens"
+    (well,) = user.find(marker="scroll-well").elements
+    assert well._style["max-height"] == "210px"
+    assert well._style["overflow-y"] == "auto"
+    await user.should_see("Car left the road")
+
+
+async def test_prompt_preview_panel_renders_identically_from_both_entry_points(user):
+    """Exit criterion: Prompts' and Evaluation's calls into this component
+    must render byte-identical output for the same `ResolvedPromptView`,
+    asserted against one golden string — not merely "look similar"."""
+    page(
+        "/t/preview/both",
+        lambda: [
+            prompt_preview_panel(resolved=_RESOLVED),  # Prompts' "Preview with record 1"
+            prompt_preview_panel(resolved=_RESOLVED),  # Evaluation's "Preview prompt"
+        ],
+    )
+    await user.open("/t/preview/both")
+
+    panels = _ordered(user.find(marker="prompt-preview"))
+    assert len(panels) == 2
+    rendered = [_text(p) for p in panels]
+    assert rendered[0] == rendered[1] == _GOLDEN_PREVIEW_TEXT
+
+
+# --- ollama_settings_dialog (L3) ----------------------------------------------
+#
+# plan-phase-3.md Q4 / sw-design.md §15.8: an undesigned dialog built to this
+# plan's own design — endpoint, timeout, "refresh model list", and only those
+# three controls. Built on `dialog_card` (the phase-2 dialog-clipping fix).
+
+_CONNECTION = ConnectionView(
+    endpoint="http://127.0.0.1:11434/v1", status=EndpointStatus.REACHABLE, timeout_s=120
+)
+
+
+def _card_elements(user: User) -> list[ui.element]:
+    return [e for e in _all(user) if e.tag == "section" and e._props.get("data-testid") == "card"]
+
+
+async def test_ollama_settings_dialog_has_exactly_the_three_controls(user):
+    """Q4 / sw-design.md §15.8: endpoint, timeout, "refresh model list" — and
+    only those three. No VRAM control, no fourth field."""
+    page(
+        "/t/ollama/controls",
+        lambda: ollama_settings_dialog(
+            settings=_CONNECTION, on_save=lambda *_: None, on_refresh=lambda: None
+        ),
+    )
+    await user.open("/t/ollama/controls")
+
+    assert len(user.find(marker="ollama-endpoint").elements) == 1
+    assert len(user.find(marker="ollama-timeout").elements) == 1
+    assert len(user.find(marker="ollama-refresh").elements) == 1
+    (endpoint_input,) = user.find(marker="ollama-endpoint").elements
+    (timeout_input,) = user.find(marker="ollama-timeout").elements
+    assert endpoint_input._props["value"] == "http://127.0.0.1:11434/v1"
+    assert timeout_input._props["value"] == "120"
+
+
+async def test_ollama_settings_dialog_save_emits_the_edited_endpoint_and_timeout(user):
+    """Exit criterion: save emits the (possibly edited) endpoint and
+    timeout, and closes the dialog."""
+    saved: list[tuple[str, int]] = []
+    dialogs: list[ui.dialog] = []
+
+    def build() -> None:
+        dialogs.append(
+            cast(
+                ui.dialog,
+                ollama_settings_dialog(
+                    settings=_CONNECTION,
+                    on_save=lambda endpoint, timeout_s: saved.append((endpoint, timeout_s)),
+                    on_refresh=lambda: None,
+                ),
+            )
+        )
+
+    page("/t/ollama/save", build)
+    await user.open("/t/ollama/save")
+    dialogs[0].open()
+
+    user.find(marker="ollama-endpoint").trigger("change", args="http://127.0.0.1:9999/v1")
+    user.find(marker="ollama-timeout").trigger("change", args="45")
+    user.find(marker="ollama-save").click()
+
+    assert saved == [("http://127.0.0.1:9999/v1", 45)]
+    assert dialogs[0].value is False, "save closes the dialog"
+
+
+async def test_ollama_settings_dialog_refresh_reasks_the_catalogue_without_saving(user):
+    """ "Refresh model list" and "Save" are two different gestures — refresh
+    must not emit `on_save` or close the dialog."""
+    saved: list[tuple[str, int]] = []
+    refreshed: list[bool] = []
+    dialogs: list[ui.dialog] = []
+
+    def build() -> None:
+        dialogs.append(
+            cast(
+                ui.dialog,
+                ollama_settings_dialog(
+                    settings=_CONNECTION,
+                    on_save=lambda endpoint, timeout_s: saved.append((endpoint, timeout_s)),
+                    on_refresh=lambda: refreshed.append(True),
+                ),
+            )
+        )
+
+    page("/t/ollama/refresh", build)
+    await user.open("/t/ollama/refresh")
+    dialogs[0].open()
+
+    user.find(marker="ollama-refresh").click()
+
+    assert refreshed == [True]
+    assert saved == []
+    assert dialogs[0].value is True, "refresh must not close the dialog"
+
+
+async def test_ollama_settings_dialog_state_is_scoped_to_its_own_instance(user):
+    """Do-NOT #8: no module global. Two dialogs built in the same process
+    must not leak an edit from one into the other's `on_save`."""
+    saved_a: list[tuple[str, int]] = []
+    saved_b: list[tuple[str, int]] = []
+    dialogs: list[ui.dialog] = []
+
+    def build() -> None:
+        dialogs.append(
+            cast(
+                ui.dialog,
+                ollama_settings_dialog(
+                    settings=ConnectionView(
+                        endpoint="http://127.0.0.1:11434/v1",
+                        status=EndpointStatus.REACHABLE,
+                        timeout_s=120,
+                    ),
+                    on_save=lambda endpoint, timeout_s: saved_a.append((endpoint, timeout_s)),
+                    on_refresh=lambda: None,
+                ),
+            )
+        )
+        dialogs.append(
+            cast(
+                ui.dialog,
+                ollama_settings_dialog(
+                    settings=ConnectionView(
+                        endpoint="http://127.0.0.1:22222/v1",
+                        status=EndpointStatus.REACHABLE,
+                        timeout_s=60,
+                    ),
+                    on_save=lambda endpoint, timeout_s: saved_b.append((endpoint, timeout_s)),
+                    on_refresh=lambda: None,
+                ),
+            )
+        )
+
+    page("/t/ollama/scoped", build)
+    await user.open("/t/ollama/scoped")
+    for dialog in dialogs:
+        dialog.open()
+
+    # `.trigger`/`.click` act on every matched element, so this edits both
+    # dialogs' endpoint fields identically — that is fine: `.click()` always
+    # picks the lowest-id (first-built) match deterministically, so only
+    # dialog A's `on_save` can possibly fire, which is exactly what this
+    # test needs to tell the two instances apart.
+    user.find(marker="ollama-endpoint").trigger("change", args="http://127.0.0.1:9999/v1")
+    user.find(marker="ollama-save").click()
+
+    assert saved_a == [("http://127.0.0.1:9999/v1", 120)]
+    assert saved_b == [], "the second dialog's on_save must never fire from the first's edit"
+
+
+async def test_ollama_settings_dialog_opens_without_clipping_at_1024px(user):
+    """Phase 2's dialog-clipping fix (`dialog_card`'s docstring): the direct
+    child of `.q-dialog__inner` carries its own `max-width:96vw` and the card
+    derives its cap from that wrapper rather than an independent guess, which
+    is what stopped a wide card from clipping under Quasar's hardcoded
+    560px rule. `tests/ui` has no real viewport to resize to 1024px and
+    measure (that belongs to a later `tests/e2e` addition, once a view wires
+    the gear button that opens this dialog) — the structural check available
+    here is that this dialog is built on that fix, and that its own card is
+    comfortably narrower than 1024px's 96vw allowance (983px)."""
+    page(
+        "/t/ollama/clip",
+        lambda: ollama_settings_dialog(
+            settings=_CONNECTION, on_save=lambda *_: None, on_refresh=lambda: None
+        ),
+    )
+    await user.open("/t/ollama/clip")
+
+    wrapper = next(e for e in _all(user) if e.tag == "div" and e._style.get("max-width") == "96vw")
+    assert wrapper is not None
+    (card_el,) = _card_elements(user)
+    assert card_el._style["max-width"] == "100%"
+    width_px = int(str(card_el._style["width"]).removesuffix("px"))
+    assert width_px < 1024 * 0.96
 
 
 # --- state ------------------------------------------------------------------
