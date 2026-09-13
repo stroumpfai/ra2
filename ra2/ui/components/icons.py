@@ -13,6 +13,7 @@ from typing import Final
 
 __all__ = [
     "ALERT_TRIANGLE",
+    "ALIGN_LEFT",
     "BAR_CHART",
     "CHECK",
     "CLIPBOARD",
@@ -66,6 +67,10 @@ ALERT_TRIANGLE: Final = (
     'L13.7 4.3a1.7 1.7 0 0 0-3 0Z"></path>'
     '<path d="M12 9v4"></path><path d="M12 17h.01"></path>'
 )
+ALIGN_LEFT: Final = (
+    '<path d="M4 5h16"></path><path d="M4 10h10"></path>'
+    '<path d="M4 15h13"></path><path d="M4 20h7"></path>'
+)
 CHECK: Final = '<path d="m5 13 4 4 10-10"></path>'
 PLUS: Final = '<path d="M12 5v14"></path><path d="M5 12h14"></path>'
 CLIPBOARD: Final = (
@@ -84,6 +89,7 @@ NAV_ICONS: Final[dict[str, str]] = {
     "census": BAR_CHART,
     "codelists": LIST,
     "features": SLIDERS,
+    "prompts": ALIGN_LEFT,
     "evaluation": PLAY_CIRCLE,
     "results": TABLE,
     "mismatches": ALERT_TRIANGLE,

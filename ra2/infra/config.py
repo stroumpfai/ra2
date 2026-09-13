@@ -33,8 +33,37 @@ class Settings(BaseSettings):
     #: Defaults to `{data_dir}/ra2.sqlite`; see `_default_db_path` below.
     db_path: Path | None = None
 
-    #: N2 — present from commit 1, no caller in phase 1.
-    llm_base_url: str = "http://localhost:11434/v1"
+    #: N2 — present from commit 1, first caller in phase 3
+    #: (`infra/ollama_client.py`). The default is the design's own endpoint
+    #: line, written as `127.0.0.1` rather than `localhost` so the loopback
+    #: guard has one fewer name to resolve (sw-design.md §15.5).
+    #:
+    #: **The host must be loopback.** `OllamaLLMClient` refuses anything else
+    #: at construction, and there is deliberately no opt-out setting: an
+    #: opt-out is how "no data leaves the host" (N1) becomes "no data leaves
+    #: the host by default" (mvp-spec.md §19.10, §15 F4).
+    llm_base_url: str = "http://127.0.0.1:11434/v1"
+
+    #: Per-call timeout. Belongs to client construction, not to a per-call
+    #: argument — which is why `LLMClient.extract` never took one.
+    llm_timeout_s: int = 120
+
+    #: mvp-spec.md §10.4 — retries are **bounded and counted**, never a
+    #: retry-until-quiet loop. The count is carried back on the `Extraction`
+    #: and rendered in the progress card's metrics line.
+    llm_max_retries: int = 2
+
+    #: sw-design.md §15.4 — runs execute serially, one model at a time: the
+    #: GPU is the bottleneck and two models sharing 24 GB is slower than two
+    #: in sequence. Phase 3 never raises this; it exists so lifting the limit
+    #: is a config line rather than a rewrite (§15 F7).
+    run_concurrency: int = 1
+
+    #: sw-design.md §15.6 — declared capability beats a probed one. Unset
+    #: (the default) means "ask NVML"; NVML absent means an honest "unknown",
+    #: not an error. Set these on a host whose GPU is not NVIDIA.
+    gpu_vram_gb: float | None = None
+    gpu_name: str | None = None
 
     #: Bind to loopback by default. No egress, no external listener (N1).
     host: str = "127.0.0.1"

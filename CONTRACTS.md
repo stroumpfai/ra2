@@ -149,6 +149,117 @@ touched. No parallel heads (CLAUDE.md).
 
 ---
 
+## Phase 3 — owner: M17 (Wave 0), amendment only
+
+Re-established at tag `p3-frozen`, the same way M9 established the phase-2
+list at `p2-frozen`. **Wave 0 of phase 3 may edit any file this document
+already lists**, including phase-1 and phase-2 files — re-establishing the
+frozen baseline for a new phase is Wave 0's job (plan-phase-3.md §4). After
+`p3-frozen`, everything below is frozen for Waves 1-4 exactly as the two
+lists above are.
+
+**One migration author, one per phase.** A3 was phase 1's, D3 phase 2's;
+**H3 is phase 3's**. Nobody else runs `alembic revision` against a chain
+phase 3 has touched. No parallel heads (CLAUDE.md).
+
+**This is the commit where the codebase gains the ability to make an outbound
+request at all.** `pyproject.toml` gains `openai` and `nvidia-ml-py`;
+`.importlinter`'s `one-llm-seam` contract gains `pynvml`; `ra2/infra/
+ollama_client.py` is the first module in the repo allowed to import `openai`
+and `ra2/infra/gpu.py` the first allowed `pynvml`. The loopback guard lives in
+`OllamaLLMClient.__init__` and has **no opt-out** (mvp-spec.md §19.10,
+sw-design.md §15.5, plan-phase-3.md §15 F4).
+
+### New files
+
+| File | Contents |
+|---|---|
+| `ra2/domain/prompt.py` | `SlotName`, `Slot`, `SLOTS`, `REQUIRED_SLOTS`, `PromptValidationCode`, `PromptValidationError`, `PromptTemplateDraft`, `FeatureBlockEntry`, `ResolvedPrompt` — **types and signatures only**; `validate_template` / `render_feature_block` / `resolve_template` / `estimate_tokens` / `compute_template_fingerprint` bodies are H1's |
+| `ra2/domain/extraction.py` | `RunStatus`, `EvaluationSize`, the mvp-spec.md §10.3 shapes (`FeatureAnswer`, `EntityAnswer`, `ExtractionOutput`), `ParseIssueCode`, `ParseIssue`, `ParsedValue`, `ParsedExtraction`, `ParseFailure` — **types and signatures only**; `build_output_schema` / `parse_output` bodies are H2's |
+| `ra2/infra/gpu.py` | `GpuInfo`, the `GpuProbe` protocol, `StaticGpuProbe`, `probe_for` — frozen; `NvmlGpuProbe`'s body is H4's |
+| `ra2/services/prompt_service.py` | constructor + typed signatures; bodies I1. **No `update_template` — the absence is the contract** (sw-design.md §15.1) |
+| `ra2/services/evaluation_service.py` | constructor + typed signatures; bodies I2 |
+| `ra2/services/run_service.py` | constructor + typed signatures; bodies I3 |
+| `ra2/api/v1/prompt_templates.py` | stub router; bodies K1. **No `PATCH`/`PUT` route, ever** |
+| `ra2/api/v1/evaluations.py`, `ra2/api/v1/runs.py`, `ra2/api/v1/models.py` | stub routers; bodies K2 |
+| `ra2/infra/ollama_client.py` | `OllamaLLMClient`, `OllamaModelCatalog`, `LOOPBACK_HOSTS` — stub; bodies H4. The **only** module that may import `openai` |
+| `ra2/ui/views/prompts_view.py` | stub; body L1 |
+| `ra2/ui/views/evaluation_view.py` | stub; body L2 |
+| `ra2/ui/components/progress_card.py`, `ra2/ui/components/ollama_settings.py`, `ra2/ui/components/prompt_preview.py` | **signatures only** — the Wave 4 seam (plan-phase-3.md §3.1); bodies L3 |
+| `ra2/persistence/migrations/versions/20260913_0000_9e90e50a151f_phase_3_prompts_and_runs.py` | the **whole** phase-3 schema — not the stub plan-phase-3.md §5.1 originally asked for (P3-D11). H3 still owns `migrations/versions/**` from Wave 1 |
+| `tests/test_p3_contract.py` | this wave's exit criteria as tests — lead-owned, frozen |
+| `tests/fixtures/fake_llm.py` | `FakeLLMClient`, `StaticModelCatalog`, `DEFAULT_MODELS` — seeded with a minimal working body so the root fixtures do not wait on Wave 1; **owned and extended by H4** |
+
+### Amended files (already frozen; re-frozen here)
+
+| File | What changed |
+|---|---|
+| `ra2/domain/ids.py` | + `PromptTemplateId`, `RunId`, `ExtractionId` |
+| `ra2/domain/llm.py` | + `ModelInfo`, `EndpointStatus`, `ModelCatalog`. `LLMClient` **unchanged** — confirming that was part of this wave's job (plan-phase-3.md §5.1) |
+| `ra2/persistence/models.py` | + `PromptTemplate`, `EvaluationFeature`, `Run`, `Extraction`, `ExtractionValue`, `ExtractionEntity`; `Evaluation` gains `prompt_template_id`, `prompt_language`, `temperature`, `seed`, `size`, `selected_models_json`, `launched_at` |
+| `ra2/services/protocols.py` | + `PromptResolver` (the Wave 2 seam, plan-phase-3.md §3.1) |
+| `ra2/services/container.py` | + `prompt: PromptService`, `evaluation: EvaluationService`, `run: RunService` |
+| `ra2/services/errors.py` | + `PromptTemplateInvalidError`, `PromptTemplateCitedError`, `EvaluationLockedError`, `LlmEndpointError`. **No new `FindingCode`s** |
+| `ra2/services/readmodels.py` | + `PromptTemplateView`, `SlotView`, `ResolvedPromptView`, `ModelChoiceView`, `ConnectionView`, `EvaluationDraftView`, `RunProgressView`, `RunView`, `ProvenanceView`, `EvaluationView` |
+| `ra2/api/schemas.py` | + every request/response model for the four new routers |
+| `ra2/api/deps.py` | + `PromptServiceDep`, `EvaluationServiceDep`, `RunServiceDep` |
+| `ra2/api/v1/router.py` | + the four new routers |
+| `ra2/infra/config.py` | + `llm_timeout_s`, `llm_max_retries`, `run_concurrency`, `gpu_vram_gb`, `gpu_name`; `llm_base_url` defaults to `http://127.0.0.1:11434/v1` |
+| `ra2/main.py` | + `llm_client`, `model_catalog`, `gpu_probe` keyword arguments and the three new services' construction |
+| `ra2/ui/shell.py` | + the eighth `NavItem`: `prompts`, group `Configure`, `/prompts`, after `features`, `built=False` |
+| `ra2/ui/components/icons.py` | + `ALIGN_LEFT`, wired into `NAV_ICONS` |
+| `tests/conftest.py` | + `fake_llm`, `fake_model_catalog`, `static_gpu` root fixtures, and `app_factory` now substitutes all three by default — **no test in layers 1-4 talks to a live endpoint or a real GPU** |
+| `pyproject.toml` | + `openai`, + `nvidia-ml-py` |
+| `.importlinter` | `one-llm-seam`'s forbidden list gains `pynvml` |
+| `mvp-spec.md` | §3 (PydanticAI dropped), §5 (+ `prompt_template`, + `evaluation_feature`, `evaluation`/`run`/`extraction` columns), §8.5 (the snapshot lives on `evaluation_feature`), §10.2 (a row, not a file), §14 N3 (the probe is a library load) |
+| `CLAUDE.md` | the third migration author; "no egress at all in phase 1" -> loopback only |
+
+### Stubs — a body is expected; the file is **not** frozen (phase 3)
+
+| Path | Owner |
+|---|---|
+| `ra2/domain/prompt.py` *(bodies)* | H1 |
+| `ra2/domain/extraction.py` *(bodies)* | H2 |
+| `ra2/persistence/repositories/{prompt,evaluation,run,extraction}_repo.py`, `ra2/persistence/migrations/versions/**` | H3 |
+| `ra2/infra/ollama_client.py`, `ra2/infra/gpu.py` *(`NvmlGpuProbe`)*, `tests/fixtures/fake_llm.py` | H4 |
+| `ra2/ui/components/primitives.py` *(additions)* | H5 |
+| `ra2/services/prompt_service.py` | I1 |
+| `ra2/services/evaluation_service.py` | I2 |
+| `ra2/services/run_service.py` | I3 |
+| `ra2/api/v1/prompt_templates.py` | K1 |
+| `ra2/api/v1/{evaluations,runs,models}.py` | K2 |
+| `ra2/ui/views/prompts_view.py` | L1 |
+| `ra2/ui/views/evaluation_view.py`, `ra2/ui/state.py` *(additions)* | L2 |
+| `ra2/ui/components/{progress_card,ollama_settings,prompt_preview}.py` *(bodies)* | L3 |
+
+### The two-line nav exception
+
+`ra2/ui/shell.py` and `ra2/ui/views/__init__.py` stay frozen through Wave 4
+with **one exception each, declared up front** (plan-phase-3.md §6.1): L1 and
+L2 may each flip exactly their own `built` flag and add exactly their own line
+to `register_all`. Nothing else in either file. L3 touches neither. Phase 2
+left this implicit and paid for it with a lead fix-up commit (`e386a66`).
+
+---
+
+## Documented deviations phase 3 (M17) introduces
+
+| # | Decision | Why |
+|---|---|---|
+| **P3-D1** | The service-layer exception is `PromptTemplateInvalidError`, not `PromptValidationError` | plan-phase-3.md §5.1 names `PromptValidationError` **twice** — once as `domain/prompt.py`'s payload type and once as `services/errors.py`'s exception. Two different things cannot share one name across two modules without an aliased import at every call site. The phase-2 precedent settles which keeps it: `domain.codes.CodeImportError` (payload) versus `services.errors.CodelistImportError` (exception). The domain keeps the plan's name; the exception is renamed. |
+| **P3-D2** | `RunStatus` and `EvaluationSize` live in `ra2/domain/extraction.py`, not in a module of their own | sw-design.md §15 is silent on where they go, so CLAUDE.md's "follow the nearest existing pattern" applies: `DeliveryStatus` sits in `domain/delivery.py`, the domain module for its area. A fifth domain module would also belong to no wave — plan-phase-3.md §6's ownership matrix names exactly four (`ids`, `prompt`, `extraction`, `llm`). |
+| **P3-D3** | `extraction.retry_count` and `run.error` — additive beyond mvp-spec.md §5 | sw-design.md §15.4 requires the retry count to be "carried back on the `Extraction` and rendered in the progress card's metrics line", and the design's failed-run row offers a "log" action that needs something to show. Same pattern as SD4's additive `corpus` columns. |
+| **P3-D4** | `run.prompt_template_fingerprint` is stored on the run, though it is derivable through `prompt_template_id` | mvp-spec.md §19.8 requires a run's **own record** to be sufficient to reproduce it, and the design's reproducibility card renders the fingerprint beside the model digest. A join is not a record. |
+| **P3-D5** | `evaluation.prompt_template_id` is **nullable**; `run.prompt_template_id` is not | The design has a "Save draft" button, so the row exists before the inputs are final — and a draft saved on a database with no template yet must still be savable. The launch transaction is what requires one, and a `run` always cites exactly one. |
+| **P3-D6** | Launching an evaluation whose `feature_config` is not frozen raises `FeatureValidationError`, not a new error type | plan-phase-3.md §5.1's error list does not name one, K2 wants 422, and "the set this launch cites is not frozen" is exactly a blocking validation message with exactly that status. `FeatureConfigFrozenError` means the opposite (an edit of a set that *is* frozen) and would have read backwards. |
+| **P3-D7** | `extraction_entity` has a plain string primary key, not a composite `(extraction_id, entity_kind, entity_ref)` | Entities are **captured, never scored** (mvp-spec.md §10.3). A model that repeats `(kind, ref)` would violate a composite key and cost the run a record — for output nothing reads. Same treatment `code_value` gets (P2-D6): no dedicated id `NewType`, because nothing joins against one by id outside its own extraction. |
+| **P3-D8** | `tests/conftest.py`'s `app_factory` substitutes `llm_client`, `model_catalog` and `gpu_probe` by **default** | plan-phase-3.md §11: "everything inside `just test` and `just e2e` must pass on a machine with no GPU and nothing listening on 11434". Leaving the real adapters as the default would make that a per-test discipline instead of a property of the suite. The real ones are still reachable — H4's adapter tests construct them directly against a local stub. |
+| **P3-D9** | `ra2/infra/gpu.py` exposes `probe_for(name, vram_gb)` beyond the three names plan-phase-3.md §5.1 lists | "The override wins, else NVML" is one rule and belongs in one place. Putting the conditional in `create_app()` instead would have put logic in a composition root that is meant to be wiring only (sw-design.md §3). |
+| **P3-D11** | M17 writes the **real** phase-3 migration, not the empty stub plan-phase-3.md §5.1 asked for | That instruction was written from phase 2's shape, where Wave 0 added only *new* tables: an empty revision left a gap that broke nothing and D3 filled it in. Phase 3 also **alters `evaluation`** — the moment `models.py` declares the seven new columns, every phase-1 and phase-2 test that seeds an evaluation row fails with `no such column`. §5.2 is explicit that "every phase-1 and phase-2 test still green — this wave adds surface, it does not change behaviour", and that is the stricter criterion. plan-phase-3.md §5.1/§6/§7 are corrected in the same commit. **H3 remains phase 3's one migration author** and still owns `migrations/versions/**` from Wave 1; its brief becomes "verify this one, and add your own revision on top if Wave 1 needs more". |
+| **P3-D10** | `openai>=3.0` pulls in `httpx2`, not `httpx` | Noted rather than decided: the SDK's own dependency. It means H4 stubs the endpoint with `httpx2.MockTransport` / `ASGITransport` passed as `http_client`, **not** with `respx` (which targets `httpx` 0.x). Recorded here because `pyproject.toml` is frozen after this wave, and an agent discovering it mid-Wave-1 would otherwise need an amendment to add a test dependency it does not actually need. |
+
+---
+
 ## The census seam
 
 The one that lets Wave 2 run in parallel (plan-m0-m5.md E6):

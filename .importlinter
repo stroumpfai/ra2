@@ -108,6 +108,12 @@ source_modules =
     ra2.services
     ra2.api
     ra2.ui
+# `pynvml` (the `nvidia-ml-py` distribution) joins the list at phase 3: the GPU
+# probe is an adapter too (sw-design.md §15.6), so `ra2/infra/` stays the only
+# package allowed to load a vendor library. `ra2.infra.ollama_client` is the
+# one module in the repo that may import `openai`, and `ra2.infra.gpu` the one
+# that may import `pynvml` — neither appears above, which is what permits it.
 forbidden_modules =
     openai
     ollama
+    pynvml

@@ -19,11 +19,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from ra2.api.v1.router import api_router
 from ra2.domain.language import LanguageDetector
+from ra2.domain.llm import LLMClient, ModelCatalog
 from ra2.infra.clock import Clock, SystemClock
 from ra2.infra.config import Settings
 from ra2.infra.filestore import FileStore, HostPathFileStore, UploadedFileStore
+from ra2.infra.gpu import GpuProbe, probe_for
 from ra2.infra.idgen import IdFactory, Uuid7Factory
 from ra2.infra.lingua_detector import LinguaDetector
+from ra2.infra.ollama_client import OllamaLLMClient, OllamaModelCatalog
 from ra2.infra.tasks import AsyncioTaskRunner, TaskRunner
 from ra2.persistence.session import create_engine, create_session_factory, ensure_database_dir
 from ra2.services.census_materialiser import RelationalCensusMaterialiser
@@ -32,9 +35,12 @@ from ra2.services.codelist_service import CodelistService
 from ra2.services.container import Services
 from ra2.services.corpus_service import CorpusService
 from ra2.services.delivery_service import DeliveryService
+from ra2.services.evaluation_service import EvaluationService
 from ra2.services.export_service import ExportService
 from ra2.services.feature_service import FeatureService
+from ra2.services.prompt_service import PromptService
 from ra2.services.protocols import CensusMaterialiser
+from ra2.services.run_service import RunService
 from ra2.ui import views
 from ra2.ui.theme import FONTS_DIR, FONTS_URL_PATH
 
@@ -53,6 +59,9 @@ def create_app(
     host_path_store: FileStore | None = None,
     language_detector: LanguageDetector | None = None,
     census_materialiser: CensusMaterialiser | None = None,
+    llm_client: LLMClient | None = None,
+    model_catalog: ModelCatalog | None = None,
+    gpu_probe: GpuProbe | None = None,
     mount_ui: bool = True,
 ) -> FastAPI:
     """Build the application.
@@ -79,6 +88,21 @@ def create_app(
     host_path_store = host_path_store or HostPathFileStore()
     language_detector = language_detector or LinguaDetector()
     census_materialiser = census_materialiser or RelationalCensusMaterialiser(ids=ids)
+    # The one LLM seam (sw-design.md §15.5). `OllamaLLMClient.__init__` is
+    # where the **loopback guard** lives: a non-loopback `RA2_LLM_BASE_URL`
+    # fails the app at start, not at the first narrative (N1, §15 F4).
+    # Both arrive as defaulted keyword arguments, so every test above Wave 1
+    # substitutes `tests/fixtures/fake_llm.py` with no test-mode branch here
+    # (§12.12) and no machine needs a GPU or anything on port 11434.
+    llm_client = llm_client or OllamaLLMClient(
+        base_url=settings.llm_base_url,
+        timeout_s=settings.llm_timeout_s,
+        max_retries=settings.llm_max_retries,
+    )
+    model_catalog = model_catalog or OllamaModelCatalog(
+        base_url=settings.llm_base_url, timeout_s=settings.llm_timeout_s
+    )
+    gpu_probe = gpu_probe or probe_for(name=settings.gpu_name, vram_gb=settings.gpu_vram_gb)
 
     delivery_service = DeliveryService(
         session_factory=session_factory,
@@ -124,6 +148,27 @@ def create_app(
         clock=clock,
         ids=ids,
     )
+    prompt_service = PromptService(session_factory=session_factory, clock=clock, ids=ids)
+    evaluation_service = EvaluationService(
+        session_factory=session_factory,
+        model_catalog=model_catalog,
+        gpu_probe=gpu_probe,
+        clock=clock,
+        ids=ids,
+        settings=settings,
+    )
+    # `prompt_service` satisfies `PromptResolver` (services/protocols.py)
+    # structurally — `run_service` never imports it directly.
+    run_service = RunService(
+        session_factory=session_factory,
+        llm_client=llm_client,
+        prompt_resolver=prompt_service,
+        gpu_probe=gpu_probe,
+        task_runner=task_runner,
+        clock=clock,
+        ids=ids,
+        settings=settings,
+    )
     services = Services(
         delivery=delivery_service,
         corpus=corpus_service,
@@ -131,6 +176,9 @@ def create_app(
         export=export_service,
         codelist=codelist_service,
         feature=feature_service,
+        prompt=prompt_service,
+        evaluation=evaluation_service,
+        run=run_service,
     )
 
     app = FastAPI(

@@ -76,7 +76,11 @@ Fixed by [ra2.md](ra2.md); restated so the implementation has one place to look.
 - **SQLite (WAL)** + SQLAlchemy 2.0 async + **Alembic**
 - **Ollama** reached through the **`openai` SDK** at `/v1`; base URL is an env var
 - Structured output: Pydantic model → JSON Schema → Ollama `format:` (constrained
-  decoding), wrapped by PydanticAI
+  decoding), through the **`openai` SDK alone**. *(Corrected at phase 3, SD14:
+  PydanticAI is dropped. The one call this product makes is "one prompt, one
+  JSON Schema, one response"; PydanticAI's value is an agent loop nobody here
+  wants, and it would be a second place a provider client gets constructed —
+  which is what the invariant below exists to prevent.)*
 - Jobs: `runs` table + in-process asyncio worker. No Redis, no Celery.
 - ruff, mypy, pytest, pytest-cov, pre-commit, GitHub Actions
 
@@ -256,14 +260,35 @@ feature_config(id, name, created_at, frozen_at)
 feature(id, feature_config_id, ordinal, key, kind, description,
         grain, source_column, derivation_json, value_type,
         matching_rule, enum_codelist_json, fingerprint)
+      -- enum_codelist_json/fingerprint here are the DRAFT-TIME PREVIEW; the
+      -- real per-evaluation ones live on evaluation_feature (SD12, below)
 
-evaluation(id, name, corpus_id, feature_config_id, created_at, is_dev)
+prompt_template(id, version, source, created_at, activated_at, fingerprint)
+      -- IMMUTABLE. version UNIQUE. A save is a new row, never an UPDATE.
+      -- Added at phase 3 (SD11): §10.2 said "a versioned on-disk template",
+      -- but citation counts, an active flag and "delete only when uncited"
+      -- are one foreign key in a table and four conventions on a filesystem.
+
+evaluation(id, name, corpus_id, feature_config_id, prompt_template_id,
+           prompt_language, temperature, seed, size, selected_models_json,
+           created_at, launched_at, is_dev)
+      -- editable while launched_at IS NULL; immutable after (SD13)
+evaluation_feature(evaluation_id, feature_id, enum_codelist_json, fingerprint)
+      -- written once, inside the launch transaction (SD12). A frozen
+      -- feature_config is corpus-INDEPENDENT, so the codelist snapshot and
+      -- the final fingerprint cannot resolve until an evaluation fixes a
+      -- corpus — which is why they are not on `feature`.
 run(id, evaluation_id, model_name, model_digest, prompt_template_version,
-    temperature, seed, started_at, finished_at, status,
+    prompt_template_id, prompt_template_fingerprint,
+    temperature, seed, started_at, finished_at, status, error,
     host_platform, gpu_name, llm_endpoint)
+      -- status: queued | running | done | failed | interrupted
+      -- no records_done column: progress is COUNT(extraction WHERE run_id=…)
 
 extraction(id, run_id, record_id, raw_output_text, parse_ok, parse_error,
-           latency_ms, prompt_tokens, completion_tokens)     -- IMMUTABLE
+           latency_ms, prompt_tokens, completion_tokens, retry_count)
+      -- IMMUTABLE. UNIQUE (run_id, record_id) — that constraint IS the
+      -- resume key (sw-design.md §15.3).
 extraction_value(extraction_id, feature_id, value_raw, value_normalised,
                  present_flag, evidence_span)
 extraction_entity(extraction_id, entity_kind, entity_ref, attributes_json)
@@ -276,6 +301,12 @@ mismatch(id, run_id, record_id, feature_id, record_value, extracted_value,
 
 **Never overwrite an extraction.** A re-run creates a new `run` and new
 `extraction` rows. `run_id` is the discriminator everywhere.
+
+**Never overwrite a prompt template.** Saving is an `INSERT` at `version + 1`;
+the previous row's `source` stays byte-identical, because the runs citing it
+must keep resolving to the exact text they used. `run.prompt_template_id`'s
+`RESTRICT` is what makes "delete only when uncited" an invariant rather than a
+convention.
 
 **Never edit `code_value` or `code_attribute`.** A superseding `codes-2019.json`
 (or a correction) is a new `code_table_import`, adding new rows — existing
@@ -413,8 +444,13 @@ attribute's code table (§7) taken when the evaluation is created — it is a
 copy, not a live reference, so a later `code_table_import` never moves the
 fingerprint of an already-created evaluation.
 
-Computed when the evaluation is created; stored on the feature. Cross-evaluation
-views (post-MVP) join on this, never on the feature name.
+Computed when the evaluation is created; stored on **`evaluation_feature`**,
+not on `feature` (SD12, corrected at phase 3: a frozen `feature_config` is
+corpus-independent and reusable across evaluations, so the snapshot cannot
+resolve until a corpus is fixed). `feature.fingerprint` remains the draft-time
+**preview** — the same function over the same inputs minus the snapshot, which
+is exactly why a preview badge and a run's fingerprint can legitimately differ.
+Cross-evaluation views (post-MVP) join on this, never on the feature name.
 
 ### 8.6 Empty cells
 
@@ -463,13 +499,17 @@ template version.
 
 ### 10.2 Prompt
 
-Assembled from a versioned on-disk template plus config. One multilingual prompt
-for all inputs (no per-language routing in the MVP). It contains:
+Assembled from a versioned template **row** (`prompt_template`, §5) plus
+config. *(Corrected at phase 3, SD11 — it was "a versioned on-disk
+template".)* One multilingual prompt for all inputs (no per-language routing
+in the MVP). It contains:
 
 - the narrative text, verbatim
 - per labelled feature: key, description, type, and for enums the **full
   code → label list** from the mapped code table (§7), as snapshotted into
-  `enum_codelist_json` at evaluation creation
+  `evaluation_feature.enum_codelist_json` at evaluation creation — and
+  "evaluation creation" means the **launch commit**, the moment the inputs
+  stop being editable (sw-design.md §15.2)
 - per exploratory attribute: key and the expert's description verbatim
 - instructions: emit the **code** for enums; `null` when the text does not support
   a value; an **evidence span quoted verbatim from the text** for every non-null
@@ -648,7 +688,7 @@ NiceGUI, single mode, no login, everything permitted.
 |---|---|
 | N1 | **No data leaves the host.** No external API, no telemetry, no crash reporting, no font/CDN fetches in the UI. |
 | N2 | LLM endpoint is an **env var / config value** from the first commit. GPU passthrough is never assumed (fails on macOS). |
-| N3 | Runs on **Windows and Linux**. macOS not required but not designed out: no POSIX-only paths, no shell-outs, explicit encodings on every file operation. |
+| N3 | Runs on **Windows and Linux**. macOS not required but not designed out: no POSIX-only paths, no shell-outs, explicit encodings on every file operation. *(Phase 3 note: the GPU probe reads VRAM through NVML's **library bindings** — a `ctypes` load of `libnvidia-ml`, present wherever the GPU is, on both platforms. A library load is not a shell-out. **Never `nvidia-smi`**, never any subprocess — sw-design.md §15.6.)* |
 | N4 | All file I/O specifies encoding explicitly. Never rely on the platform default. |
 | N5 | Extractions are **immutable**; a re-run adds rows, never updates them. |
 | N6 | Long runs are restart-safe and resumable; progress is visible. |

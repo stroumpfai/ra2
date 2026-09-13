@@ -50,11 +50,17 @@ FROZEN_MODULES = [
     "tests/conftest.py",
 ]
 
+#: Every nav route `create_app()` must register. The list grows with the
+#: phases — phase 3 (M17) adds `/prompts` — because "an entry in the nav
+#: resolves to a page" is the criterion, not the count. Only one app per
+#: process may mount NiceGUI (M0-D6), so this is the **one** place a
+#: `mount_ui=True` route check can live.
 NAV_ROUTES = [
     "/import",
     "/census",
     "/codelists",
     "/features",
+    "/prompts",
     "/evaluation",
     "/results",
     "/mismatches",
@@ -179,8 +185,8 @@ def test_every_module_imports(module):
         assert hasattr(imported, name), f"{module}.__all__ names a missing {name}"
 
 
-def test_create_app_registers_the_seven_nav_routes_and_the_api(app_factory):
-    """The M0 exit criterion, verbatim."""
+def test_create_app_registers_every_nav_route_and_the_api(app_factory):
+    """The M0 exit criterion, over the nav as it stands today."""
     app = app_factory(mount_ui=True)
 
     paths = {getattr(route, "path", None) for route in _walk(app.routes)}

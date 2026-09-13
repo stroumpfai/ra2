@@ -7,7 +7,10 @@ requires-python = ">=3.14"
 license = { file = "LICENSE" }
 
 # Every dependency M0-M8 needs is declared here, once, so no later agent has
-# cause to touch this file (plan-m0-m5.md E4).
+# cause to touch this file (plan-m0-m5.md E4). Phase 3 (M17) adds the two the
+# LLM seam and the GPU probe need — see plan-phase-3.md §2.4; both are reached
+# only from `ra2/infra/`, which `.importlinter`'s `one-llm-seam` contract
+# enforces.
 dependencies = [
     "fastapi>=0.115",
     "nicegui>=2.0",
@@ -19,6 +22,12 @@ dependencies = [
     "pydantic-settings>=2.5",
     "lingua-language-detector>=2.0",
     "uuid-utils>=0.9",
+    # The one provider SDK (mvp-spec.md §3, sw-design.md §15.5). PydanticAI is
+    # deliberately absent: §15 F3 drops it.
+    "openai>=3.0",
+    # NVML's library bindings — a ctypes load of libnvidia-ml, never a
+    # subprocess (N3, sw-design.md §15.6). Imported as `pynvml`.
+    "nvidia-ml-py>=13.0",
 ]
 
 [dependency-groups]

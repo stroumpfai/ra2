@@ -2,7 +2,7 @@
 
 Three claims, one per test group:
 
-1. every route renders all **7 nav items in 4 groups**;
+1. every route renders all **8 nav items in 4 groups**;
 2. the active item is **derived from the route**, never stored;
 3. the header title and description are the design's copy, **verbatim**.
 
@@ -41,10 +41,22 @@ DESIGNED_COPY = {
 }
 
 
-def test_the_nav_is_four_groups_of_seven_items():
+def test_the_nav_is_four_groups_of_eight_items():
+    """Eight since phase 3 (M17): Prompts joins the Configure group,
+    immediately after Features (design/prompt-evaluation/README.md §0)."""
     assert [group for group, _ in NAV_GROUPS] == ["Data", "Configure", "Run", "Review"]
-    assert len(NAV_ITEMS) == 7
-    assert sum(len(items) for _, items in NAV_GROUPS) == 7
+    assert len(NAV_ITEMS) == 8
+    assert sum(len(items) for _, items in NAV_GROUPS) == 8
+
+
+def test_prompts_sits_in_configure_immediately_after_features():
+    """The design puts it there, and the nav's order is the pipeline's order:
+    Data -> Configure (Features -> Prompts) -> Run -> Review."""
+    configure = next(items for group, items in NAV_GROUPS if group == "Configure")
+    assert [item.key for item in configure] == ["features", "prompts"]
+    prompts = next(i for i in NAV_ITEMS if i.key == "prompts")
+    assert prompts.label == "Prompts"
+    assert prompts.path == "/prompts"
 
 
 def test_the_design_readme_still_says_what_nav_items_says():

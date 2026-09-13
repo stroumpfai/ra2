@@ -702,13 +702,14 @@ one running the `GROUP BY` query and handing it plain cell values.
 
 ## 15. Prompts and Evaluation (F5, F6)
 
-**Not yet built** — Codelists and Features shipped in phase 2, and the nav's
-Run group still routes to `placeholder_view` (§8.1). This section exists so
-the wave that builds Prompts and Evaluation starts from an architecture rather
-than a blank page, now that `design/prompt-evaluation/README.md` and
-`mvp-spec.md` §9/§10 exist. It is also the first section in this document to
-describe code that **makes an outbound request** and code that **runs for an
-hour**, which is why it spends most of its length on two boundaries: the
+**Contract frozen at M17, bodies from Wave 1 on.** Codelists and Features
+shipped in phase 2; M17 added this section's tables, seams and stubs and the
+eighth nav entry, and the nav's Run group still routes to `placeholder_view`
+(§8.1) until Wave 4. This section is the architecture the phase-3 waves build
+against, written before them rather than discovered inside them, now that
+`design/prompt-evaluation/README.md` and `mvp-spec.md` §9/§10 exist. It is also
+the first section in this document to describe code that **makes an outbound
+request** and code that **runs for an hour**, which is why it spends most of its length on two boundaries: the
 transaction boundary (§15.3) and the process boundary (§15.5).
 
 It resolves three of the design's open questions: prompt language belongs to
@@ -780,9 +781,19 @@ evaluation(id, name, corpus_id, feature_config_id, prompt_template_id,
            prompt_language, temperature, seed, size, selected_models_json,
            created_at, launched_at, is_dev)
           -- editable while launched_at IS NULL; immutable after
-run(... , prompt_template_id, status)
+          -- prompt_template_id is NULLABLE: "Save draft" means the row can
+          -- exist before any template does; the launch transaction requires one
+run(... , prompt_template_id, prompt_template_fingerprint, status, error)
           -- status: queued | running | done | failed | interrupted
+          -- no records_done column (§15.4); `error` is the design's "log" action
 ```
+
+`prompt_template_fingerprint` is stored on the run although it is reachable
+through `prompt_template_id`, because `mvp-spec.md` §19.8 asks for the run's
+**own record** to be sufficient to reproduce it and a join is not a record.
+`RunStatus` and the `full`/`dev` `EvaluationSize` live in
+`domain/extraction.py` beside the shapes a run produces, the way
+`DeliveryStatus` lives in `domain/delivery.py` (P3-D2).
 
 `run.prompt_template_version` (`mvp-spec.md` §5) stays as the human-facing
 citation; `prompt_template_id` is added beside it because a version integer
@@ -843,10 +854,16 @@ aspirational:
 > call.
 
 ```
-extraction(... )              -- UNIQUE (run_id, record_id)
-extraction_value(...)         -- one per (extraction, feature)
+extraction(... , retry_count) -- UNIQUE (run_id, record_id)
+extraction_value(...)         -- one per (extraction, feature): composite PK
 extraction_entity(...)        -- captured, never scored (mvp-spec.md §10.3)
 ```
+
+`retry_count` is on the row because §15.4 renders it ("retries 11 (bounded,
+counted)") and a bound nobody can see is not a bound. `extraction_entity`
+keeps a plain string primary key rather than a composite `(extraction_id,
+kind, ref)`: a model that repeats an entity would otherwise cost the run a
+whole record over output nothing scores (P3-D7).
 
 `UNIQUE (run_id, record_id)` **is the resume key**. Resume is "the record ids
 in this run's scope with no `extraction` row", which is a query, not
@@ -943,7 +960,14 @@ digest and size; it does not report the host's VRAM. So VRAM is probed
 # infra/gpu.py
 class GpuProbe(Protocol):
     def describe(self) -> GpuInfo | None: ...   # None = no NVIDIA GPU, or NVML absent
+
+def probe_for(*, name: str | None, vram_gb: float | None) -> GpuProbe: ...
+                                            # the override wins, else NVML
 ```
+
+`probe_for` keeps "which probe" a single rule in a single place. Putting the
+conditional in `create_app()` instead would have put logic in a composition
+root that is meant to be wiring only (§3).
 
 `NvmlGpuProbe` reads GPU name and total VRAM through the **NVML library
 bindings** (`nvidia-ml-py` — a `ctypes` load of `libnvidia-ml`, present
@@ -963,7 +987,8 @@ either when it is the truth.
 ```
 domain/
   prompt.py                 slot catalogue, validate/resolve/render, fingerprint, estimate_tokens (pure)
-  extraction.py             mvp-spec.md §10.3 shapes, build_output_schema, parse_output (pure)
+  extraction.py             mvp-spec.md §10.3 shapes, build_output_schema, parse_output,
+                            RunStatus, EvaluationSize (pure)
   llm.py                    + ModelInfo, EndpointStatus, ModelCatalog (LLMClient unchanged)
 persistence/
   repositories/
@@ -980,7 +1005,8 @@ api/
   v1/prompt_templates.py  v1/evaluations.py  v1/runs.py  v1/models.py
 infra/
   ollama_client.py          the only module that imports openai (§15.5)
-  gpu.py                    GpuProbe, NvmlGpuProbe, StaticGpuProbe (§15.6)
+  gpu.py                    GpuProbe, NvmlGpuProbe, StaticGpuProbe, probe_for (§15.6)
+                            the only module that imports pynvml
 ui/
   views/prompts_view.py     master/detail per design/prompt-evaluation/README.md §1
   views/evaluation_view.py  setup/progress split per the same README §2

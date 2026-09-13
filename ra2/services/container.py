@@ -12,8 +12,11 @@ from ra2.services.census_service import CensusService
 from ra2.services.codelist_service import CodelistService
 from ra2.services.corpus_service import CorpusService
 from ra2.services.delivery_service import DeliveryService
+from ra2.services.evaluation_service import EvaluationService
 from ra2.services.export_service import ExportService
 from ra2.services.feature_service import FeatureService
+from ra2.services.prompt_service import PromptService
+from ra2.services.run_service import RunService
 
 __all__ = ["Services"]
 
@@ -26,3 +29,6 @@ class Services:
     export: ExportService
     codelist: CodelistService
     feature: FeatureService
+    prompt: PromptService
+    evaluation: EvaluationService
+    run: RunService

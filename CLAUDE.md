@@ -102,8 +102,8 @@ gate.
   `tests/ui` NiceGUI `User` fixture · `tests/e2e` Playwright · `tests/eval`
   phase 3. `tests/conftest.py` is frozen; per-layer conftests belong to
   whoever owns that layer in the current wave.
-- **One migration author, one per phase — A3 for phase 1, D3 for phase 2.**
-  Nobody else runs `alembic revision`. No parallel heads.
+- **One migration author, one per phase — A3 for phase 1, D3 for phase 2,
+  H3 for phase 3.** Nobody else runs `alembic revision`. No parallel heads.
 - **Fixtures must contain the real hazards** — mixed encodings, a stray `|`, an
   embedded newline, an orphan key, a key duplicated across two cantonal sets,
   an all-empty column, French already lossy. Clean fixtures are not acceptable
@@ -112,8 +112,17 @@ gate.
 - **Findings, not prose.** `FindingCode` values are stable identifiers; assert
   on the code, never on message text. Wording lives in one rendering table in
   `ui/`.
-- **No egress at all in phase 1.** There is no LLM endpoint to talk to yet, and
-  J6 fails the build on any request to a host other than the server under test.
+- **Loopback only.** Phase 1's "no egress at all" posture ends at phase 3 —
+  replaced, not dropped. The **one** outbound call this codebase makes is to
+  the configured LLM endpoint, whose host must be loopback (`127.0.0.1`,
+  `::1`, `localhost`); `OllamaLLMClient` refuses anything else **at
+  construction**, and there is deliberately **no opt-out setting** — an
+  opt-out is how "no data leaves the host" (N1) becomes "no data leaves the
+  host by default". `mvp-spec.md` §19.10 and `sw-design.md` §15.5 are the
+  rule; `import-linter`'s `one-llm-seam` contract and H4's guard tests are
+  what make it a gate. J6 is unchanged and stays exactly as strict: it
+  watches the *browser*, and the browser still talks only to the server under
+  test.
 - **Design fidelity is a requirement, not a suggestion** (sw-design.md §8.2):
   the tokens, fixed sizes and layout rules in
   `design/nav-import-census/README.md` are asserted in E2E. Fonts are vendored

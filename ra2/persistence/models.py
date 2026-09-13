@@ -1,18 +1,20 @@
 # FROZEN — see CONTRACTS.md
-"""The whole phase-1 schema (mvp-spec.md §5 + sw-design.md §4).
+"""The schema (mvp-spec.md §5 + sw-design.md §4, §14, §15).
 
-**Scope.** Phase 1 is shell, import and census (plan-phase-1.md §1). Codelists,
-feature configs, runs, extractions, scores and mismatches are *out*, so their
-tables are not here. `evaluation` is the one exception: sw-design.md §6.3
-requires the corpus delete guard to be implemented and tested against a seeded
-row, and J3 asserts the `LOCKED · 1 eval` pill, so the table must exist to seed.
-See the note on `Evaluation` below.
+**Scope.** Phase 1 built import and census, phase 2 added codelists and
+feature configs, and phase 3 (M17) adds prompts and runs — `prompt_template`,
+`evaluation_feature`, `run`, `extraction`, `extraction_value`,
+`extraction_entity`, plus the setup columns `evaluation` was always implying.
+`score` and `mismatch` are still *out*: scoring is phase 4.
 
 **Immutability (N5, §12.2).** `corpus` and everything below it —
 `record`, `unfall_row`, `objekt_row`, `objekt_cell`, `person_row`,
-`person_cell`, `census_*` — is written once at freeze and never updated.
-`delivery` and `delivery_file` are the only mutable tables: re-parsing after an
-encoding override rewrites a `delivery_file` row.
+`person_cell`, `census_*` — is written once at freeze and never updated. So is
+`prompt_template` (a save is a new version) and so is `extraction` and its two
+child tables (a re-run adds rows). `delivery`, `delivery_file`,
+`column_mapping`, a draft `feature_config` and an unlaunched `evaluation` are
+the mutable ones: re-parsing after an encoding override rewrites a
+`delivery_file` row, and a draft is editable until it is pinned.
 
 **Storage rules (§4.4).**
 - Values are stored `value_raw`, **verbatim**. Normalisation is a read-time
@@ -45,6 +47,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from ra2.domain.census import TypeHint
 from ra2.domain.delivery import DeliveryStatus, FileKind, SourceKind
+from ra2.domain.extraction import EvaluationSize, RunStatus
 from ra2.domain.feature import Grain, Kind, ValueType
 from ra2.domain.ids import (
     CensusColumnId,
@@ -54,12 +57,15 @@ from ra2.domain.ids import (
     CorpusId,
     DeliveryId,
     EvaluationId,
+    ExtractionId,
     FeatureConfigId,
     FeatureId,
     FileId,
     ObjektRowId,
     PersonRowId,
+    PromptTemplateId,
     RecordId,
+    RunId,
 )
 
 __all__ = [
@@ -75,13 +81,19 @@ __all__ = [
     "Delivery",
     "DeliveryFile",
     "Evaluation",
+    "EvaluationFeature",
+    "Extraction",
+    "ExtractionEntity",
+    "ExtractionValue",
     "Feature",
     "FeatureConfig",
     "ObjektCell",
     "ObjektRow",
     "PersonCell",
     "PersonRow",
+    "PromptTemplate",
     "Record",
+    "Run",
     "UnfallRow",
 ]
 
@@ -123,6 +135,9 @@ class Base(DeclarativeBase):
         ColumnMappingId: String(_ID_LEN),
         FeatureConfigId: String(_ID_LEN),
         FeatureId: String(_ID_LEN),
+        PromptTemplateId: String(_ID_LEN),
+        RunId: String(_ID_LEN),
+        ExtractionId: String(_ID_LEN),
         FileKind: String(16),
         SourceKind: String(16),
         DeliveryStatus: String(16),
@@ -130,6 +145,8 @@ class Base(DeclarativeBase):
         Kind: String(16),
         Grain: String(16),
         ValueType: String(16),
+        RunStatus: String(16),
+        EvaluationSize: String(16),
         datetime: DateTime(timezone=True),
         str: Text(),
         int: Integer(),
@@ -558,14 +575,18 @@ class CensusBucketRow(Base):
 class Evaluation(Base):
     """one corpus + one feature config + N models (mvp-spec.md §9).
 
-    **Phase 1 never creates one.** The table exists because sw-design.md §6.3
-    requires the corpus delete guard — "deleting a corpus is refused (HTTP 409)
-    when any evaluation cites it" — to be implemented and tested against a
-    seeded row, and J3 asserts the `LOCKED · 1 eval` pill in the UI.
+    **A draft is a saved setup; an evaluation is a pinned one** (sw-design.md
+    §15.2). Every column below is editable while `launched_at IS NULL` and
+    immutable after — `evaluation_service.launch` stamps it, writes the
+    `evaluation_feature` snapshot and creates one `queued` `run` per selected
+    model, all in one transaction. After that every edit path raises
+    `EvaluationLockedError`.
 
-    `feature_config_id` is therefore a plain string with **no foreign key**:
-    `feature_config` is a phase-2 table and pulling it forward would freeze a
-    schema nobody has reviewed. Phase 2 adds the FK in its own migration.
+    Phases 1 and 2 never created one: the table existed because sw-design.md
+    §6.3 requires the corpus delete guard — "deleting a corpus is refused
+    (HTTP 409) when any evaluation cites it" — to be tested against a seeded
+    row, and J3 asserts the `LOCKED · 1 eval` pill. Phase 3 is where it grows
+    the setup it was always implying (SD13).
     """
 
     __tablename__ = "evaluation"
@@ -586,6 +607,46 @@ class Evaluation(Base):
     created_at: Mapped[datetime | None] = mapped_column(default=None)
     #: mvp-spec.md §9 — a run over a corpus below the floor is a smoke test.
     is_dev: Mapped[bool] = mapped_column(default=False)
+
+    # --- phase 3 (M17): the setup the design's six steps collect -----------
+
+    #: Step 3. **Nullable on purpose**: a draft can be saved before any
+    #: template exists, and the launch transaction is what requires one.
+    #: RESTRICT is the other half of "delete only when uncited" — a `run`
+    #: citing a version is the hard guard (see `Run.prompt_template_id`);
+    #: this one keeps a draft's choice from vanishing under it.
+    prompt_template_id: Mapped[PromptTemplateId | None] = mapped_column(
+        ForeignKey("prompt_template.id", ondelete="RESTRICT"), default=None
+    )
+    #: C1 / §15 F10 — the prompt language belongs to the **evaluation**, not
+    #: to the template: the codelist labels the prompt carries are
+    #: language-specific, and which language is a property of the question
+    #: being asked, not of the wording asking it. A `ra2.domain.language.
+    #: Language` value, stored as a plain string for the same reason
+    #: `record.language` is (M0-D7).
+    prompt_language: Mapped[str] = mapped_column(String(16), default="de")
+    #: Step 5. The design draws 0.0 and 42; both travel in every run's
+    #: provenance (mvp-spec.md §19.8).
+    temperature: Mapped[float] = mapped_column(default=0.0)
+    seed: Mapped[int] = mapped_column(default=42)
+    #: Step 6. `DEV` takes the first `RA2_DEV_RECORD_MAX` records by id —
+    #: deterministic, so a re-run is a check and not a new sample (§15 F9).
+    size: Mapped[EvaluationSize] = mapped_column(default=EvaluationSize.FULL)
+    #: Step 4, serialised (M0-D8 convention): `["llama3.1:8b-instruct-q8_0",
+    #: ...]`. One `run` per entry is created at launch. No FK — a model tag
+    #: is what the endpoint happens to hold, not a row this app owns.
+    selected_models_json: Mapped[str | None] = mapped_column(default=None)
+    #: `None` while this is a draft. Stamping it is the launch commit, and
+    #: "evaluation creation" in mvp-spec.md §8.5's sense is **this moment** —
+    #: not the moment the draft row appeared (sw-design.md §15.2).
+    launched_at: Mapped[datetime | None] = mapped_column(default=None)
+
+    features: Mapped[list[EvaluationFeature]] = relationship(
+        back_populates="evaluation", cascade="all, delete-orphan", passive_deletes=True
+    )
+    runs: Mapped[list[Run]] = relationship(
+        back_populates="evaluation", cascade="all, delete-orphan", passive_deletes=True
+    )
 
 
 # ===========================================================================
@@ -773,3 +834,274 @@ class Feature(Base):
     fingerprint: Mapped[str | None] = mapped_column(String(64), default=None)
 
     feature_config: Mapped[FeatureConfig] = relationship(back_populates="features")
+
+
+# ===========================================================================
+# Prompts and evaluation runs — phase 3, mvp-spec.md §5/§9/§10,
+# sw-design.md §15. `prompt_template`, `extraction` and everything under it
+# are IMMUTABLE: a save is a new row, a re-run is a new run (N5, Do-NOT #2).
+# ===========================================================================
+
+
+class PromptTemplate(Base):
+    """One version of the wording around the feature descriptions (§15.1).
+
+    **IMMUTABLE. A save is an `INSERT` at `version + 1`, never an `UPDATE`** —
+    copy-on-write, not versioning-by-convention: the runs citing a version
+    must keep resolving to the exact text they used, so the previous row's
+    `source` stays byte-identical. There is deliberately no `PATCH` route and
+    no service method that updates a `source`; the absence is the contract.
+
+    mvp-spec.md §10.2 called this "a versioned **on-disk** template". SD11
+    corrects it: the design's version list carries a citation count, an active
+    flag, a per-version fingerprint and "delete only when nothing cites it",
+    and the one that matters is enforceable only where the citations are —
+    which is `Run.prompt_template_id`'s `RESTRICT`, below.
+    """
+
+    __tablename__ = "prompt_template"
+    __table_args__ = (
+        UniqueConstraint("version", name="uq_prompt_template_version"),
+        CheckConstraint("version >= 1", name="version_positive"),
+    )
+
+    id: Mapped[PromptTemplateId] = mapped_column(primary_key=True)
+    #: One lineage, `v1…vN`, **no names** — a name is what a forked template
+    #: needs and nothing in the MVP forks one (§15.1, plan-phase-3.md C2).
+    version: Mapped[int]
+    #: The template text, verbatim, `{{slots}}` and all. Never rewritten.
+    source: Mapped[str]
+    created_at: Mapped[datetime]
+    #: Marks the one version new evaluations default to. Activating another
+    #: clears it, so at most one row is non-null at a time.
+    activated_at: Mapped[datetime | None] = mapped_column(default=None)
+    #: `domain.prompt.compute_template_fingerprint(source)` — sha256 over the
+    #: exact source. Stored on every run beside the model digest.
+    fingerprint: Mapped[str] = mapped_column(String(64))
+
+
+class EvaluationFeature(Base):
+    """The per-evaluation resolution of one feature (SD12, §15.2).
+
+    mvp-spec.md §5 puts `enum_codelist_json` and `fingerprint` on `feature`.
+    Phase 2 then decided a frozen `feature_config` is corpus-**independent**
+    and reusable across evaluations (plan-phase-2.md §15 F2), and the two
+    cannot both hold: the same frozen config cited against two corpora has two
+    different `column_mapping` generations under it, so two different codelist
+    snapshots and two different fingerprints.
+
+    **Written once, inside the launch transaction**, and never updated. That
+    is what makes "a later `code_table_import` never moves the fingerprint of
+    an already-created evaluation" (mvp-spec.md §8.5) true.
+
+    `feature.fingerprint` (phase 2) stays the draft-time **preview**: the same
+    function over the same inputs minus the codelist snapshot, which is
+    exactly why a preview badge and a run's fingerprint can legitimately
+    differ.
+    """
+
+    __tablename__ = "evaluation_feature"
+    __table_args__ = (Index("ix_evaluation_feature_evaluation_id", "evaluation_id"),)
+
+    evaluation_id: Mapped[EvaluationId] = mapped_column(
+        ForeignKey("evaluation.id", ondelete="CASCADE"), primary_key=True
+    )
+    #: RESTRICT: a frozen config's features are never deleted, and an
+    #: evaluation citing one must not be able to lose its snapshot.
+    feature_id: Mapped[FeatureId] = mapped_column(
+        ForeignKey("feature.id", ondelete="RESTRICT"), primary_key=True
+    )
+    #: The mapped attribute's whole code table, **including label text**,
+    #: serialised at launch (M0-D8 convention). `None` unless the feature's
+    #: `value_type` is `enum`.
+    enum_codelist_json: Mapped[str | None] = mapped_column(default=None)
+    #: `domain.fingerprint.compute_fingerprint` over the eight §8.5 inputs
+    #: *with* the snapshot above — the real one, not the draft preview.
+    fingerprint: Mapped[str] = mapped_column(String(64))
+
+    evaluation: Mapped[Evaluation] = relationship(back_populates="features")
+
+
+class Run(Base):
+    """One model's pass over one evaluation (mvp-spec.md §5, §9).
+
+    **Provenance is written at run start, not at completion** (§15.4): a run
+    that dies mid-corpus is still a reproducible run (mvp-spec.md §19.8).
+
+    There is **no `records_done` column**. Progress is
+    `COUNT(extraction WHERE run_id = …)` over an indexed column (§15 F6): a
+    counter would be a second source of truth that a restart can disagree
+    with, and being wrong about how much work is done is the one thing this
+    worker cannot afford.
+    """
+
+    __tablename__ = "run"
+    __table_args__ = (Index("ix_run_evaluation_id", "evaluation_id"),)
+
+    id: Mapped[RunId] = mapped_column(primary_key=True)
+    evaluation_id: Mapped[EvaluationId] = mapped_column(
+        ForeignKey("evaluation.id", ondelete="CASCADE")
+    )
+
+    # --- what varies inside an evaluation: the model, and only the model ---
+    model_name: Mapped[str] = mapped_column(String(200))
+    #: mvp-spec.md §19.8 — the digest, not just the tag. A tag is mutable at
+    #: the endpoint; the digest is what makes the run reproducible.
+    model_digest: Mapped[str] = mapped_column(String(64))
+
+    # --- the pinned inputs, copied here so a run is self-describing --------
+    #: mvp-spec.md §5's human-facing citation, kept as drawn ("prompt template
+    #: v4").
+    prompt_template_version: Mapped[int]
+    #: Added beside it (§15.2): a version integer alone cannot resolve exact
+    #: text once a lineage is long. **RESTRICT is "delete only when
+    #: uncited"** — the database refuses to drop a version a run cites, which
+    #: is the invariant §15.1 says can only be enforced where the citations
+    #: are.
+    prompt_template_id: Mapped[PromptTemplateId] = mapped_column(
+        ForeignKey("prompt_template.id", ondelete="RESTRICT")
+    )
+    prompt_template_fingerprint: Mapped[str] = mapped_column(String(64))
+    temperature: Mapped[float]
+    seed: Mapped[int]
+
+    # --- lifecycle ---------------------------------------------------------
+    status: Mapped[RunStatus] = mapped_column(default=RunStatus.QUEUED)
+    started_at: Mapped[datetime | None] = mapped_column(default=None)
+    finished_at: Mapped[datetime | None] = mapped_column(default=None)
+    #: Why a `failed` run failed — the design's muted "log" action. A failure
+    #: is a recorded outcome, never a silent stop (mvp-spec.md §10.4).
+    error: Mapped[str | None] = mapped_column(default=None)
+
+    # --- host provenance (mvp-spec.md §19.8) -------------------------------
+    #: e.g. `win11-x64`. `platform.platform()`'s answer, not a guess.
+    host_platform: Mapped[str] = mapped_column(String(200))
+    #: `None` when `GpuProbe.describe()` returned `None` — an honest
+    #: "unknown", not an error (§15.6).
+    gpu_name: Mapped[str | None] = mapped_column(String(200), default=None)
+    llm_endpoint: Mapped[str] = mapped_column(String(400), default="")
+
+    evaluation: Mapped[Evaluation] = relationship(back_populates="runs")
+    extractions: Mapped[list[Extraction]] = relationship(
+        back_populates="run", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class Extraction(Base):
+    """One model's output for one `(run, record)` (mvp-spec.md §5, §10.4).
+
+    **IMMUTABLE** (N5). A re-run creates a new `run` and new rows; `run_id` is
+    the discriminator everywhere.
+
+    `UNIQUE (run_id, record_id)` **is the resume key** (§15.3). Resume is "the
+    record ids in this run's scope with no `extraction` row" — a query, not
+    bookkeeping — and the constraint means a double write raises instead of
+    quietly updating (Do-NOT #2). Note the resume set can have **holes in the
+    middle**, not just a missing tail: a record whose retries were exhausted
+    leaves one, and resume must find it.
+
+    One of these rows, its `extraction_value` children and its
+    `extraction_entity` children are committed **together, per record**.
+    Nothing batches across records, and nothing holds a transaction open
+    across an LLM call.
+    """
+
+    __tablename__ = "extraction"
+    __table_args__ = (
+        UniqueConstraint("run_id", "record_id", name="uq_extraction_run_record"),
+        Index("ix_extraction_run_id", "run_id"),
+    )
+
+    id: Mapped[ExtractionId] = mapped_column(primary_key=True)
+    run_id: Mapped[RunId] = mapped_column(ForeignKey("run.id", ondelete="CASCADE"))
+    #: RESTRICT: an extraction is evidence. A corpus delete is already refused
+    #: while an evaluation cites it (§6.3); this is the second lock.
+    record_id: Mapped[RecordId] = mapped_column(ForeignKey("record.id", ondelete="RESTRICT"))
+
+    #: The response **verbatim**, stored alongside the parsed values
+    #: (mvp-spec.md §10.4). Non-null: a record whose retries were exhausted
+    #: leaves no row at all, so every row here has text.
+    raw_output_text: Mapped[str]
+    #: `False` is a **recorded outcome, not an exception** — the run
+    #: continues. The row carrying the evidence *is* the finding, which is why
+    #: this phase adds no `FindingCode` values (§15.3).
+    parse_ok: Mapped[bool] = mapped_column(default=True)
+    parse_error: Mapped[str | None] = mapped_column(default=None)
+
+    latency_ms: Mapped[int | None] = mapped_column(default=None)
+    #: The **real** counts, from the endpoint. `domain.prompt.estimate_tokens`
+    #: is the preview's estimate; these are the numbers that have to be right.
+    prompt_tokens: Mapped[int | None] = mapped_column(default=None)
+    completion_tokens: Mapped[int | None] = mapped_column(default=None)
+    #: mvp-spec.md §10.4 — retries are bounded **and counted**. Rendered in
+    #: the progress card's "retries 11 (bounded, counted)" metrics line.
+    retry_count: Mapped[int] = mapped_column(default=0)
+
+    run: Mapped[Run] = relationship(back_populates="extractions")
+    values: Mapped[list[ExtractionValue]] = relationship(
+        back_populates="extraction", cascade="all, delete-orphan", passive_deletes=True
+    )
+    entities: Mapped[list[ExtractionEntity]] = relationship(
+        back_populates="extraction", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class ExtractionValue(Base):
+    """One feature's answer inside one extraction (mvp-spec.md §5).
+
+    One row per `(extraction, feature)` — the composite primary key says so,
+    the same shape `unfall_row` uses for its cells.
+    """
+
+    __tablename__ = "extraction_value"
+
+    extraction_id: Mapped[ExtractionId] = mapped_column(
+        ForeignKey("extraction.id", ondelete="CASCADE"), primary_key=True
+    )
+    feature_id: Mapped[FeatureId] = mapped_column(
+        ForeignKey("feature.id", ondelete="RESTRICT"), primary_key=True
+    )
+    #: What the model said, **verbatim**. `None` is a real answer: the
+    #: narrative did not support a value.
+    value_raw: Mapped[str | None] = mapped_column(default=None)
+    #: Exact-and-trimmed only (D6). Never fuzzy, never a repair.
+    value_normalised: Mapped[str | None] = mapped_column(default=None)
+    present_flag: Mapped[bool] = mapped_column(default=False)
+    #: A span quoted **verbatim from the narrative**, required for every
+    #: non-null value (mvp-spec.md §10.2). Its absence is a recorded issue,
+    #: not a dropped row.
+    evidence_span: Mapped[str | None] = mapped_column(default=None)
+
+    extraction: Mapped[Extraction] = relationship(back_populates="values")
+
+
+class ExtractionEntity(Base):
+    """One vehicle or person the model reported (mvp-spec.md §5, §10.3).
+
+    **Captured and stored, never scored** in the MVP. It is the cheap capture
+    that makes set matching and per-entity alignment possible later without
+    re-running the corpus.
+
+    A plain string primary key, no dedicated id `NewType` — the same treatment
+    `code_value` gets (P2-D6): nothing joins against one of these by id
+    outside its own extraction. A model that repeats `(kind, ref)` therefore
+    produces two rows rather than a constraint violation, which is the right
+    answer for output nothing scores.
+    """
+
+    __tablename__ = "extraction_entity"
+    __table_args__ = (Index("ix_extraction_entity_extraction_id", "extraction_id"),)
+
+    id: Mapped[str] = mapped_column(String(_ID_LEN), primary_key=True)
+    extraction_id: Mapped[ExtractionId] = mapped_column(
+        ForeignKey("extraction.id", ondelete="CASCADE")
+    )
+    #: `vehicle` | `person`, as the model wrote it. Not an enum: nothing
+    #: scores this, and a fourth kind must be a value, not a migration.
+    entity_kind: Mapped[str] = mapped_column(String(32))
+    #: The role code the anonymisation uses — `B1`, `G1`, `P`.
+    entity_ref: Mapped[str] = mapped_column(String(32))
+    #: The free attribute bag, serialised (M0-D8 convention).
+    attributes_json: Mapped[str]
+
+    extraction: Mapped[Extraction] = relationship(back_populates="entities")

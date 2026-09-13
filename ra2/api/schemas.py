@@ -15,7 +15,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ra2.domain.census import CensusBucketLabel, TypeHint
 from ra2.domain.delivery import DeliveryStatus, Encoding, FileKind, SourceKind
+from ra2.domain.extraction import EvaluationSize, RunStatus
 from ra2.domain.findings import FindingCode, Severity
+from ra2.domain.llm import EndpointStatus
+from ra2.domain.prompt import PromptValidationCode, SlotName
 from ra2.infra.tasks import TaskStatus
 from ra2.services.readmodels import SortDir
 
@@ -33,15 +36,21 @@ __all__ = [
     "CodelistImportResponse",
     "ColumnCoverageResponse",
     "ColumnMappingResponse",
+    "ConnectionResponse",
     "CorpusPage",
     "CorpusResponse",
     "CreateCorpusRequest",
+    "CreateEvaluationRequest",
     "CreateFeatureConfigRequest",
+    "CreatePromptTemplateRequest",
     "DeliveryFileResponse",
     "DeliveryResponse",
     "DerivationFilterSchema",
     "DerivationSpecSchema",
     "ErrorResponse",
+    "EvaluationDraftResponse",
+    "EvaluationLaunchResponse",
+    "EvaluationResponse",
     "FeatureConfigResponse",
     "FeatureConfigSummaryResponse",
     "FeatureRequest",
@@ -51,11 +60,25 @@ __all__ = [
     "FindingResponse",
     "MapColumnRequest",
     "MatchingRuleSchema",
+    "ModelCatalogResponse",
+    "ModelChoiceResponse",
     "PageMeta",
     "ProfileBucketResponse",
+    "PromptTemplateResponse",
+    "PromptValidationErrorResponse",
+    "PromptValidationIssueResponse",
+    "ProvenanceResponse",
     "RegisterDeliveryRequest",
+    "ResolvePromptRequest",
+    "ResolvedPromptResponse",
+    "RunPage",
+    "RunProgressResponse",
+    "RunResponse",
     "SelectFileRequest",
+    "SlotResponse",
+    "TaskAcceptedResponse",
     "TaskProgressResponse",
+    "UpdateEvaluationRequest",
     "ValueCountResponse",
 ]
 
@@ -500,3 +523,261 @@ class FeatureValidationErrorResponse(_Schema):
     #: Named to match `FeatureValidationError.validation_errors` (§12.4's
     #: banned `errors=` keyword; Wave 2's amendment).
     validation_errors: list[str]
+
+
+# ===========================================================================
+# /api/v1/prompt-templates  (K1)
+#
+# There is deliberately **no PATCH model** here: saving is copy-on-write, and
+# the absence of an update shape is part of the contract (sw-design.md §15.1).
+# ===========================================================================
+
+
+class PromptTemplateResponse(_Schema):
+    """One version of the prompt template."""
+
+    prompt_template_id: str
+    version: int
+    source: str
+    created_at: datetime
+    is_active: bool = False
+    #: `COUNT(run WHERE prompt_template_id = …)` — what makes `deletable` and
+    #: the design's `locked` marker true rather than advisory.
+    cited_by_run_count: int = 0
+    fingerprint: str
+    deletable: bool = True
+
+
+class SlotResponse(_Schema):
+    """One row of the "Slots available" reference strip."""
+
+    name: SlotName
+    token: str
+    required: bool
+    resolves_to: str = ""
+
+
+class CreatePromptTemplateRequest(_Schema):
+    """ "Save as vN". The version is assigned by the store, never by the
+    caller, so two concurrent saves cannot pick the same integer."""
+
+    source: str = Field(min_length=1)
+
+
+class PromptValidationIssueResponse(_Schema):
+    """One reason a template was refused. `code` is the stable identifier;
+    wording lives in one rendering table in `ui/`."""
+
+    code: PromptValidationCode
+    slot: str | None = None
+    offset: int | None = None
+
+
+class PromptValidationErrorResponse(_Schema):
+    """422 from a refused save. **Nothing was written** (sw-design.md §15.1)."""
+
+    detail: str = "invalid prompt template; nothing was saved"
+    #: Named to match `PromptTemplateInvalidError.validation_errors` — §12.4's
+    #: banned `errors=` keyword, same as the two phase-2 error shapes.
+    validation_errors: list[PromptValidationIssueResponse]
+
+
+class ResolvePromptRequest(_Schema):
+    """Expand a template against a feature set and one record.
+
+    **Makes no model call** — both preview entry points land here (C4).
+    """
+
+    prompt_template_id: str
+    feature_config_id: str
+    record_id: str
+    language: str = "de"
+
+
+class ResolvedPromptResponse(_Schema):
+    text: str
+    #: Rendered `≈ N tokens`. An **estimate**: an exact count needs the
+    #: model's tokeniser and every tokeniser package downloads its vocabulary,
+    #: which is egress (N1). The real counts come back per call (C6).
+    token_estimate: int
+    record_key: str = ""
+    feature_count: int = 0
+    slots_used: list[SlotName] = Field(default_factory=list)
+    validation_errors: list[PromptValidationIssueResponse] = Field(default_factory=list)
+
+
+# ===========================================================================
+# /api/v1/evaluations, /api/v1/runs, /api/v1/models  (K2)
+# ===========================================================================
+
+
+class ModelChoiceResponse(_Schema):
+    """One row of the Models card.
+
+    `fits_vram` is `null` when the host's VRAM is unknown — not a failure:
+    every model stays selectable and the design's disabled row does not occur.
+    """
+
+    tag: str
+    digest: str
+    size_bytes: int
+    fits_vram: bool | None = None
+    selected: bool = False
+
+
+class ConnectionResponse(_Schema):
+    """The endpoint line under the Models card.
+
+    An unreachable endpoint is **200 with `reachable: false`**, never a 502:
+    the UI renders the reason beside the endpoint line and disables Launch,
+    and an error status would force exactly the toast the design rejects.
+    """
+
+    endpoint: str
+    status: EndpointStatus
+    reachable: bool
+    timeout_s: int
+    reason: str | None = None
+    gpu_name: str | None = None
+    gpu_vram_bytes: int | None = None
+
+
+class ModelCatalogResponse(_Schema):
+    """`GET /api/v1/models` — the catalogue and the connection, together."""
+
+    connection: ConnectionResponse
+    models: list[ModelChoiceResponse] = Field(default_factory=list)
+
+
+class CreateEvaluationRequest(_Schema):
+    """ "Save draft" for a new evaluation. Everything else takes the design's
+    defaults: the active template, temperature 0.0, seed 42, size `full`."""
+
+    name: str = Field(min_length=1, max_length=200)
+    corpus_id: str
+    feature_config_id: str
+
+
+class UpdateEvaluationRequest(_Schema):
+    """Edit any of the six setup steps. **Draft only** — editing a launched
+    evaluation is 409."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    corpus_id: str | None = None
+    feature_config_id: str | None = None
+    prompt_template_id: str | None = None
+    prompt_language: str | None = Field(default=None, max_length=16)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    seed: int | None = None
+    size: EvaluationSize | None = None
+    selected_models: list[str] | None = None
+
+
+class EvaluationDraftResponse(_Schema):
+    """An evaluation's setup — the six numbered steps, as data."""
+
+    evaluation_id: str
+    name: str
+    corpus_id: str
+    feature_config_id: str
+    prompt_template_id: str | None = None
+    prompt_language: str = "de"
+    temperature: float = 0.0
+    seed: int = 42
+    size: EvaluationSize = EvaluationSize.FULL
+    selected_models: list[str] = Field(default_factory=list)
+    launched_at: datetime | None = None
+
+
+class RunProgressResponse(_Schema):
+    """One per-model progress card. Every count is derived from committed
+    `extraction` rows, never from a counter column (§15 F6)."""
+
+    run_id: str
+    model_tag: str
+    status: RunStatus
+    done: int = 0
+    total: int = 0
+    percent: float = 0.0
+    parse_failures: int = 0
+    #: mvp-spec.md §10.4 — bounded **and** counted.
+    retries: int = 0
+    median_latency_ms: int | None = None
+    prompt_tokens: int = 0
+    elapsed_ms: int | None = None
+    eta_ms: int | None = None
+
+
+class RunResponse(_Schema):
+    """One row of the "Runs in this evaluation" table."""
+
+    run_id: str
+    evaluation_id: str
+    model_tag: str
+    model_digest: str
+    records_done: int = 0
+    started_at: datetime | None = None
+    status: RunStatus
+    #: mvp-spec.md §9 — every view showing this run's numbers carries the
+    #: "smoke test, not a result" marker.
+    is_dev: bool = False
+    error: str | None = None
+
+
+class RunPage(_Schema):
+    items: list[RunResponse]
+    meta: PageMeta
+
+
+class ProvenanceResponse(_Schema):
+    """mvp-spec.md §19.8 — "every run's record alone is sufficient to
+    reproduce it"."""
+
+    model_name: str
+    model_digest: str
+    prompt_template_version: int
+    prompt_template_fingerprint: str
+    temperature: float
+    seed: int
+    feature_config_id: str
+    #: `{feature key: fingerprint}` from `evaluation_feature` — the real ones,
+    #: resolved in the launch transaction, not draft previews.
+    feature_fingerprints: dict[str, str] = Field(default_factory=dict)
+    corpus_id: str
+    corpus_version: int
+    host_platform: str
+    gpu_name: str | None = None
+    llm_endpoint: str
+
+
+class EvaluationResponse(_Schema):
+    """One whole Evaluation screen."""
+
+    draft: EvaluationDraftResponse
+    connection: ConnectionResponse
+    models: list[ModelChoiceResponse] = Field(default_factory=list)
+    progress: list[RunProgressResponse] = Field(default_factory=list)
+    runs: RunPage | None = None
+    provenance: ProvenanceResponse | None = None
+    feature_config_label: str = ""
+    corpus_label: str = ""
+    corpus_record_count: int = 0
+    dev_record_max: int = 0
+    can_launch: bool = False
+
+
+class TaskAcceptedResponse(_Schema):
+    """Work was submitted; poll `GET /api/v1/tasks/{task_id}`."""
+
+    task_id: str
+
+
+class EvaluationLaunchResponse(_Schema):
+    """The launch commit, plus the task the worker runs under.
+
+    Two things in one response because they happen together and the view
+    needs both: the pinned evaluation to render, and the task id to poll.
+    """
+
+    evaluation: EvaluationResponse
+    task_id: str

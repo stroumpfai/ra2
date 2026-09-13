@@ -19,6 +19,7 @@ from ra2.domain.census import CensusBucket, TypeHint, ValueCount
 from ra2.domain.codelist_coverage import ColumnCoverage
 from ra2.domain.codes import CodeValue
 from ra2.domain.delivery import DeliveryStatus, FileKind, SourceKind
+from ra2.domain.extraction import EvaluationSize, RunStatus
 from ra2.domain.feature import DerivationSpec, Grain, Kind, MatchingRule, ValueType
 from ra2.domain.findings import Finding
 from ra2.domain.ids import (
@@ -28,10 +29,15 @@ from ra2.domain.ids import (
     ColumnMappingId,
     CorpusId,
     DeliveryId,
+    EvaluationId,
     FeatureConfigId,
     FeatureId,
     FileId,
+    PromptTemplateId,
+    RunId,
 )
+from ra2.domain.llm import EndpointStatus
+from ra2.domain.prompt import PromptValidationError, SlotName
 
 __all__ = [
     "CensusBucket",
@@ -40,14 +46,24 @@ __all__ = [
     "CodeAttributeView",
     "CodelistImportResult",
     "ColumnMappingView",
+    "ConnectionView",
     "CorpusSummary",
     "CorpusView",
     "DeliveryFileView",
     "DeliveryView",
+    "EvaluationDraftView",
+    "EvaluationView",
     "FeatureConfigView",
     "FeatureSetSummary",
     "FeatureView",
+    "ModelChoiceView",
     "Page",
+    "PromptTemplateView",
+    "ProvenanceView",
+    "ResolvedPromptView",
+    "RunProgressView",
+    "RunView",
+    "SlotView",
     "SortDir",
 ]
 
@@ -318,3 +334,286 @@ class FeatureSetSummary:
     @property
     def is_frozen(self) -> bool:
         return self.frozen_at is not None
+
+
+# ===========================================================================
+# Prompts (F5) — phase 3, mvp-spec.md §10.2, sw-design.md §15.1,
+# design/prompt-evaluation/README.md §1.
+# ===========================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class PromptTemplateView:
+    """One row of the Prompts version list, and the editor's content for it.
+
+    The four row markers the design draws come from three fields: `is_active`
+    -> the `ACTIVE` pill and the selected-row treatment; `cited_by_run_count`
+    > 0 with `is_active` false -> `locked`; `deletable` -> the `--danger`
+    delete button.
+    """
+
+    prompt_template_id: PromptTemplateId
+    version: int
+    #: The template text, verbatim. The Source card highlights `{{slots}}` in
+    #: it; the highlighting is presentation, the text is not touched.
+    source: str
+    created_at: datetime
+    is_active: bool
+    #: The design's ".rsub" line, "created · citation count".
+    cited_by_run_count: int
+    fingerprint: str
+
+    @property
+    def deletable(self) -> bool:
+        """Only a version with zero runs can be deleted; all others show
+        `locked` (sw-design.md §15.1)."""
+        return self.cited_by_run_count == 0
+
+
+@dataclass(frozen=True, slots=True)
+class SlotView:
+    """One row of the "Slots available" reference strip.
+
+    `resolves_to` is the design's per-slot description, already resolved
+    against the current context where there is one — "13 features",
+    "record text", "de". The view renders it; it never computes it.
+    """
+
+    name: SlotName
+    token: str
+    required: bool
+    resolves_to: str
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedPromptView:
+    """The shared preview panel's content (plan-phase-3.md C4).
+
+    **One component, two entry points**: Prompts' "Preview with record 1"
+    resolves against the active feature set and record 1; Evaluation's
+    "Preview prompt" resolves against its own pinned inputs. Neither makes a
+    model call.
+    """
+
+    text: str
+    #: Rendered as `≈ N tokens` — an **estimate**, and the UI says so. The
+    #: real counts come back from the endpoint per call (C6).
+    token_estimate: int
+    #: The design's header line, "Resolved — record 1, all 13 features".
+    record_key: str
+    feature_count: int
+    slots_used: tuple[SlotName, ...] = ()
+    #: Non-empty when the template being previewed would not save. The
+    #: preview still renders — seeing the broken expansion is the point.
+    validation_errors: tuple[PromptValidationError, ...] = ()
+
+
+# ===========================================================================
+# Evaluation (F6) — phase 3, mvp-spec.md §9, sw-design.md §15.2,
+# design/prompt-evaluation/README.md §2.
+# ===========================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class ModelChoiceView:
+    """One row of the Models card (the design's step 4).
+
+    `fits_vram` is `None` when the host's VRAM is unknown — no NVIDIA GPU, no
+    NVML, no override. That is **not** a failure: every model stays
+    selectable and the design's disabled row simply does not occur
+    (sw-design.md §15.6).
+    """
+
+    tag: str
+    digest: str
+    size_bytes: int
+    fits_vram: bool | None
+    selected: bool = False
+
+    @property
+    def disabled(self) -> bool:
+        """`opacity:.55` with the size line in `--warn` — only when we
+        actually know the model does not fit."""
+        return self.fits_vram is False
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectionView:
+    """The endpoint line under the Models card, and the settings dialog's
+    three controls (Q4).
+
+    `reason` is rendered **beside the endpoint line, never as a toast**, and
+    an unreachable endpoint **disables Launch** (plan-phase-3.md C3).
+    """
+
+    endpoint: str
+    status: EndpointStatus
+    timeout_s: int
+    #: `None` when reachable. A sentence for the analyst, from one rendering
+    #: table in `ui/` keyed on `status` — not a provider error string.
+    reason: str | None = None
+    #: The probe's answer, for the reproducibility card and the VRAM
+    #: judgement. `None` is the honest "unknown".
+    gpu_name: str | None = None
+    gpu_vram_bytes: int | None = None
+
+    @property
+    def is_reachable(self) -> bool:
+        return self.status is EndpointStatus.REACHABLE
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationDraftView:
+    """An evaluation's **setup** — the six numbered steps, as data.
+
+    Editable while `launched_at` is `None`; every edit path raises
+    `EvaluationLockedError` after (sw-design.md §15.2).
+    """
+
+    evaluation_id: EvaluationId
+    name: str
+    corpus_id: CorpusId
+    feature_config_id: FeatureConfigId
+    prompt_template_id: PromptTemplateId | None
+    prompt_language: str
+    temperature: float
+    seed: int
+    size: EvaluationSize
+    selected_models: tuple[str, ...] = ()
+    launched_at: datetime | None = None
+
+    @property
+    def is_launched(self) -> bool:
+        return self.launched_at is not None
+
+    @property
+    def launch_label_count(self) -> int:
+        """The primary button reads "Launch N runs", and N follows the model
+        selection."""
+        return len(self.selected_models)
+
+
+@dataclass(frozen=True, slots=True)
+class RunProgressView:
+    """One per-model progress card (the design's progress column).
+
+    Every count here is **derived from committed `extraction` rows**, never
+    from a counter column (§15 F6): a counter is a second source of truth that
+    a restart can disagree with. A `queued` model renders with a 0 % bar and
+    **no metrics line** — there is nothing honest to put in it yet.
+    """
+
+    run_id: RunId
+    model_tag: str
+    status: RunStatus
+    done: int
+    total: int
+    parse_failures: int = 0
+    retries: int = 0
+    median_latency_ms: int | None = None
+    prompt_tokens: int = 0
+    elapsed_ms: int | None = None
+    eta_ms: int | None = None
+
+    @property
+    def percent(self) -> float:
+        """0-100, clamped. The `.bar` fill width."""
+        if self.total <= 0:
+            return 0.0
+        return min(100.0, max(0.0, 100.0 * self.done / self.total))
+
+    @property
+    def has_metrics(self) -> bool:
+        return self.status is not RunStatus.QUEUED
+
+
+@dataclass(frozen=True, slots=True)
+class RunView:
+    """One row of the "Runs in this evaluation" table.
+
+    `is_dev` paints the row `--warn-soft` and every downstream view must label
+    it "smoke test, not a result" (mvp-spec.md §9). A `FAILED` row paints
+    `--danger-soft` and offers a muted "log" action instead of "results".
+    """
+
+    run_id: RunId
+    evaluation_id: EvaluationId
+    model_tag: str
+    model_digest: str
+    records_done: int
+    started_at: datetime | None
+    status: RunStatus
+    is_dev: bool = False
+    #: Why it failed — the "log" action's content. `None` unless `FAILED`.
+    error: str | None = None
+
+    @property
+    def is_resumable(self) -> bool:
+        """An interrupted run is resumed **explicitly**; nothing auto-restarts
+        at startup (§15 F8)."""
+        return self.status is RunStatus.INTERRUPTED
+
+
+@dataclass(frozen=True, slots=True)
+class ProvenanceView:
+    """ "Stored on every run — enough to reproduce it" (mvp-spec.md §19.8).
+
+    Every field the acceptance criterion names, in the order the design's
+    reproducibility card lists them. If a field here is `None`, the run is not
+    reproducible and the card must say so rather than omit the line.
+    """
+
+    model_name: str
+    model_digest: str
+    prompt_template_version: int
+    prompt_template_fingerprint: str
+    temperature: float
+    seed: int
+    feature_config_id: FeatureConfigId
+    #: `{feature key: fingerprint}` from `evaluation_feature` — the real
+    #: fingerprints, resolved in the launch transaction, not draft previews.
+    feature_fingerprints: Mapping[str, str]
+    corpus_id: CorpusId
+    corpus_version: int
+    host_platform: str
+    gpu_name: str | None
+    llm_endpoint: str
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationView:
+    """A whole evaluation screen's worth of data: setup, models, connection,
+    progress, runs and provenance.
+
+    One read model rather than six service calls, for the same reason
+    `DeliveryView` carries its files: the view renders one screen and must not
+    assemble it from parts that could disagree.
+    """
+
+    draft: EvaluationDraftView
+    connection: ConnectionView
+    models: tuple[ModelChoiceView, ...] = ()
+    progress: tuple[RunProgressView, ...] = ()
+    runs: Page[RunView] | None = None
+    #: `None` until a run exists — provenance is written at run start.
+    provenance: ProvenanceView | None = None
+    #: The toolbar's pinned-inputs line, "Weather & conditions · v2 — only the
+    #: model varies".
+    feature_config_label: str = ""
+    corpus_label: str = ""
+    #: What step 6 offers: the corpus's record count, and the dev cap from
+    #: `RA2_DEV_RECORD_MAX`. The design's "Dev · 40 records" reads its number
+    #: from config, never from a literal.
+    corpus_record_count: int = 0
+    dev_record_max: int = 0
+
+    @property
+    def can_launch(self) -> bool:
+        """An unreachable endpoint **disables Launch**, with the reason
+        rendered beside the endpoint line (plan-phase-3.md C3)."""
+        return (
+            self.connection.is_reachable
+            and bool(self.draft.selected_models)
+            and self.draft.prompt_template_id is not None
+            and not self.draft.is_launched
+        )

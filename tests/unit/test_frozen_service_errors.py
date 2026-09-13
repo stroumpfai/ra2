@@ -7,11 +7,17 @@ the lead with the rest of the M0 contract.
 import pytest
 
 from ra2.domain.findings import Finding, FindingCode, Severity
+from ra2.domain.llm import EndpointStatus
+from ra2.domain.prompt import PromptValidationCode, PromptValidationError
 from ra2.services.errors import (
     BlockingFindingsError,
     CorpusLockedError,
     DeliveryNotAnalysedError,
+    EvaluationLockedError,
+    LlmEndpointError,
     NotFoundError,
+    PromptTemplateCitedError,
+    PromptTemplateInvalidError,
     ServiceError,
 )
 
@@ -65,3 +71,59 @@ def test_delivery_not_analysed_names_the_delivery():
     error = DeliveryNotAnalysedError("d-1")
     assert error.delivery_id == "d-1"
     assert "d-1" in str(error)
+
+
+# ===========================================================================
+# Prompts and evaluation — phase 3 (M17). Same reasoning as above: both
+# adapters translate these, so what they carry has to be stable.
+# ===========================================================================
+
+
+def test_the_phase_3_errors_are_one_family_too():
+    for error in (
+        PromptTemplateInvalidError,
+        PromptTemplateCitedError,
+        EvaluationLockedError,
+        LlmEndpointError,
+    ):
+        assert issubclass(error, ServiceError)
+
+
+def test_prompt_template_invalid_carries_the_typed_payloads_immutably():
+    """422 returns the validation errors themselves, not a sentence: the
+    router sends `code`, and wording lives in one rendering table in `ui/`."""
+    issues = [
+        PromptValidationError(code=PromptValidationCode.MISSING_REQUIRED_SLOT, slot="narrative")
+    ]
+    error = PromptTemplateInvalidError(issues)
+    issues.clear()
+
+    assert isinstance(error.validation_errors, tuple)
+    assert len(error.validation_errors) == 1
+    assert error.validation_errors[0].code is PromptValidationCode.MISSING_REQUIRED_SLOT
+    assert error.validation_errors[0].slot == "narrative"
+
+
+def test_prompt_template_cited_names_the_version_and_the_count():
+    """409: the runs citing it must keep resolving to the exact text they
+    used, so a cited version is never deleted (sw-design.md §15.1)."""
+    error = PromptTemplateCitedError("pt-4", 3)
+    assert error.prompt_template_id == "pt-4"
+    assert error.run_count == 3
+    assert "pt-4" in str(error)
+
+
+def test_evaluation_locked_names_the_evaluation():
+    """409: editable while `launched_at IS NULL`, immutable after."""
+    error = EvaluationLockedError("e-1")
+    assert error.evaluation_id == "e-1"
+    assert "e-1" in str(error)
+
+
+def test_llm_endpoint_carries_the_url_and_the_status():
+    """The non-loopback refusal is raised at client construction and names
+    N1 — there is deliberately no opt-out setting (§15 F4)."""
+    error = LlmEndpointError("http://192.168.1.9:11434/v1", EndpointStatus.REFUSED_NOT_LOOPBACK)
+    assert error.base_url == "http://192.168.1.9:11434/v1"
+    assert error.status is EndpointStatus.REFUSED_NOT_LOOPBACK
+    assert "192.168.1.9" in str(error)

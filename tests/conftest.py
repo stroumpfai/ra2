@@ -16,19 +16,29 @@ from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
+from tests.fixtures.fake_llm import FakeLLMClient, StaticModelCatalog
 
 from ra2.infra.config import Settings
+from ra2.infra.gpu import GpuInfo, StaticGpuProbe
 from ra2.main import create_app
 
 __all__ = [
     "FrozenClock",
     "SeededFactory",
     "app_factory",
+    "fake_llm",
+    "fake_model_catalog",
     "frozen_clock",
     "seeded_ids",
     "settings",
+    "static_gpu",
     "tmp_data_dir",
 ]
+
+#: The design's host: "gpu RTX 4090 24 GB". Fixed here so a `fits_vram`
+#: judgement is the same on a laptop with no GPU and on the target machine —
+#: phase 3's whole test suite must pass on both (plan-phase-3.md §11).
+FIXTURE_GPU = GpuInfo(name="RTX 4090", total_vram_bytes=24_000_000_000)
 
 #: A fixed instant, so golden reports and E2E screenshots are byte-stable.
 FROZEN_NOW = datetime(2026, 9, 2, 9, 30, tzinfo=UTC)
@@ -87,6 +97,11 @@ def settings(tmp_data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
         "RA2_DEV_RECORD_MAX",
         "RA2_EVAL_RECORD_MIN",
         "RA2_MIN_CELL_COUNT",
+        "RA2_LLM_TIMEOUT_S",
+        "RA2_LLM_MAX_RETRIES",
+        "RA2_RUN_CONCURRENCY",
+        "RA2_GPU_VRAM_GB",
+        "RA2_GPU_NAME",
     ):
         monkeypatch.delenv(name, raising=False)
     return Settings(data_dir=tmp_data_dir, _env_file=None)
@@ -103,10 +118,40 @@ def seeded_ids() -> SeededFactory:
 
 
 @pytest.fixture
+def fake_llm() -> FakeLLMClient:
+    """The LLM seam's substitute (`tests/fixtures/fake_llm.py`, H4).
+
+    **Nothing in layers 1-4 talks to a live endpoint** (plan-phase-3.md §11):
+    the whole suite must pass on a machine with no GPU and nothing listening
+    on 11434. Injected through `create_app()`'s keyword argument, so there is
+    no test-mode branch in production code (§12.12).
+    """
+    return FakeLLMClient()
+
+
+@pytest.fixture
+def fake_model_catalog() -> StaticModelCatalog:
+    """A reachable endpoint with the design's fixture models. Pass
+    `StaticModelCatalog(status=EndpointStatus.UNREACHABLE)` explicitly to
+    exercise the disabled-Launch path."""
+    return StaticModelCatalog()
+
+
+@pytest.fixture
+def static_gpu() -> StaticGpuProbe:
+    """A fixed GPU answer. The real `NvmlGpuProbe` would make every
+    VRAM-dependent assertion depend on the machine running the test."""
+    return StaticGpuProbe(FIXTURE_GPU)
+
+
+@pytest.fixture
 def app_factory(
     settings: Settings,
     frozen_clock: FrozenClock,
     seeded_ids: SeededFactory,
+    fake_llm: FakeLLMClient,
+    fake_model_catalog: StaticModelCatalog,
+    static_gpu: StaticGpuProbe,
 ) -> Iterator[Callable[..., FastAPI]]:
     """Build an app with deterministic adapters.
 
@@ -122,6 +167,9 @@ def app_factory(
             "settings": settings,
             "clock": frozen_clock,
             "ids": seeded_ids,
+            "llm_client": fake_llm,
+            "model_catalog": fake_model_catalog,
+            "gpu_probe": static_gpu,
             "mount_ui": False,
         }
         kwargs.update(overrides)

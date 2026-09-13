@@ -511,6 +511,68 @@
         "title": "ColumnMappingResponse",
         "type": "object"
       },
+      "ConnectionResponse": {
+        "additionalProperties": false,
+        "description": "The endpoint line under the Models card.\n\nAn unreachable endpoint is **200 with `reachable: false`**, never a 502:\nthe UI renders the reason beside the endpoint line and disables Launch,\nand an error status would force exactly the toast the design rejects.",
+        "properties": {
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "gpu_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Name"
+          },
+          "gpu_vram_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Vram Bytes"
+          },
+          "reachable": {
+            "title": "Reachable",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "$ref": "#/components/schemas/EndpointStatus"
+          },
+          "timeout_s": {
+            "title": "Timeout S",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "endpoint",
+          "status",
+          "reachable",
+          "timeout_s"
+        ],
+        "title": "ConnectionResponse",
+        "type": "object"
+      },
       "CorpusPage": {
         "additionalProperties": false,
         "properties": {
@@ -644,6 +706,33 @@
         "title": "CreateCorpusRequest",
         "type": "object"
       },
+      "CreateEvaluationRequest": {
+        "additionalProperties": false,
+        "description": "\"Save draft\" for a new evaluation. Everything else takes the design's\ndefaults: the active template, temperature 0.0, seed 42, size `full`.",
+        "properties": {
+          "corpus_id": {
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "feature_config_id": {
+            "title": "Feature Config Id",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "corpus_id",
+          "feature_config_id"
+        ],
+        "title": "CreateEvaluationRequest",
+        "type": "object"
+      },
       "CreateFeatureConfigRequest": {
         "additionalProperties": false,
         "properties": {
@@ -669,6 +758,22 @@
           "name"
         ],
         "title": "CreateFeatureConfigRequest",
+        "type": "object"
+      },
+      "CreatePromptTemplateRequest": {
+        "additionalProperties": false,
+        "description": "\"Save as vN\". The version is assigned by the store, never by the\ncaller, so two concurrent saves cannot pick the same integer.",
+        "properties": {
+          "source": {
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "CreatePromptTemplateRequest",
         "type": "object"
       },
       "DeliveryFileResponse": {
@@ -1022,6 +1127,16 @@
         "title": "Encoding",
         "type": "string"
       },
+      "EndpointStatus": {
+        "description": "Whether the configured endpoint is there.\n\n**Unreachable is a state, not an error** (sw-design.md \u00a715.5): the service\nhands the view an empty model list and a reason, the view renders it beside\nthe endpoint line and disables Launch. Never a toast, never a 502 \u2014 a 502\nwould force exactly the toast the design rejects.",
+        "enum": [
+          "reachable",
+          "unreachable",
+          "refused_not_loopback"
+        ],
+        "title": "EndpointStatus",
+        "type": "string"
+      },
       "ErrorResponse": {
         "additionalProperties": false,
         "description": "The body of every 4xx that is not a validation error.",
@@ -1036,6 +1151,190 @@
         ],
         "title": "ErrorResponse",
         "type": "object"
+      },
+      "EvaluationDraftResponse": {
+        "additionalProperties": false,
+        "description": "An evaluation's setup \u2014 the six numbered steps, as data.",
+        "properties": {
+          "corpus_id": {
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "evaluation_id": {
+            "title": "Evaluation Id",
+            "type": "string"
+          },
+          "feature_config_id": {
+            "title": "Feature Config Id",
+            "type": "string"
+          },
+          "launched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Launched At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "prompt_language": {
+            "default": "de",
+            "title": "Prompt Language",
+            "type": "string"
+          },
+          "prompt_template_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Template Id"
+          },
+          "seed": {
+            "default": 42,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "selected_models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Selected Models",
+            "type": "array"
+          },
+          "size": {
+            "$ref": "#/components/schemas/EvaluationSize",
+            "default": "full"
+          },
+          "temperature": {
+            "default": 0.0,
+            "title": "Temperature",
+            "type": "number"
+          }
+        },
+        "required": [
+          "evaluation_id",
+          "name",
+          "corpus_id",
+          "feature_config_id"
+        ],
+        "title": "EvaluationDraftResponse",
+        "type": "object"
+      },
+      "EvaluationLaunchResponse": {
+        "additionalProperties": false,
+        "description": "The launch commit, plus the task the worker runs under.\n\nTwo things in one response because they happen together and the view\nneeds both: the pinned evaluation to render, and the task id to poll.",
+        "properties": {
+          "evaluation": {
+            "$ref": "#/components/schemas/EvaluationResponse"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evaluation",
+          "task_id"
+        ],
+        "title": "EvaluationLaunchResponse",
+        "type": "object"
+      },
+      "EvaluationResponse": {
+        "additionalProperties": false,
+        "description": "One whole Evaluation screen.",
+        "properties": {
+          "can_launch": {
+            "default": false,
+            "title": "Can Launch",
+            "type": "boolean"
+          },
+          "connection": {
+            "$ref": "#/components/schemas/ConnectionResponse"
+          },
+          "corpus_label": {
+            "default": "",
+            "title": "Corpus Label",
+            "type": "string"
+          },
+          "corpus_record_count": {
+            "default": 0,
+            "title": "Corpus Record Count",
+            "type": "integer"
+          },
+          "dev_record_max": {
+            "default": 0,
+            "title": "Dev Record Max",
+            "type": "integer"
+          },
+          "draft": {
+            "$ref": "#/components/schemas/EvaluationDraftResponse"
+          },
+          "feature_config_label": {
+            "default": "",
+            "title": "Feature Config Label",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelChoiceResponse"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "progress": {
+            "items": {
+              "$ref": "#/components/schemas/RunProgressResponse"
+            },
+            "title": "Progress",
+            "type": "array"
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProvenanceResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunPage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "draft",
+          "connection"
+        ],
+        "title": "EvaluationResponse",
+        "type": "object"
+      },
+      "EvaluationSize": {
+        "description": "The design's step 6: \"Evaluation \u00b7 all N\" or \"Dev \u00b7 N records\".\n\nA `DEV` selection takes the **first `RA2_DEV_RECORD_MAX` records by id** \u2014\ndeterministic, because \"a re-run is a check, not a new sample\" is false the\nmoment the record selection is random (\u00a715 F9). The seed fixes what the\nmodel does with what it sees; determinism has to cover what it is *shown*\ntoo.",
+        "enum": [
+          "full",
+          "dev"
+        ],
+        "title": "EvaluationSize",
+        "type": "string"
       },
       "FeatureConfigResponse": {
         "additionalProperties": false,
@@ -1561,6 +1860,68 @@
         "title": "MatchingRuleSchema",
         "type": "object"
       },
+      "ModelCatalogResponse": {
+        "additionalProperties": false,
+        "description": "`GET /api/v1/models` \u2014 the catalogue and the connection, together.",
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/ConnectionResponse"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelChoiceResponse"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "connection"
+        ],
+        "title": "ModelCatalogResponse",
+        "type": "object"
+      },
+      "ModelChoiceResponse": {
+        "additionalProperties": false,
+        "description": "One row of the Models card.\n\n`fits_vram` is `null` when the host's VRAM is unknown \u2014 not a failure:\nevery model stays selectable and the design's disabled row does not occur.",
+        "properties": {
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "fits_vram": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fits Vram"
+          },
+          "selected": {
+            "default": false,
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "tag": {
+            "title": "Tag",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tag",
+          "digest",
+          "size_bytes"
+        ],
+        "title": "ModelChoiceResponse",
+        "type": "object"
+      },
       "PageMeta": {
         "additionalProperties": false,
         "description": "Paging envelope. `total` is the unpaged count matching the filter.",
@@ -1613,6 +1974,210 @@
         "title": "ProfileBucketResponse",
         "type": "object"
       },
+      "PromptTemplateResponse": {
+        "additionalProperties": false,
+        "description": "One version of the prompt template.",
+        "properties": {
+          "cited_by_run_count": {
+            "default": 0,
+            "title": "Cited By Run Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "deletable": {
+            "default": true,
+            "title": "Deletable",
+            "type": "boolean"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "is_active": {
+            "default": false,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "prompt_template_id": {
+            "title": "Prompt Template Id",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt_template_id",
+          "version",
+          "source",
+          "created_at",
+          "fingerprint"
+        ],
+        "title": "PromptTemplateResponse",
+        "type": "object"
+      },
+      "PromptValidationCode": {
+        "description": "Why a template was refused. A **stable identifier**, asserted on\ninstead of message text \u2014 the same rule `FindingCode` follows (CLAUDE.md,\n\"Findings, not prose\"). Wording lives in one rendering table in `ui/`.",
+        "enum": [
+          "unknown_slot",
+          "missing_required_slot",
+          "malformed_slot",
+          "empty_source"
+        ],
+        "title": "PromptValidationCode",
+        "type": "string"
+      },
+      "PromptValidationErrorResponse": {
+        "additionalProperties": false,
+        "description": "422 from a refused save. **Nothing was written** (sw-design.md \u00a715.1).",
+        "properties": {
+          "detail": {
+            "default": "invalid prompt template; nothing was saved",
+            "title": "Detail",
+            "type": "string"
+          },
+          "validation_errors": {
+            "items": {
+              "$ref": "#/components/schemas/PromptValidationIssueResponse"
+            },
+            "title": "Validation Errors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "validation_errors"
+        ],
+        "title": "PromptValidationErrorResponse",
+        "type": "object"
+      },
+      "PromptValidationIssueResponse": {
+        "additionalProperties": false,
+        "description": "One reason a template was refused. `code` is the stable identifier;\nwording lives in one rendering table in `ui/`.",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/PromptValidationCode"
+          },
+          "offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offset"
+          },
+          "slot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slot"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "PromptValidationIssueResponse",
+        "type": "object"
+      },
+      "ProvenanceResponse": {
+        "additionalProperties": false,
+        "description": "mvp-spec.md \u00a719.8 \u2014 \"every run's record alone is sufficient to\nreproduce it\".",
+        "properties": {
+          "corpus_id": {
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "corpus_version": {
+            "title": "Corpus Version",
+            "type": "integer"
+          },
+          "feature_config_id": {
+            "title": "Feature Config Id",
+            "type": "string"
+          },
+          "feature_fingerprints": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Feature Fingerprints",
+            "type": "object"
+          },
+          "gpu_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Name"
+          },
+          "host_platform": {
+            "title": "Host Platform",
+            "type": "string"
+          },
+          "llm_endpoint": {
+            "title": "Llm Endpoint",
+            "type": "string"
+          },
+          "model_digest": {
+            "title": "Model Digest",
+            "type": "string"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          },
+          "prompt_template_fingerprint": {
+            "title": "Prompt Template Fingerprint",
+            "type": "string"
+          },
+          "prompt_template_version": {
+            "title": "Prompt Template Version",
+            "type": "integer"
+          },
+          "seed": {
+            "title": "Seed",
+            "type": "integer"
+          },
+          "temperature": {
+            "title": "Temperature",
+            "type": "number"
+          }
+        },
+        "required": [
+          "model_name",
+          "model_digest",
+          "prompt_template_version",
+          "prompt_template_fingerprint",
+          "temperature",
+          "seed",
+          "feature_config_id",
+          "corpus_id",
+          "corpus_version",
+          "host_platform",
+          "llm_endpoint"
+        ],
+        "title": "ProvenanceResponse",
+        "type": "object"
+      },
       "RegisterDeliveryRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1644,6 +2209,266 @@
         "title": "RegisterDeliveryRequest",
         "type": "object"
       },
+      "ResolvePromptRequest": {
+        "additionalProperties": false,
+        "description": "Expand a template against a feature set and one record.\n\n**Makes no model call** \u2014 both preview entry points land here (C4).",
+        "properties": {
+          "feature_config_id": {
+            "title": "Feature Config Id",
+            "type": "string"
+          },
+          "language": {
+            "default": "de",
+            "title": "Language",
+            "type": "string"
+          },
+          "prompt_template_id": {
+            "title": "Prompt Template Id",
+            "type": "string"
+          },
+          "record_id": {
+            "title": "Record Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt_template_id",
+          "feature_config_id",
+          "record_id"
+        ],
+        "title": "ResolvePromptRequest",
+        "type": "object"
+      },
+      "ResolvedPromptResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "feature_count": {
+            "default": 0,
+            "title": "Feature Count",
+            "type": "integer"
+          },
+          "record_key": {
+            "default": "",
+            "title": "Record Key",
+            "type": "string"
+          },
+          "slots_used": {
+            "items": {
+              "$ref": "#/components/schemas/SlotName"
+            },
+            "title": "Slots Used",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "token_estimate": {
+            "title": "Token Estimate",
+            "type": "integer"
+          },
+          "validation_errors": {
+            "items": {
+              "$ref": "#/components/schemas/PromptValidationIssueResponse"
+            },
+            "title": "Validation Errors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "text",
+          "token_estimate"
+        ],
+        "title": "ResolvedPromptResponse",
+        "type": "object"
+      },
+      "RunPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PageMeta"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
+        ],
+        "title": "RunPage",
+        "type": "object"
+      },
+      "RunProgressResponse": {
+        "additionalProperties": false,
+        "description": "One per-model progress card. Every count is derived from committed\n`extraction` rows, never from a counter column (\u00a715 F6).",
+        "properties": {
+          "done": {
+            "default": 0,
+            "title": "Done",
+            "type": "integer"
+          },
+          "elapsed_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elapsed Ms"
+          },
+          "eta_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta Ms"
+          },
+          "median_latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Latency Ms"
+          },
+          "model_tag": {
+            "title": "Model Tag",
+            "type": "string"
+          },
+          "parse_failures": {
+            "default": 0,
+            "title": "Parse Failures",
+            "type": "integer"
+          },
+          "percent": {
+            "default": 0.0,
+            "title": "Percent",
+            "type": "number"
+          },
+          "prompt_tokens": {
+            "default": 0,
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "retries": {
+            "default": 0,
+            "title": "Retries",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "model_tag",
+          "status"
+        ],
+        "title": "RunProgressResponse",
+        "type": "object"
+      },
+      "RunResponse": {
+        "additionalProperties": false,
+        "description": "One row of the \"Runs in this evaluation\" table.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "evaluation_id": {
+            "title": "Evaluation Id",
+            "type": "string"
+          },
+          "is_dev": {
+            "default": false,
+            "title": "Is Dev",
+            "type": "boolean"
+          },
+          "model_digest": {
+            "title": "Model Digest",
+            "type": "string"
+          },
+          "model_tag": {
+            "title": "Model Tag",
+            "type": "string"
+          },
+          "records_done": {
+            "default": 0,
+            "title": "Records Done",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          }
+        },
+        "required": [
+          "run_id",
+          "evaluation_id",
+          "model_tag",
+          "model_digest",
+          "status"
+        ],
+        "title": "RunResponse",
+        "type": "object"
+      },
+      "RunStatus": {
+        "description": "One model's pass over one evaluation (sw-design.md \u00a715.2).",
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "failed",
+          "interrupted"
+        ],
+        "title": "RunStatus",
+        "type": "string"
+      },
       "SelectFileRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1667,6 +2492,45 @@
         "title": "Severity",
         "type": "string"
       },
+      "SlotName": {
+        "description": "The closed slot catalogue (sw-design.md \u00a715.1). Never extended at\nruntime \u2014 an unknown `{{slot}}` is a validation error, not a pass-through.",
+        "enum": [
+          "feature_block",
+          "narrative",
+          "language"
+        ],
+        "title": "SlotName",
+        "type": "string"
+      },
+      "SlotResponse": {
+        "additionalProperties": false,
+        "description": "One row of the \"Slots available\" reference strip.",
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/SlotName"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "resolves_to": {
+            "default": "",
+            "title": "Resolves To",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "token",
+          "required"
+        ],
+        "title": "SlotResponse",
+        "type": "object"
+      },
       "SortDir": {
         "description": "Sort direction. Always an explicit **service-call parameter**, even when\nthe dataset is small enough to sort in memory (sw-design.md \u00a78.4).",
         "enum": [
@@ -1684,6 +2548,21 @@
         ],
         "title": "SourceKind",
         "type": "string"
+      },
+      "TaskAcceptedResponse": {
+        "additionalProperties": false,
+        "description": "Work was submitted; poll `GET /api/v1/tasks/{task_id}`.",
+        "properties": {
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "title": "TaskAcceptedResponse",
+        "type": "object"
       },
       "TaskProgressResponse": {
         "additionalProperties": false,
@@ -1758,6 +2637,120 @@
         ],
         "title": "TypeHint",
         "type": "string"
+      },
+      "UpdateEvaluationRequest": {
+        "additionalProperties": false,
+        "description": "Edit any of the six setup steps. **Draft only** \u2014 editing a launched\nevaluation is 409.",
+        "properties": {
+          "corpus_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corpus Id"
+          },
+          "feature_config_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Config Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "prompt_language": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Language"
+          },
+          "prompt_template_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Template Id"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "selected_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Models"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvaluationSize"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "maximum": 2.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature"
+          }
+        },
+        "title": "UpdateEvaluationRequest",
+        "type": "object"
       },
       "ValidationError": {
         "properties": {
@@ -2849,6 +3842,208 @@
         ]
       }
     },
+    "/api/v1/evaluations": {
+      "get": {
+        "operationId": "list_evaluations_api_v1_evaluations_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EvaluationDraftResponse"
+                  },
+                  "title": "Response List Evaluations Api V1 Evaluations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Evaluations",
+        "tags": [
+          "evaluations"
+        ]
+      },
+      "post": {
+        "description": "\"Save draft\" \u2014 the row exists before the inputs are final.",
+        "operationId": "save_draft_api_v1_evaluations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEvaluationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationDraftResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Draft",
+        "tags": [
+          "evaluations"
+        ]
+      }
+    },
+    "/api/v1/evaluations/{evaluation_id}": {
+      "get": {
+        "description": "One whole Evaluation screen: setup, models, connection, progress, runs\nand provenance.",
+        "operationId": "get_evaluation_api_v1_evaluations__evaluation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Evaluation",
+        "tags": [
+          "evaluations"
+        ]
+      },
+      "put": {
+        "description": "409 once `launched_at` is set \u2014 an evaluation is immutable after.",
+        "operationId": "update_draft_api_v1_evaluations__evaluation_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateEvaluationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationDraftResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Draft",
+        "tags": [
+          "evaluations"
+        ]
+      }
+    },
+    "/api/v1/evaluations/{evaluation_id}/launch": {
+      "post": {
+        "description": "Pin the inputs, snapshot the codelists and fingerprints, create one\n`queued` run per selected model \u2014 then submit the worker.\n\nThe snapshot and the runs land in **one transaction**\n(`EvaluationService.launch`); submitting the work is a second step, so a\nfailed submit cannot leave a half-pinned evaluation.",
+        "operationId": "launch_api_v1_evaluations__evaluation_id__launch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationLaunchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureValidationErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "summary": "Launch",
+        "tags": [
+          "evaluations"
+        ]
+      }
+    },
     "/api/v1/feature-configs": {
       "get": {
         "operationId": "list_feature_configs_api_v1_feature_configs_get",
@@ -3336,6 +4531,513 @@
         "summary": "Freeze Feature Config",
         "tags": [
           "feature-configs"
+        ]
+      }
+    },
+    "/api/v1/models": {
+      "get": {
+        "description": "Tag, digest, size and `fits_vram` per model, plus the connection line.\n\n`refresh` is the settings dialog's \"refresh model list\" \u2014 reachability is\nre-checked on view load and on that press, **never on a timer**.",
+        "operationId": "list_models_api_v1_models_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalogResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Models",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/prompt-templates": {
+      "get": {
+        "description": "Every version, newest first, each with its citation count.",
+        "operationId": "list_versions_api_v1_prompt_templates_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PromptTemplateResponse"
+                  },
+                  "title": "Response List Versions Api V1 Prompt Templates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Versions",
+        "tags": [
+          "prompt-templates"
+        ]
+      },
+      "post": {
+        "description": "\"Save as vN\" \u2014 copy-on-write. Never mutates an existing version.",
+        "operationId": "save_as_next_version_api_v1_prompt_templates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePromptTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptTemplateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptValidationErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "summary": "Save As Next Version",
+        "tags": [
+          "prompt-templates"
+        ]
+      }
+    },
+    "/api/v1/prompt-templates/resolve": {
+      "post": {
+        "description": "Expand a template against a feature set and one record.\n\n**No model call** (plan-phase-3.md C4). Both preview buttons land here.",
+        "operationId": "resolve_api_v1_prompt_templates_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolvePromptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolvedPromptResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve",
+        "tags": [
+          "prompt-templates"
+        ]
+      }
+    },
+    "/api/v1/prompt-templates/slots": {
+      "get": {
+        "description": "The closed slot catalogue (`domain.prompt.SLOTS`).",
+        "operationId": "list_slots_api_v1_prompt_templates_slots_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SlotResponse"
+                  },
+                  "title": "Response List Slots Api V1 Prompt Templates Slots Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Slots",
+        "tags": [
+          "prompt-templates"
+        ]
+      }
+    },
+    "/api/v1/prompt-templates/{prompt_template_id}": {
+      "delete": {
+        "description": "409 when any run cites it; nothing is deleted.",
+        "operationId": "delete_version_api_v1_prompt_templates__prompt_template_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_template_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Template Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Version",
+        "tags": [
+          "prompt-templates"
+        ]
+      },
+      "get": {
+        "operationId": "get_version_api_v1_prompt_templates__prompt_template_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_template_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Template Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptTemplateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Version",
+        "tags": [
+          "prompt-templates"
+        ]
+      }
+    },
+    "/api/v1/prompt-templates/{prompt_template_id}/activate": {
+      "post": {
+        "description": "Mark the version new evaluations default to. Exactly one at a time.",
+        "operationId": "activate_api_v1_prompt_templates__prompt_template_id__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_template_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Template Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptTemplateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate",
+        "tags": [
+          "prompt-templates"
+        ]
+      }
+    },
+    "/api/v1/runs": {
+      "get": {
+        "description": "The \"Runs in this evaluation\" table \u2014 paginated at 10, as drawn.",
+        "operationId": "list_runs_api_v1_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_key",
+            "required": false,
+            "schema": {
+              "default": "started_at",
+              "title": "Sort Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_dir",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortDir",
+              "default": "desc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Runs",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}": {
+      "get": {
+        "operationId": "get_run_api_v1_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/progress": {
+      "get": {
+        "description": "Derived from committed `extraction` rows, never from a counter.",
+        "operationId": "get_progress_api_v1_runs__run_id__progress_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunProgressResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Progress",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/resume": {
+      "post": {
+        "description": "Pick an interrupted run back up from its last committed extraction.",
+        "operationId": "resume_api_v1_runs__run_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAcceptedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resume",
+        "tags": [
+          "runs"
         ]
       }
     },

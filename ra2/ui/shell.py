@@ -1,10 +1,15 @@
 # STUB — bodies owned by A5 (feat/m5-shell). Not frozen.
 #
-# NAV_ITEMS is seeded here because `create_app()` registers exactly these seven
+# NAV_ITEMS is seeded here because `create_app()` registers exactly these
 # routes and the M0 exit criterion checks for them. A5 owns the rendering; the
 # routes and the Import/Census copy are from design/nav-import-census/README.md
 # and should not drift.
-"""Header, 4 nav groups, 7 items, active state derived from the route."""
+#
+# Phase 3 (M17) adds the eighth entry, Prompts, in the Configure group
+# immediately after Features — label, route and icon verbatim from
+# design/prompt-evaluation/README.md §0. It lands at Wave 0, not Wave 4, so
+# J4/J5/J6 prove the nav change before any view exists to fill it.
+"""Header, 4 nav groups, 8 items, active state derived from the route."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -49,7 +54,7 @@ class NavItem:
     built: bool
 
 
-#: The 4 groups x 7 items. Order is the nav's order.
+#: The 4 groups x 8 items. Order is the nav's order.
 #:
 #: Import and Census copy is **verbatim** from the design README. The other five
 #: views are not designed yet, so their copy is provisional and lands with the
@@ -90,6 +95,18 @@ NAV_ITEMS: Final[tuple[NavItem, ...]] = (
         title="Features",
         description="What to extract: labelled features and exploratory attributes.",
         built=True,
+    ),
+    NavItem(
+        key="prompts",
+        group="Configure",
+        label="Prompts",
+        path="/prompts",
+        title="Prompt templates",
+        description=(
+            "The wording around your feature descriptions. Versioned, because "
+            "changing it changes every answer."
+        ),
+        built=False,
     ),
     NavItem(
         key="evaluation",

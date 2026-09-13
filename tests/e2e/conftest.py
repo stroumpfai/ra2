@@ -32,8 +32,10 @@ import uvicorn
 from alembic import command
 from alembic.config import Config
 from nicegui import ui
+from tests.fixtures.fake_llm import FakeLLMClient, StaticModelCatalog
 
 from ra2.infra.config import Settings
+from ra2.infra.gpu import GpuInfo, StaticGpuProbe
 from ra2.main import create_app
 from ra2.services.readmodels import SortDir
 from ra2.ui.components import (
@@ -296,6 +298,17 @@ def server_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         settings=settings,
         clock=_FrozenClock(),
         ids=_SeededFactory(),
+        # Phase 3: the LLM seam and the GPU probe are substituted here for the
+        # same reason the clock and the id factory are — **no test in layers
+        # 1-4 talks to a live endpoint or a real GPU** (plan-phase-3.md §11).
+        # The whole suite has to pass on a machine with nothing listening on
+        # 11434 and no NVIDIA card, and leaving the real adapters in would
+        # make that a per-journey discipline instead of a property of the
+        # fixture. They still go in through the composition root's ordinary
+        # keyword arguments — there is no test mode in production code.
+        llm_client=FakeLLMClient(),
+        model_catalog=StaticModelCatalog(),
+        gpu_probe=StaticGpuProbe(GpuInfo(name="RTX 4090", total_vram_bytes=24_000_000_000)),
         mount_ui=True,
     )
     port = _free_port()

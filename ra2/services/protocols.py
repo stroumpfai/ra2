@@ -18,9 +18,16 @@ from typing import Protocol, runtime_checkable
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ra2.domain.codelist_coverage import ColumnCoverage
-from ra2.domain.ids import CorpusId
+from ra2.domain.ids import CorpusId, EvaluationId, RecordId
+from ra2.domain.prompt import ResolvedPrompt
 
-__all__ = ["CensusInput", "CensusMaterialiser", "CensusTableInput", "EnumCodeTableProvider"]
+__all__ = [
+    "CensusInput",
+    "CensusMaterialiser",
+    "CensusTableInput",
+    "EnumCodeTableProvider",
+    "PromptResolver",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,3 +90,29 @@ class EnumCodeTableProvider(Protocol):
     ) -> ColumnCoverage | None:
         """`None` means no mapping at all for this column."""
         ...
+
+
+@runtime_checkable
+class PromptResolver(Protocol):
+    """The resolved prompt for one record of one evaluation.
+
+    Declared at M17 (plan-phase-3.md §3.1) for the third time the same trick
+    is played: the run worker needs the resolved prompt per record **without
+    `run_service` importing `prompt_service`**. I1 implements it,
+    I3 calls it, and neither waits on the other.
+
+    Takes the *session*, not a session factory, for the same reason
+    `CensusMaterialiser` does: the worker owns the transaction boundary — one
+    record, one commit (sw-design.md §15.3) — and a resolver that opened its
+    own session would read outside it.
+
+    Makes **no model call**. It is the same path both preview buttons take
+    (plan-phase-3.md C4).
+    """
+
+    async def resolve(
+        self,
+        session: AsyncSession,
+        evaluation_id: EvaluationId,
+        record_id: RecordId,
+    ) -> ResolvedPrompt: ...

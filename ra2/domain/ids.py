@@ -20,12 +20,15 @@ __all__ = [
     "CorpusId",
     "DeliveryId",
     "EvaluationId",
+    "ExtractionId",
     "FeatureConfigId",
     "FeatureId",
     "FileId",
     "ObjektRowId",
     "PersonRowId",
+    "PromptTemplateId",
     "RecordId",
+    "RunId",
     "TaskId",
 ]
 
@@ -79,3 +82,18 @@ FeatureConfigId = NewType("FeatureConfigId", str)
 
 #: One feature inside a `feature_config`.
 FeatureId = NewType("FeatureId", str)
+
+# --- phase 3 (M17, plan-phase-3.md §3) --------------------------------------
+
+#: One prompt template version (sw-design.md §15.1). The table is beyond
+#: mvp-spec.md §5's list — §15 F1 corrects "a versioned on-disk template" to a
+#: row, because copy-on-write, citation counts and "delete only when uncited"
+#: are one foreign key in a database and four conventions on a filesystem.
+PromptTemplateId = NewType("PromptTemplateId", str)
+
+#: One model's pass over one evaluation's records (mvp-spec.md §5, §9).
+RunId = NewType("RunId", str)
+
+#: One model's output for one `(run, record)` (mvp-spec.md §5, §10.3).
+#: **IMMUTABLE** — a re-run adds rows, never updates them (N5).
+ExtractionId = NewType("ExtractionId", str)

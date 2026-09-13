@@ -314,8 +314,18 @@ full** (§0 — it is the architecture this wave transcribes into code), and
   `ra2/infra/ollama_client.py`, `ra2/ui/views/{prompts,evaluation}_view.py`,
   `ra2/ui/components/{progress_card,ollama_settings,prompt_preview}.py`:
   constructors and typed signatures, bodies `raise NotImplementedError`.
-- **One migration** — an empty revision wired into the chain, so H3's Wave 1
-  work is "fill this in", not "create the first phase-3 revision from nothing".
+- **One migration** — **the real one, not an empty stub.** This is a
+  correction to the line that stood here (M17, in the same commit, per
+  `CLAUDE.md`'s "where it is wrong, raise it and change *that file* first").
+  An empty revision was right for phase 2, where Wave 0 added only *new*
+  tables: the gap broke nothing and D3 filled it in. Phase 3 also **alters
+  `evaluation`**, so the moment `models.py` declares the seven new columns,
+  every phase-1 and phase-2 test that seeds an evaluation row fails with
+  `no such column`. §5.2's "every phase-1 and phase-2 test still green — this
+  wave adds surface, it does not change behaviour" is the stricter criterion,
+  and it wins. **H3 remains phase 3's one migration author** for everything
+  Wave 1 adds on top, and still owns `migrations/versions/**` from Wave 1.
+  Recorded as `P3-D11` in `CONTRACTS.md`.
 - **`CONTRACTS.md`** and **`CLAUDE.md`** amendments per §2.4.
 - **`tests/test_p3_contract.py`** *(new, lead-owned)* — this wave's exit
   criteria as tests, in the shape of the existing `test_m0_contract.py` and
@@ -373,7 +383,7 @@ look specifically:
 | `ra2/ui/shell.py` `ra2/ui/components/icons.py` | M17 | 🔒 | 🔒 | 🔒 | 🔒 *(the two-line exception, §6.1)* |
 | `ra2/domain/prompt.py` *(bodies)* | M17 stub | **H1** | 🔒 | 🔒 | 🔒 |
 | `ra2/domain/extraction.py` *(bodies)* | M17 stub | **H2** | 🔒 | 🔒 | 🔒 |
-| `ra2/persistence/repositories/{prompt,evaluation,run,extraction}_repo.py`, `migrations/versions/**` | M17 stub | **H3** | 🔒 | 🔒 | 🔒 |
+| `ra2/persistence/repositories/{prompt,evaluation,run,extraction}_repo.py`, `migrations/versions/**` | M17 *(the phase-3 revision, written in full — §5.1)* | **H3** | 🔒 | 🔒 | 🔒 |
 | `ra2/infra/ollama_client.py`, `ra2/infra/gpu.py` *(`NvmlGpuProbe`)* | M17 stub | **H4** | 🔒 | 🔒 | 🔒 |
 | `ra2/ui/components/primitives.py` *(additions)* | — | **H5** | 🔒 | 🔒 | 🔒 |
 | `ra2/services/prompt_service.py` | M17 stub | 🔒 | **I1** | 🔒 | 🔒 |
@@ -483,12 +493,15 @@ bytes.
 **One migration author, one per phase — H3 for phase 3** (`CLAUDE.md`, as
 amended at Wave 0). Nobody else runs `alembic revision`.
 
-**Build:** the **single** phase-3 migration — `prompt_template`,
+**Build:** the repositories, and **verify** the phase-3 migration M17 wrote
+(§5.1: it had to be real, not a stub, or the phase-1/2 suites would have gone
+red at the freeze). It already creates `prompt_template`,
 `evaluation_feature`, `run`, `extraction`, `extraction_value`,
-`extraction_entity`, plus the new `evaluation` columns, plus
+`extraction_entity`, the new `evaluation` columns,
 `UNIQUE (run_id, record_id)` on `extraction` and `UNIQUE (version)` on
-`prompt_template`. Repositories: `prompt_repo` (versions, citation counts,
-the active flag), `evaluation_repo` (drafts, launch, the
+`prompt_template`. Anything Wave 1 needs beyond that is H3's own new revision
+on top — no parallel heads. Repositories: `prompt_repo` (versions, citation
+counts, the active flag), `evaluation_repo` (drafts, launch, the
 `evaluation_feature` snapshot), `run_repo` (create, status transitions,
 progress counts), `extraction_repo` (the per-record write, and the
 **resume query**: record ids in the run's scope with no `extraction` row).
