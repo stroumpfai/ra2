@@ -12,27 +12,53 @@ refuses that at construction, so the app never starts with one and this route
 never sees it (N1, §15 F4).
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter
 
 from ra2.api.deps import EvaluationServiceDep
-from ra2.api.schemas import ModelCatalogResponse
+from ra2.api.schemas import ConnectionResponse, ModelCatalogResponse, ModelChoiceResponse
+from ra2.services.readmodels import ConnectionView, ModelChoiceView
 
 __all__ = ["router"]
 
 router = APIRouter(prefix="/models", tags=["models"])
 
-_NOT_BUILT = "not implemented until Wave 3 (K2)"
+
+def _connection_response(view: ConnectionView) -> ConnectionResponse:
+    return ConnectionResponse(
+        endpoint=view.endpoint,
+        status=view.status,
+        reachable=view.is_reachable,
+        timeout_s=view.timeout_s,
+        reason=view.reason,
+        gpu_name=view.gpu_name,
+        gpu_vram_bytes=view.gpu_vram_bytes,
+    )
 
 
-def _todo() -> HTTPException:
-    return HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=_NOT_BUILT)
+def _model_choice_response(view: ModelChoiceView) -> ModelChoiceResponse:
+    return ModelChoiceResponse(
+        tag=view.tag,
+        digest=view.digest,
+        size_bytes=view.size_bytes,
+        fits_vram=view.fits_vram,
+        selected=view.selected,
+    )
 
 
 @router.get("", response_model=ModelCatalogResponse)
 async def list_models(service: EvaluationServiceDep, refresh: bool = False) -> ModelCatalogResponse:
     """Tag, digest, size and `fits_vram` per model, plus the connection line.
 
-    `refresh` is the settings dialog's "refresh model list" — reachability is
-    re-checked on view load and on that press, **never on a timer**.
+    `refresh` is the settings dialog's "refresh model list" — there is no
+    cache to bypass here (`connection_status()`/`list_models()` always ask
+    the catalogue fresh), so the parameter exists for the UI's intent and the
+    OpenAPI contract rather than to select a different code path: reachability
+    is re-checked on **every** call, on view load and on that press, **never
+    on a timer** (plan-phase-3.md C3).
     """
-    raise _todo()
+    connection = await service.connection_status()
+    choices = await service.list_models()
+    return ModelCatalogResponse(
+        connection=_connection_response(connection),
+        models=[_model_choice_response(m) for m in choices],
+    )

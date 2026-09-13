@@ -4,35 +4,210 @@
 
 Launching with an **unfrozen** feature config is 422 and creates nothing;
 editing a **launched** evaluation is 409. Both are the service's errors
-translated, not this router's own judgement.
+translated, not this router's own judgement. Thin translation only — same
+idiom as `features.py`/`codelists.py` (F1/F2, phase 2): small
+`_xxx_response(view) -> XxxResponse` mapping functions, `_not_found`/
+`_locked`, and a `JSONResponse` built directly for the 422 case so the error
+body's fields are top-level, not nested under `"detail"`.
 """
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 
 from ra2.api.deps import EvaluationServiceDep, RunServiceDep
 from ra2.api.schemas import (
+    ConnectionResponse,
     CreateEvaluationRequest,
+    ErrorResponse,
     EvaluationDraftResponse,
     EvaluationLaunchResponse,
     EvaluationResponse,
     FeatureValidationErrorResponse,
+    ModelChoiceResponse,
+    PageMeta,
+    ProvenanceResponse,
+    RunPage,
+    RunProgressResponse,
+    RunResponse,
     UpdateEvaluationRequest,
+)
+from ra2.domain.ids import CorpusId, EvaluationId, FeatureConfigId, PromptTemplateId
+from ra2.services.errors import EvaluationLockedError, FeatureValidationError, NotFoundError
+from ra2.services.readmodels import (
+    ConnectionView,
+    EvaluationDraftView,
+    EvaluationView,
+    ModelChoiceView,
+    Page,
+    ProvenanceView,
+    RunProgressView,
+    RunView,
 )
 
 __all__ = ["router"]
 
 router = APIRouter(prefix="/evaluations", tags=["evaluations"])
 
-_NOT_BUILT = "not implemented until Wave 3 (K2)"
+
+# ---------------------------------------------------------------------------
+# read model -> wire schema
+# ---------------------------------------------------------------------------
 
 
-def _todo() -> HTTPException:
-    return HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=_NOT_BUILT)
+def _draft_response(view: EvaluationDraftView) -> EvaluationDraftResponse:
+    return EvaluationDraftResponse(
+        evaluation_id=view.evaluation_id,
+        name=view.name,
+        corpus_id=view.corpus_id,
+        feature_config_id=view.feature_config_id,
+        prompt_template_id=view.prompt_template_id,
+        prompt_language=view.prompt_language,
+        temperature=view.temperature,
+        seed=view.seed,
+        size=view.size,
+        selected_models=list(view.selected_models),
+        launched_at=view.launched_at,
+    )
+
+
+def _connection_response(view: ConnectionView) -> ConnectionResponse:
+    return ConnectionResponse(
+        endpoint=view.endpoint,
+        status=view.status,
+        reachable=view.is_reachable,
+        timeout_s=view.timeout_s,
+        reason=view.reason,
+        gpu_name=view.gpu_name,
+        gpu_vram_bytes=view.gpu_vram_bytes,
+    )
+
+
+def _model_choice_response(view: ModelChoiceView) -> ModelChoiceResponse:
+    return ModelChoiceResponse(
+        tag=view.tag,
+        digest=view.digest,
+        size_bytes=view.size_bytes,
+        fits_vram=view.fits_vram,
+        selected=view.selected,
+    )
+
+
+def _run_response(view: RunView) -> RunResponse:
+    return RunResponse(
+        run_id=view.run_id,
+        evaluation_id=view.evaluation_id,
+        model_tag=view.model_tag,
+        model_digest=view.model_digest,
+        records_done=view.records_done,
+        started_at=view.started_at,
+        status=view.status,
+        is_dev=view.is_dev,
+        error=view.error,
+    )
+
+
+def _run_progress_response(view: RunProgressView) -> RunProgressResponse:
+    return RunProgressResponse(
+        run_id=view.run_id,
+        model_tag=view.model_tag,
+        status=view.status,
+        done=view.done,
+        total=view.total,
+        percent=view.percent,
+        parse_failures=view.parse_failures,
+        retries=view.retries,
+        median_latency_ms=view.median_latency_ms,
+        prompt_tokens=view.prompt_tokens,
+        elapsed_ms=view.elapsed_ms,
+        eta_ms=view.eta_ms,
+    )
+
+
+def _run_page_response(page: Page[RunView] | None) -> RunPage | None:
+    if page is None:
+        return None
+    return RunPage(
+        items=[_run_response(r) for r in page.items],
+        meta=PageMeta(
+            total=page.total,
+            page=page.page,
+            page_size=page.page_size,
+            sort_key=page.sort_key,
+            sort_dir=page.sort_dir,
+        ),
+    )
+
+
+def _provenance_response(view: ProvenanceView | None) -> ProvenanceResponse | None:
+    if view is None:
+        return None
+    return ProvenanceResponse(
+        model_name=view.model_name,
+        model_digest=view.model_digest,
+        prompt_template_version=view.prompt_template_version,
+        prompt_template_fingerprint=view.prompt_template_fingerprint,
+        temperature=view.temperature,
+        seed=view.seed,
+        feature_config_id=view.feature_config_id,
+        feature_fingerprints=dict(view.feature_fingerprints),
+        corpus_id=view.corpus_id,
+        corpus_version=view.corpus_version,
+        host_platform=view.host_platform,
+        gpu_name=view.gpu_name,
+        llm_endpoint=view.llm_endpoint,
+    )
+
+
+def _evaluation_response(view: EvaluationView) -> EvaluationResponse:
+    return EvaluationResponse(
+        draft=_draft_response(view.draft),
+        connection=_connection_response(view.connection),
+        models=[_model_choice_response(m) for m in view.models],
+        progress=[_run_progress_response(p) for p in view.progress],
+        runs=_run_page_response(view.runs),
+        provenance=_provenance_response(view.provenance),
+        feature_config_label=view.feature_config_label,
+        corpus_label=view.corpus_label,
+        corpus_record_count=view.corpus_record_count,
+        dev_record_max=view.dev_record_max,
+        can_launch=view.can_launch,
+    )
+
+
+# ---------------------------------------------------------------------------
+# error builders
+# ---------------------------------------------------------------------------
+
+
+def _not_found(exc: NotFoundError) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
+
+def _locked(exc: EvaluationLockedError) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+
+
+def _validation_error_response(exc: FeatureValidationError) -> JSONResponse:
+    """422, body **is** `FeatureValidationErrorResponse` — nothing was
+    created (or changed). Same top-level-fields contract as `features.py`'s
+    `_validation_error_response`: a plain `HTTPException` would nest this
+    under `"detail"`, which is not what the schema promises."""
+    body = FeatureValidationErrorResponse(validation_errors=list(exc.validation_errors))
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content=jsonable_encoder(body)
+    )
+
+
+# ---------------------------------------------------------------------------
+# routes
+# ---------------------------------------------------------------------------
 
 
 @router.get("", response_model=list[EvaluationDraftResponse])
 async def list_evaluations(service: EvaluationServiceDep) -> list[EvaluationDraftResponse]:
-    raise _todo()
+    views = await service.list_evaluations()
+    return [_draft_response(v) for v in views]
 
 
 @router.post("", response_model=EvaluationDraftResponse, status_code=status.HTTP_201_CREATED)
@@ -40,39 +215,95 @@ async def save_draft(
     body: CreateEvaluationRequest, service: EvaluationServiceDep
 ) -> EvaluationDraftResponse:
     """ "Save draft" — the row exists before the inputs are final."""
-    raise _todo()
+    try:
+        view = await service.save_draft(
+            name=body.name,
+            corpus_id=CorpusId(body.corpus_id),
+            feature_config_id=FeatureConfigId(body.feature_config_id),
+        )
+    except NotFoundError as exc:
+        raise _not_found(exc) from exc
+    return _draft_response(view)
 
 
 @router.get("/{evaluation_id}", response_model=EvaluationResponse)
 async def get_evaluation(evaluation_id: str, service: EvaluationServiceDep) -> EvaluationResponse:
     """One whole Evaluation screen: setup, models, connection, progress, runs
     and provenance."""
-    raise _todo()
+    try:
+        view = await service.get(EvaluationId(evaluation_id))
+    except NotFoundError as exc:
+        raise _not_found(exc) from exc
+    return _evaluation_response(view)
 
 
-@router.put("/{evaluation_id}", response_model=EvaluationDraftResponse)
+@router.put(
+    "/{evaluation_id}",
+    response_model=EvaluationDraftResponse,
+    responses={409: {"model": ErrorResponse}, 422: {"model": FeatureValidationErrorResponse}},
+)
 async def update_draft(
     evaluation_id: str, body: UpdateEvaluationRequest, service: EvaluationServiceDep
-) -> EvaluationDraftResponse:
-    """409 once `launched_at` is set — an evaluation is immutable after."""
-    raise _todo()
+) -> EvaluationDraftResponse | JSONResponse:
+    """409 once `launched_at` is set — an evaluation is immutable after. 422
+    when the edit selects a model the host is known not to have the VRAM
+    for."""
+    try:
+        view = await service.update_draft(
+            EvaluationId(evaluation_id),
+            name=body.name,
+            corpus_id=None if body.corpus_id is None else CorpusId(body.corpus_id),
+            feature_config_id=(
+                None if body.feature_config_id is None else FeatureConfigId(body.feature_config_id)
+            ),
+            prompt_template_id=(
+                None
+                if body.prompt_template_id is None
+                else PromptTemplateId(body.prompt_template_id)
+            ),
+            prompt_language=body.prompt_language,
+            temperature=body.temperature,
+            seed=body.seed,
+            size=body.size,
+            selected_models=(None if body.selected_models is None else tuple(body.selected_models)),
+        )
+    except EvaluationLockedError as exc:
+        raise _locked(exc) from exc
+    except FeatureValidationError as exc:
+        return _validation_error_response(exc)
+    except NotFoundError as exc:
+        raise _not_found(exc) from exc
+    return _draft_response(view)
 
 
 @router.post(
     "/{evaluation_id}/launch",
     response_model=EvaluationLaunchResponse,
-    responses={422: {"model": FeatureValidationErrorResponse}},
+    responses={422: {"model": FeatureValidationErrorResponse}, 409: {"model": ErrorResponse}},
 )
 async def launch(
     evaluation_id: str,
     service: EvaluationServiceDep,
     runs: RunServiceDep,
-) -> EvaluationLaunchResponse:
+) -> EvaluationLaunchResponse | JSONResponse:
     """Pin the inputs, snapshot the codelists and fingerprints, create one
     `queued` run per selected model — then submit the worker.
 
     The snapshot and the runs land in **one transaction**
     (`EvaluationService.launch`); submitting the work is a second step, so a
-    failed submit cannot leave a half-pinned evaluation.
+    failed submit cannot leave a half-pinned evaluation. The returned
+    `evaluation` reflects the state right after that transaction commits —
+    not after the (possibly already-finished, on a synchronous task runner)
+    work — the UI polls `task_id` for progress.
     """
-    raise _todo()
+    eval_id = EvaluationId(evaluation_id)
+    try:
+        view = await service.launch(eval_id)
+    except FeatureValidationError as exc:
+        return _validation_error_response(exc)
+    except EvaluationLockedError as exc:
+        raise _locked(exc) from exc
+    except NotFoundError as exc:
+        raise _not_found(exc) from exc
+    task_id = await runs.launch_runs(eval_id)
+    return EvaluationLaunchResponse(evaluation=_evaluation_response(view), task_id=str(task_id))
