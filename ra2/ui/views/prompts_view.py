@@ -343,6 +343,7 @@ def register(services: Services) -> None:
 #: matches `evaluation_service`'s own default so the two never disagree.
 _PREVIEW_FALLBACK_LANGUAGE: Final = "de"
 
+
 class _PromptsPage:
     """One client's Prompts view.
 

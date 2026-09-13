@@ -2,7 +2,7 @@
 name = "ra2"
 version = "0.1.0"
 description = "Road Accident Report Analysis — import, census and LLM extraction evaluation"
-readme = "ra2.md"
+readme = "README.md"
 requires-python = ">=3.14"
 license = { file = "LICENSE" }
 

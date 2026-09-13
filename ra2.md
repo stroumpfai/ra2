@@ -1,5 +1,23 @@
 # Recommendation — Local-LLM Text Structuring App
 
+> **Historical.** This is the original stack and process recommendation,
+> written before the app existed, and it is kept for its **rationale** — why
+> each piece was chosen, and what the alternates were. It is **not** a
+> description of what was built, and some specifics below have since been
+> superseded:
+>
+> - **PydanticAI was dropped** (`sw-design.md` SD14). The `openai` SDK alone
+>   makes the one call this product needs, and a second provider client is
+>   exactly what the one-LLM-seam invariant exists to prevent.
+> - **Prompt templates are a database table, not files on disk**
+>   (`sw-design.md` SD11) — citation counts, an active flag and "delete only
+>   when uncited" are enforceable only where the citations are.
+> - The **loopback-only egress rule** and the **GPU probe** post-date this
+>   document entirely.
+>
+> Start at [`README.md`](README.md) to run or develop the app. On a *what*
+> question `mvp-spec.md` wins; on a *how* question `sw-design.md` wins.
+
 Stack and process recommendation for a new app that processes unstructured text
 through different local LLMs and stores the structured result in SQLite.
 
