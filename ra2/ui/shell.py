@@ -115,7 +115,7 @@ NAV_ITEMS: Final[tuple[NavItem, ...]] = (
         path="/evaluation",
         title="Evaluation",
         description="One corpus, one frozen feature config, N models.",
-        built=False,
+        built=True,
     ),
     NavItem(
         key="results",

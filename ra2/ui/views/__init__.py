@@ -13,6 +13,7 @@ from ra2.ui.shell import NAV_ITEMS
 from ra2.ui.views import (
     census_view,
     codelists_view,
+    evaluation_view,
     features_view,
     import_view,
     placeholder_view,
@@ -33,6 +34,7 @@ def register_all(services: Services) -> None:
     codelists_view.register(services)
     features_view.register(services)
     prompts_view.register(services)
+    evaluation_view.register(services)
     for item in NAV_ITEMS:
         if not item.built:
             placeholder_view.register(item)

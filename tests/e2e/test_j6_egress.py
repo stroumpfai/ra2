@@ -48,6 +48,18 @@ def _host(url: str) -> str:
     return urlsplit(url).netloc
 
 
+def _hostname(url: str) -> str:
+    """The host **without** the port.
+
+    `_host` keeps the port, because the request scans below compare against
+    the server under test and a different port on this machine is a different
+    server. The *naming* scan wants the opposite: a URL is loopback or it is
+    not, and `127.0.0.1:11434` is exactly as unable to leave this host as
+    `127.0.0.1` is (amendment: feat/p3-evaluation-view).
+    """
+    return urlsplit(url).hostname or ""
+
+
 def _external(urls: list[str], server_url: str) -> list[str]:
     """Compared on **host**, not on prefix: `ws://` to the server under test is
     the same host, and `http://evil/` that merely starts with the right string
@@ -109,9 +121,15 @@ def test_the_served_html_names_no_other_host(page, server_url, item):
     element was hidden."""
     response = page.request.get(f"{server_url}{item.path}")
     assert response.ok
+    #: Compared on **hostname**, not netloc: the allowlist holds bare host
+    #: names, so a netloc comparison could never match a loopback URL that
+    #: carries a port — which the Evaluation view legitimately names, since
+    #: the design's reproducibility card prints the configured endpoint.
+    #: This is the *naming* scan; nothing here relaxes what the browser may
+    #: actually fetch, which the request scans above still pin to the server
+    #: under test exactly.
+    allowed = {_hostname(server_url), "127.0.0.1", "::1", "localhost", *XML_NAMESPACES}
     offenders = [
-        url
-        for url in ABSOLUTE_URL.findall(response.text())
-        if _host(url) not in {_host(server_url), "127.0.0.1", "localhost", *XML_NAMESPACES}
+        url for url in ABSOLUTE_URL.findall(response.text()) if _hostname(url) not in allowed
     ]
     assert offenders == [], f"{item.path} names external URLs: {offenders}"
