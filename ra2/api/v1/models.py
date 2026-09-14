@@ -15,7 +15,13 @@ never sees it (N1, §15 F4).
 from fastapi import APIRouter
 
 from ra2.api.deps import EvaluationServiceDep
-from ra2.api.schemas import ConnectionResponse, ModelCatalogResponse, ModelChoiceResponse
+from ra2.api.schemas import (
+    ConnectionProbeResponse,
+    ConnectionResponse,
+    ModelCatalogResponse,
+    ModelChoiceResponse,
+    TestConnectionRequest,
+)
 from ra2.services.readmodels import ConnectionView, ModelChoiceView
 
 __all__ = ["router"]
@@ -61,4 +67,34 @@ async def list_models(service: EvaluationServiceDep, refresh: bool = False) -> M
     return ModelCatalogResponse(
         connection=_connection_response(connection),
         models=[_model_choice_response(m) for m in choices],
+    )
+
+
+@router.post("/test", response_model=ConnectionProbeResponse)
+async def test_connection(
+    request: TestConnectionRequest, service: EvaluationServiceDep
+) -> ConnectionProbeResponse:
+    """Probe an endpoint that is **not** the configured one, and name the cause.
+
+    The settings dialog's "Test connection": you type a URL, press it, and
+    find out whether Ollama is there *before* putting the value in `.env`.
+    Nothing is persisted — `RA2_LLM_BASE_URL` remains the only source of the
+    endpoint the app actually uses, so this route changes no state and is a
+    `POST` only because the endpoint travels in a body.
+
+    **Always 200**, including for a host that is not loopback: that refusal is
+    the most useful answer this route gives, and a 4xx would make the UI
+    render it as a failure of the request rather than a fact about the URL. It
+    is settled before any socket is opened (N1, §15 F4).
+    """
+    view = await service.test_connection(request.endpoint, request.timeout_s)
+    return ConnectionProbeResponse(
+        endpoint=view.endpoint,
+        code=view.code,
+        ok=view.ok,
+        detail=view.detail,
+        latency_ms=view.latency_ms,
+        model_count=view.model_count,
+        http_status=view.http_status,
+        probe_timeout_s=view.probe_timeout_s,
     )

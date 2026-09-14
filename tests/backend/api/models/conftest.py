@@ -26,6 +26,9 @@ from tests.backend.api.evaluations._seed import (
     api_client as api_client,
 )
 from tests.backend.api.evaluations._seed import (
+    api_endpoint_prober as api_endpoint_prober,
+)
+from tests.backend.api.evaluations._seed import (
     api_gpu_probe as api_gpu_probe,
 )
 from tests.backend.api.evaluations._seed import (
@@ -56,6 +59,7 @@ __all__ = [
     "NOW",
     "OVERSIZED_MODEL",
     "api_client",
+    "api_endpoint_prober",
     "api_gpu_probe",
     "api_ids",
     "api_llm_client",

@@ -36,7 +36,7 @@ from ra2.domain.ids import (
     PromptTemplateId,
     RunId,
 )
-from ra2.domain.llm import EndpointStatus
+from ra2.domain.llm import EndpointStatus, ProbeCode
 from ra2.domain.prompt import PromptValidationError, SlotName
 
 __all__ = [
@@ -46,6 +46,7 @@ __all__ = [
     "CodeAttributeView",
     "CodelistImportResult",
     "ColumnMappingView",
+    "ConnectionProbeView",
     "ConnectionView",
     "CorpusSummary",
     "CorpusView",
@@ -460,6 +461,42 @@ class ConnectionView:
     @property
     def is_reachable(self) -> bool:
         return self.status is EndpointStatus.REACHABLE
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectionProbeView:
+    """One connection test, as the settings dialog renders it.
+
+    Distinct from `ConnectionView`, which describes the **configured**
+    endpoint in one bit for the Models card. This describes an endpoint the
+    analyst has *typed* and pressed Test on, and it carries a named cause,
+    because "unreachable" cannot separate "Ollama is not running" from "that
+    is the wrong port" — and separating those is the whole point of the
+    button.
+
+    Note what is **not** here: a sentence. `code` is the stable identifier and
+    the wording lives in one rendering table in `ui/`, exactly as `FindingCode`
+    does (CLAUDE.md). `ConnectionView.reason` is a sentence because it predates
+    this and is shared with the API's own response; new work follows the rule.
+    """
+
+    endpoint: str
+    code: ProbeCode
+    #: The provider's or the OS's verbatim words, rendered as a second,
+    #: monospaced line under the sentence. `None` when there were none.
+    detail: str | None = None
+    latency_ms: int | None = None
+    model_count: int | None = None
+    http_status: int | None = None
+    #: The bound the probe actually used — the *lower* of the configured
+    #: timeout and the probe's own cap. `TIMEOUT`'s sentence names it, so a
+    #: 5-second failure does not read as contradicting the 120 in the field
+    #: above it.
+    probe_timeout_s: int = 0
+
+    @property
+    def ok(self) -> bool:
+        return self.code is ProbeCode.OK
 
 
 @dataclass(frozen=True, slots=True)

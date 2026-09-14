@@ -98,6 +98,7 @@ from ra2.domain.llm import EndpointStatus
 from ra2.services.container import Services
 from ra2.services.errors import ServiceError
 from ra2.services.readmodels import (
+    ConnectionProbeView,
     ConnectionView,
     CorpusView,
     EvaluationView,
@@ -1180,6 +1181,7 @@ class _EvaluationPage:
                     settings=connection,
                     on_save=_save_settings,
                     on_refresh=_sync(self._refresh_connection),
+                    on_test=self._test_connection,
                 ),
             )
         self._settings_dialog = dialog
@@ -1188,6 +1190,17 @@ class _EvaluationPage:
         # (Do-NOT #4), and a dialog opener tripping it would be a false
         # positive on a real invariant (`file_report_modal.show`'s note).
         dialog.value = True
+
+    async def _test_connection(self, endpoint: str, timeout_s: int) -> ConnectionProbeView:
+        """The settings dialog's "Test connection" — straight through to the
+        service, which owns the probe and the loopback refusal.
+
+        Nothing is decided here. The view does not know what a loopback host
+        is, does not catch anything (`test_connection` never raises), and does
+        not turn the result into words — the dialog's own `PROBE_WORDS` table
+        does that. Business logic in `ui/` is Do-NOT #7.
+        """
+        return await self._services.evaluation.test_connection(endpoint, timeout_s)
 
     async def _refresh_connection(self) -> None:
         """ "Refresh model list" re-asks the endpoint. Reachability is

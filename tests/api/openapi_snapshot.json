@@ -511,6 +511,79 @@
         "title": "ColumnMappingResponse",
         "type": "object"
       },
+      "ConnectionProbeResponse": {
+        "additionalProperties": false,
+        "description": "One connection test's outcome. **Always 200**, whatever `code` says.\n\nThe same reasoning that makes an unreachable endpoint `200` with\n`reachable: false` on `GET /models`: a probe that found nothing has\nsucceeded at its job, and an error status would force exactly the toast\nthe design rejects. `detail` is the provider's or the OS's verbatim words\nand `code` is the stable identifier \u2014 clients render from `code`.",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ProbeCode"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Http Status"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "model_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Count"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "probe_timeout_s": {
+            "default": 0,
+            "title": "Probe Timeout S",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "endpoint",
+          "code",
+          "ok"
+        ],
+        "title": "ConnectionProbeResponse",
+        "type": "object"
+      },
       "ConnectionResponse": {
         "additionalProperties": false,
         "description": "The endpoint line under the Models card.\n\nAn unreachable endpoint is **200 with `reachable: false`**, never a 502:\nthe UI renders the reason beside the endpoint line and disables Launch,\nand an error status would force exactly the toast the design rejects.",
@@ -1956,6 +2029,20 @@
         "title": "PageMeta",
         "type": "object"
       },
+      "ProbeCode": {
+        "description": "Why a connection test did or did not succeed.\n\nA **stable identifier**, exactly as `FindingCode` and `ParseIssueCode`\nare: tests assert on the code and never on message text, and the wording\nlives in one rendering table in `ui/` (CLAUDE.md, mvp-spec.md \u00a715).\n\n`EndpointStatus` is the *configured* endpoint's one-bit state, rendered\nbeside the Models card. This is the richer answer to \"I pressed Test on\nthe value I just typed\" \u2014 \"unreachable\" cannot tell an analyst whether\nOllama is down or the port is wrong, and that distinction is the whole\npoint of the button.",
+        "enum": [
+          "ok",
+          "refused_not_loopback",
+          "malformed_url",
+          "connection_refused",
+          "timeout",
+          "http_error",
+          "bad_payload"
+        ],
+        "title": "ProbeCode",
+        "type": "string"
+      },
       "ProfileBucketResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2624,6 +2711,35 @@
         ],
         "title": "TaskStatus",
         "type": "string"
+      },
+      "TestConnectionRequest": {
+        "additionalProperties": false,
+        "description": "`POST /api/v1/models/test` \u2014 probe an endpoint that is **not**\nconfigured.\n\n`endpoint` is deliberately a free string and **not** validated by Pydantic\ninto a loopback URL: the refusal is the answer this route exists to give,\nso rejecting it at the schema would turn the most interesting result into\na 422 the dialog cannot render.\n\n`timeout_s` omitted means the configured `RA2_LLM_TIMEOUT_S`; either way\nthe probe lowers it to its own cap and reports the bound it used.",
+        "properties": {
+          "endpoint": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "timeout_s": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout S"
+          }
+        },
+        "required": [
+          "endpoint"
+        ],
+        "title": "TestConnectionRequest",
+        "type": "object"
       },
       "TypeHint": {
         "description": "Inferred column type (sw-design.md \u00a77).\n\nThe suffix rule runs **first**; value-shape inspection only decides what\nthe suffix leaves open. An `Ausw` column (RADIS) or a `* UAP` column\n(Astrana) is `ENUM` even when every value happens to look like an integer.",
@@ -4593,6 +4709,48 @@
           }
         },
         "summary": "List Models",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/test": {
+      "post": {
+        "description": "Probe an endpoint that is **not** the configured one, and name the cause.\n\nThe settings dialog's \"Test connection\": you type a URL, press it, and\nfind out whether Ollama is there *before* putting the value in `.env`.\nNothing is persisted \u2014 `RA2_LLM_BASE_URL` remains the only source of the\nendpoint the app actually uses, so this route changes no state and is a\n`POST` only because the endpoint travels in a body.\n\n**Always 200**, including for a host that is not loopback: that refusal is\nthe most useful answer this route gives, and a 4xx would make the UI\nrender it as a failure of the request rather than a fact about the URL. It\nis settled before any socket is opened (N1, \u00a715 F4).",
+        "operationId": "test_connection_api_v1_models_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestConnectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionProbeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Connection",
         "tags": [
           "models"
         ]

@@ -32,7 +32,11 @@ import uvicorn
 from alembic import command
 from alembic.config import Config
 from nicegui import ui
-from tests.fixtures.fake_llm import FakeLLMClient, StaticModelCatalog
+from tests.fixtures.fake_llm import (
+    FakeLLMClient,
+    StaticEndpointProber,
+    StaticModelCatalog,
+)
 
 from ra2.infra.config import Settings
 from ra2.infra.gpu import GpuInfo, StaticGpuProbe
@@ -308,6 +312,7 @@ def server_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         # keyword arguments — there is no test mode in production code.
         llm_client=FakeLLMClient(),
         model_catalog=StaticModelCatalog(),
+        endpoint_prober=StaticEndpointProber(),
         gpu_probe=StaticGpuProbe(GpuInfo(name="RTX 4090", total_vram_bytes=24_000_000_000)),
         mount_ui=True,
     )

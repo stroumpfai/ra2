@@ -366,7 +366,11 @@ the Import file-report modal.
 
 ## Open questions for the team
 1. **Ollama connection settings** — the gear button exists; the dialog (endpoint, timeout, model refresh,
-   VRAM reporting) is not designed.
+   VRAM reporting) is not designed. **Built to the plan's own design in the meantime** (plan-phase-3.md Q4,
+   sw-design.md §15.8), and since extended to five controls: the endpoint field now refuses a non-loopback
+   host inline and disables Save, and a "Test connection" button probes the typed endpoint and reports a
+   named cause (P3-D19). VRAM reporting is still **not** in the dialog — that judgement needs the GPU probe
+   and belongs on the Models card (§15.6). A design round is still wanted; this is what ships until then.
 2. **Prompt language** — `{{language}}` is listed as an available slot but marked "unused". Decide
    whether the prompt language belongs to the evaluation (as the Codelists view assumes) or to the
    template.

@@ -17,7 +17,7 @@ from ra2.domain.census import CensusBucketLabel, TypeHint
 from ra2.domain.delivery import DeliveryStatus, Encoding, FileKind, SourceKind
 from ra2.domain.extraction import EvaluationSize, RunStatus
 from ra2.domain.findings import FindingCode, Severity
-from ra2.domain.llm import EndpointStatus
+from ra2.domain.llm import EndpointStatus, ProbeCode
 from ra2.domain.prompt import PromptValidationCode, SlotName
 from ra2.infra.tasks import TaskStatus
 from ra2.services.readmodels import SortDir
@@ -36,6 +36,7 @@ __all__ = [
     "CodelistImportResponse",
     "ColumnCoverageResponse",
     "ColumnMappingResponse",
+    "ConnectionProbeResponse",
     "ConnectionResponse",
     "CorpusPage",
     "CorpusResponse",
@@ -78,6 +79,7 @@ __all__ = [
     "SlotResponse",
     "TaskAcceptedResponse",
     "TaskProgressResponse",
+    "TestConnectionRequest",
     "UpdateEvaluationRequest",
     "ValueCountResponse",
 ]
@@ -640,6 +642,43 @@ class ConnectionResponse(_Schema):
     reason: str | None = None
     gpu_name: str | None = None
     gpu_vram_bytes: int | None = None
+
+
+class TestConnectionRequest(_Schema):
+    """`POST /api/v1/models/test` — probe an endpoint that is **not**
+    configured.
+
+    `endpoint` is deliberately a free string and **not** validated by Pydantic
+    into a loopback URL: the refusal is the answer this route exists to give,
+    so rejecting it at the schema would turn the most interesting result into
+    a 422 the dialog cannot render.
+
+    `timeout_s` omitted means the configured `RA2_LLM_TIMEOUT_S`; either way
+    the probe lowers it to its own cap and reports the bound it used.
+    """
+
+    endpoint: str = Field(min_length=1, max_length=2000)
+    timeout_s: int | None = Field(default=None, ge=1)
+
+
+class ConnectionProbeResponse(_Schema):
+    """One connection test's outcome. **Always 200**, whatever `code` says.
+
+    The same reasoning that makes an unreachable endpoint `200` with
+    `reachable: false` on `GET /models`: a probe that found nothing has
+    succeeded at its job, and an error status would force exactly the toast
+    the design rejects. `detail` is the provider's or the OS's verbatim words
+    and `code` is the stable identifier — clients render from `code`.
+    """
+
+    endpoint: str
+    code: ProbeCode
+    ok: bool
+    detail: str | None = None
+    latency_ms: int | None = None
+    model_count: int | None = None
+    http_status: int | None = None
+    probe_timeout_s: int = 0
 
 
 class ModelCatalogResponse(_Schema):

@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from tests.fixtures.fake_llm import DEFAULT_MODELS, StaticModelCatalog
+from tests.fixtures.fake_llm import DEFAULT_MODELS, StaticEndpointProber, StaticModelCatalog
 
 from ra2.domain.codelist_coverage import ColumnCoverage, CoverageStatus
 from ra2.domain.feature import Grain, Kind, MatchingRule, MatchingRuleKind, ValueType
@@ -188,6 +188,13 @@ def model_catalog() -> StaticModelCatalog:
 
 
 @pytest.fixture
+def endpoint_prober() -> StaticEndpointProber:
+    """A connection test that succeeds. Call `set_result()` for the failures —
+    no test in this layer opens a socket (plan-phase-3.md §11)."""
+    return StaticEndpointProber()
+
+
+@pytest.fixture
 def gpu_probe() -> StaticGpuProbe:
     return StaticGpuProbe(FIXTURE_GPU)
 
@@ -205,6 +212,7 @@ def eval_settings(backend_settings: Settings) -> Settings:
 def evaluation_service(
     db_session_factory: async_sessionmaker[AsyncSession],
     model_catalog: StaticModelCatalog,
+    endpoint_prober: StaticEndpointProber,
     gpu_probe: StaticGpuProbe,
     clock: FrozenClock,
     ids: SeededFactory,
@@ -213,6 +221,7 @@ def evaluation_service(
     return EvaluationService(
         session_factory=db_session_factory,
         model_catalog=model_catalog,
+        endpoint_prober=endpoint_prober,
         gpu_probe=gpu_probe,
         clock=clock,
         ids=ids,

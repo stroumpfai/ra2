@@ -33,8 +33,9 @@ from ra2.domain.feature import (
     Operator,
 )
 from ra2.domain.ids import FeatureConfigId, RunId
-from ra2.domain.llm import EndpointStatus
+from ra2.domain.llm import EndpointStatus, ProbeCode
 from ra2.services.readmodels import (
+    ConnectionProbeView,
     ConnectionView,
     FeatureSetSummary,
     ResolvedPromptView,
@@ -57,7 +58,12 @@ from ra2.ui.components import (
 )
 from ra2.ui.components.derivation_builder import derivation_builder
 from ra2.ui.components.feature_sets_table import feature_sets_table
-from ra2.ui.components.ollama_settings import ollama_settings_dialog
+from ra2.ui.components.ollama_settings import (
+    ENDPOINT_INVALID_MESSAGE,
+    PROBE_WORDS,
+    ollama_settings_dialog,
+    probe_sentence,
+)
 from ra2.ui.components.primitives import (
     field_select,
     fingerprint_badge,
@@ -1103,25 +1109,63 @@ async def test_prompt_preview_panel_renders_identically_from_both_entry_points(u
 # --- ollama_settings_dialog (L3) ----------------------------------------------
 #
 # plan-phase-3.md Q4 / sw-design.md §15.8: an undesigned dialog built to this
-# plan's own design — endpoint, timeout, "refresh model list", and only those
-# three controls. Built on `dialog_card` (the phase-2 dialog-clipping fix).
+# plan's own design. M17 specified three controls — endpoint, timeout, "refresh
+# model list". Two more were added once the dialog met the job of actually
+# *configuring* Ollama (P3-D19): a loopback check on the endpoint as you type
+# it, and a connection test that names why the endpoint did not answer. The
+# assertions below are on codes and structure, never on the sentences — those
+# live in `PROBE_WORDS` and must be rewritable without touching this file.
 
 _CONNECTION = ConnectionView(
     endpoint="http://127.0.0.1:11434/v1", status=EndpointStatus.REACHABLE, timeout_s=120
 )
+
+_OFF_HOST = "http://192.168.1.5:11434/v1"
+
+
+def _probe(
+    code: ProbeCode = ProbeCode.OK,
+    *,
+    detail: str | None = None,
+    latency_ms: int | None = None,
+    model_count: int | None = None,
+    http_status: int | None = None,
+    probe_timeout_s: int = 5,
+) -> ConnectionProbeView:
+    return ConnectionProbeView(
+        endpoint="http://127.0.0.1:11434/v1",
+        code=code,
+        detail=detail,
+        latency_ms=latency_ms,
+        model_count=model_count,
+        http_status=http_status,
+        probe_timeout_s=probe_timeout_s,
+    )
+
+
+async def _ok_probe(endpoint: str, timeout_s: int) -> ConnectionProbeView:
+    """The default `on_test` for the tests that are not about testing."""
+    return _probe(latency_ms=12, model_count=3)
 
 
 def _card_elements(user: User) -> list[ui.element]:
     return [e for e in _all(user) if e.tag == "section" and e._props.get("data-testid") == "card"]
 
 
-async def test_ollama_settings_dialog_has_exactly_the_three_controls(user):
-    """Q4 / sw-design.md §15.8: endpoint, timeout, "refresh model list" — and
-    only those three. No VRAM control, no fourth field."""
+async def test_ollama_settings_dialog_has_exactly_the_five_controls(user):
+    """Endpoint, timeout, test, refresh, save — and only those five.
+
+    Still no VRAM control: that judgement needs the GPU probe and is rendered
+    on the Models card, not in here (sw-design.md §15.6). The count is asserted
+    because "three controls, and only three" was a real decision and its
+    replacement should be just as deliberate."""
     page(
         "/t/ollama/controls",
         lambda: ollama_settings_dialog(
-            settings=_CONNECTION, on_save=lambda *_: None, on_refresh=lambda: None
+            settings=_CONNECTION,
+            on_save=lambda *_: None,
+            on_refresh=lambda: None,
+            on_test=_ok_probe,
         ),
     )
     await user.open("/t/ollama/controls")
@@ -1129,6 +1173,8 @@ async def test_ollama_settings_dialog_has_exactly_the_three_controls(user):
     assert len(user.find(marker="ollama-endpoint").elements) == 1
     assert len(user.find(marker="ollama-timeout").elements) == 1
     assert len(user.find(marker="ollama-refresh").elements) == 1
+    assert len(user.find(marker="ollama-test").elements) == 1
+    assert len(user.find(marker="ollama-save").elements) == 1
     (endpoint_input,) = user.find(marker="ollama-endpoint").elements
     (timeout_input,) = user.find(marker="ollama-timeout").elements
     assert endpoint_input._props["value"] == "http://127.0.0.1:11434/v1"
@@ -1149,6 +1195,7 @@ async def test_ollama_settings_dialog_save_emits_the_edited_endpoint_and_timeout
                     settings=_CONNECTION,
                     on_save=lambda endpoint, timeout_s: saved.append((endpoint, timeout_s)),
                     on_refresh=lambda: None,
+                    on_test=_ok_probe,
                 ),
             )
         )
@@ -1180,6 +1227,7 @@ async def test_ollama_settings_dialog_refresh_reasks_the_catalogue_without_savin
                     settings=_CONNECTION,
                     on_save=lambda endpoint, timeout_s: saved.append((endpoint, timeout_s)),
                     on_refresh=lambda: refreshed.append(True),
+                    on_test=_ok_probe,
                 ),
             )
         )
@@ -1214,6 +1262,7 @@ async def test_ollama_settings_dialog_state_is_scoped_to_its_own_instance(user):
                     ),
                     on_save=lambda endpoint, timeout_s: saved_a.append((endpoint, timeout_s)),
                     on_refresh=lambda: None,
+                    on_test=_ok_probe,
                 ),
             )
         )
@@ -1228,6 +1277,7 @@ async def test_ollama_settings_dialog_state_is_scoped_to_its_own_instance(user):
                     ),
                     on_save=lambda endpoint, timeout_s: saved_b.append((endpoint, timeout_s)),
                     on_refresh=lambda: None,
+                    on_test=_ok_probe,
                 ),
             )
         )
@@ -1262,7 +1312,10 @@ async def test_ollama_settings_dialog_opens_without_clipping_at_1024px(user):
     page(
         "/t/ollama/clip",
         lambda: ollama_settings_dialog(
-            settings=_CONNECTION, on_save=lambda *_: None, on_refresh=lambda: None
+            settings=_CONNECTION,
+            on_save=lambda *_: None,
+            on_refresh=lambda: None,
+            on_test=_ok_probe,
         ),
     )
     await user.open("/t/ollama/clip")
@@ -1273,6 +1326,321 @@ async def test_ollama_settings_dialog_opens_without_clipping_at_1024px(user):
     assert card_el._style["max-width"] == "100%"
     width_px = int(str(card_el._style["width"]).removesuffix("px"))
     assert width_px < 1024 * 0.96
+
+
+# --- ollama_settings_dialog: the loopback gate and the connection test --------
+#
+# The two additions of P3-D19. Both are about the same rule reached two ways:
+# locally, per keystroke, to disable Save, and through the service, on the
+# button, to say why the endpoint did not answer.
+
+
+async def test_a_non_loopback_endpoint_disables_save_and_says_why(user):
+    """N1 at the point of entry.
+
+    `require_loopback` has always refused a LAN address — at *startup*, long
+    after the analyst typed it. The dialog applies the identical rule
+    (`domain.llm.is_loopback_url`, which is why the rule moved down out of
+    `infra/`) while the value is still editable.
+    """
+    saved: list[tuple[str, int]] = []
+    dialogs: list[ui.dialog] = []
+
+    def build() -> None:
+        dialogs.append(
+            cast(
+                ui.dialog,
+                ollama_settings_dialog(
+                    settings=_CONNECTION,
+                    on_save=lambda endpoint, timeout_s: saved.append((endpoint, timeout_s)),
+                    on_refresh=lambda: None,
+                    on_test=_ok_probe,
+                ),
+            )
+        )
+
+    page("/t/ollama/invalid", build)
+    await user.open("/t/ollama/invalid")
+    dialogs[0].open()
+
+    user.find(marker="ollama-endpoint").trigger("change", args=_OFF_HOST)
+
+    (save_button,) = user.find(marker="ollama-save").elements
+    assert "disabled" in save_button._props
+    (error,) = user.find(marker="ollama-endpoint-error").elements
+    assert error.text == ENDPOINT_INVALID_MESSAGE
+    # Pressing it anyway emits nothing: a disabled button is a UI state, not
+    # a guarantee, so the handler checks too.
+    user.find(marker="ollama-save").click()
+    assert saved == []
+    assert dialogs[0].value is True, "a refused endpoint must not close the dialog"
+
+
+async def test_a_loopback_endpoint_re_enables_save(user):
+    """The gate lets go again — an analyst who mistypes and corrects it must
+    not have to reopen the dialog."""
+    saved: list[tuple[str, int]] = []
+    dialogs: list[ui.dialog] = []
+
+    def build() -> None:
+        dialogs.append(
+            cast(
+                ui.dialog,
+                ollama_settings_dialog(
+                    settings=_CONNECTION,
+                    on_save=lambda endpoint, timeout_s: saved.append((endpoint, timeout_s)),
+                    on_refresh=lambda: None,
+                    on_test=_ok_probe,
+                ),
+            )
+        )
+
+    page("/t/ollama/revalid", build)
+    await user.open("/t/ollama/revalid")
+    dialogs[0].open()
+
+    user.find(marker="ollama-endpoint").trigger("change", args=_OFF_HOST)
+    user.find(marker="ollama-endpoint").trigger("change", args="http://localhost:11434/v1")
+
+    (save_button,) = user.find(marker="ollama-save").elements
+    assert "disabled" not in save_button._props
+    # `user.find()` raises when nothing matches and skips invisible elements,
+    # so "hidden" is asserted over the full tree instead.
+    assert _marked(user, "ollama-endpoint-error").visible is False
+    user.find(marker="ollama-save").click()
+    assert saved == [("http://localhost:11434/v1", 120)]
+
+
+async def test_the_reason_is_hidden_until_the_endpoint_is_actually_invalid(user):
+    """A dialog opened on a healthy endpoint shows no error. (The converse —
+    opening on an already-broken configured endpoint — is why `_sync_validity`
+    runs once at build time rather than only on `change`.)"""
+    page(
+        "/t/ollama/clean",
+        lambda: ollama_settings_dialog(
+            settings=_CONNECTION,
+            on_save=lambda *_: None,
+            on_refresh=lambda: None,
+            on_test=_ok_probe,
+        ),
+    )
+    await user.open("/t/ollama/clean")
+
+    # `user.find()` raises when nothing matches and skips invisible elements,
+    # so "hidden" is asserted over the full tree instead.
+    assert _marked(user, "ollama-endpoint-error").visible is False
+
+
+async def test_a_dialog_opened_on_a_bad_configured_endpoint_says_so_immediately(user):
+    """`RA2_LLM_BASE_URL` cannot actually hold a non-loopback value — the app
+    would not have started — but the dialog must not depend on that to be
+    correct, and the analyst should not have to touch the field to find out."""
+    page(
+        "/t/ollama/prebad",
+        lambda: ollama_settings_dialog(
+            settings=ConnectionView(
+                endpoint=_OFF_HOST, status=EndpointStatus.REFUSED_NOT_LOOPBACK, timeout_s=120
+            ),
+            on_save=lambda *_: None,
+            on_refresh=lambda: None,
+            on_test=_ok_probe,
+        ),
+    )
+    await user.open("/t/ollama/prebad")
+
+    (error,) = user.find(marker="ollama-endpoint-error").elements
+    assert error.text == ENDPOINT_INVALID_MESSAGE
+    (save_button,) = user.find(marker="ollama-save").elements
+    assert "disabled" in save_button._props
+
+
+async def test_test_connection_probes_the_typed_endpoint_not_the_configured_one(user):
+    """The whole point of the button. Probing `settings.endpoint` would re-ask
+    a question the line outside the dialog already answers."""
+    probed: list[tuple[str, int]] = []
+    dialogs: list[ui.dialog] = []
+
+    async def on_test(endpoint: str, timeout_s: int) -> ConnectionProbeView:
+        probed.append((endpoint, timeout_s))
+        return _probe(latency_ms=12, model_count=3)
+
+    def build() -> None:
+        dialogs.append(
+            cast(
+                ui.dialog,
+                ollama_settings_dialog(
+                    settings=_CONNECTION,
+                    on_save=lambda *_: None,
+                    on_refresh=lambda: None,
+                    on_test=on_test,
+                ),
+            )
+        )
+
+    page("/t/ollama/test-typed", build)
+    await user.open("/t/ollama/test-typed")
+    dialogs[0].open()
+
+    user.find(marker="ollama-endpoint").trigger("change", args="http://127.0.0.1:9999/v1")
+    user.find(marker="ollama-timeout").trigger("change", args="30")
+    user.find(marker="ollama-test").click()
+    await user.should_see(marker="ollama-test-sentence")
+
+    assert probed == [("http://127.0.0.1:9999/v1", 30)]
+    assert dialogs[0].value is True, "test must not close the dialog"
+
+
+async def test_test_connection_renders_the_sentence_and_the_raw_cause(user):
+    """Both lines. The sentence is what an analyst acts on; the detail is what
+    they paste into a bug report, and neither substitutes for the other."""
+    dialogs: list[ui.dialog] = []
+
+    async def on_test(endpoint: str, timeout_s: int) -> ConnectionProbeView:
+        return _probe(ProbeCode.CONNECTION_REFUSED, detail="[Errno 111] Connection refused")
+
+    def build() -> None:
+        dialogs.append(
+            cast(
+                ui.dialog,
+                ollama_settings_dialog(
+                    settings=_CONNECTION,
+                    on_save=lambda *_: None,
+                    on_refresh=lambda: None,
+                    on_test=on_test,
+                ),
+            )
+        )
+
+    page("/t/ollama/test-refused", build)
+    await user.open("/t/ollama/test-refused")
+    dialogs[0].open()
+    user.find(marker="ollama-test").click()
+    await user.should_see(marker="ollama-test-sentence")
+
+    (sentence,) = user.find(marker="ollama-test-sentence").elements
+    (detail,) = user.find(marker="ollama-test-detail").elements
+    # Asserted through `PROBE_WORDS`, not against a literal: the wording lives
+    # in that one table and must be rewritable without touching this test
+    # (CLAUDE.md: findings, not prose).
+    assert sentence.text == PROBE_WORDS[ProbeCode.CONNECTION_REFUSED]
+    assert detail.text == "[Errno 111] Connection refused"
+    assert "danger" in sentence._classes
+
+
+async def test_a_successful_test_reads_as_success(user):
+    dialogs: list[ui.dialog] = []
+
+    async def on_test(endpoint: str, timeout_s: int) -> ConnectionProbeView:
+        return _probe(latency_ms=38, model_count=4)
+
+    def build() -> None:
+        dialogs.append(
+            cast(
+                ui.dialog,
+                ollama_settings_dialog(
+                    settings=_CONNECTION,
+                    on_save=lambda *_: None,
+                    on_refresh=lambda: None,
+                    on_test=on_test,
+                ),
+            )
+        )
+
+    page("/t/ollama/test-ok", build)
+    await user.open("/t/ollama/test-ok")
+    dialogs[0].open()
+    user.find(marker="ollama-test").click()
+    await user.should_see(marker="ollama-test-sentence")
+
+    (sentence,) = user.find(marker="ollama-test-sentence").elements
+    assert "ok" in sentence._classes
+    assert "4 models" in sentence.text and "38" in sentence.text
+    assert _find_marked(user, "ollama-test-detail") is None
+
+
+async def test_test_connection_works_on_an_endpoint_save_refuses(user):
+    """The Test button stays enabled for a non-loopback host.
+
+    Disabling it would withhold the clearest explanation the dialog can give.
+    Nothing is dialled — the service refuses before opening a socket — so
+    what reaches the analyst is the refusal itself, with its reason.
+    """
+    probed: list[str] = []
+    dialogs: list[ui.dialog] = []
+
+    async def on_test(endpoint: str, timeout_s: int) -> ConnectionProbeView:
+        probed.append(endpoint)
+        return _probe(ProbeCode.REFUSED_NOT_LOOPBACK)
+
+    def build() -> None:
+        dialogs.append(
+            cast(
+                ui.dialog,
+                ollama_settings_dialog(
+                    settings=_CONNECTION,
+                    on_save=lambda *_: None,
+                    on_refresh=lambda: None,
+                    on_test=on_test,
+                ),
+            )
+        )
+
+    page("/t/ollama/test-refused-host", build)
+    await user.open("/t/ollama/test-refused-host")
+    dialogs[0].open()
+
+    user.find(marker="ollama-endpoint").trigger("change", args=_OFF_HOST)
+    user.find(marker="ollama-test").click()
+    await user.should_see(marker="ollama-test-sentence")
+
+    assert probed == [_OFF_HOST]
+    (sentence,) = user.find(marker="ollama-test-sentence").elements
+    assert sentence.text == PROBE_WORDS[ProbeCode.REFUSED_NOT_LOOPBACK]
+
+
+async def test_no_verdict_is_shown_before_the_button_is_pressed(user):
+    """The dialog opens with no result rather than a stale one: the last
+    answer was about whatever URL was in the field at the time."""
+    page(
+        "/t/ollama/test-pristine",
+        lambda: ollama_settings_dialog(
+            settings=_CONNECTION,
+            on_save=lambda *_: None,
+            on_refresh=lambda: None,
+            on_test=_ok_probe,
+        ),
+    )
+    await user.open("/t/ollama/test-pristine")
+
+    assert _marked(user, "ollama-test-result").visible is False
+    assert _find_marked(user, "ollama-test-sentence") is None
+
+
+@pytest.mark.parametrize(
+    ("count", "expected"),
+    [(1, "1 model,"), (3, "3 models,"), (0, "no models,"), (None, "unknown number")],
+)
+def test_the_success_sentence_counts_models_grammatically(count, expected):
+    assert expected in probe_sentence(_probe(ProbeCode.OK, model_count=count, latency_ms=15))
+
+
+def test_every_probe_code_has_a_sentence():
+    """A code with no wording would reach an analyst as a bare identifier.
+
+    `probe_sentence` falls back rather than raising, so this is the check that
+    the fallback never actually fires in production.
+    """
+    assert set(PROBE_WORDS) == set(ProbeCode)
+
+
+def test_probe_sentences_fill_in_their_numbers():
+    """The templates carry `{}` placeholders; nothing may reach the screen
+    with a brace still in it."""
+    for code in ProbeCode:
+        text = probe_sentence(
+            _probe(code, latency_ms=12, model_count=3, http_status=404, probe_timeout_s=5)
+        )
+        assert "{" not in text and "}" not in text, code
 
 
 # --- state ------------------------------------------------------------------
@@ -1310,6 +1678,27 @@ async def test_two_tables_on_one_page_keep_independent_sort_state(user):
 
 
 # --- helpers ----------------------------------------------------------------
+
+
+def _find_marked(user: User, marker: str) -> ui.element | None:
+    """The one element carrying `marker`, **visible or not**, or `None`.
+
+    `user.find()` raises when nothing matches and skips invisible elements, so
+    it cannot express "this is present but hidden" or "this was never built" —
+    both of which are exactly what a dialog's error line and its empty result
+    slot need asserted. This walks the client's own element registry instead.
+    """
+    client = user.client
+    assert client is not None, "no page is open"
+    found = [e for e in client.elements.values() if marker in e._markers]
+    assert len(found) <= 1, f"{marker} matched {len(found)} elements"
+    return found[0] if found else None
+
+
+def _marked(user: User, marker: str) -> ui.element:
+    element = _find_marked(user, marker)
+    assert element is not None, f"no element marked {marker}"
+    return element
 
 
 def _all(user: User) -> list[ui.element]:
