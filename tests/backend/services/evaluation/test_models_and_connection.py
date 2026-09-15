@@ -354,3 +354,89 @@ async def test_test_connection_never_touches_the_catalogue(
 
     assert model_catalog.reachable_calls == 0
     assert model_catalog.models_calls == 0
+
+
+# ===========================================================================
+# catalogue() — the Models card **before** an evaluation exists
+# ===========================================================================
+#
+# The regression tests for the bug where the card was empty on every database
+# without an evaluation row. The catalogue is the endpoint's fact; only the
+# ticks are the evaluation's, and reaching the first through the second is
+# what made a perfectly reachable Ollama render as "0 available".
+
+
+async def test_catalogue_returns_models_with_no_evaluation_in_the_database(
+    evaluation_service: EvaluationService,
+) -> None:
+    """**The regression test.** Nothing is seeded — no corpus, no feature set,
+    no evaluation — and the endpoint's models still come back."""
+    catalogue = await evaluation_service.catalogue()
+
+    assert catalogue.connection.is_reachable is True
+    assert {choice.tag for choice in catalogue.models} == {m.tag for m in DEFAULT_MODELS}
+
+
+async def test_catalogue_asks_the_endpoint_exactly_once_for_each_fact(
+    evaluation_service: EvaluationService,
+    model_catalog: StaticModelCatalog,
+) -> None:
+    """One `reachable()`, one `models()`.
+
+    `connection_status()` + `list_models()` would be three round trips for two
+    facts, because `list_models` fetches its own connection. `get()` has always
+    passed the connection through instead, and this path must not be more
+    expensive than the one it stands in for.
+    """
+    await evaluation_service.catalogue()
+
+    assert model_catalog.reachable_calls == 1
+    assert model_catalog.models_calls == 1
+
+
+async def test_catalogue_is_empty_and_unreachable_when_nothing_is_listening(
+    db_session_factory: async_sessionmaker[AsyncSession],
+    clock: FrozenClock,
+    ids: SeededFactory,
+    eval_settings: Settings,
+) -> None:
+    """An unreachable endpoint yields an empty list and a reason, never an
+    exception (§15.5) — the same contract `list_models()` has."""
+    catalog = StaticModelCatalog(status=EndpointStatus.UNREACHABLE)
+    service = EvaluationService(
+        session_factory=db_session_factory,
+        model_catalog=catalog,
+        endpoint_prober=StaticEndpointProber(),
+        gpu_probe=StaticGpuProbe(),
+        clock=clock,
+        ids=ids,
+        settings=eval_settings,
+    )
+
+    catalogue = await service.catalogue()
+
+    assert catalogue.models == ()
+    assert catalogue.connection.is_reachable is False
+    assert catalogue.connection.reason is not None
+
+
+async def test_catalogue_judges_vram_the_same_way_list_models_does(
+    evaluation_service: EvaluationService,
+    oversized_model: str,
+) -> None:
+    """One judgement, not two: the card must not become more permissive just
+    because no evaluation exists yet (§15.6)."""
+    catalogue = await evaluation_service.catalogue()
+
+    by_tag = {choice.tag: choice for choice in catalogue.models}
+    assert by_tag[oversized_model].fits_vram is False
+
+
+async def test_catalogue_selects_nothing(
+    evaluation_service: EvaluationService,
+) -> None:
+    """With no evaluation there is nothing that *could* be selected — the view
+    renders the ticks inert on the strength of this."""
+    catalogue = await evaluation_service.catalogue()
+
+    assert all(choice.selected is False for choice in catalogue.models)

@@ -194,6 +194,7 @@ def tick(
     checked: bool,
     indeterminate: bool = False,
     label: str,
+    disabled: bool = False,
     on_change: Callable[[], None] | None = None,
 ) -> Element:
     """A 14x14 checkbox with a real **indeterminate** state.
@@ -201,6 +202,14 @@ def tick(
     The header-row tick is indeterminate when a table is partially selected
     (README, Interactions). Whether it is partial is the caller's fact, never
     this component's: it renders `aria-checked="mixed"` when told to.
+
+    `disabled` renders a tick that is **visibly** not interactive — the
+    `disabled` attribute, so the browser and a screen reader both know, and
+    `aria-disabled` for assistive tech that reads the role rather than the
+    tag. Omitting `on_change` alone only makes a tick *inert*: it still looks
+    live and silently swallows the click, which is how the Evaluation view's
+    model rows behaved before an evaluation existed to record a selection
+    into.
     """
     state = "mixed" if indeterminate else ("true" if checked else "false")
     classes = "tick"
@@ -208,16 +217,19 @@ def tick(
         classes += " mixed"
     elif checked:
         classes += " on"
+    if disabled:
+        classes += " disabled"
     box = (
         ui.element("button")
         .classes(classes)
         .props(
             f'type="button" role="checkbox" aria-checked="{state}" '
             f'aria-label="{label}" title="{label}" data-testid="tick"'
+            + (' disabled aria-disabled="true"' if disabled else "")
         )
         .mark("tick")
     )
-    if on_change is not None:
+    if on_change is not None and not disabled:
         box.on("click", lambda _: on_change())
     with box:
         if indeterminate:

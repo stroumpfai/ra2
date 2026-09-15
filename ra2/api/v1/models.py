@@ -62,11 +62,13 @@ async def list_models(service: EvaluationServiceDep, refresh: bool = False) -> M
     is re-checked on **every** call, on view load and on that press, **never
     on a timer** (plan-phase-3.md C3).
     """
-    connection = await service.connection_status()
-    choices = await service.list_models()
+    # `catalogue()` rather than `connection_status()` + `list_models()`: the
+    # latter asks for its own connection, so the pair cost three round trips
+    # for two facts. Same body, one fewer ask of the endpoint.
+    catalogue = await service.catalogue()
     return ModelCatalogResponse(
-        connection=_connection_response(connection),
-        models=[_model_choice_response(m) for m in choices],
+        connection=_connection_response(catalogue.connection),
+        models=[_model_choice_response(m) for m in catalogue.models],
     )
 
 

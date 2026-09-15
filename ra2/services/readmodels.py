@@ -40,6 +40,7 @@ from ra2.domain.llm import EndpointStatus, ProbeCode
 from ra2.domain.prompt import PromptValidationError, SlotName
 
 __all__ = [
+    "CatalogueView",
     "CensusBucket",
     "CensusColumnView",
     "CensusSummary",
@@ -461,6 +462,27 @@ class ConnectionView:
     @property
     def is_reachable(self) -> bool:
         return self.status is EndpointStatus.REACHABLE
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogueView:
+    """What the Models card needs when there is **no evaluation yet**.
+
+    The card mixes two different things, and they have different owners: which
+    models the endpoint has — with their digests, sizes and VRAM judgement —
+    is a property of the **endpoint**, while the ticks are a property of the
+    **evaluation**. `EvaluationView` carries both, which is right once an
+    evaluation exists and is why the card rendered nothing before one did: the
+    half that never depended on an evaluation was reached through the half
+    that did.
+
+    Deliberately the same two field names `EvaluationView` uses, so the view
+    reads one shape either way and the difference stays where it belongs —
+    whether the rows are selectable.
+    """
+
+    connection: ConnectionView
+    models: tuple[ModelChoiceView, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

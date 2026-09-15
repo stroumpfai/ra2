@@ -86,6 +86,7 @@ from ra2.services.errors import (
     NotFoundError,
 )
 from ra2.services.readmodels import (
+    CatalogueView,
     ConnectionProbeView,
     ConnectionView,
     EvaluationDraftView,
@@ -372,6 +373,26 @@ class EvaluationService:
                 evaluation = await self._require(session, evaluation_id)
                 selected = _selected_models(evaluation)
         return list(await self._model_choices(selected=selected))
+
+    async def catalogue(self) -> CatalogueView:
+        """The endpoint's models and its connection line, **without an
+        evaluation**.
+
+        The Models card needs two facts that belong to two different owners:
+        what the endpoint offers (the endpoint's) and which of them are ticked
+        (the evaluation's). `get()` serves the card once an evaluation exists;
+        this serves it before one does — on a fresh install, or any time
+        before "Save draft" — where the catalogue is just as knowable and used
+        to render as empty.
+
+        **One `reachable()` and one `models()`**, because the connection is
+        passed into `_model_choices` rather than re-fetched: `list_models()`
+        asks for its own, so `connection_status()` + `list_models()` would
+        cost three round trips for two facts. This mirrors `get()`, which has
+        always done it the cheap way.
+        """
+        connection = await self.connection_status()
+        return CatalogueView(connection=connection, models=await self._model_choices(connection))
 
     async def connection_status(self) -> ConnectionView:
         """Endpoint, timeout, reachability and the probe's GPU answer.

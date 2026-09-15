@@ -1025,6 +1025,16 @@ any subprocess**: N3 forbids shell-outs, and a library load is not one. Read
 this rule as written — the next reader reaching for `nvidia-smi` because "it
 is only a probe" is the failure mode this paragraph exists to prevent.
 
+**The catalogue is endpoint state; only the selection is evaluation state.**
+The Models card shows both, which is why `EvaluationView` carries both — but
+the card must render the catalogue whether or not an evaluation exists, and
+`EvaluationService.catalogue()` is what serves it before one does. Reaching
+the endpoint's facts *through* the evaluation's is how the card came to be
+empty on every fresh install, in exactly the state where "is Ollama set up?"
+is the question being asked (**P3-D21**). Selection is withheld until the
+draft is saved — the design's own step order — so the ticks render `disabled`
+rather than merely inert.
+
 `StaticGpuProbe` serves both the `RA2_GPU_VRAM_GB` / `RA2_GPU_NAME` overrides
 and the tests. `None` is not an error: no NVIDIA GPU means no `fits_vram`
 judgement, every model selectable, and the design's disabled row simply does

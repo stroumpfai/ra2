@@ -235,6 +235,9 @@ _UTILITIES: Final = """
 }
 .tick.on{background:var(--accent);border-color:var(--accent);color:#fff;}
 .tick.mixed{background:var(--accent);border-color:var(--accent);color:#fff;}
+/* A tick with nowhere to record a selection — the Models card before a
+   draft is saved. Reads as unavailable rather than merely unresponsive. */
+.tick.disabled{cursor:not-allowed;opacity:.45;}
 .sorth{display:inline-flex;align-items:center;gap:5px;cursor:pointer;}
 .sarr{font-size:9px;line-height:1;color:var(--muted-arrow);letter-spacing:-1px;}
 .sarr.on{color:var(--ink);}
