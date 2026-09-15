@@ -228,6 +228,10 @@ _UTILITIES: Final = """
 .iconbtn-sm{width:22px;height:22px;color:var(--ink3);}
 .iconbtn-md{width:24px;height:24px;}
 .iconbtn[disabled]{color:var(--muted-arrow);cursor:default;}
+/* The Import row's delete (P3-D22). It sits at --ink3 like its two
+   neighbours and only reads as destructive under the pointer, so the row is
+   not a red stripe at rest. --danger is the design's own delete colour. */
+.iconbtn.danger-hover:hover{color:var(--danger);border-color:var(--danger);}
 .tick{
   display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;
   border:1px solid var(--ink3);border-radius:2px;color:transparent;

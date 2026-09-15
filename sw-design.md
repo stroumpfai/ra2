@@ -363,6 +363,14 @@ counts and keys, the detected vs. effective encoding/delimiter/quote char with
 override selectors, a re-parse button, a 20-row raw preview, remove, and
 "Export findings CSV".
 
+**Amended by P3-D22: remove is no longer in the modal.** Deleting a file is a row
+action in the Import table, so it has exactly one home. Re-parse stays and is
+labelled "Apply & re-parse", because it is the only thing that applies the three
+override selectors above it — `DeliveryService.reparse_file`'s arguments come from
+them. The row's own re-parse passes no overrides, which that method reads as "keep
+what is effective now": a re-run, never a change. The two buttons call the same
+service method and are not duplicates of each other.
+
 ---
 
 ## 9. Jobs
@@ -565,7 +573,7 @@ Each is additive and cheap to reverse; none should change silently.
 | SD6 | Structured **sets** inferred by FK reachability from the `unfall` file | Same reason; the design's collapsed set rows need a data-driven grouping |
 | SD7 | `TaskRunner` seam introduced in phase 1 for import | The spec needs it in §9 anyway; retrofitting progress onto a synchronous import is worse |
 | SD8 | Long tail defined as `distinct > 20 and top_value_share < 0.01` | The design states the rendering, not the threshold |
-| SD9 | Minimum spec for the file report modal (§8.3) | The design defers it, but the Import row action opens it |
+| SD9 | Minimum spec for the file report modal (§8.3) | The design defers it, but the Import row action opens it. **Amended by P3-D22** — remove left the modal for the row |
 | SD10 | The API is built in phase 1, not deferred | It is how E2E seeds state, and it is the same services either way |
 | SD11 | `prompt_template` is a **table**, not the on-disk template `mvp-spec.md` §10.2 describes (§15.1) | Citation counts, an active flag and "delete only when uncited" are enforceable only where the citations are |
 | SD12 | `evaluation_feature` — the per-evaluation `enum_codelist_json` snapshot and final fingerprint, which `mvp-spec.md` §5 puts on `feature` (§15.2) | A frozen `feature_config` is corpus-independent, so the snapshot cannot resolve until an evaluation fixes a corpus |
