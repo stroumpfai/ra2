@@ -25,6 +25,7 @@ import os
 from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 
 import httpx
 import pytest
@@ -182,6 +183,27 @@ async def _seed_run(
         await session.commit()
 
 
+async def _mounted_bare(
+    app_factory: Callable[..., FastAPI], **overrides: object
+) -> AsyncIterator[User]:
+    """`_mounted` without the seeding — a migrated but otherwise empty
+    database, which is what a fresh install actually looks like."""
+    with nicegui_reset_globals():
+        os.environ["NICEGUI_USER_SIMULATION"] = "true"
+        try:
+            app = app_factory(mount_ui=True, **overrides)
+            async with (
+                app.router.lifespan_context(app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app), base_url="http://test"
+                ) as client,
+            ):
+                yield User(client)
+        finally:
+            os.environ.pop("NICEGUI_USER_SIMULATION", None)
+            _restore_nicegui_functions()
+
+
 async def _mounted(
     app_factory: Callable[..., FastAPI], *, name: str, **overrides: object
 ) -> AsyncIterator[Seeded]:
@@ -207,6 +229,34 @@ async def seeded(
     app_factory: Callable[..., FastAPI], migrated_db: Settings
 ) -> AsyncIterator[Seeded]:
     async for value in _mounted(app_factory, name="ui"):
+        yield value
+
+
+@pytest.fixture
+async def unsaved(
+    app_factory: Callable[..., FastAPI], migrated_db: Settings
+) -> AsyncIterator[User]:
+    """The view on a database with **no evaluation** — a fresh install, or any
+    moment before the first "Save draft".
+
+    Every other fixture here seeds a draft, which is why the Models card could
+    be dead in exactly this state without a single test noticing: the
+    catalogue was reached through `EvaluationView`, so no evaluation meant no
+    models, however reachable the endpoint was.
+    """
+    async for value in _mounted_bare(app_factory):
+        yield value
+
+
+@pytest.fixture
+async def unsaved_and_unreachable(
+    app_factory: Callable[..., FastAPI], migrated_db: Settings
+) -> AsyncIterator[User]:
+    """No evaluation **and** no endpoint — the two empty causes at once, which
+    must not produce the same sentence."""
+    async for value in _mounted_bare(
+        app_factory, model_catalog=StaticModelCatalog(status=EndpointStatus.UNREACHABLE)
+    ):
         yield value
 
 
@@ -298,6 +348,10 @@ def _model_tick(user: User, tag: str) -> Element:
 
 def _statuses(user: User) -> set[str]:
     return {str(e._props["data-status"]) for e in _find(user, "run-status")}
+
+
+def _has_model_rows(user: User) -> bool:
+    return bool(_find(user, "model-row"))
 
 
 async def _until(predicate: Callable[[], bool]) -> None:
@@ -757,3 +811,113 @@ async def _assert_empty_state(seeded: Seeded) -> None:
     _one(user, save).click()
     await _until(lambda: bool(_find(user, "prompt-select")))
     assert len(await seeded.services.evaluation.list_evaluations()) == 1
+
+
+# --- the Models card without an evaluation ------------------------------------
+#
+# The regression tests for "refresh model list does nothing". The card used to
+# read `() if view is None else view.models`, so on any database with no
+# evaluation row it said "0 available" and "the endpoint returned an empty
+# catalogue" — while the endpoint was reachable and offering models, and while
+# the settings dialog's Test button said so. Refresh could not help: it
+# re-asked reachability and never asked for models at all.
+
+
+async def test_the_models_card_lists_the_catalogue_with_no_evaluation(
+    unsaved: User,
+) -> None:
+    """**The regression test.** Nothing saved, and the models are still there.
+
+    Which models the endpoint offers is the *endpoint's* fact. Only the ticks
+    belong to the evaluation.
+    """
+    await unsaved.open("/evaluation")
+    await unsaved.should_see("Evaluation")
+
+    assert len(_find(unsaved, "model-row")) == len(DEFAULT_MODELS)
+    assert _all_text(unsaved, "models-count") == f"{len(DEFAULT_MODELS)} available · 0 selected"
+    assert "reachable" in _all_text(unsaved, "endpoint-line")
+
+
+async def test_the_models_are_not_selectable_before_a_draft_is_saved(
+    unsaved: User,
+) -> None:
+    """A tick writes into the evaluation, so there has to be one to write into.
+
+    Withheld *visibly*: `_toggle_model` has always returned early without an
+    evaluation, which meant a live-looking tick that swallowed the click.
+    """
+    await unsaved.open("/evaluation")
+    await unsaved.should_see("Evaluation")
+
+    ticks = _find(unsaved, "tick")
+    assert ticks, "the rows render, so their ticks exist"
+    assert all("disabled" in t._props for t in ticks)
+    assert evaluation_view.MODELS_UNSAVED_MESSAGE in _all_text(unsaved, "empty-note")
+
+
+async def test_an_unreachable_endpoint_does_not_claim_an_empty_catalogue(
+    unsaved_and_unreachable: User,
+) -> None:
+    """Two different emptinesses, two different sentences.
+
+    "The endpoint returned an empty catalogue" was the single message for
+    both, and it is a lie when nothing was returned at all — which is the
+    wording that made this read as a broken refresh rather than a reachable
+    endpoint with nothing asked of it.
+    """
+    user = unsaved_and_unreachable
+    await user.open("/evaluation")
+    await user.should_see("Evaluation")
+
+    notes = _all_text(user, "empty-note")
+    assert evaluation_view.NO_MODELS_UNREACHABLE_MESSAGE in notes
+    assert evaluation_view.NO_MODELS_MESSAGE not in notes
+    assert not _find(user, "model-row")
+    # The reason line under the card is what names *which* refusal it was, so
+    # the card body deliberately does not repeat it.
+    assert _find(user, "endpoint-reason")
+
+
+async def test_a_reachable_endpoint_with_nothing_pulled_says_how_to_fix_it(
+    app_factory: Callable[..., FastAPI], migrated_db: Settings
+) -> None:
+    """Reachable and genuinely empty — an ordinary fresh install. The message
+    names the fix rather than only the symptom."""
+    async for user in _mounted_bare(app_factory, model_catalog=StaticModelCatalog(models=())):
+        await user.open("/evaluation")
+        await user.should_see("Evaluation")
+
+        notes = _all_text(user, "empty-note")
+        assert evaluation_view.NO_MODELS_MESSAGE in notes
+        assert evaluation_view.NO_MODELS_UNREACHABLE_MESSAGE not in notes
+        assert "reachable" in _all_text(user, "endpoint-line")
+
+
+async def test_refresh_picks_up_a_model_that_appeared(
+    app_factory: Callable[..., FastAPI], migrated_db: Settings
+) -> None:
+    """The journey the bug report describes: the endpoint was down, you start
+    Ollama, you press "Refresh model list" — and the card fills in.
+
+    Before the fix this could never pass with no evaluation saved, because
+    refresh re-asked reachability and the model list came from somewhere that
+    was empty by construction.
+    """
+    catalog = StaticModelCatalog(status=EndpointStatus.UNREACHABLE)
+    async for user in _mounted_bare(app_factory, model_catalog=catalog):
+        await user.open("/evaluation")
+        await user.should_see("Evaluation")
+        assert not _find(user, "model-row")
+
+        catalog.set_status(EndpointStatus.REACHABLE)
+        user.find(marker="ollama-connection-settings").click()
+        await user.should_see(marker="ollama-refresh")
+        user.find(marker="ollama-refresh").click()
+        # `functools.partial`, not a closure: `user` is the `async for`
+        # target, and a late-binding closure over a loop variable is what
+        # B023 catches.
+        await _until(partial(_has_model_rows, user))
+
+        assert len(_find(user, "model-row")) == len(DEFAULT_MODELS)
+        assert "reachable" in _all_text(user, "endpoint-line")

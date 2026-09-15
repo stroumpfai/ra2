@@ -121,7 +121,10 @@ def test_the_file_column_is_the_only_one_that_truncates(page, demo_tables_url):
     assert widths["selection"] == 30
     assert widths["rows"] == 52
     assert widths["state"] == 86
-    assert widths["action"] == 46
+    # 92, not the design's original 46: the row carries three actions now
+    # (P3-D22). The File column absorbs the extra 46px, which is what being
+    # the flexible column means.
+    assert widths["action"] == 92
 
     layout = page.evaluate(
         "() => getComputedStyle(document.querySelector('[data-testid=\"table-structured\"]'))"

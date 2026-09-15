@@ -176,7 +176,7 @@ card and no column becomes unreachable:
 | 2 | File | flexible (takes all remaining width) | filename, mono 11.5px, single line, `overflow:hidden; text-overflow:ellipsis` inside `display:flex; align-items:center; overflow:hidden`. **This is the only column allowed to truncate** — it does so only below ≈1030px window width. Sortable, currently sorted ascending. |
 | 3 | Rows | 52px, right-aligned | mono row count with thin space as thousands separator ("1 204", "4 982"). Sortable. |
 | 4 | State | 86px | 12.5px text: "ok" in `--ok`, "2 rejected" in `--danger`, "3 recovered" in `--warn`. Sortable. Must stay ≥86px — its longest value needs ~67px + padding, and `.td` is `white-space:nowrap` with no clipping. |
-| 5 | action | 46px, right-aligned, `padding-right:14px` | one 22×22 button, `1px solid --rule`, radius 3px, colour `--ink3`, 13px clipboard glyph → **opens that file's parse-findings report** (modal, not yet designed). Re-parse, preview and remove live inside that modal. |
+| 5 | action | **92px**, right-aligned, `padding-right:14px`, `gap:4px` | **three** 22×22 buttons, each `1px solid --rule`, radius 3px, colour `--ink3`, 13px glyph: clipboard → **opens that file's parse-findings report** (modal, not yet designed); rotate-cw → **re-parses that file** with the settings effective now; trash → **deletes that file from the delivery**, `--danger` on hover only. The trash is a two-step: the first click replaces **all three buttons** with mono 11px "Sure?" in `--danger` plus a `--ink3` `✕` cancel (three buttons and "Sure?" do not fit 92px, and a row one click from losing a file should not also offer to re-parse it); the second click deletes; the cancel, or any other action in the view, disarms it. Preview and the encoding/delimiter selectors still live inside the modal, and so does the re-parse that *applies* them. **Changed from the original 46px / one button — see P3-D22 in `CONTRACTS.md`.** |
 
 `.th`: mono 10px, uppercase, letter-spacing .07em, weight 500, colour `--ink3`,
 `padding:0 9px 7px` (+`padding-top:10px`), `border-bottom:1px solid --rule`, left-aligned,
@@ -297,9 +297,13 @@ and description change per view. No nested/secondary nav.
 - Sorting: click File / Rows / State to sort; clicking the active column flips direction. Sort state is
   per-table and independent between the two tables.
 - Pagination: page size selector (10 default) and prev/next; disabled arrows are greyed, not hidden.
-- Clipboard icon opens the **file report modal** — per-file parse findings. *Not yet designed.* It should
-  carry the actions removed from the row: re-parse, preview, remove, and the encoding/delimiter
-  selectors; whether "Export report" lives inside it is still open.
+- Clipboard icon opens the **file report modal** — per-file parse findings. *Not yet designed.* It
+  carries preview, the encoding/delimiter selectors and the "Apply & re-parse" that applies them,
+  plus "Export findings CSV". **Re-parse and delete are also row actions** (P3-D22): a re-run and a
+  deletion are things you decide about a row while looking at the table, not things worth opening a
+  modal for. Delete is *only* a row action; the modal no longer offers it.
+- Row re-parse and row delete show a spinner in the cell they replace, keyed to that row — every other
+  row stays interactive, the same way a corpus delete behaves.
 - "Create corpus" freezes the selection into a new immutable corpus and adds a row to Corpora.
 - Corpora rows: "Delete" only when no evaluation cites the corpus; otherwise the row shows the
   LOCKED pill and a non-interactive "delete blocked".
@@ -402,7 +406,7 @@ is the one place a scrim/shadow may be needed.)
 
 **Fixed sizes worth keeping** — nav/brand column 196px; card header 46px; Import table well 404px
 (10 rows + header); `.bar` 78×6px; distribution bar 8px tall, max-width 230px; icon buttons 22×22
-(row action) and 24×24 (header add, pagination); checkbox 14×14; nav/toolbar icons 15×15, row icons 13px.
+(row actions — three of them, 4px apart, in a 92px column) and 24×24 (header add, pagination); checkbox 14×14; nav/toolbar icons 15×15, row icons 13px.
 
 ## Assets
 No image assets. All icons are inline SVG on a 24×24 viewBox with `fill:none; stroke:currentColor`,
@@ -422,8 +426,10 @@ Not included, handed off later: `Codelists.dc.html`, `FeatureConfig.dc.html`, `E
 `Main.dc.html` (Results), `Mismatches.dc.html`.
 
 ## Open questions for the team
-1. The **file report modal** (clipboard icon) is not designed yet: it needs per-file parse findings plus
-   the actions taken out of the row (re-parse, preview, remove, encoding/delimiter). Whether
-   "Export report" lives there or at delivery level is undecided.
+1. The **file report modal** (clipboard icon) is not designed yet. *Partly settled in code ahead of a
+   design round:* it holds per-file parse findings, preview, the encoding/delimiter selectors and
+   "Apply & re-parse"; re-parse and delete are **also** row actions and delete is row-only (P3-D22);
+   "Export findings CSV" lives in the modal, not at delivery level. A design round may still want the
+   three row actions drawn differently — an overflow menu would return the column to 46px.
 2. Loading, empty and error states are undefined for both views.
 3. Behaviour below ~900px viewport width is undefined.

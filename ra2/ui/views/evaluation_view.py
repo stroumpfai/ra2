@@ -98,6 +98,7 @@ from ra2.domain.llm import EndpointStatus
 from ra2.services.container import Services
 from ra2.services.errors import ServiceError
 from ra2.services.readmodels import (
+    ConnectionProbeView,
     ConnectionView,
     CorpusView,
     EvaluationView,
@@ -310,11 +311,21 @@ NO_SETUP_MESSAGE: Final = (
 NO_CORPUS_MESSAGE: Final = "No corpus yet — freeze one on Import first."
 NO_FROZEN_SET_MESSAGE: Final = "No frozen feature set yet — create one on Features first."
 NO_TEMPLATE_MESSAGE: Final = "No prompt template yet — save one on Prompts first."
-NO_MODELS_MESSAGE: Final = "No models — the endpoint returned an empty catalogue."
+#: The endpoint answered, and has nothing. Names the fix: a reachable
+#: Ollama with no model pulled is a completely ordinary state on a fresh
+#: install, and "empty catalogue" alone does not tell you what to do.
+NO_MODELS_MESSAGE: Final = "No models — the endpoint has none. Pull one with “ollama pull”."
+#: The endpoint was never answered for, so there is no catalogue to call
+#: empty. Which refusal it was — unreachable, or not loopback — is on the
+#: reason line under the card, so it is not repeated here.
+NO_MODELS_UNREACHABLE_MESSAGE: Final = "No models — the endpoint could not be asked."
 NO_RECORDS_MESSAGE: Final = "This corpus has no records to preview a prompt against."
 NO_RUNS_MESSAGE: Final = "No runs yet — Launch queues one per selected model."
 NO_PROVENANCE_MESSAGE: Final = "Nothing stored yet — provenance is written when a run starts."
 UNSAVED_MESSAGE: Final = "Save the draft to pin the prompt, the decoding settings and the size."
+#: Step 4's own version of `UNSAVED_MESSAGE`: the list above is real and
+#: current, and only the selection needs somewhere to be recorded.
+MODELS_UNSAVED_MESSAGE: Final = "Save the draft to select models."
 DRAFT_SAVED_MESSAGE: Final = "Draft saved."
 UNKNOWN_VALUE: Final = "unknown"
 EMPTY_CELL: Final = "—"
@@ -344,6 +355,12 @@ class _EvaluationPage:
         self._runs: Page[RunView] | None = None
         self._all_runs: tuple[RunView, ...] = ()
         self._connection: ConnectionView | None = None
+        #: The endpoint's catalogue. Held separately from `_view`
+        #: because it does not depend on one: which models the endpoint
+        #: offers is the endpoint's fact, and only the ticks are the
+        #: evaluation's. Reaching it through `_view` is what left the
+        #: Models card empty on every database with no evaluation yet.
+        self._models: tuple[ModelChoiceView, ...] = ()
         self._root: Element | None = None
         self._toolbar: Element | None = None
         self._setup_slot: Element | None = None
@@ -399,11 +416,17 @@ class _EvaluationPage:
             self._templates = tuple(await self._services.prompt.list_versions())
             self._view = await self._current_evaluation()
             if self._view is None:
-                self._connection = await self._services.evaluation.connection_status()
+                # `catalogue()` rather than `connection_status()`: the card can
+                # list what the endpoint offers long before an evaluation row
+                # exists, and one call fetches both facts.
+                catalogue = await self._services.evaluation.catalogue()
+                self._connection = catalogue.connection
+                self._models = catalogue.models
                 self._runs = None
                 self._all_runs = ()
             else:
                 self._connection = self._view.connection
+                self._models = self._view.models
                 evaluation_id = self._view.draft.evaluation_id
                 state = table_state(
                     RUNS_TABLE, sort_key="started_at", sort_dir=SortDir.DESC, page_size=PAGE_SIZE
@@ -585,23 +608,50 @@ class _EvaluationPage:
             ).style(NOTE_STYLE)
 
     def _step_models(self) -> None:
-        view = self._view
+        """The catalogue, whether or not an evaluation exists.
+
+        It used to read `() if view is None else view.models`, which made the
+        card dead on every database without an evaluation — the state a fresh
+        install is in, and the one where "is Ollama set up?" is the actual
+        question. The list comes from `_models` now; only the **ticks** need
+        an evaluation to record into, so only they are withheld.
+        """
+        models = self._models
         with self._step(4):
-            models = () if view is None else view.models
             with card():
                 with scroll_well(max_height_px=MODELS_WELL_PX):
                     if not models:
-                        _empty_line(NO_MODELS_MESSAGE)
+                        _empty_line(self._no_models_message())
                     for choice in models:
                         self._model_row(choice)
                 self._models_footer(models)
+            if models and self._view is None:
+                _empty_line(MODELS_UNSAVED_MESSAGE)
             self._endpoint_line()
+
+    def _no_models_message(self) -> str:
+        """Why the list is empty, not one sentence for three different causes.
+
+        The old wording said "the endpoint returned an empty catalogue" no
+        matter what — including when the endpoint was never asked, which was
+        exactly the case that made this look like a refresh bug. An endpoint
+        that could not be answered for gets its own line, and the reason
+        underneath the card already names which of the two refusals it was.
+        """
+        connection = self._connection
+        if connection is not None and not connection.is_reachable:
+            return NO_MODELS_UNREACHABLE_MESSAGE
+        return NO_MODELS_MESSAGE
 
     def _model_row(self, choice: ModelChoiceView) -> None:
         """README §2 step 4: a 13×13 tick, the mono tag over a mono `--ink3`
         "digest … · size" line. A model the host is **known** not to have the
         VRAM for is `opacity:.55` with its size line in `--warn`."""
-        disabled = choice.disabled or self._locked
+        # A tick writes into `evaluation.selected_models_json`, so there has
+        # to be an evaluation to write into. `_toggle_model` already returns
+        # early without one; this is what stops the tick looking live while
+        # silently swallowing the click.
+        disabled = choice.disabled or self._locked or self._view is None
         with (
             ui.element("div")
             .props(
@@ -618,6 +668,7 @@ class _EvaluationPage:
             tick(
                 checked=choice.selected,
                 label=f"Select {choice.tag}",
+                disabled=disabled,
                 on_change=None if disabled else _toggle(self._toggle_model, choice.tag),
             )
             with ui.element("div").style("display:flex;flex-direction:column;min-width:0;"):
@@ -1180,6 +1231,7 @@ class _EvaluationPage:
                     settings=connection,
                     on_save=_save_settings,
                     on_refresh=_sync(self._refresh_connection),
+                    on_test=self._test_connection,
                 ),
             )
         self._settings_dialog = dialog
@@ -1188,6 +1240,17 @@ class _EvaluationPage:
         # (Do-NOT #4), and a dialog opener tripping it would be a false
         # positive on a real invariant (`file_report_modal.show`'s note).
         dialog.value = True
+
+    async def _test_connection(self, endpoint: str, timeout_s: int) -> ConnectionProbeView:
+        """The settings dialog's "Test connection" — straight through to the
+        service, which owns the probe and the loopback refusal.
+
+        Nothing is decided here. The view does not know what a loopback host
+        is, does not catch anything (`test_connection` never raises), and does
+        not turn the result into words — the dialog's own `PROBE_WORDS` table
+        does that. Business logic in `ui/` is Do-NOT #7.
+        """
+        return await self._services.evaluation.test_connection(endpoint, timeout_s)
 
     async def _refresh_connection(self) -> None:
         """ "Refresh model list" re-asks the endpoint. Reachability is

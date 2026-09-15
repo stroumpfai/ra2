@@ -51,7 +51,13 @@ from ra2.domain.ids import (
     RecordId,
     RunId,
 )
-from ra2.domain.llm import EndpointStatus, ModelCatalog, ModelInfo
+from ra2.domain.llm import (
+    PROBE_TIMEOUT_S,
+    EndpointProber,
+    EndpointStatus,
+    ModelCatalog,
+    ModelInfo,
+)
 from ra2.infra.clock import Clock
 from ra2.infra.config import Settings
 from ra2.infra.gpu import GpuProbe
@@ -80,6 +86,8 @@ from ra2.services.errors import (
     NotFoundError,
 )
 from ra2.services.readmodels import (
+    CatalogueView,
+    ConnectionProbeView,
     ConnectionView,
     EvaluationDraftView,
     EvaluationView,
@@ -232,6 +240,7 @@ class EvaluationService:
         *,
         session_factory: async_sessionmaker[AsyncSession],
         model_catalog: ModelCatalog,
+        endpoint_prober: EndpointProber,
         gpu_probe: GpuProbe,
         clock: Clock,
         ids: IdFactory,
@@ -239,6 +248,7 @@ class EvaluationService:
     ) -> None:
         self._session_factory = session_factory
         self._model_catalog = model_catalog
+        self._endpoint_prober = endpoint_prober
         self._gpu_probe = gpu_probe
         self._clock = clock
         self._ids = ids
@@ -364,6 +374,26 @@ class EvaluationService:
                 selected = _selected_models(evaluation)
         return list(await self._model_choices(selected=selected))
 
+    async def catalogue(self) -> CatalogueView:
+        """The endpoint's models and its connection line, **without an
+        evaluation**.
+
+        The Models card needs two facts that belong to two different owners:
+        what the endpoint offers (the endpoint's) and which of them are ticked
+        (the evaluation's). `get()` serves the card once an evaluation exists;
+        this serves it before one does — on a fresh install, or any time
+        before "Save draft" — where the catalogue is just as knowable and used
+        to render as empty.
+
+        **One `reachable()` and one `models()`**, because the connection is
+        passed into `_model_choices` rather than re-fetched: `list_models()`
+        asks for its own, so `connection_status()` + `list_models()` would
+        cost three round trips for two facts. This mirrors `get()`, which has
+        always done it the cheap way.
+        """
+        connection = await self.connection_status()
+        return CatalogueView(connection=connection, models=await self._model_choices(connection))
+
     async def connection_status(self) -> ConnectionView:
         """Endpoint, timeout, reachability and the probe's GPU answer.
 
@@ -382,6 +412,39 @@ class EvaluationService:
             reason=None if status is EndpointStatus.REACHABLE else _CONNECTION_REASONS[status],
             gpu_name=None if gpu is None else gpu.name,
             gpu_vram_bytes=None if gpu is None else gpu.total_vram_bytes,
+        )
+
+    async def test_connection(
+        self, endpoint: str, timeout_s: int | None = None
+    ) -> ConnectionProbeView:
+        """Probe an endpoint the analyst **typed**, and say why it did not answer.
+
+        Not the same question as `connection_status()`. That one asks about
+        the configured endpoint and answers in one bit for the Models card;
+        this one asks about a value that is not configured anywhere yet, which
+        is the only value worth testing while you are still setting Ollama up.
+        Nothing here is persisted — `RA2_LLM_BASE_URL` is still the one source
+        of the endpoint the app actually uses.
+
+        `timeout_s` defaults to the configured timeout; the prober lowers it
+        further to its own cap, and the bound it settled on comes back on the
+        view so the dialog can name it.
+
+        **Never raises**, including for a non-loopback host: the prober refuses
+        that before opening a socket and returns
+        `ProbeCode.REFUSED_NOT_LOOPBACK`. An exception here would become a
+        toast, and the design does not have one.
+        """
+        requested = self._settings.llm_timeout_s if timeout_s is None else timeout_s
+        result = await self._endpoint_prober.probe(endpoint, timeout_s=requested)
+        return ConnectionProbeView(
+            endpoint=endpoint,
+            code=result.code,
+            detail=result.detail,
+            latency_ms=result.latency_ms,
+            model_count=result.model_count,
+            http_status=result.http_status,
+            probe_timeout_s=min(requested, PROBE_TIMEOUT_S),
         )
 
     async def record_scope(self, evaluation_id: EvaluationId) -> tuple[RecordId, ...]:

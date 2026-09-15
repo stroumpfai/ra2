@@ -23,8 +23,10 @@ __all__ = [
     "NAV_ICONS",
     "PLAY_CIRCLE",
     "PLUS",
+    "REFRESH",
     "SLIDERS",
     "TABLE",
+    "TRASH",
     "svg",
 ]
 
@@ -81,6 +83,16 @@ CLIPBOARD: Final = (
 )
 INFO: Final = (
     '<circle cx="12" cy="12" r="9"></circle><path d="M12 11v5"></path><path d="M12 8h.01"></path>'
+)
+#: The Import row's re-parse action. Lucide `rotate-cw`, same 24x24 viewBox
+#: and the same open-arc-plus-arrowhead construction as the rest of the set.
+REFRESH: Final = '<path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"></path><path d="M20.5 3v5.5H15"></path>'
+#: The Import row's delete action. Lucide `trash-2`.
+TRASH: Final = (
+    '<path d="M4 6.5h16"></path>'
+    '<path d="M9 6.5V5a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 5v1.5"></path>'
+    '<path d="m6.6 6.5.8 12.4A1.6 1.6 0 0 0 9 20.5h6a1.6 1.6 0 0 0 1.6-1.6l.8-12.4"></path>'
+    '<path d="M10 10.5v6"></path><path d="M14 10.5v6"></path>'
 )
 
 #: Nav key -> icon body. The mapping the design README's nav table specifies.

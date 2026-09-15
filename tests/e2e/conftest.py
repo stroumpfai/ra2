@@ -32,7 +32,11 @@ import uvicorn
 from alembic import command
 from alembic.config import Config
 from nicegui import ui
-from tests.fixtures.fake_llm import FakeLLMClient, StaticModelCatalog
+from tests.fixtures.fake_llm import (
+    FakeLLMClient,
+    StaticEndpointProber,
+    StaticModelCatalog,
+)
 
 from ra2.infra.config import Settings
 from ra2.infra.gpu import GpuInfo, StaticGpuProbe
@@ -52,7 +56,7 @@ from ra2.ui.components import (
     pagination_row,
     tick,
 )
-from ra2.ui.components.icons import CLIPBOARD
+from ra2.ui.components.icons import CLIPBOARD, REFRESH, TRASH
 from ra2.ui.shell import shell
 from ra2.ui.state import TableState
 
@@ -145,14 +149,33 @@ def _columns() -> tuple[ColumnSpec[FileRow], ...]:
         ),
         ColumnSpec(
             key="action",
-            width="46px",
+            width="92px",
             align="right",
             cell_style="padding-right:14px;",
-            render=lambda row: icon_button(
-                CLIPBOARD, label=f"Report for {row.name}", size=22, glyph=13, stroke=1.9
-            ),
+            render=_render_actions,
         ),
     )
+
+
+def _render_actions(row: FileRow) -> None:
+    """The row's three actions (P3-D22), at the metrics `import_view` uses.
+
+    J4 measures **this** table, so it has to be the same shape as the real
+    one or the layout tripwire is measuring fiction.
+    """
+    with ui.element("div").style(
+        "display:inline-flex;align-items:center;justify-content:flex-end;gap:4px;"
+    ):
+        icon_button(CLIPBOARD, label=f"Report for {row.name}", size=22, glyph=13, stroke=1.9)
+        icon_button(REFRESH, label=f"Re-parse {row.name}", size=22, glyph=13, stroke=1.9)
+        icon_button(
+            TRASH,
+            label=f"Delete {row.name}",
+            size=22,
+            glyph=13,
+            stroke=1.9,
+            extra_class="danger-hover",
+        )
 
 
 def _render_name(row: FileRow) -> None:
@@ -308,6 +331,7 @@ def server_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         # keyword arguments — there is no test mode in production code.
         llm_client=FakeLLMClient(),
         model_catalog=StaticModelCatalog(),
+        endpoint_prober=StaticEndpointProber(),
         gpu_probe=StaticGpuProbe(GpuInfo(name="RTX 4090", total_vram_bytes=24_000_000_000)),
         mount_ui=True,
     )

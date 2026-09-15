@@ -523,3 +523,184 @@ async def test_the_report_shows_a_twenty_line_raw_preview(seeded: Seeded) -> Non
     _one(user, action).click()
     await user.should_see("File report", retries=30)
     assert _text_of(user, "report-preview").startswith("UnfallUid|GeoRefUid")
+
+
+# --- the row actions (P3-D22) ------------------------------------------------
+
+
+def _action(root: Element, label: str) -> Element:
+    """A row action button, by the `aria-label` the view stamps on it."""
+    return next(e for e in root.descendants() if e._props.get("aria-label") == label)
+
+
+async def test_every_file_row_carries_report_reparse_and_delete(seeded: Seeded) -> None:
+    """P3-D22: the action column holds three buttons, on **both** tables.
+
+    The text table is not a lesser case of the structured one — it renders
+    through the same `_file_columns`, and this is what says so.
+    """
+    user = seeded.user
+    await user.open("/import")
+    await user.should_see(f"{STRUCTURED_FILES} files", retries=30)
+
+    structured = _card(user, "structured")
+    for label in ("Report for", "Re-parse", "Delete"):
+        assert _action(structured, f"{label} a_unfall.txt") is not None
+
+    text = _card(user, "text")
+    for label in ("Report for", "Re-parse", "Delete"):
+        assert _action(text, f"{label} m_text.csv") is not None
+
+
+async def test_the_row_reparse_keeps_the_settings_that_are_effective_now(
+    seeded: Seeded,
+) -> None:
+    """The row's re-parse passes **no** overrides, which `reparse_file` reads
+    as "keep what is effective now".
+
+    Proven against an override that detection would not have chosen on its
+    own: `a_unfall.txt` is delimited with `|`, and a row re-parse that
+    re-detected instead of re-running would hand back `|` and lose the `,`
+    set here. Changing a delimiter stays the report modal's job — this button
+    only re-runs.
+    """
+    user = seeded.user
+    delivery = (await seeded.services.delivery.list_deliveries())[0]
+    file = next(f for f in delivery.files if f.filename == "a_unfall.txt")
+    overridden = await seeded.services.delivery.reparse_file(
+        delivery.delivery_id, file.file_id, delimiter=","
+    )
+    assert overridden.delimiter == ","
+
+    before = {
+        f.file_id: f.delimiter
+        for f in (await seeded.services.delivery.get(delivery.delivery_id)).files
+        if f.file_id != file.file_id
+    }
+
+    await user.open("/import")
+    await user.should_see(f"{STRUCTURED_FILES} files", retries=30)
+    structured = _card(user, "structured")
+    _one(user, _action(structured, "Re-parse a_unfall.txt")).click()
+
+    async def _reparsed() -> bool:
+        current = await seeded.services.delivery.get(delivery.delivery_id)
+        return next(f for f in current.files if f.file_id == file.file_id).delimiter == ","
+
+    for _ in range(500):
+        if await _reparsed():
+            break
+        await asyncio.sleep(0.01)
+    else:  # pragma: no cover - the failure path
+        raise AssertionError("the row re-parse never completed")
+
+    # And it touched that file alone — `reparse_file` promises exactly that,
+    # and the row action must not be the thing that breaks the promise.
+    current = await seeded.services.delivery.get(delivery.delivery_id)
+    after = {f.file_id: f.delimiter for f in current.files if f.file_id != file.file_id}
+    assert after == before
+
+
+async def test_the_row_delete_takes_two_clicks(seeded: Seeded) -> None:
+    """The first click arms the row, the second one deletes (P3-D22).
+
+    A delete is unrecoverable for an upload delivery, where `remove_file`
+    deletes the stored bytes — so one click must not be enough.
+    """
+    user = seeded.user
+    await user.open("/import")
+    await user.should_see(f"{STRUCTURED_FILES} files · {STRUCTURED_FILES} selected", retries=30)
+    await user.should_see(f"Create corpus · {ALL_RECORDS} records", retries=30)
+
+    structured = _card(user, "structured")
+    _one(user, _action(structured, "Delete a_unfall.txt")).click()
+    await user.should_see("Sure?", retries=30)
+
+    # Armed, not done: the file is still in the delivery and both counts stand.
+    delivery = (await seeded.services.delivery.list_deliveries())[0]
+    assert any(f.filename == "a_unfall.txt" for f in delivery.files)
+
+    confirm = next(
+        e
+        for e in _card(user, "structured").descendants()
+        if e._props.get("data-testid") == "confirm-delete-file"
+    )
+    _one(user, confirm).click()
+
+    # Both counts move, because both are re-read from the service (§8.1.1):
+    # one file fewer, and its two `unfall` rows gone from the record count.
+    await user.should_see(
+        f"{STRUCTURED_FILES - 1} files · {STRUCTURED_FILES - 1} selected", retries=30
+    )
+    await user.should_see(f"Create corpus · {WITHOUT_A} records", retries=30)
+    delivery = (await seeded.services.delivery.list_deliveries())[0]
+    assert not any(f.filename == "a_unfall.txt" for f in delivery.files)
+
+
+async def test_the_armed_row_can_be_cancelled(seeded: Seeded) -> None:
+    """The two-step is escapable without clicking something unrelated, and
+    backing out touches nothing."""
+    user = seeded.user
+    await user.open("/import")
+    await user.should_see(f"{STRUCTURED_FILES} files", retries=30)
+
+    _one(user, _action(_card(user, "structured"), "Delete a_unfall.txt")).click()
+    await user.should_see("Sure?", retries=30)
+
+    _one(user, _action(_card(user, "structured"), "Cancel delete a_unfall.txt")).click()
+    await _until(
+        lambda: not [
+            e
+            for e in _card(user, "structured").descendants()
+            if e._props.get("data-testid") == "confirm-delete-file"
+        ]
+    )
+    # The three buttons are back and the file is untouched.
+    assert _action(_card(user, "structured"), "Delete a_unfall.txt") is not None
+    delivery = (await seeded.services.delivery.list_deliveries())[0]
+    assert any(f.filename == "a_unfall.txt" for f in delivery.files)
+
+
+async def test_an_armed_delete_is_disarmed_by_any_other_action(seeded: Seeded) -> None:
+    """A "Sure?" left standing behind an unrelated click is a trap, so
+    `reload()` clears it — and every other action goes through `reload()`."""
+    user = seeded.user
+    await user.open("/import")
+    await user.should_see(f"{STRUCTURED_FILES} files", retries=30)
+
+    structured = _card(user, "structured")
+    _one(user, _action(structured, "Delete a_unfall.txt")).click()
+    await user.should_see("Sure?", retries=30)
+
+    # Deselecting a different file is an unrelated action — and it reloads.
+    # The card is re-fetched because arming the row redrew the grid, which
+    # destroyed the element `structured` was pointing at. A sort would have
+    # done as well, except that it also moves `a_unfall.txt` off page 1.
+    _one(user, _tick(user, _card(user, "structured"), "Select b_unfall.txt")).click()
+    await _until(
+        lambda: (
+            not [
+                e
+                for e in _card(user, "structured").descendants()
+                if e._props.get("data-testid") == "confirm-delete-file"
+            ]
+        )
+    )
+    assert _action(_card(user, "structured"), "Delete a_unfall.txt") is not None
+
+
+async def test_the_report_modal_no_longer_offers_remove(seeded: Seeded) -> None:
+    """Deleting a file has exactly one home, and it is the row (P3-D22).
+
+    The modal keeps re-parse, because it is the only thing that applies the
+    override selectors above it.
+    """
+    user = seeded.user
+    await user.open("/import")
+    structured = _card(user, "structured")
+    _one(user, _action(structured, "Report for a_unfall.txt")).click()
+    await user.should_see("File report", retries=30)
+
+    testids = {e._props.get("data-testid") for e in user.find(kind=ui.element).elements}
+    assert "remove-file" not in testids
+    assert "reparse" in testids

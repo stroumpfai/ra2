@@ -21,11 +21,21 @@ import httpx2
 import pytest
 from pydantic import BaseModel
 
-from ra2.domain.llm import EndpointStatus, Extraction, LLMClient, ModelCatalog, ModelInfo
+from ra2.domain.llm import (
+    EndpointProber,
+    EndpointStatus,
+    Extraction,
+    LLMClient,
+    ModelCatalog,
+    ModelInfo,
+    ProbeCode,
+)
 from ra2.infra.config import Settings
 from ra2.infra.ollama_client import (
     LOOPBACK_HOSTS,
+    PROBE_TIMEOUT_S,
     LlmEndpointError,
+    OllamaEndpointProber,
     OllamaLLMClient,
     OllamaModelCatalog,
     native_api_url,
@@ -620,3 +630,221 @@ def _modules_naming(packages: tuple[str, ...]) -> set[str]:
                 if head in packages and name not in docstrings:
                     found.add(relative)
     return found
+
+
+# ===========================================================================
+# OllamaEndpointProber — the settings dialog's "Test connection"
+# ===========================================================================
+#
+# One test per `ProbeCode`, because the whole value of the button is that it
+# tells these outcomes apart. `reachable()` collapses all of them to one bit,
+# which is right for the Models card and useless for someone trying to work
+# out why Ollama will not answer.
+#
+# Assertions are on the **code**, never on a sentence: the wording lives in one
+# rendering table in `ra2/ui/components/ollama_settings.py` and must be
+# rewritable without touching this file (CLAUDE.md: findings, not prose).
+
+
+async def test_probe_reports_ok_with_the_model_count(stub: StubOllama) -> None:
+    prober = OllamaEndpointProber(http_client=stub.http_client())
+
+    result = await prober.probe(LOOPBACK_URL, timeout_s=120)
+
+    assert result.code is ProbeCode.OK
+    assert result.ok is True
+    assert result.model_count == len(TAGS_BODY["models"])
+    assert result.latency_ms is not None
+    assert result.http_status is None
+
+
+async def test_probe_reads_the_native_tags_url(stub: StubOllama) -> None:
+    """The probe asks the same endpoint the catalogue does, so "the test
+    passed" means the thing the app will actually call answered."""
+    prober = OllamaEndpointProber(http_client=stub.http_client())
+
+    await prober.probe(LOOPBACK_URL, timeout_s=120)
+
+    assert stub.tags_urls == ["http://127.0.0.1:11434/api/tags"]
+
+
+async def test_probe_handles_a_base_url_without_the_v1_suffix(stub: StubOllama) -> None:
+    """Someone who configured the native root by hand gets a working test
+    rather than a 404 — `native_api_url` treats it as the root already."""
+    prober = OllamaEndpointProber(http_client=stub.http_client())
+
+    result = await prober.probe("http://127.0.0.1:11434", timeout_s=120)
+
+    assert result.code is ProbeCode.OK
+    assert stub.tags_urls == ["http://127.0.0.1:11434/api/tags"]
+
+
+async def test_probe_reports_connection_refused_when_nothing_is_listening() -> None:
+    stub = StubOllama(tags=httpx2.ConnectError("[Errno 111] Connection refused"))
+    prober = OllamaEndpointProber(http_client=stub.http_client())
+
+    result = await prober.probe(LOOPBACK_URL, timeout_s=120)
+
+    assert result.code is ProbeCode.CONNECTION_REFUSED
+    # The **verbatim** cause, for the dialog's second line. The SDK's own
+    # message is the generic "Connection error."; the errno is the half that
+    # tells an analyst anything, so `_cause` prefers `__cause__`.
+    assert result.detail is not None
+    assert "Connection refused" in result.detail
+
+
+async def test_probe_detail_walks_to_the_deepest_cause() -> None:
+    """The bottom of the `__cause__` chain, not the top.
+
+    A real refusal arrives as `APIConnectionError` ("Connection error.") ->
+    `httpx2.ConnectError` ("All connection attempts failed") ->
+    `ConnectionRefusedError` ("[Errno 111] ... ('127.0.0.1', 11434)"). Each
+    wrapper is more generic than what it wraps, and only the last one names the
+    port — which is the whole reason the detail line exists.
+    """
+    refused = ConnectionRefusedError("[Errno 111] Connect call failed ('127.0.0.1', 11434)")
+    wrapped = httpx2.ConnectError("All connection attempts failed")
+    wrapped.__cause__ = refused
+    stub = StubOllama(tags=wrapped)
+    prober = OllamaEndpointProber(http_client=stub.http_client())
+
+    result = await prober.probe(LOOPBACK_URL, timeout_s=120)
+
+    assert result.code is ProbeCode.CONNECTION_REFUSED
+    assert result.detail == "[Errno 111] Connect call failed ('127.0.0.1', 11434)"
+
+
+async def test_probe_detail_survives_a_self_referential_cause_chain() -> None:
+    """A chain that loops must not spin the walk."""
+    looping = httpx2.ConnectError("round and round")
+    looping.__cause__ = looping
+    stub = StubOllama(tags=looping)
+    prober = OllamaEndpointProber(http_client=stub.http_client())
+
+    result = await prober.probe(LOOPBACK_URL, timeout_s=120)
+
+    assert result.detail == "round and round"
+
+
+async def test_probe_tells_a_timeout_apart_from_a_refusal() -> None:
+    """`APITimeoutError` subclasses `APIConnectionError`, so order matters in
+    the adapter. A host that accepted the connection and went quiet is a
+    different fix from one that was never there, and collapsing the two would
+    put the analyst on the wrong trail."""
+    stub = StubOllama(tags=httpx2.ConnectTimeout("timed out"))
+    prober = OllamaEndpointProber(http_client=stub.http_client())
+
+    result = await prober.probe(LOOPBACK_URL, timeout_s=120)
+
+    assert result.code is ProbeCode.TIMEOUT
+
+
+async def test_probe_reports_the_http_status_it_was_given() -> None:
+    """A 404 usually means `/v1` is pointed at something that is not Ollama.
+    The status reaches the view, because "404" is the word that resolves it."""
+    stub = StubOllama(tags=(404, {"error": "not found"}))
+    prober = OllamaEndpointProber(http_client=stub.http_client())
+
+    result = await prober.probe(LOOPBACK_URL, timeout_s=120)
+
+    assert result.code is ProbeCode.HTTP_ERROR
+    assert result.http_status == 404
+
+
+async def test_probe_reports_a_500_as_an_http_error_not_a_refusal() -> None:
+    """A 5xx is retryable for `extract`, but a connection **test** reports what
+    it saw once rather than hiding a broken endpoint behind retries."""
+    stub = StubOllama(tags=(500, {"error": "boom"}))
+    prober = OllamaEndpointProber(http_client=stub.http_client())
+
+    result = await prober.probe(LOOPBACK_URL, timeout_s=120)
+
+    assert result.code is ProbeCode.HTTP_ERROR
+    assert result.http_status == 500
+
+
+async def test_probe_reports_bad_payload_when_something_else_answers() -> None:
+    """A 200 from a web server that is not an Ollama. The port is right, the
+    thing behind it is not — which no status code would have said."""
+    stub = StubOllama(tags=(200, {"totally": "not ollama", "models": "a string"}))
+    prober = OllamaEndpointProber(http_client=stub.http_client())
+
+    result = await prober.probe(LOOPBACK_URL, timeout_s=120)
+
+    assert result.code is ProbeCode.BAD_PAYLOAD
+
+
+async def test_probe_reports_bad_payload_when_there_is_no_model_list() -> None:
+    """A JSON 200 with no `models` key at all.
+
+    The SDK's parser is deliberately lenient — that is what keeps the
+    catalogue tolerant of fields Ollama adds later — so it returns an
+    `_OllamaTags` with `models=None` rather than raising, and the probe would
+    report a healthy endpoint with zero models. A real Ollama with nothing
+    pulled sends `{"models": []}`; the key being **absent** means this is not
+    an Ollama.
+    """
+    stub = StubOllama(tags=(200, {"status": "ok"}))
+    prober = OllamaEndpointProber(http_client=stub.http_client())
+
+    result = await prober.probe(LOOPBACK_URL, timeout_s=120)
+
+    assert result.code is ProbeCode.BAD_PAYLOAD
+
+
+async def test_probe_reports_ok_for_an_ollama_with_no_models_pulled() -> None:
+    """The other side of the previous test: an empty list is a **healthy**
+    endpoint that simply has nothing pulled yet, and must not be confused with
+    a server that is not Ollama."""
+    stub = StubOllama(tags=(200, {"models": []}))
+    prober = OllamaEndpointProber(http_client=stub.http_client())
+
+    result = await prober.probe(LOOPBACK_URL, timeout_s=120)
+
+    assert result.code is ProbeCode.OK
+    assert result.model_count == 0
+
+
+@pytest.mark.parametrize(
+    ("url", "code"),
+    [
+        pytest.param("http://192.168.1.5:11434/v1", ProbeCode.REFUSED_NOT_LOOPBACK, id="lan"),
+        pytest.param("http://ollama.example.com/v1", ProbeCode.REFUSED_NOT_LOOPBACK, id="public"),
+        pytest.param("ftp://127.0.0.1", ProbeCode.MALFORMED_URL, id="scheme"),
+        pytest.param("127.0.0.1:11434", ProbeCode.MALFORMED_URL, id="no-scheme"),
+    ],
+)
+async def test_probe_refuses_without_opening_a_socket(url: str, code: ProbeCode) -> None:
+    """**The N1 gate for this feature.** A refused endpoint must produce no
+    packet at all, not merely no answer — `refusing_transport` fails the test
+    if anything reaches it.
+
+    And it is a `ProbeResult`, not an exception: the dialog has to be able to
+    say "that host is not local" without taking the app down, which is the one
+    way this differs from the constructor guard.
+    """
+    prober = OllamaEndpointProber(http_client=refusing_transport())
+
+    result = await prober.probe(url, timeout_s=120)
+
+    assert result.code is code
+    assert result.ok is False
+    assert result.latency_ms is None
+
+
+async def test_probe_caps_the_timeout_below_the_configured_one(stub: StubOllama) -> None:
+    """`RA2_LLM_TIMEOUT_S` is 120 by default — right for a model that is
+    thinking, wrong for a dialog waiting to learn whether anything is there.
+    The probe takes the lower of the two so a hung endpoint cannot freeze the
+    dialog for two minutes.
+    """
+    client = stub.http_client()
+    prober = OllamaEndpointProber(http_client=client)
+
+    await prober.probe(LOOPBACK_URL, timeout_s=120)
+
+    assert PROBE_TIMEOUT_S < 120
+
+
+async def test_probe_satisfies_the_endpoint_prober_protocol() -> None:
+    assert isinstance(OllamaEndpointProber(), EndpointProber)

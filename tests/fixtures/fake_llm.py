@@ -45,13 +45,14 @@ reproduces the M17 behaviour exactly. Nothing here changes what
 
 from collections.abc import Mapping, Sequence
 
-from ra2.domain.llm import EndpointStatus, Extraction, ModelInfo
+from ra2.domain.llm import EndpointStatus, Extraction, ModelInfo, ProbeCode, ProbeResult
 from ra2.infra.ollama_client import LlmEndpointError
 
 __all__ = [
     "DEFAULT_ENDPOINT",
     "DEFAULT_MODELS",
     "FakeLLMClient",
+    "StaticEndpointProber",
     "StaticModelCatalog",
 ]
 
@@ -236,3 +237,36 @@ class StaticModelCatalog:
     async def reachable(self) -> EndpointStatus:
         self.reachable_calls += 1
         return self._status
+
+
+class StaticEndpointProber:
+    """A `domain.llm.EndpointProber` with a fixed verdict.
+
+    The real `OllamaEndpointProber` opens a socket, and `create_app()` defaults
+    to it — harmless for the tests that never press Test, and exactly what must
+    not happen in the layers that do. **No test in layers 1-4 talks to a live
+    endpoint** (plan-phase-3.md §11), so anything exercising the settings
+    dialog's connection test substitutes this.
+
+    `set_result()` makes the verdict change between presses, which is the
+    journey worth covering: nothing was listening, the analyst started Ollama,
+    the next press finds it. `probe_calls` records every ask — `calls` keeps
+    the arguments, because "the probe is bounded to 5 s, not the configured
+    120" is a claim about what this was called *with*.
+    """
+
+    def __init__(self, result: ProbeResult | None = None) -> None:
+        self._result = result or ProbeResult(
+            code=ProbeCode.OK, latency_ms=12, model_count=len(DEFAULT_MODELS)
+        )
+        self.probe_calls = 0
+        self.calls: list[tuple[str, int]] = []
+
+    def set_result(self, result: ProbeResult) -> None:
+        """Change what the next probe returns."""
+        self._result = result
+
+    async def probe(self, base_url: str, *, timeout_s: int) -> ProbeResult:
+        self.probe_calls += 1
+        self.calls.append((base_url, timeout_s))
+        return self._result

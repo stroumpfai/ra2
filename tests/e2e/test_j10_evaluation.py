@@ -315,15 +315,52 @@ def test_j10_the_connection_settings_dialog_opens_unclipped_at_1024px(
     page.click('[aria-label="Ollama connection settings"]')
     dialog = page.locator('[data-testid="ollama-settings-dialog"] [data-testid="card"]')
     expect(dialog).to_be_visible()
+    # Quasar scales the dialog in, so a box measured the instant it becomes
+    # visible is a fraction of the final one — and a fraction of a card always
+    # fits, which would make the clipping assertion below pass on a dialog that
+    # actually clips. Wait for the box to stop changing first. This matters
+    # more since the dialog grew to five controls (P3-D19).
+    page.wait_for_function(
+        """() => {
+            const el = document.querySelector(
+                '[data-testid="ollama-settings-dialog"] [data-testid="card"]');
+            if (!el) return false;
+            const now = el.getBoundingClientRect().height;
+            const settled = window.__ra2DialogHeight === now && now > 0;
+            window.__ra2DialogHeight = now;
+            return settled;
+        }"""
+    )
 
     box = dialog.bounding_box()
     assert box is not None, "the dialog card has no layout box"
     assert box["x"] >= 0, f"the dialog is clipped on the left: {box}"
     assert box["x"] + box["width"] <= 1024, f"the dialog is clipped on the right: {box}"
 
-    # All three controls are laid out and reachable, not merely in the DOM.
-    for testid in ("ollama-endpoint", "ollama-timeout", "ollama-refresh", "ollama-save"):
+    # Every control is laid out and reachable, not merely in the DOM. The
+    # dialog grew from three controls to five (P3-D19) and its height is the
+    # reason this assertion is worth keeping: the clipping fix has to hold for
+    # the taller dialog too.
+    for testid in (
+        "ollama-endpoint",
+        "ollama-timeout",
+        "ollama-test",
+        "ollama-refresh",
+        "ollama-save",
+    ):
         expect(page.locator(f'[data-testid="{testid}"]')).to_be_visible()
     assert not page.evaluate("document.body.scrollWidth > document.body.clientWidth + 1"), (
         "the open dialog made the page scroll horizontally"
     )
+
+    # The connection test is wired end to end: press it and a verdict appears.
+    # `StaticEndpointProber` answers (e2e/conftest.py) — no journey dials 11434.
+    page.click('[data-testid="ollama-test"]')
+    expect(page.locator('[data-testid="ollama-test-sentence"]')).to_be_visible()
+
+    # The loopback gate, in a real browser: a LAN address disables Save.
+    endpoint = page.locator('[data-testid="ollama-endpoint"]')
+    endpoint.fill("http://192.168.1.5:11434/v1")
+    endpoint.blur()
+    expect(page.locator('[data-testid="ollama-endpoint-error"]')).to_be_visible()
+    expect(page.locator('[data-testid="ollama-save"]')).to_be_disabled()

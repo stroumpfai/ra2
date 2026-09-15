@@ -363,6 +363,14 @@ counts and keys, the detected vs. effective encoding/delimiter/quote char with
 override selectors, a re-parse button, a 20-row raw preview, remove, and
 "Export findings CSV".
 
+**Amended by P3-D22: remove is no longer in the modal.** Deleting a file is a row
+action in the Import table, so it has exactly one home. Re-parse stays and is
+labelled "Apply & re-parse", because it is the only thing that applies the three
+override selectors above it — `DeliveryService.reparse_file`'s arguments come from
+them. The row's own re-parse passes no overrides, which that method reads as "keep
+what is effective now": a re-run, never a change. The two buttons call the same
+service method and are not duplicates of each other.
+
 ---
 
 ## 9. Jobs
@@ -565,7 +573,7 @@ Each is additive and cheap to reverse; none should change silently.
 | SD6 | Structured **sets** inferred by FK reachability from the `unfall` file | Same reason; the design's collapsed set rows need a data-driven grouping |
 | SD7 | `TaskRunner` seam introduced in phase 1 for import | The spec needs it in §9 anyway; retrofitting progress onto a synchronous import is worse |
 | SD8 | Long tail defined as `distinct > 20 and top_value_share < 0.01` | The design states the rendering, not the threshold |
-| SD9 | Minimum spec for the file report modal (§8.3) | The design defers it, but the Import row action opens it |
+| SD9 | Minimum spec for the file report modal (§8.3) | The design defers it, but the Import row action opens it. **Amended by P3-D22** — remove left the modal for the row |
 | SD10 | The API is built in phase 1, not deferred | It is how E2E seeds state, and it is the same services either way |
 | SD11 | `prompt_template` is a **table**, not the on-disk template `mvp-spec.md` §10.2 describes (§15.1) | Citation counts, an active flag and "delete only when uncited" are enforceable only where the citations are |
 | SD12 | `evaluation_feature` — the per-evaluation `enum_codelist_json` snapshot and final fingerprint, which `mvp-spec.md` §5 puts on `feature` (§15.2) | A frozen `feature_config` is corpus-independent, so the snapshot cannot resolve until an evaluation fixes a corpus |
@@ -922,7 +930,8 @@ exactly as Import does. No streaming, no websocket push.
 `LLMClient` (unchanged since phase 1 — `extract(text, schema, model, *,
 temperature, seed)` takes the resolved prompt as `text`, and the timeout
 belongs to construction, not to a call) and the new `ModelCatalog`
-(`models() -> tuple[ModelInfo, ...]`, `reachable() -> EndpointStatus`). It is
+(`models() -> tuple[ModelInfo, ...]`, `reachable() -> EndpointStatus`), plus
+`EndpointProber` (below). It is
 the only module in the repo permitted to import `openai`, which
 `import-linter`'s `one-llm-seam` contract enforces against every other
 package.
@@ -936,7 +945,15 @@ endpoint's constrained decoding, through `/v1`, as §3 already describes.
 
 **The loopback guard.** The client refuses **at construction** a `base_url`
 whose host is not loopback (`127.0.0.1`, `::1`, `localhost`), raising
-`LlmEndpointError` naming N1. `mvp-spec.md` §19.10 permits egress to "the
+`LlmEndpointError` naming N1. The **rule itself lives in `domain/llm.py`**, not
+here: `classify_endpoint(base_url) -> ProbeCode | None` is the one statement of
+"may RA2 dial this?", and it has three faces — `require_loopback` raises on it
+(this guard), `is_loopback_url` answers yes/no for the settings dialog's Save
+gate, and `EndpointProber` returns it as a result. The dialog needs the same
+rule and `ra2/ui/` may not import `ra2/infra/`, so a rule that stayed in the
+adapter would have become two copies of the one thing standing between this
+codebase and N1. It is pure `urllib.parse`, so `domain` is a legal home; the
+adapter re-exports it. `mvp-spec.md` §19.10 permits egress to "the
 configured LLM endpoint" and N1 forbids data leaving the host; a configurable
 URL with no guard satisfies neither, and a typo or a copied `.env` would ship
 accident narratives to a LAN address. **There is deliberately no opt-out
@@ -949,6 +966,46 @@ the guard plus `import-linter` are what make it a gate.
 service hands the view an empty model list and a reason; the view renders it
 beside the endpoint line and **disables Launch**. Never a toast, never a 502 —
 a 502 would force exactly the toast the design rejects.
+
+**The endpoint prober — diagnosing a URL nobody has committed to yet**
+(**P3-D19**). `reachable()` answers about the *configured* endpoint, in one
+bit, which is all the Models card renders. It cannot help someone setting
+Ollama up, for two reasons: the value they care about is the one still in the
+settings dialog's field, and "unreachable" cannot tell "Ollama is not running"
+from "that is the wrong port". So there is a third protocol beside the other
+two:
+
+```python
+# domain/llm.py
+class EndpointProber(Protocol):
+    async def probe(self, base_url: str, *, timeout_s: int) -> ProbeResult: ...
+```
+
+`OllamaEndpointProber` implements it. Three properties make it more than a
+second `reachable()`:
+
+- **It takes the URL per call**, so it holds no `base_url` and needs no
+  settings — which is also what lets `create_app()` default it with nothing.
+- **It never raises.** Every outcome is a `ProbeResult` carrying a `ProbeCode`
+  — `OK`, `REFUSED_NOT_LOOPBACK`, `MALFORMED_URL`, `CONNECTION_REFUSED`,
+  `TIMEOUT`, `HTTP_ERROR`, `BAD_PAYLOAD` — plus the provider's or the OS's
+  verbatim `detail`. The code is the stable identifier and the wording lives in
+  one rendering table in `ui/`, exactly as `FindingCode` works. A refusal that
+  raised would force the toast the design rejects.
+- **`classify_endpoint` runs before any client is built**, so an off-host URL
+  produces no packet at all. That is the N1 property, and it is asserted
+  directly: the adapter tests hand the prober a transport that fails the test
+  if anything reaches it.
+
+The bound is `min(timeout_s, PROBE_TIMEOUT_S)`. `RA2_LLM_TIMEOUT_S` is 120 —
+right for a model that is thinking, wrong for a dialog waiting to learn whether
+anything is listening, which would otherwise hang for two minutes on a host
+that accepts the connection and goes quiet. The bound actually used is reported
+back, so the timeout sentence can name it.
+
+`POST /api/v1/models/test` is the same call through the other adapter, and is
+**always 200** for the same reason `GET /models` is: a probe that found nothing
+has succeeded at its job.
 
 ### 15.6 The GPU probe
 
@@ -975,6 +1032,16 @@ wherever the GPU is, on Windows and Linux alike). **Never `nvidia-smi`, never
 any subprocess**: N3 forbids shell-outs, and a library load is not one. Read
 this rule as written — the next reader reaching for `nvidia-smi` because "it
 is only a probe" is the failure mode this paragraph exists to prevent.
+
+**The catalogue is endpoint state; only the selection is evaluation state.**
+The Models card shows both, which is why `EvaluationView` carries both — but
+the card must render the catalogue whether or not an evaluation exists, and
+`EvaluationService.catalogue()` is what serves it before one does. Reaching
+the endpoint's facts *through* the evaluation's is how the card came to be
+empty on every fresh install, in exactly the state where "is Ollama set up?"
+is the question being asked (**P3-D21**). Selection is withheld until the
+draft is saved — the design's own step order — so the ticks render `disabled`
+rather than merely inert.
 
 `StaticGpuProbe` serves both the `RA2_GPU_VRAM_GB` / `RA2_GPU_NAME` overrides
 and the tests. `None` is not an error: no NVIDIA GPU means no `fits_vram`

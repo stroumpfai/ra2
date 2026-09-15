@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from tests.fixtures.fake_llm import StaticModelCatalog
+from tests.fixtures.fake_llm import StaticEndpointProber, StaticModelCatalog
 
 from ra2.domain.extraction import EvaluationSize, RunStatus
 from ra2.domain.ids import CodeAttributeId, CorpusId, EvaluationId, PromptTemplateId
@@ -290,6 +290,7 @@ async def test_a_vram_infeasible_model_is_refused_at_launch_too(
     unknown_host = EvaluationService(
         session_factory=db_session_factory,
         model_catalog=model_catalog,
+        endpoint_prober=StaticEndpointProber(),
         gpu_probe=StaticGpuProbe(),
         clock=clock,
         ids=ids,

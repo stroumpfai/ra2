@@ -19,14 +19,18 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from ra2.api.v1.router import api_router
 from ra2.domain.language import LanguageDetector
-from ra2.domain.llm import LLMClient, ModelCatalog
+from ra2.domain.llm import EndpointProber, LLMClient, ModelCatalog
 from ra2.infra.clock import Clock, SystemClock
 from ra2.infra.config import Settings
 from ra2.infra.filestore import FileStore, HostPathFileStore, UploadedFileStore
 from ra2.infra.gpu import GpuProbe, probe_for
 from ra2.infra.idgen import IdFactory, Uuid7Factory
 from ra2.infra.lingua_detector import LinguaDetector
-from ra2.infra.ollama_client import OllamaLLMClient, OllamaModelCatalog
+from ra2.infra.ollama_client import (
+    OllamaEndpointProber,
+    OllamaLLMClient,
+    OllamaModelCatalog,
+)
 from ra2.infra.tasks import AsyncioTaskRunner, TaskRunner
 from ra2.persistence.session import create_engine, create_session_factory, ensure_database_dir
 from ra2.services.census_materialiser import RelationalCensusMaterialiser
@@ -61,6 +65,7 @@ def create_app(
     census_materialiser: CensusMaterialiser | None = None,
     llm_client: LLMClient | None = None,
     model_catalog: ModelCatalog | None = None,
+    endpoint_prober: EndpointProber | None = None,
     gpu_probe: GpuProbe | None = None,
     prompt_resolver: PromptResolver | None = None,
     mount_ui: bool = True,
@@ -103,6 +108,12 @@ def create_app(
     model_catalog = model_catalog or OllamaModelCatalog(
         base_url=settings.llm_base_url, timeout_s=settings.llm_timeout_s
     )
+    # The settings dialog's "Test connection". It takes no `base_url` and no
+    # settings: the whole point is to probe a URL the analyst typed, which is
+    # not the configured one and is not persisted anywhere. It opens no socket
+    # until `test_connection` is called, so leaving the real one in place costs
+    # tests that never press the button nothing.
+    endpoint_prober = endpoint_prober or OllamaEndpointProber()
     gpu_probe = gpu_probe or probe_for(name=settings.gpu_name, vram_gb=settings.gpu_vram_gb)
 
     delivery_service = DeliveryService(
@@ -153,6 +164,7 @@ def create_app(
     evaluation_service = EvaluationService(
         session_factory=session_factory,
         model_catalog=model_catalog,
+        endpoint_prober=endpoint_prober,
         gpu_probe=gpu_probe,
         clock=clock,
         ids=ids,

@@ -9,8 +9,15 @@ implements exactly that list and nothing more:
   override selectors;
 - a re-parse button;
 - a 20-row raw preview;
-- remove;
 - "Export findings CSV".
+
+**Remove is no longer here** (P3-D22). Deleting a file is a row action in the
+Import table, so it has exactly one home. Re-parse stays, and is labelled
+"Apply & re-parse", because it is the **only** thing that applies the three
+override selectors above it — `reparse_file`'s arguments come from them, and
+without this button they would be dead controls. The row's own re-parse
+passes no overrides at all, which the service reads as "keep what is
+effective now": a re-run, never a change.
 
 Two things here are architecture, not decoration:
 
@@ -87,9 +94,8 @@ async def open_file_report(
 ) -> None:
     """Open the report for one file of one delivery.
 
-    `on_changed` is awaited after anything that changes the delivery — a
-    re-parse or a removal — so the view behind the modal re-reads the service
-    rather than guessing what changed.
+    `on_changed` is awaited after a re-parse, so the view behind the modal
+    re-reads the service rather than guessing what changed.
 
     `host` is the element the dialog is built inside, and it must be one the
     view never clears: the click that opens this modal comes from a button in
@@ -397,9 +403,8 @@ class _FileReport:
         with ui.element("div").style(
             _SECTION + "display:flex;gap:8px;align-items:center;flex-wrap:wrap;"
         ):
-            _button("Re-parse", primary=True, testid="reparse", action=self._reparse)
+            _button("Apply & re-parse", primary=True, testid="reparse", action=self._reparse)
             _button("Export findings CSV", testid="export-findings", action=self._export)
-            _button("Remove file", testid="remove-file", action=self._remove, danger=True)
             ui.element("div").style("flex:1;")
             _button("Close", testid="close-report", action=self._close_async)
             ui.label(file.relative_path).classes("mono").style(
@@ -431,15 +436,6 @@ class _FileReport:
         file = self._file()
         name = file.filename if file is not None else self._file_id
         ui.download.content(data, f"{name}.findings.csv", media_type="text/csv")
-
-    async def _remove(self) -> None:
-        try:
-            await self._services.delivery.remove_file(self._delivery.delivery_id, self._file_id)
-        except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
-            return
-        self._close()
-        await self._on_changed()
 
     async def _close_async(self) -> None:
         self._close()

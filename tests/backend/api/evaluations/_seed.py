@@ -35,7 +35,12 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.conftest import FrozenClock, SeededFactory
-from tests.fixtures.fake_llm import DEFAULT_MODELS, FakeLLMClient, StaticModelCatalog
+from tests.fixtures.fake_llm import (
+    DEFAULT_MODELS,
+    FakeLLMClient,
+    StaticEndpointProber,
+    StaticModelCatalog,
+)
 
 from ra2.domain.ids import CorpusId, PromptTemplateId, RecordId
 from ra2.infra.config import Settings
@@ -104,6 +109,16 @@ def api_model_catalog() -> StaticModelCatalog:
 
 
 @pytest.fixture
+def api_endpoint_prober() -> StaticEndpointProber:
+    """`POST /models/test`'s prober. A test wanting a different verdict calls
+    `api_endpoint_prober.set_result(...)` before its request — the same
+    mutable-double idiom `api_model_catalog` uses. Substituted here rather
+    than left to the real adapter because no test in this layer may open a
+    socket (plan-phase-3.md §11)."""
+    return StaticEndpointProber()
+
+
+@pytest.fixture
 def api_gpu_probe() -> StaticGpuProbe:
     return StaticGpuProbe(FIXTURE_GPU)
 
@@ -116,6 +131,7 @@ async def api_client(
     api_ids: SeededFactory,
     api_llm_client: FakeLLMClient,
     api_model_catalog: StaticModelCatalog,
+    api_endpoint_prober: StaticEndpointProber,
     api_gpu_probe: StaticGpuProbe,
 ) -> AsyncIterator[AsyncClient]:
     """An `AsyncClient` over the real composition root, real migrated DB,
@@ -128,6 +144,7 @@ async def api_client(
         task_runner=InlineTaskRunner(api_ids),
         llm_client=api_llm_client,
         model_catalog=api_model_catalog,
+        endpoint_prober=api_endpoint_prober,
         gpu_probe=api_gpu_probe,
         mount_ui=False,
     )

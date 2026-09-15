@@ -33,7 +33,7 @@ from nicegui.events import MultiUploadEventArguments
 
 from ra2.domain.delivery import DeliveryStatus, FileKind, SourceKind
 from ra2.domain.findings import Finding
-from ra2.domain.ids import CorpusId, DeliveryId
+from ra2.domain.ids import CorpusId, DeliveryId, FileId
 from ra2.services.container import Services
 from ra2.services.errors import BlockingFindingsError, ServiceError
 from ra2.services.readmodels import CorpusView, DeliveryFileView, DeliveryView, Page, SortDir
@@ -50,12 +50,13 @@ from ra2.ui.components import (
     pagination_row,
     tick,
 )
-from ra2.ui.components.icons import CLIPBOARD
+from ra2.ui.components.icons import CLIPBOARD, REFRESH, TRASH
 from ra2.ui.shell import NAV_ITEMS, shell
 from ra2.ui.state import TableState, set_table_state, table_state
 from ra2.ui.views.file_report_modal import open_file_report
 
 __all__ = [
+    "ACTION_WIDTH",
     "CONTENT_GAP",
     "CONTENT_PADDING",
     "CORPORA_CAPTION",
@@ -93,6 +94,11 @@ DELIVERY_KEY: Final = "ra2.import.delivery"
 #: README §1a.2 — 10 rows plus the header row, so both cards are the same
 #: height regardless of how many rows they hold.
 WELL_HEIGHT_PX: Final = 404
+
+#: The action column, widened from the design's 46px by P3-D22: three 22px
+#: buttons, two 4px gaps and the design's own 14px right padding. The File
+#: column absorbs it, which is what it is the flexible one for (README §1a).
+ACTION_WIDTH: Final = "92px"
 PAGE_SIZE: Final = 10
 
 # --- copy, verbatim from design/nav-import-census/README.md ------------------
@@ -154,6 +160,12 @@ class _ImportPage:
         self._corpus_locked = 0
         self._corpus_busy = False
         self._deleting_corpus_id: CorpusId | None = None
+        #: The file whose delete is one click from happening (P3-D22's inline
+        #: two-step) and the file a row action is currently running for. Both
+        #: are per-instance, so one row going busy leaves every other row
+        #: interactive — the same shape `_deleting_corpus_id` has.
+        self._confirming_file_id: FileId | None = None
+        self._busy_file_id: FileId | None = None
         self._root: Element | None = None
         self._grid: Element | None = None
         self._corpora_slot: Element | None = None
@@ -199,6 +211,10 @@ class _ImportPage:
         redraw and every button in it.
         """
         assert self._root is not None  # built in `build()`, before any reload
+        # Any action at all disarms a pending delete: sorting, paging, a
+        # selection toggle or a corpus action all land here, and a "Sure?"
+        # left armed behind an unrelated click is a trap (P3-D22).
+        self._confirming_file_id = None
         with self._root:
             self._delivery = await self._current_delivery()
             if self._delivery is not None:
@@ -388,19 +404,108 @@ class _ImportPage:
             ),
             ColumnSpec(
                 key="action",
-                width="46px",
+                width=ACTION_WIDTH,
                 align="right",
                 cell_style="padding-right:14px;",
-                render=lambda row: icon_button(
-                    CLIPBOARD,
-                    label=f"Report for {row.filename}",
-                    size=22,
-                    glyph=13,
-                    stroke=1.9,
-                    on_click=_sync(lambda: self._open_report(row)),
-                ),
+                render=self._render_row_actions,
             ),
         )
+
+    def _render_row_actions(self, row: DeliveryFileView) -> None:
+        """Report, re-parse and delete, in the row itself (P3-D22).
+
+        Three 22x22 buttons at README §1a's own row-icon metrics. The cell has
+        exactly three states and renders one of them:
+
+        *busy* — a spinner while `reparse_file` or `remove_file` is in flight,
+        keyed by file id so only this row loses its controls;
+        *confirming* — "Sure?" and a cancel, **instead of** the three buttons.
+        A delete is unrecoverable for an upload delivery, where `remove_file`
+        deletes the stored bytes, and a 22px glyph is a small target to hang
+        that on. It takes the whole cell rather than only the trash's place
+        because three buttons plus "Sure?" do not fit 92px, and because a row
+        that is one click from losing a file should not also be offering to
+        re-parse it;
+        *idle* — the three buttons.
+        """
+        with ui.element("div").style(
+            "display:inline-flex;align-items:center;justify-content:flex-end;gap:4px;"
+        ):
+            if self._busy_file_id == row.file_id:
+                ui.spinner(size="13px", color="var(--ink3)").props(
+                    'data-testid="row-action-busy"'
+                ).mark("row-action-busy")
+                return
+            if self._confirming_file_id == row.file_id:
+                self._confirm_delete_cell(row)
+                return
+            icon_button(
+                CLIPBOARD,
+                label=f"Report for {row.filename}",
+                size=22,
+                glyph=13,
+                stroke=1.9,
+                on_click=_sync(lambda: self._open_report(row)),
+            )
+            icon_button(
+                REFRESH,
+                label=f"Re-parse {row.filename}",
+                size=22,
+                glyph=13,
+                stroke=1.9,
+                on_click=_sync(lambda: self._reparse_file(row)),
+            )
+            icon_button(
+                TRASH,
+                label=f"Delete {row.filename}",
+                size=22,
+                glyph=13,
+                stroke=1.9,
+                extra_class="danger-hover",
+                on_click=lambda: self._confirm_delete(row),
+            )
+
+    def _confirm_delete_cell(self, row: DeliveryFileView) -> None:
+        """The armed row: "Sure?" and a cancel.
+
+        Both are mono text rather than icons — the corpora table's own delete
+        idiom, and the design's vocabulary already carries text glyphs for
+        sort arrows and pagination chevrons. The cancel is what keeps the
+        two-step escapable without clicking something unrelated.
+        """
+        confirm = (
+            ui.element("button")
+            .classes("mono danger")
+            .props(
+                f'type="button" aria-label="Confirm delete {row.filename}" '
+                f'data-testid="confirm-delete-file"'
+            )
+            .mark("confirm-delete-file")
+            .style(
+                "font-size:11px;background:none;border:none;padding:0;"
+                "cursor:pointer;color:var(--danger);"
+            )
+        )
+        confirm.on("click", lambda _: self._delete_file(row))
+        with confirm:
+            ui.label("Sure?")
+
+        cancel = (
+            ui.element("button")
+            .classes("mono ink3")
+            .props(
+                f'type="button" aria-label="Cancel delete {row.filename}" '
+                f'data-testid="cancel-delete-file"'
+            )
+            .mark("cancel-delete-file")
+            .style(
+                "font-size:12px;background:none;border:none;padding:0 2px;"
+                "cursor:pointer;color:var(--ink3);line-height:1;"
+            )
+        )
+        cancel.on("click", lambda _: self._cancel_delete())
+        with cancel:
+            ui.label("✕")
 
     def _corpora_card(self) -> None:
         page = self._corpora
@@ -628,9 +733,79 @@ class _ImportPage:
                 )
         await self.reload()
 
+    async def _reparse_file(self, file: DeliveryFileView) -> None:
+        """The row's re-parse: re-run analysis for this file with the settings
+        that are effective now.
+
+        Every override argument is left `None`, which `reparse_file` documents
+        as "keep what is effective now" — so this is a re-run, never a change.
+        Changing an encoding or a delimiter is still the report modal's job,
+        because that is where the selectors are.
+
+        `_render()` rather than `reload()` flips the row busy before the slow
+        `await`: `_render()` touches no service and no `app.storage.client`, so
+        it carries none of the slot-lifetime hazard `reload()`'s own docstring
+        describes. The row's new counts and state are the feedback; nothing
+        follows the final `reload()`, which has already deleted this handler's
+        button.
+        """
+        if self._delivery is None:
+            return
+        self._confirming_file_id = None
+        self._busy_file_id = file.file_id
+        self._render()
+        try:
+            await self._services.delivery.reparse_file(self._delivery.delivery_id, file.file_id)
+        except ServiceError as exc:
+            self._busy_file_id = None
+            self._render()
+            ui.notify(str(exc), type="negative")
+            return
+        self._busy_file_id = None
+        await self.reload()
+
+    def _confirm_delete(self, file: DeliveryFileView) -> None:
+        """First click of the two-step: arm this row and disarm any other.
+
+        Synchronous and `_render()`-only — nothing has happened yet, so there
+        is nothing to re-read.
+        """
+        self._confirming_file_id = file.file_id
+        self._render()
+
+    def _cancel_delete(self) -> None:
+        """Back out of the two-step without touching anything."""
+        self._confirming_file_id = None
+        self._render()
+
+    async def _delete_file(self, file: DeliveryFileView) -> None:
+        """Second click: drop the file from the delivery.
+
+        For an upload delivery this deletes the stored bytes; for a host-path
+        delivery `remove_file` leaves the analyst's own file where it is and
+        only drops the row. Either way the delivery's selection, its header
+        count and "Create corpus · N records" all change, so this ends in a
+        full `reload()` rather than a `_render()`.
+        """
+        if self._delivery is None:
+            return
+        self._confirming_file_id = None
+        self._busy_file_id = file.file_id
+        self._render()
+        try:
+            await self._services.delivery.remove_file(self._delivery.delivery_id, file.file_id)
+        except ServiceError as exc:
+            self._busy_file_id = None
+            self._render()
+            ui.notify(str(exc), type="negative")
+            return
+        self._busy_file_id = None
+        await self.reload()
+
     async def _open_report(self, file: DeliveryFileView) -> None:
         if self._delivery is None:
             return
+        self._confirming_file_id = None
         assert self._root is not None
         await open_file_report(
             services=self._services,

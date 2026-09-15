@@ -15,7 +15,11 @@ decoding, through `/v1`.
 
 **The loopback guard.** The client refuses, **at construction**, a `base_url`
 whose host is not loopback (`127.0.0.1`, `::1`, `localhost`), raising
-`LlmEndpointError` naming N1. mvp-spec.md §19.10 permits egress to "the
+`LlmEndpointError` naming N1. The rule itself now lives in `domain.llm`
+(`classify_endpoint`/`require_loopback`) because the settings dialog has to
+apply the *same* rule to the endpoint you type, and `ra2/ui/` may not import
+`ra2/infra/`; this module re-exports it so every caller here keeps one import
+site. mvp-spec.md §19.10 permits egress to "the
 configured LLM endpoint" and N1 forbids data leaving the host; a configurable
 URL with no guard satisfies neither, and a typo or a copied `.env` would ship
 accident narratives to a LAN address. **There is deliberately no opt-out
@@ -69,6 +73,17 @@ its bounded retries raises, writes no row, and leaves the hole that the resume
 query is specified to find. A parse failure is never retried — temperature and
 seed are fixed, so the retry would return the same bytes.
 
+**`OllamaEndpointProber` probes a URL nobody has committed to yet.** The two
+classes above are bound to one `base_url` for their lifetime, which is right
+for them and useless for a settings dialog: the thing an analyst wants tested
+is the value they just typed, before it goes anywhere near `.env`. So the
+prober takes the URL per call, applies `classify_endpoint` **before** building
+a client, and returns a `ProbeResult` for every outcome including the refusals
+— a test button that raised would force exactly the toast the design rejects.
+It reports a *named cause* rather than one bit, because "unreachable" cannot
+tell you whether Ollama is down or the port is wrong, and that distinction is
+the whole reason the button exists.
+
 **The catalogue reads Ollama's native `/api/tags`, not `/v1/models`.**
 `ModelInfo` carries `digest` and `size_bytes` and `fits_vram` is computed from
 the latter (§15.6); OpenAI-compatible `/v1/models` reports neither. The call
@@ -79,7 +94,6 @@ Do-NOT #1.
 
 import time
 from typing import Any, Protocol, cast
-from urllib.parse import urlsplit
 
 import httpx2
 
@@ -90,27 +104,32 @@ import httpx2
 # reached through this name, so the seam is visible at every use site.
 import openai
 
-from ra2.domain.llm import EndpointStatus, Extraction, LlmEndpointError, ModelInfo
+from ra2.domain.llm import (
+    ALLOWED_SCHEMES,
+    LOOPBACK_HOSTS,
+    PROBE_TIMEOUT_S,
+    EndpointStatus,
+    Extraction,
+    LlmEndpointError,
+    ModelInfo,
+    ProbeCode,
+    ProbeResult,
+    classify_endpoint,
+    require_loopback,
+)
 
 __all__ = [
+    "ALLOWED_SCHEMES",
     "LOOPBACK_HOSTS",
+    "PROBE_TIMEOUT_S",
     "RETRYABLE_STATUS_CODES",
     "LlmEndpointError",
+    "OllamaEndpointProber",
     "OllamaLLMClient",
     "OllamaModelCatalog",
     "native_api_url",
     "require_loopback",
 ]
-
-#: The only hosts the guard accepts. Written out rather than resolved through
-#: DNS: a name that resolves to loopback *today* is not a guarantee, and this
-#: list is the whole of what N1 permits.
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "[::1]", "localhost"})
-
-#: The only URL schemes the guard accepts. Anything else (`file:`, `ftp:`, a
-#: bare `host:port` that `urlsplit` reads as a scheme) is refused rather than
-#: interpreted.
-ALLOWED_SCHEMES = frozenset({"http", "https"})
 
 #: A transport failure or one of these statuses is worth asking again about; a
 #: 4xx is not. A wrong model name does not become right on the second attempt,
@@ -159,36 +178,6 @@ class _OllamaTag(openai.BaseModel):
 
 class _OllamaTags(openai.BaseModel):
     models: list[_OllamaTag] | None = None
-
-
-def require_loopback(base_url: str) -> None:
-    """Refuse a `base_url` that is not on this host. **N1, and no opt-out.**
-
-    Raises `LlmEndpointError(base_url, EndpointStatus.REFUSED_NOT_LOOPBACK)`.
-
-    The host is compared against `LOOPBACK_HOSTS` **literally**: no DNS, no
-    `socket.getaddrinfo`, no "does it resolve to 127.0.0.1". A name that
-    resolves to loopback on this machine today resolves wherever its owner
-    points it tomorrow, and the guarantee this guard carries has to be
-    readable from the configuration alone.
-
-    `urlsplit(...).hostname` lower-cases and strips the brackets from an IPv6
-    literal, so `http://[::1]:11434/v1` is compared as `::1`. It returns
-    `None` for a string with no authority, which is refused: an endpoint this
-    function cannot parse is not an endpoint it can vouch for.
-    """
-    try:
-        parts = urlsplit(base_url)
-        host = parts.hostname
-        # `.hostname` does not validate the port; `.port` does. A `base_url`
-        # this function cannot fully parse is one it cannot vouch for.
-        _ = parts.port
-    except ValueError as exc:  # a malformed port, an unparseable IPv6 literal
-        raise LlmEndpointError(base_url, EndpointStatus.REFUSED_NOT_LOOPBACK) from exc
-    if parts.scheme.lower() not in ALLOWED_SCHEMES or host is None:
-        raise LlmEndpointError(base_url, EndpointStatus.REFUSED_NOT_LOOPBACK)
-    if host.lower() not in LOOPBACK_HOSTS:
-        raise LlmEndpointError(base_url, EndpointStatus.REFUSED_NOT_LOOPBACK)
 
 
 def native_api_url(base_url: str, path: str) -> str:
@@ -414,6 +403,131 @@ class OllamaModelCatalog:
             return await self._client.get(self._tags_url, cast_to=_OllamaTags)
         except openai.APIConnectionError, openai.APIStatusError, ValueError, TypeError:
             return None
+
+
+class OllamaEndpointProber:
+    """`domain.llm.EndpointProber` — "is this URL an Ollama, and if not, why?"
+
+    Separate from `OllamaModelCatalog` because the question is different. The
+    catalogue asks about the endpoint the app was *configured* with and
+    answers in one bit, which is all the Models card renders. This answers
+    about an endpoint the user has merely **typed** into the settings dialog,
+    and answers with a named cause — `CONNECTION_REFUSED` and `HTTP_ERROR`
+    send an analyst to two completely different fixes, and collapsing them to
+    "unreachable" is what made the endpoint painful to set up in the first
+    place.
+
+    **Never raises.** Every outcome, refusals included, is a `ProbeResult`.
+
+    Holds no `base_url` and no settings, so `create_app()` can default it with
+    nothing to hand it: the URL and the timeout both arrive per call.
+    """
+
+    def __init__(self, *, http_client: httpx2.AsyncClient | None = None) -> None:
+        # The same injection seam the other two classes carry, for the same
+        # reason: it is how the tests drive a `httpx2.MockTransport` stub
+        # without a socket, and production passes nothing (Do-NOT #12).
+        self._http_client = http_client
+
+    async def probe(self, base_url: str, *, timeout_s: int) -> ProbeResult:
+        """Ask `base_url` for its model list, with a short bound.
+
+        The guard runs **first**, and a refusal returns before any client
+        exists — for a URL pointing off this host, the absence of a packet is
+        the feature (N1). Everything after that is a real round trip, mapped
+        to the code that names what went wrong.
+        """
+        refusal = classify_endpoint(base_url)
+        if refusal is not None:
+            return ProbeResult(code=refusal)
+
+        client = _build_client(
+            base_url=base_url,
+            timeout_s=min(timeout_s, PROBE_TIMEOUT_S),
+            http_client=self._http_client,
+        )
+        started = time.perf_counter()
+        try:
+            payload = await client.get(
+                native_api_url(base_url, _NATIVE_TAGS_PATH), cast_to=_OllamaTags
+            )
+        except openai.APITimeoutError as exc:
+            # Checked before `APIConnectionError`, which it subclasses: a host
+            # that accepted the connection and went quiet is a different fix
+            # from one that was never there.
+            return ProbeResult(code=ProbeCode.TIMEOUT, detail=_cause(exc))
+        except openai.APIConnectionError as exc:
+            return ProbeResult(code=ProbeCode.CONNECTION_REFUSED, detail=_cause(exc))
+        except openai.APIStatusError as exc:
+            return ProbeResult(
+                code=ProbeCode.HTTP_ERROR,
+                detail=_cause(exc),
+                http_status=exc.status_code,
+                latency_ms=_elapsed_ms(started),
+            )
+        except (ValueError, TypeError) as exc:
+            # Something answered and it was not `/api/tags`. A web server on
+            # the right port, or `/v1` pointed at something else entirely.
+            return ProbeResult(
+                code=ProbeCode.BAD_PAYLOAD,
+                detail=_cause(exc),
+                latency_ms=_elapsed_ms(started),
+            )
+
+        # The SDK's response parser is **deliberately lenient** — that is what
+        # keeps the catalogue tolerant of fields Ollama adds later — so it will
+        # happily hand back an `_OllamaTags` whose `models` is a string that
+        # some unrelated web server put there. A probe cannot lean on it: the
+        # difference between "Ollama answered" and "something answered" is the
+        # entire question being asked, and a lenient parse reports the second
+        # as the first. So the shape is checked here, explicitly.
+        if not isinstance(payload.models, list):
+            return ProbeResult(
+                code=ProbeCode.BAD_PAYLOAD,
+                detail=f"no model list in the response (models: {type(payload.models).__name__})",
+                latency_ms=_elapsed_ms(started),
+            )
+        return ProbeResult(
+            code=ProbeCode.OK,
+            latency_ms=_elapsed_ms(started),
+            model_count=len(payload.models),
+        )
+
+
+def _elapsed_ms(started: float) -> int:
+    return int((time.perf_counter() - started) * 1000)
+
+
+#: How far down a `__cause__` chain `_cause` will walk. Three is enough for
+#: the deepest real chain (`APIConnectionError` -> `httpx2.ConnectError` ->
+#: `OSError`) with room to spare, and a bound means a self-referential chain
+#: cannot spin.
+_MAX_CAUSE_DEPTH = 5
+
+
+def _cause(error: Exception) -> str:
+    """The OS's or the provider's **verbatim** words, for the probe's second line.
+
+    Walks to the **deepest** cause, not the first. The chain for a refused
+    connection is `APIConnectionError` ("Connection error.") ->
+    `httpx2.ConnectError` ("All connection attempts failed") ->
+    `ConnectionRefusedError` ("[Errno 111] Connection refused"), and only the
+    last of those names what actually happened. Each wrapper is more generic
+    than the thing it wraps, so the bottom of the chain is the line worth
+    showing.
+
+    Never rendered as the analyst's explanation — that comes from the code
+    alone, through `PROBE_WORDS` — only underneath it.
+    """
+    deepest: BaseException = error
+    seen = {id(error)}
+    for _ in range(_MAX_CAUSE_DEPTH):
+        cause = deepest.__cause__ or deepest.__context__
+        if cause is None or id(cause) in seen or not str(cause).strip():
+            break
+        seen.add(id(cause))
+        deepest = cause
+    return str(deepest).strip() or type(error).__name__
 
 
 def _first_content(completion: Any) -> str:
