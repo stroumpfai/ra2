@@ -649,11 +649,13 @@ async def test_the_armed_row_can_be_cancelled(seeded: Seeded) -> None:
 
     _one(user, _action(_card(user, "structured"), "Cancel delete a_unfall.txt")).click()
     await _until(
-        lambda: not [
-            e
-            for e in _card(user, "structured").descendants()
-            if e._props.get("data-testid") == "confirm-delete-file"
-        ]
+        lambda: (
+            not [
+                e
+                for e in _card(user, "structured").descendants()
+                if e._props.get("data-testid") == "confirm-delete-file"
+            ]
+        )
     )
     # The three buttons are back and the file is untouched.
     assert _action(_card(user, "structured"), "Delete a_unfall.txt") is not None
