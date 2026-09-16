@@ -580,6 +580,13 @@ Each is additive and cheap to reverse; none should change silently.
 | SD13 | `evaluation` gains the draft/decoding columns, `run` gains `prompt_template_id` and `status` (§15.2) | The design's "Save draft" means the row exists before the inputs are final; a version integer alone cannot resolve exact text |
 | SD14 | The `openai` SDK alone; **PydanticAI dropped** from `mvp-spec.md` §3's stack (§15.5) | One call, one schema, one response — and a second provider client is what Do-NOT list #1 exists to prevent |
 | SD15 | VRAM and GPU name **probed** via NVML library bindings, with a config override (§15.6) | The design disables models that exceed VRAM; Ollama does not report it. A `ctypes` library load is not the shell-out N3 forbids |
+| SD16 | `score.language` is **`NOT NULL`** with `'*'` for the all-languages row, where `mvp-spec.md` §5 writes `language|NULL` (§16.1) | SQL treats two NULLs as distinct in a unique constraint, so a composite key over a nullable column permits exactly the duplicate rows it looks like it prevents — and "rewrite this feature's rows" would orphan the old ones on every re-score |
+| SD17 | Scoring is **chained off the run worker's terminal `done`**; there is no Score control anywhere (§16.1) | Every input is immutable from the launch commit, so there is no moment between a run finishing and its scores existing in which a user could decide anything. The design draws no such button |
+| SD18 | `score.metric` is a **closed vocabulary carrying raw counts as well as rates** (§16.3) | The breakdown row needs hit/wrong/missing and the cross-tab needs six cells. Back-deriving counts from three rounded floats is off-by-one precisely at small n, where the number matters most; a second table for them is a join and a migration |
+| SD19 | **Suppression is applied at read time** from stored `n`, never as a write-time filter (§16.4) | It is what makes `mvp-spec.md` §11.4's "configurable per evaluation" cheap enough to honour as a column: changing the floor never requires a re-score. Every cell is computed and stored; the read model substitutes the typed insufficient-data shape |
+| SD20 | Ranking's presence figure is a **macro presence rate, reported and never scored** — `mvp-spec.md` §11.5 corrected (§16.5) | The design renders it as `0.907` in a ranking table, where it reads as a quality score. §11.2 is unambiguous that presence has no independent gold label, and §11.3's reasoning applies directly: a model that flags everything present maximises it |
+| SD21 | `mismatch` is the **first mutable row** in the pipeline, and a re-score **upserts** it preserving `analyst_tag` (§16.6) | Tagging is the whole of F11. `DELETE`-then-`INSERT` is the obvious implementation and it destroys review work silently, at the moment a developer is most confident — they just fixed the scorer |
+| SD22 | `ra2/ui/views/results/` is a **package**, the first view in the repo that is (§16.8) | Three tabs of one screen get built by three agents in one wave; three files is what makes that parallel, and a single `results_view.py` would serialise the wave for no architectural gain |
 
 **Note on the design's fixture column names.** `UnfallTypAusw`, `WitterungAusw`,
 `LichtverhaeltnisAusw` and `UnfallDatumFeld` do not exist in the delivery; the real
@@ -1101,3 +1108,417 @@ callers are the ones holding sessions and sockets.
   refresh) — the design does not draw it, and three controls are the three
   settings the adapter takes. VRAM reporting inside that dialog is out until
   §15.6's probe has met a machine that is not the target one.
+
+---
+
+## 16. Scoring and Results (F7–F10)
+
+**Contract frozen at M27, bodies from Wave 1 on.** Prompts and Evaluation
+shipped in phase 3; runs now produce `extraction*` rows and **nothing reads
+them**. This section is what phase 4 builds against, and unlike §14 and §15 it
+was written *after* its plan rather than before it — `plan-phase-4.md` §0 says
+so, names the ten things this section had to settle, and is subordinate to
+whatever it says here.
+
+§15.8 parked scoring with the words "the `score` and `mismatch` tables stay
+unbuilt". **They are built here**, and this section supersedes that bullet.
+
+It spends its length on one boundary and one refusal. The boundary is the
+scoring transaction (§16.1), for the same reason §15.3 spent its length there:
+a pass over 5 000 records × 13 features × 3 models is long enough to be
+interrupted, and what it committed when it was has to be exactly what it can
+resume from. The refusal is **numbers this product will not print** — a
+hallucination rate (`mvp-spec.md` `D1`), a presence F1 (`D2`), a discovery rate
+compared between models (§11.3), a rank where the intervals overlap (§11.5).
+Every one of them is computable and every one of them would be a lie, so the
+architecture has to make printing them harder than not printing them. That is
+why suppression is a property of a read model rather than a CSS class, and why
+Ranking is a function rather than a table.
+
+Mismatch **review** (F11) is not here; its rows are (§16.6). §16.9 is this
+section's own deferral list.
+
+### 16.1 Scoring is a pass, not a query
+
+A score is not computed when someone looks at it. It is computed once, by a
+job, into rows — and everything the three Results tabs render is a read over
+those rows.
+
+The alternative was considered and rejected on its arithmetic: a 5 000-record
+corpus with 13 labelled features across 3 models is ~195 000 classifications,
+each one an EAV lookup plus a normalisation, **per page load**, before sorting
+and paging. But the decisive argument is not cost. `mismatch` rows must exist
+as rows regardless, because an analyst tags them (`mvp-spec.md` §12) — so the
+classification pass gets written either way, and computing scores on read would
+mean writing it *twice*, once to persist mismatches and once to aggregate
+metrics, with two chances to disagree about what a `hit` is.
+
+```
+score(run_id, feature_id, language, metric, value, n, ci_low, ci_high)
+     -- composite PK (run_id, feature_id, language, metric)
+mismatch(id, run_id, record_id, feature_id, record_value, extracted_value,
+         evidence_span, analyst_tag, tagged_at, note)
+     -- UNIQUE (run_id, record_id, feature_id)
+```
+
+> **One `(run, feature)`, one commit.** Every `score` row for that pair — the
+> all-languages row and each per-language row, every metric — plus every
+> `mismatch` row that feature produced, are written **together**. Nothing
+> batches across features, and no transaction is held open across the EAV read
+> that feeds the next one.
+
+This is §15.3's rule one level up, and it buys the same property. **The
+features of a run that have no `score` rows are the work left**, which is a
+query, not bookkeeping. An interrupted pass leaves whole features done and
+whole features absent — never a feature half-scored, which is the state that
+would make a resumed pass produce numbers derived from two different reads of
+the corpus.
+
+**`language` is `NOT NULL`, with `'*'` for the all-languages row** (**SD16**).
+`mvp-spec.md` §5 writes `language|NULL`, which cannot carry a composite primary
+key: SQL treats two NULLs as distinct in a unique constraint, so the schema
+that looks like it prevents duplicate rows would silently permit them, and
+"rewrite this feature's rows" would leave orphans behind every time a pass
+re-ran. A sentinel makes the key real. `ALL_LANGUAGES` lives in
+`domain/scoring.py` beside the metric names.
+
+**Scoring is chained, not triggered** (**SD17**). The run worker's terminal
+`done` submits the scoring job; there is no Score button, and the design draws
+none. Every input a score depends on — the corpus, the frozen config, the
+codelist snapshot, the matching rules, the extractions — is immutable from the
+launch commit onward, so there is no moment between a run finishing and its
+scores existing in which a user could make a meaningful decision. A `failed` or
+`interrupted` run is **never** scored: a partial corpus produces real-looking
+numbers over an unstated denominator, which is precisely the failure §11.4's
+suppression rule exists to prevent at the other end of the scale.
+
+**No scoring-status column.** Whether a run is scored is
+`COUNT(DISTINCT feature_id)` over its `score` rows against the evaluation's
+labelled-feature count. §15.3 refused a `records_done` counter because a
+restart can desynchronise it; the same reasoning holds here, and the same
+consolation applies — the count that answers "how far did it get" is the same
+one that answers "where does it resume", so the two cannot disagree.
+
+### 16.2 Ground truth — and the rule that decides who is in the denominator
+
+Scoring compares two values per record: what the model said
+(`extraction_value.value_normalised`) and what the record already held. The
+second one is the work, because for half the feature kinds it does not exist
+anywhere until something computes it.
+
+| Feature | Ground truth is |
+|---|---|
+| native (`source_column`) | `unfall_row.value_raw` for that record and column |
+| derived (`derivation_json`) | `domain/derivation.py`'s evaluation of the closed 7-type catalogue over the record's objekt/person cells |
+
+`plan-phase-2.md` Q1 deferred the derivation evaluator on the explicit promise
+that "scoring needs to build one anyway"; phase 3 did not need it, and this is
+the phase that pays. It lives in `domain/` and takes a **`RecordProjection`** —
+a plain mapping of one record's cells, no session, no repository, no query — so
+the catalogue is testable without a database and the EAV read stays in
+`persistence/` where §1.1 requires it.
+
+**The EAV read is one pass, not one per record** (`SD2`'s lesson in a new
+place). `GroundTruthProvider.values_for(session, corpus_id, feature)` returns
+the whole corpus's values for one feature; the caller iterates a mapping. A
+5 000-record corpus × 13 features is 13 queries, not 65 000, and the repository
+test asserts a **bounded statement count** rather than a wall-clock number,
+which would be flaky.
+
+> **`mvp-spec.md` §8.6 is the most consequential sentence in this section.**
+> *"A record whose column is empty is excluded from that feature's denominator
+> **entirely**, for Goal 1 and Goal 2 alike."*
+
+It has three plausible wrong readings, and **all three produce numbers**, which
+is why it is stated as code rather than as prose:
+
+| Wrong reading | What it does | Why it is wrong |
+|---|---|---|
+| an empty cell is a `missing` | inflates the denominator, depresses recall | the model was never asked a question with an answer; the *data* has no label, and §8.6 says the data cannot distinguish "empty" from "not applicable" |
+| an empty cell scores `0` | same, silently | a zero is a measurement |
+| an empty cell is suppressed | renders an "insufficient data" cell | suppression is about *too few* labelled cases, not about *no* case — a feature with 4 000 empty cells and 30 populated ones has n = 30 and is perfectly scoreable |
+
+`classify(record_value, model_value)` therefore returns `Outcome | None`, and
+`None` means **not a labelled case**. A caller cannot accidentally count it,
+because there is nothing to count. A feature whose source column is empty
+across the whole corpus produces **no `score` rows at all** — not rows of
+zeros, and not a suppressed cell.
+
+The distinction that catches people is the derived one: `count_objects` over a
+record with **zero objects** is `0`, and that `0` is a real labelled value in
+the denominator. "No objects" is a fact the data states; "no value" is a fact
+the data is missing. `domain/derivation.py` returns a value in the first case
+and the caller never sees the second, because a derived feature has no source
+column to be empty.
+
+**Matching is `mvp-spec.md` §8.4's table and nothing else** (`D6`).
+`domain/matching.py` normalises both sides per value type — enum compares
+codes, integer strips separators, decimal rounds to the rule's precision, date
+goes `YYYYMMDD` → ISO, time goes `HH:MM` → minutes with the rule's optional
+tolerance, boolean maps truthily, free text goes NFKC → casefold → collapse
+whitespace → strip edge punctuation — and then compares for equality. **No
+fuzzy anything, and no accent folding**: §8.4 flags accent folding as "worth
+evaluating" precisely because it interacts with §4.4's encoding damage, and
+evaluating it means having the numbers this phase is built to produce. Turning
+it on first would decide the question by assuming the answer.
+
+### 16.3 One row shape, sixteen metric names
+
+Spec §5 gives `score` a `metric` column and a `value`, which reads as a table
+of rates. It is also, unchanged, a table of **counts** (**SD18**):
+
+| Group | `ScoreMetric` values |
+|---|---|
+| Goal 1 rates | `precision` · `recall` · `f1` |
+| Goal 1 counts | `hit` · `wrong` · `missing` |
+| Goal 2 | `presence_rate` · `flag_inconsistency_rate` |
+| Goal 2 cross-tab | `hit_present` · `hit_absent` · `wrong_present` · `wrong_absent` · `missing_present` · `missing_absent` |
+| Goal 3 | `discovery_rate` · `evidence_span_count` |
+
+The design's breakdown row renders Precision · Recall · F1 · Hit · Wrong ·
+Missing, and its cross-tab renders nine cells. Both are reads over one table.
+
+**The counts are stored, not back-derived.** They are recoverable in principle
+— `hit = recall × n`, and the rest follows — but through three rounded floats,
+in code nobody will look at again, producing integers that are off by one in
+exactly the cases (small n) where the number matters most. Storing them costs
+three rows per `(run, feature, language)` and removes a class of error that has
+no symptom.
+
+**`ScoreMetric` is a closed `StrEnum`.** A metric this table does not name
+cannot be written, and a tab asking for one that does not exist is a lint
+error in Wave 4 rather than a `KeyError` in front of an analyst. It lives in
+`domain/scoring.py` beside `Outcome` and `ALL_LANGUAGES`, the way `RunStatus`
+lives in `domain/extraction.py` (`P3-D2`).
+
+Goal 3 takes no part in any of this beyond its own two metrics. §11.3 is
+explicit: exploratory attributes are excluded from the ranking and from every
+Goal 1/2 aggregate, and **discovery rates are never compared between models**,
+because a freely hallucinating model wins that comparison. The read model that
+serves the Goal 3 card carries no model-to-model shape at all — the comparison
+is not merely undrawn, it is unrepresentable.
+
+### 16.4 The statistics, and the one number that must never be printed
+
+`domain/stats.py` is pure, and is the smallest, most-tested module in the
+project by intent:
+
+```python
+def wilson(successes: int, n: int) -> Interval          # 95%, z = 1.959963985
+def suppressed(n: int, floor: int) -> bool              # n < floor
+def mark_ties(cells: Sequence[Cell]) -> tuple[TieMark, ...]
+def macro(scores: Sequence[FeatureScore]) -> float      # non-suppressed only
+```
+
+**Wilson is written out, not imported** (`mvp-spec.md` `D4` chose it for
+correct behaviour at small n and near 0 or 1, where the normal approximation
+fails). `scipy` would be the largest dependency in the project, added for one
+closed form and one constant, so `pyproject.toml` gains nothing this phase and
+Wave 0's exit criteria assert it stayed byte-unchanged.
+
+**A tie is a tie.** `mark_ties` marks a model `best` only if **no** rival's
+interval overlaps its own; the moment one does, every overlapping model —
+the leader included — is `tied`. `mvp-spec.md` §11.5: "overlapping confidence
+intervals are rendered as a tie, **not** as an order". Ranks repeat (`1, 1, 3`)
+and never enumerate (`1, 2, 3`). The marker vocabulary is three **shapes** —
+filled, outlined, empty — not three colours, so the distinction survives a
+greyscale print and a colour-blind reader, and `theme.py`'s standing rule
+("colour carries only state and severity, no decorative hue") is not bent for
+one view family.
+
+**Suppression is a read-time rule over stored `n`, never a write-time filter**
+(**SD19**). Every cell is computed and stored; `ResultsService` replaces it
+with a typed insufficient-data shape when `n < evaluation.min_cell_count`. Two
+things follow, and both are the point:
+
+- Lowering or raising the floor **never requires a re-score**, which is what
+  makes `mvp-spec.md` §11.4's "configurable per evaluation" cheap enough to
+  honour as a column rather than quietly demote to a global constant.
+- A suppressed cell is carried as a *shape carrying its `n`*, not as `None` and
+  not as a number. It cannot be formatted into a string by accident, it cannot
+  be sorted as zero, and `tests` assert at every layer — domain, service, JSON,
+  DOM — that no number reaches a suppressed cell.
+
+The last one has a specific failure it is guarding against: **a suppressed row
+that sorts as 0 silently ranks the least-evidenced feature as the worst-
+performing one.** Suppressed rows sort **last**, in both directions.
+
+A suppressed feature is also excluded from `macro` and from tie counting
+entirely. `macro` over a set where *every* feature is suppressed **raises**
+rather than returning `0.0` — there is no mean of nothing, and a `0.0` there
+would print as a model that scored zero.
+
+### 16.5 Ranking is a derivation, and that is enforced structurally
+
+`design/results/README.md` states the invariant and this section keeps it
+verbatim: *"Every number on this tab is derived from tab 1's scored rows —
+nothing here is independent… if the two disagree, Ranking is wrong by
+construction."*
+
+So Ranking is not a table, not a cache and not a materialised view. It is
+`domain/ranking.py` — `rank_models(...)` and `separating_features(...)` — a
+pure function over the same `score` rows `ResultsService` reads. **A function
+cannot disagree with its own input.**
+
+This is enforced by a contract that already exists rather than by a review
+comment: `domain/` may import stdlib and `pydantic` and nothing else in `ra2/`
+(§1.1, `import-linter`), so `ranking.py` **cannot** reach a session, a
+repository or a second source of numbers even if an agent wanted it to.
+`.importlinter` needs no new contract this phase, which is the sign the layer
+rule was drawn in the right place.
+
+Three columns on that tab are **reported, never scored** — median latency,
+prompt tokens and VRAM, per §3d's own rule 4: "the tie-breaker you apply, not
+one the tool applies". **The presence figure joins them** (**SD20**). The
+design renders it as `0.907` in a ranking table, where it reads as a quality
+score; `mvp-spec.md` §11.2 is unambiguous that presence has no independent gold
+label, and §11.3's reasoning applies to it directly — a model that flags
+everything present maximises presence rate. So the column is a macro presence
+**rate**, headed as one, sitting with latency and VRAM, and taking no part in
+rank computation. `mvp-spec.md` §11.5 is corrected to say so. A test asserts
+the negative: change the presence rate and the ranking must not move.
+
+The reciprocal rule comes from §11.2 and is stronger than a layout note:
+**Goal 2 numbers are never published without the Goal 1 numbers beside them**,
+because a weak extractor manufactures false "missing" flags. That is expressed
+as a *shape* — `PresenceRow` carries its `goal1` block and there is no
+constructor that omits it — so a later refactor cannot drop the column and
+leave the page still rendering.
+
+### 16.6 Re-scoring, and the first mutable row in this codebase
+
+Everything in this pipeline has been append-only. `Do-NOT #2` covers
+`extraction`, `record` and `corpus`; prompt templates are copy-on-write;
+code tables are superseded, never edited. **`mismatch.analyst_tag` breaks the
+pattern by design** — tagging a mismatch is the whole of F11 — and it is the
+one place phase 4 has to be careful (**SD21**).
+
+`rescore_run(run_id)` exists because the *scorer's own code* can change; no
+other input can. It is the explicit path, and per feature it:
+
+1. **replaces** that feature's `score` rows — they are a pure function of
+   immutable inputs, so a re-score either reproduces them byte-for-byte or the
+   code changed, and in both cases replacement is correct;
+2. **upserts** its `mismatch` rows on `(run_id, record_id, feature_id)`,
+   rewriting the derived columns and **preserving `analyst_tag`, `tagged_at`
+   and `note`**.
+
+The obvious implementation — `DELETE` then `INSERT` — destroys review work that
+phase 5 exists to collect, and it destroys it silently, at the moment a
+developer is most confident (they just fixed the scorer). The `UNIQUE`
+constraint above is what makes the upsert expressible; the preservation test is
+what makes it true.
+
+A re-score of the same code over the same run is **byte-identical**. The inputs
+are immutable, so anything else is a bug, and that is asserted rather than
+assumed.
+
+### 16.7 The Results read models
+
+One route, three tabs, one evaluation. `/results?evaluation=<id>`, with the
+standard empty card listing launched evaluations when the parameter is absent —
+the design draws a run descriptor and no picker, and phase 3's Evaluation view
+left its runs-table link pointing at a deliberate placeholder route, which is
+the link that lands here.
+
+No ORM object crosses the service boundary (§1.1, unchanged since phase 1).
+Every tab carries the same `RunDescriptorView` — corpus label, record count,
+model count, `cfg` chip — including, per `mvp-spec.md` §13, **the dev marker on
+every dev-sized result**: on these boards `DEV · smoke test, not a result`
+*replaces* the "Evaluation run" pill rather than sitting beside it, so there is
+no state in which a dev number renders unmarked.
+
+| Tab | Read models |
+|---|---|
+| 1 · Extraction | `ExtractionTabView` — `FeatureScoreRow` × `ModelCellView` (sortable, paged, suppressed last), `BreakdownView`, `ByLanguageView`, `ExploratoryRow` |
+| 2 · Presence | `PresenceTabView` — `PresenceRow` (each carrying its `goal1` block, §16.5), `CrossTabView`, `FlagInconsistencyRow`, `PerRecordRow` |
+| 3 · Ranking | `RankingTabView` — `RankingRow`, `SeparatingRow`; **built by calling `domain/ranking.py` over the same rows tab 1 read** |
+
+Three states are not "empty" and must not share a rendering:
+**not scored yet** (no `score` rows), **scoring…** (a `TaskRunner` task in
+flight, polled through `GET /api/v1/tasks/{id}` exactly as import and runs
+are), and **nothing scoreable** (zero labelled features, or every feature below
+the floor). The third says *which*, because "no results" and "not enough data
+for results" are different facts about the run.
+
+The API mirrors that: an unscored run is **200 with `scored: false`**, never a
+404 — the same reasoning §15.5 used for an unreachable endpoint. A status code
+forces a toast, and a toast is the wrong shape for a state the page should
+simply be in.
+
+Tab 2's per-record list is **the deliverable**, not a rate: *"this report does
+not say what the weather was"*, one row per record, exportable. The CSV is
+`export_service.py`'s existing conventions unchanged — UTF-8 **with BOM** for
+Excel on Windows (N3), `;`-delimited, a header comment naming corpus and
+version, and the **currently filtered, currently sorted** rows only (§7).
+
+### 16.8 Package layout additions
+
+```
+domain/
+  stats.py          wilson, suppressed, mark_ties, macro (pure)
+  ranking.py        rank_models, separating_features — the tab-3 derivation (pure)
+  matching.py       mvp-spec.md §8.4's normalise + match table (pure)
+  scoring.py        Outcome, ScoreMetric, ALL_LANGUAGES, classify,
+                    aggregate_goal1/2/3 (pure)
+  derivation.py     RecordProjection, evaluate — the closed 7-type catalogue,
+                    phase 2's deferred evaluator (pure)
+persistence/
+  repositories/
+    score_repo.py         write a feature's rows in one commit; read a run's
+    mismatch_repo.py      bulk write; the tag-preserving upsert (§16.6)
+    ground_truth_repo.py  GroundTruthProvider — one pass per feature (§16.2)
+services/
+  scoring_service.py    the pass, the chain off run completion, rescore, status
+  results_service.py    tabs 1 and 2; suppression applied here (§16.4)
+  ranking_service.py    tab 3, through domain/ranking.py
+  protocols.py          + GroundTruthProvider, Scorer
+api/
+  v1/results.py  v1/presence.py  v1/ranking.py
+ui/
+  views/results/        __init__ (route, shell, tab strip), extraction_tab,
+                        presence_tab, ranking_tab
+  components/           stat_cells (tie marker, value-over-interval, the
+                        insufficient chip), contingency_table
+```
+
+**`ui/views/results/` is a package, not a module** (**SD22**) — the first view
+in the repo that is. Three tabs of one screen get built by three agents in one
+wave, and three files is what makes that parallel; a single `results_view.py`
+would serialise the wave for no architectural gain. The route, the shell and
+the tab strip are the package's `__init__.py`.
+
+The five new `domain/` modules sit beside `census.py`, `codelist_coverage.py`,
+`prompt.py` and `extraction.py` — pure, no SQLAlchemy, no session, no
+filesystem — even though their callers are the ones holding sessions. That is
+not tidiness: it is what makes §16.5's invariant a structural fact rather than
+a promise.
+
+### 16.9 What this section deliberately does not decide
+
+- **Mismatch review** (`mvp-spec.md` F11, §12) — the view, the tagging
+  affordance, the per-feature tally. The rows exist from this phase (§16.6) and
+  `analyst_tag` stays `NULL` throughout it. Phase 5 is a view over data that is
+  already there, which is the whole reason the rows are written now.
+- **Presence precision / recall / F1** (`D2`, §16). They need a human-labelled
+  presence subset of ~50 records × features, and the labelling tool for it is
+  not designed. Tab 2's scope banner states the deferral to the analyst
+  verbatim rather than leaving the absence to be inferred.
+- **Automatic hallucination triage** (`D1`). Distinguishing a hallucination
+  from a misread means adjudicating whether an evidence span supports a value.
+  `hallucinated` stays a review tag, reported as a tally, and the breakdown row
+  says so on the screen.
+- **The Goal 3 review workflow.** The design's "12 / 15 reviewed" counter
+  implies exactly the tagging machinery F11 defers; building a second one for
+  exploratory attributes would duplicate it. Discovery rate, value distribution
+  and the evidence-span list ship; the counter waits.
+- **Cross-evaluation and cross-corpus comparison.** §11.5 confines ranking to
+  within one evaluation, and §16 says every cross-corpus number, if ever shown,
+  carries its corpus label. The fingerprints that make such a view possible are
+  all stored; the view is not this phase's.
+- **Entity scoring.** `extraction_entity` stays captured and never scored
+  (§10.3), unchanged since phase 3. Set matching over object and person grain
+  is a scoring view over rows that already exist.
+- **Fuzzy or LLM-judge free-text matching, and accent folding** (`D6`, §8.4).
+  Each needs a threshold that can be defended, and defending one wants the real
+  numbers this phase is the first to produce.

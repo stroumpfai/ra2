@@ -29,28 +29,28 @@ scope, milestones *and* the wave-by-wave sub-agent breakdown.
 
 ---
 
-## 0. The architecture this plan sits under — `sw-design.md` §16, **which is not yet written**
+## 0. The architecture this plan sits under — `sw-design.md` §16
 
-This is the one structural difference from phase 3, and it is worth stating
-loudly rather than discovering at Wave 1.
+**§16 is written** — as Wave 0's first act, before any other file in this
+wave was touched. No sub-agent in any wave below has to invent a scoring
+architecture in its own worktree.
 
-`plan-phase-3.md` §0 could open with "**§15 now does the same job for this
-phase, and it is written** — no sub-agent in any wave below has to invent a
-run-worker design in its own worktree." **Phase 4 cannot say that.**
-`sw-design.md` §15.8 explicitly parks scoring: *"Scoring, Results and
-Mismatches (`mvp-spec.md` F7–F11). Runs produce `extraction*` rows and stop
-there; nothing reads them yet. The `score` and `mismatch` tables stay
-unbuilt."*
+That took one correction to this section, recorded here rather than quietly
+applied. **When this plan was drafted, §16 did not exist**, which was the one
+structural difference from phase 3 — `plan-phase-3.md` §0 could open by saying
+§15 was already written, and `sw-design.md` §15.8 explicitly parked scoring:
+*"Scoring, Results and Mismatches (`mvp-spec.md` F7–F11). Runs produce
+`extraction*` rows and stop there; nothing reads them yet. The `score` and
+`mismatch` tables stay unbuilt."* This plan therefore made §16 **Wave 0's first
+and largest deliverable**, to be complete and reviewed *before any Wave-1 agent
+is spawned*, and recommended the lead draft it ahead of the rest of the freeze
+so that Wave 0 transcribes an architecture rather than inventing one while also
+freezing twenty files. That is what happened, and §15.8's bullet is now
+superseded by a pointer to §16.
 
-So **§16 is Wave 0's first and largest deliverable**, and it must be complete
-and reviewed *before any Wave-1 agent is spawned*. The recommendation is
-stronger still: **the lead drafts §16 before spawning Wave 0**, so that Wave 0
-transcribes an architecture into code rather than inventing one while also
-freezing twenty files. Phase 3 got that ordering right by accident of timing;
-phase 4 has to get it right on purpose.
-
-§16 must settle these ten things. Every one of them is a question a Wave-1 or
-Wave-2 agent will otherwise answer alone, in its own worktree, differently:
+§16 settles these ten things. Every one of them is a question a Wave-1 or
+Wave-2 agent would otherwise have answered alone, in its own worktree,
+differently:
 
 | # | What §16 must settle |
 |---|---|
@@ -65,7 +65,7 @@ Wave-2 agent will otherwise answer alone, in its own worktree, differently:
 | 9 | **The Results read-model surface** — which shapes cross the service boundary for each of the three tabs, and that no ORM object does |
 | 10 | **§16.7 package layout additions** and **§16.8 what it deliberately does not decide** (Mismatch review, presence P/R/F1, cross-evaluation views, Goal 3 review workflow), in the shape of §14.4 and §15.8 |
 
-`sw-design.md` §13 gains this phase's deviations as `SD16`–`SD21` (§2.4).
+`sw-design.md` §13 gains this phase's deviations as `SD16`–`SD22` (§2.4).
 
 **Everything below is subordinate to §16.** Where this file and §16 disagree,
 §16 wins and this file gets corrected in the same commit; where §16 is silent,
@@ -129,6 +129,7 @@ blocking, each reversible:
 | P48 | The **Results view** — one route, three tabs, to `design/results/README.md`, with its verbatim copy |
 | P49 | Component kit additions: the `.mk` tie marker, the `.val` / `.ci` value-over-interval pair, the `.ins` insufficient-data chip, the tab strip, the contingency table, the suppressed-row treatment |
 | P50 | Three new E2E journeys (**J11** Extraction, **J12** Presence, **J13** Ranking consistency) and the fixture / unit / backend / UI layers under them — including the **golden-numbers fixture** (§11) |
+| P51 | **`P3-D15`'s inherited obligation**: the aware-UTC `TypeDecorator` on the stored-timestamp column type, and the deletion of the two duplicated `_as_utc` helpers phase 3 left in `evaluation_service.py` and `run_service.py`. Added after the plan was first written — see §5.1 |
 
 ### 2.2 Out of phase 4
 
@@ -166,7 +167,7 @@ change *that file* first". All are Wave 0's, all reviewed at the §5.3 gate.
 
 | Document | Correction |
 |---|---|
-| `sw-design.md` | **§16 is written** — the ten items in §0. `SD16`–`SD21` added to §13. §15.8's "the `score` and `mismatch` tables stay unbuilt" is superseded by a pointer to §16. |
+| `sw-design.md` | **§16 is written** — the ten items in §0. `SD16`–`SD22` added to §13. §15.8's "the `score` and `mismatch` tables stay unbuilt" is superseded by a pointer to §16. |
 | `mvp-spec.md` §5 | `evaluation` gains `min_cell_count` (Q4). `score`'s `metric` column is documented as a **closed vocabulary that also carries raw counts**, not only rates (F2). `mismatch` is unchanged — but its `analyst_tag` is documented as the one mutable column in the pipeline, and re-scoring is documented as preserving it. |
 | `mvp-spec.md` §11.4 | Already says "configurable per evaluation"; the note now names the column that makes it true, so the next reader does not implement it from config. |
 | `mvp-spec.md` §11.5 | Ranking reports a macro **presence rate** as a *reported-never-scored* figure beside latency and VRAM, and it takes no part in rank computation (C8, F8). |
@@ -297,7 +298,7 @@ in full**, and — if the lead has not already drafted it — writes
 
 ### 5.1 Deliverables
 
-- **`sw-design.md` §16**, settling §0's ten items, plus `SD16`–`SD21` in §13.
+- **`sw-design.md` §16**, settling §0's ten items, plus `SD16`–`SD22` in §13.
   **This is the deliverable the rest of the phase rests on**; everything below
   transcribes it.
 - **§2.4's document corrections** — `mvp-spec.md` §5/§11.4/§11.5, `CLAUDE.md`,
@@ -362,6 +363,21 @@ in full**, and — if the lead has not already drafted it — writes
   `mismatch` and adds the column, with a server default so existing rows
   migrate. **S4 remains phase 4's one migration author** for anything Wave 1
   adds on top. Recorded in `CONTRACTS.md`.
+- **`P3-D15`'s inherited obligation (P51), as its own commit.** Phase 3's
+  deviation register closes with an instruction to this phase: *"Phase 4
+  should do it as its own commit with the full suite as the check, and delete
+  both helpers."* `Clock.now()` is always aware; SQLite's
+  `DateTime(timezone=True)` has nowhere to keep the offset and returns the
+  value naive, so subtracting two stored timestamps raises — and I2 and I3 hit
+  it independently at the end of phase 3 and wrote near-identical private
+  `_as_utc` helpers. It belongs a layer down, as a SQLAlchemy `TypeDecorator`
+  on the column type: same storage, **no migration**. Phase 3 declined to do it
+  mid-wave because it changes how every timestamp in the app loads, including
+  the byte-asserted golden import report. **Wave 0 is the only place it can
+  happen** — `models.py` is frozen for Waves 1–4 and no other wave owns it.
+  Its own commit, the full suite as the check, both helpers deleted.
+  *(This deliverable was missing from the plan as first written; added here in
+  the same commit, per `CLAUDE.md`.)*
 - **`tests/test_p4_contract.py`** *(new, lead-owned)* — this wave's exit
   criteria as tests, in the shape of `test_m0_contract.py`, `test_p2_contract.py`
   and `test_p3_contract.py`: every file §5.1 freezes carries its `# FROZEN`
@@ -935,7 +951,7 @@ already wrote.
 
 | # | Flag |
 |---|---|
-| R1 | **`sw-design.md` §16 does not exist yet** — the one structural difference from phase 3, whose §15 was written before its plan (§0). If Wave 0 writes §16 in the same breath as twenty frozen files, the §5.3 review gate is the *only* thing standing between five Wave-1 agents and a wrong statistical contract. **Mitigation: the lead drafts §16 before spawning Wave 0.** |
+| R1 | **`sw-design.md` §16 does not exist yet** — the one structural difference from phase 3, whose §15 was written before its plan (§0). If Wave 0 writes §16 in the same breath as twenty frozen files, the §5.3 review gate is the *only* thing standing between five Wave-1 agents and a wrong statistical contract. **Mitigation: the lead drafts §16 before spawning Wave 0.** **Discharged at Wave 0** — §16 was written first, before any other file in the freeze (§0). The risk it names is real for the *review*, not for the drafting: the §5.3 gate still reads §16 and `models.py`'s diff together. |
 | R2 | **The statistics are the product, and a wrong one is invisible.** Nothing crashes on a mis-computed Wilson bound or a mis-marked tie — the screen simply lies, plausibly, in the one view the whole project exists to produce. `golden_stats.json` (S1) is the only layer that catches it, which makes a silent regeneration of that file the most damaging single edit available in this phase. |
 | R3 | **The derivation evaluator is a phase-2 deferral coming due** (S3), and it was deferred with the words "scoring (phase 3) needs to build one anyway" — phase 3 did not, so nobody has budgeted it. It is a full agent with its own test layer, and two of the design's eight fixture rows depend on it. |
 | R4 | **EAV ground-truth query performance** (S4). A 5 000-record corpus × 13 features over `unfall_row` / `objekt_cell` / `person_cell` is where an N+1 becomes minutes. This is `SD2`'s lesson (census materialisation) in a new place; the exit criterion asserts a **bounded statement count**, not a wall-clock number, because the latter is a flaky test. |
