@@ -833,6 +833,14 @@ differ" in ranking order with its Δ column and its plain-sentence readings, and
 "How this ranking is computed" — the four numbered rules and the
 `--warn-soft` validity footer naming the `cfg` hash and the corpus.
 
+**Do not reproduce the design README's "the *best* column sums to 7" note.**
+Under `P4-D2` it does not: a model is `best` only when no rival interval
+overlaps it, so on the README's own fixtures the column sums to **3**, not 7.
+Each *row* still sums to the scored-feature count, and that is the number the
+header may state. This is the one place the design's copy is wrong rather than
+stale, and rendering it verbatim would print a falsehood about the table
+directly beneath it.
+
 **Exit:** `tests/ui/test_results_ranking.py` asserts tied models repeat their
 rank; the four rules and the validity footer render verbatim with the **real**
 `cfg` and corpus interpolated; a run with two tied leaders renders the tie

@@ -8,6 +8,13 @@ models are tied, pick on cost".
 §11.5 renders overlapping intervals as a tie, not as an order, and a dense
 enumeration would imply the order the spec refuses to claim.
 
+**The `best` column does not sum to the feature count** (`P4-D2`). The design
+README says it does — "exactly one highest value per feature" — but that is its
+*fixture counts* speaking, and its own stated rule, which `stats.mark_ties`
+follows, says a model is best only when no rival interval overlaps it. On the
+README's own numbers the column sums to 3, not 7. **Do not render that note.**
+Each row still sums to the scored-feature count; that one is safe to state.
+
 **Every number here is derived from tab 1's rows** and arrives already computed
 in `RankingTabView`; this file computes nothing. J13 reads the macro off this
 tab and the per-feature values off tab 1 and asserts the first is the mean of
