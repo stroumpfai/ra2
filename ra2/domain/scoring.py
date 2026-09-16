@@ -37,6 +37,8 @@ from typing import Final
 
 from ra2.domain.feature import MatchingRule, ValueType
 from ra2.domain.ids import RecordId
+from ra2.domain.matching import is_empty, matches
+from ra2.domain.stats import wilson
 
 __all__ = [
     "ALL_LANGUAGES",
@@ -231,7 +233,20 @@ def classify(
     Otherwise `HIT` when `matching.matches`, `WRONG` when the model returned
     something that does not match, `MISSING` when it returned nothing.
     """
-    raise NotImplementedError
+    if is_empty(record_value):
+        # NOT a labelled case. §8.6: "a record whose column is empty is
+        # excluded from that feature's denominator ENTIRELY". Returning
+        # `MISSING` here is the wrong answer that still produces numbers — it
+        # would inflate the denominator and depress recall for every feature
+        # the delivery happens to populate sparsely.
+        return None
+    if is_empty(model_value):
+        return Outcome.MISSING
+    return (
+        Outcome.HIT
+        if matches(record_value, model_value, value_type=value_type, rule=rule)
+        else Outcome.WRONG
+    )
 
 
 def aggregate_goal1(cases: Sequence[LabelledCase], *, language: str) -> tuple[ScoreRow, ...]:
@@ -248,7 +263,28 @@ def aggregate_goal1(cases: Sequence[LabelledCase], *, language: str) -> tuple[Sc
     cell is shown at all is `stats.suppressed`'s question, asked later and by
     someone else (`SD19`).
     """
-    raise NotImplementedError
+    n = len(cases)
+    hit = sum(1 for case in cases if case.outcome is Outcome.HIT)
+    wrong = sum(1 for case in cases if case.outcome is Outcome.WRONG)
+    missing = sum(1 for case in cases if case.outcome is Outcome.MISSING)
+
+    claimed = hit + wrong
+    precision = hit / claimed if claimed else 0.0
+    recall = hit / n if n else 0.0
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+
+    return (
+        # Precision's denominator is what the model CLAIMED, not `n`: "of what
+        # it claimed, how much was right" (§11.1). Its interval is over that
+        # smaller base, which is why a model that answers rarely gets a wide
+        # precision interval and a narrow recall one.
+        _rate(language, ScoreMetric.PRECISION, hit, claimed),
+        _rate(language, ScoreMetric.RECALL, hit, n),
+        _derived_rate(language, ScoreMetric.F1, f1, n),
+        _count(language, ScoreMetric.HIT, hit, n),
+        _count(language, ScoreMetric.WRONG, wrong, n),
+        _count(language, ScoreMetric.MISSING, missing, n),
+    )
 
 
 def aggregate_goal2(cases: Sequence[LabelledCase], *, language: str) -> tuple[ScoreRow, ...]:
@@ -266,7 +302,47 @@ def aggregate_goal2(cases: Sequence[LabelledCase], *, language: str) -> tuple[Sc
     gold presence from Goal 1 correctness would be circular, and the circularity
     would not be visible in the output.
     """
-    raise NotImplementedError
+    n = len(cases)
+    flagged = [case for case in cases if case.present_flag is not None]
+    present = sum(1 for case in flagged if case.present_flag)
+
+    # Cases where the model gave no presence flag appear in NO cell, so the
+    # cross-tab totals can be less than `n`. The read model says so rather
+    # than quietly making the rows add up (§16.3).
+    cross = CrossTab(
+        hit_present=_tally(flagged, Outcome.HIT, present_flag=True),
+        hit_absent=_tally(flagged, Outcome.HIT, present_flag=False),
+        wrong_present=_tally(flagged, Outcome.WRONG, present_flag=True),
+        wrong_absent=_tally(flagged, Outcome.WRONG, present_flag=False),
+        missing_present=_tally(flagged, Outcome.MISSING, present_flag=True),
+        missing_absent=_tally(flagged, Outcome.MISSING, present_flag=False),
+    )
+
+    # `present = false` AND the value matched: self-contradiction, and the one
+    # Goal 2 number that is a quality signal rather than a description (§11.2).
+    # The denominator is the flagged cases, not `n` — a case with no flag
+    # cannot contradict itself.
+    inconsistent = cross.hit_absent
+
+    return (
+        _rate(language, ScoreMetric.PRESENCE_RATE, present, n),
+        _rate(
+            language,
+            ScoreMetric.FLAG_INCONSISTENCY_RATE,
+            inconsistent,
+            len(flagged),
+        ),
+        _count(language, ScoreMetric.HIT_PRESENT, cross.hit_present, len(flagged)),
+        _count(language, ScoreMetric.HIT_ABSENT, cross.hit_absent, len(flagged)),
+        _count(language, ScoreMetric.WRONG_PRESENT, cross.wrong_present, len(flagged)),
+        _count(language, ScoreMetric.WRONG_ABSENT, cross.wrong_absent, len(flagged)),
+        _count(language, ScoreMetric.MISSING_PRESENT, cross.missing_present, len(flagged)),
+        _count(language, ScoreMetric.MISSING_ABSENT, cross.missing_absent, len(flagged)),
+    )
+
+
+def _tally(cases: Sequence[LabelledCase], outcome: Outcome, *, present_flag: bool) -> int:
+    return sum(1 for case in cases if case.outcome is outcome and case.present_flag is present_flag)
 
 
 def aggregate_goal3(cases: Sequence[ExploratoryCase], *, language: str) -> tuple[ScoreRow, ...]:
@@ -278,4 +354,57 @@ def aggregate_goal3(cases: Sequence[ExploratoryCase], *, language: str) -> tuple
     wins this metric". Exploratory attributes also take no part in the ranking
     and in no Goal 1/2 aggregate.
     """
-    raise NotImplementedError
+    n = len(cases)
+    reported = sum(1 for case in cases if case.reported)
+    spans = sum(1 for case in cases if case.reported and case.evidence_span)
+    return (
+        _rate(language, ScoreMetric.DISCOVERY_RATE, reported, n),
+        _count(language, ScoreMetric.EVIDENCE_SPAN_COUNT, spans, n),
+    )
+
+
+def _rate(language: str, metric: ScoreMetric, successes: int, n: int) -> ScoreRow:
+    """A proportion with its Wilson interval — mvp-spec.md §11.4's "every
+    metric is rendered with its n and its interval"."""
+    interval = wilson(successes, n)
+    return ScoreRow(
+        language=language,
+        metric=metric,
+        value=(successes / n) if n else 0.0,
+        n=n,
+        ci_low=interval.low,
+        ci_high=interval.high,
+    )
+
+
+def _derived_rate(language: str, metric: ScoreMetric, value: float, n: int) -> ScoreRow:
+    """A rate that is not a raw `successes / n` — precision over its own
+    denominator, and F1, which is a ratio of ratios.
+
+    Its interval is Wilson over the value read back as a count. That is an
+    approximation for F1 and is the standard one: `design/results/README.md`
+    renders "F1 with a Wilson 95 % interval" and there is no closed form for
+    the interval of a harmonic mean of two proportions.
+    """
+    interval = wilson(round(value * n), n)
+    return ScoreRow(
+        language=language,
+        metric=metric,
+        value=value,
+        n=n,
+        ci_low=interval.low,
+        ci_high=interval.high,
+    )
+
+
+def _count(language: str, metric: ScoreMetric, value: int, n: int) -> ScoreRow:
+    """A raw count. `ci_low`/`ci_high` stay `None` — a count has no interval,
+    and a renderer must not reach for one (SD18)."""
+    return ScoreRow(
+        language=language,
+        metric=metric,
+        value=float(value),
+        n=n,
+        ci_low=None,
+        ci_high=None,
+    )
