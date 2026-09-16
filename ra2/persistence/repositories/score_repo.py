@@ -20,6 +20,7 @@ NULLs as distinct in a unique constraint.
 
 from collections.abc import Sequence
 
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ra2.domain.ids import FeatureId, RunId
@@ -38,15 +39,43 @@ class ScoreRepository:
     ) -> None:
         """Replace this `(run, feature)`'s rows. Does **not** commit — the
         caller owns the transaction boundary (§16.1)."""
-        raise NotImplementedError
+        # Delete-then-insert is correct **here** and wrong in `mismatch_repo`:
+        # a `score` row is a pure function of immutable inputs and carries
+        # nothing a human wrote, so replacing it loses nothing. A `mismatch`
+        # row carries the analyst's tag (SD21).
+        await self._session.execute(
+            delete(Score).where(Score.run_id == run_id, Score.feature_id == feature_id)
+        )
+        self._session.add_all(
+            Score(
+                run_id=run_id,
+                feature_id=feature_id,
+                language=row.language,
+                metric=row.metric,
+                value=row.value,
+                n=row.n,
+                ci_low=row.ci_low,
+                ci_high=row.ci_high,
+            )
+            for row in rows
+        )
+        await self._session.flush()
 
     async def scored_feature_ids(self, run_id: RunId) -> frozenset[FeatureId]:
         """Which features this run already has rows for — progress and resume,
         one query, one answer."""
-        raise NotImplementedError
+        result = await self._session.execute(
+            select(Score.feature_id).where(Score.run_id == run_id).distinct()
+        )
+        return frozenset(result.scalars())
 
     async def for_run(self, run_id: RunId) -> Sequence[Score]:
         """Every stored row, unsuppressed. Suppression is a **read-time** rule
         applied in `results_service` from the evaluation's floor (`SD19`), never
         here — which is what lets the floor change without a re-score."""
-        raise NotImplementedError
+        result = await self._session.execute(
+            select(Score)
+            .where(Score.run_id == run_id)
+            .order_by(Score.feature_id, Score.language, Score.metric)
+        )
+        return list(result.scalars())
