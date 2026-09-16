@@ -16,6 +16,7 @@ from typing import cast
 
 import pytest
 from nicegui import ui
+from nicegui.elements.label import Label
 from nicegui.testing.user import User
 from nicegui.testing.user_interaction import UserInteraction
 
@@ -34,13 +35,17 @@ from ra2.domain.feature import (
 )
 from ra2.domain.ids import FeatureConfigId, RunId
 from ra2.domain.llm import EndpointStatus, ProbeCode
+from ra2.domain.stats import TieMark
 from ra2.services.readmodels import (
     ConnectionProbeView,
     ConnectionView,
+    CrossTabView,
     FeatureSetSummary,
+    MetricCell,
     ResolvedPromptView,
     RunProgressView,
     SortDir,
+    SuppressedCell,
 )
 from ra2.ui.components import (
     ColumnSpec,
@@ -56,6 +61,7 @@ from ra2.ui.components import (
     pagination_row,
     tick,
 )
+from ra2.ui.components.contingency_table import contingency_table
 from ra2.ui.components.derivation_builder import derivation_builder
 from ra2.ui.components.feature_sets_table import feature_sets_table
 from ra2.ui.components.ollama_settings import (
@@ -79,6 +85,7 @@ from ra2.ui.components.primitives import (
 )
 from ra2.ui.components.progress_card import progress_card
 from ra2.ui.components.prompt_preview import prompt_preview_panel
+from ra2.ui.components.stat_cells import insufficient_cell, metric_cell, tie_marker
 from ra2.ui.state import TableState, set_table_state, table_state
 from ra2.ui.theme import STYLESHEET
 
@@ -1733,3 +1740,148 @@ def _with_marker(user: User, marker: str) -> list[ui.element]:
     filtered by marker instead of routed through `find`.
     """
     return [e for e in _all(user) if marker in e._markers]
+
+
+# --- Results statistical cells (phase 4, S5) --------------------------------
+
+
+def _cross_tab_text(user: User) -> dict[tuple[str, str], str]:
+    """`(outcome, flag) -> rendered number`, read off the DOM."""
+    return {
+        (element.props["data-outcome"], element.props["data-flag"]): cast(
+            Label, element.default_slot.children[0]
+        ).text
+        for element in user.find(marker="cross-tab-cell").elements
+    }
+
+
+_CROSS_TAB = CrossTabView(
+    feature_key="weather_code",
+    model_id="llama3.1:8b",
+    hit_present=2190,
+    hit_absent=114,
+    wrong_present=301,
+    wrong_absent=62,
+    missing_present=94,
+    missing_absent=1286,
+)
+
+
+async def test_the_tie_marker_distinguishes_its_three_states_by_shape(user: User) -> None:
+    """**Q6 / §15 F9, asserted structurally so it cannot be reverted into a
+    colour.**
+
+    The design README defines a blue `--accent` for this family; `theme.py`
+    already records that the prototypes' blue is "left over from an earlier
+    pass", under "colour carries **only** state and severity". The three states
+    are three shapes — filled, outlined, empty — which read without hue, on a
+    greyscale print, and for a colour-blind reader.
+
+    This test reads classes and `data-mark`, never a colour. A change that
+    swapped the shapes for three hues would pass a screenshot and fail here.
+    """
+    page(
+        "/t/mk/all",
+        lambda: [tie_marker(mark) for mark in (TieMark.BEST, TieMark.TIED, TieMark.NONE)],
+    )
+    await user.open("/t/mk/all")
+    markers = _ordered(user.find(marker="tie-marker"))
+    assert [m.props["data-mark"] for m in markers] == ["best", "tied", "none"]
+    assert "mk-best" in markers[0].classes
+    assert "mk-tied" in markers[1].classes
+    assert "mk-none" in markers[2].classes
+
+
+async def test_every_tie_marker_state_is_named_for_a_screen_reader(user: User) -> None:
+    """The marker is the only thing separating a best cell from a tied one. A
+    reader that saw just the numbers would find a table with no winner."""
+    page("/t/mk/aria", lambda: [tie_marker(mark) for mark in TieMark])
+    await user.open("/t/mk/aria")
+    labels = {m.props["aria-label"] for m in user.find(marker="tie-marker").elements}
+    assert labels == {"best", "statistically tied with best", "neither best nor tied"}
+
+
+async def test_a_metric_cell_renders_the_value_over_its_interval(user: User) -> None:
+    """§11.4: "every metric is rendered with its **n** and its interval"."""
+    cell = MetricCell(value=0.842, ci_low=0.824, ci_high=0.858, n=1842, mark=TieMark.BEST)
+    page("/t/cell/metric", lambda: metric_cell(cell))
+    await user.open("/t/cell/metric")
+    await user.should_see("0.842")
+    await user.should_see(".824–.858")
+
+
+async def test_a_metric_cell_that_leads_nothing_is_dimmed(user: User) -> None:
+    """Design README §1a: "a model that is neither best nor tied is
+    `color:--ink2`" — the eye lands on what leads."""
+    page(
+        "/t/cell/dim",
+        lambda: [
+            metric_cell(MetricCell(value=0.9, ci_low=0.88, ci_high=0.92, n=500, mark=m))
+            for m in (TieMark.BEST, TieMark.NONE)
+        ],
+    )
+    await user.open("/t/cell/dim")
+    values = _ordered(user.find(marker="metric-cell"))
+    assert "dim" not in values[0].default_slot.children[0].classes
+    assert "dim" in values[1].default_slot.children[0].classes
+
+
+async def test_a_suppressed_cell_renders_the_notice_and_never_a_number(user: User) -> None:
+    """mvp-spec.md §11.4: "cells with n below the minimum count render as
+    'insufficient data', **never as a number**".
+
+    `metric_cell` takes the `Cell` union rather than `MetricCell`, so there is
+    no call site that can render a cell without having decided what to do
+    about suppression.
+    """
+    page("/t/cell/suppressed", lambda: metric_cell(SuppressedCell(n=17, floor=20)))
+    await user.open("/t/cell/suppressed")
+    (chip,) = user.find(marker="insufficient").elements
+    assert chip.props["data-n"] == "17"
+    assert chip.props["data-floor"] == "20"
+    # There is no metric cell on this page at all — `SuppressedCell` has no
+    # `value` field, so the number does not exist to be rendered.
+    with pytest.raises(AssertionError):
+        user.find(marker="metric-cell")
+
+
+async def test_the_suppression_notice_states_both_numbers_from_the_data(user: User) -> None:
+    """The floor is **per evaluation** (`SD19`), so a literal `20` in the copy
+    would be wrong the first time someone changed it."""
+    page("/t/cell/floor", lambda: insufficient_cell(n=12, floor=30))
+    await user.open("/t/cell/floor")
+    await user.should_see("12 labelled cases, below the minimum of 30")
+
+
+async def test_the_contingency_table_renders_the_designs_cross_tab(user: User) -> None:
+    """`design/results/README.md` §2d's fixture, cell for cell."""
+    page("/t/xtab", lambda: contingency_table(view=_CROSS_TAB))
+    await user.open("/t/xtab")
+    cells = _cross_tab_text(user)
+    assert cells[("hit", "present")] == "2 190"
+    assert cells[("hit", "absent")] == "114"
+    assert cells[("missing", "absent")] == "1 286"
+
+
+async def test_the_self_contradiction_cell_is_styled_as_the_finding(user: User) -> None:
+    """ "That cell is the whole point of the card — style it as the finding."
+
+    `hit x present = false`: the model said the text does not contain the
+    feature and then extracted the record's exact value from it.
+    """
+    page("/t/xtab/finding", lambda: contingency_table(view=_CROSS_TAB))
+    await user.open("/t/xtab/finding")
+    findings = [e for e in user.find(marker="cross-tab-cell").elements if "finding" in e.classes]
+    assert len(findings) == 1
+    assert findings[0].props["data-outcome"] == "hit"
+    assert findings[0].props["data-flag"] == "absent"
+
+
+async def test_the_cross_tab_totals_are_the_sums_of_its_own_cells(user: User) -> None:
+    """A total that disagreed with the cells above it would be a second source
+    of truth in a nine-cell table."""
+    page("/t/xtab/totals", lambda: contingency_table(view=_CROSS_TAB))
+    await user.open("/t/xtab/totals")
+    cells = _cross_tab_text(user)
+    assert cells[("total", "total")] == "4 047"
+    assert cells[("hit", "total")] == "2 304"

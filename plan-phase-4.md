@@ -440,7 +440,7 @@ migration. Three things get a second look specifically:
 | `ra2/domain/{matching,scoring}.py` *(bodies)* | M27 stub | **S2** | 🔒 | 🔒 | 🔒 |
 | `ra2/domain/derivation.py` *(bodies)* | M27 stub | **S3** | 🔒 | 🔒 | 🔒 |
 | `ra2/persistence/repositories/{score,mismatch,ground_truth}_repo.py`, `migrations/versions/**` | M27 *(the phase-4 revision, written in full)* | **S4** | 🔒 | 🔒 | 🔒 |
-| `ra2/ui/components/{stat_cells,contingency_table}.py` *(bodies)*, `primitives.py` *(additions)* | M27 stub | **S5** | 🔒 | 🔒 | 🔒 |
+| `ra2/ui/components/{stat_cells,contingency_table}.py` *(bodies)*, `primitives.py` *(additions)*, `ra2/ui/theme.py` *(additions)* | M27 stub | **S5** | 🔒 | 🔒 | 🔒 |
 | `ra2/services/scoring_service.py` | M27 stub | 🔒 | **T1** | 🔒 | 🔒 |
 | `ra2/services/results_service.py` | M27 stub | 🔒 | **T2** | 🔒 | 🔒 |
 | `ra2/services/ranking_service.py` | M27 stub | 🔒 | **T3** | 🔒 | 🔒 |

@@ -319,7 +319,7 @@ with it (plan-phase-4.md §0).
 | `ra2/domain/{matching,scoring}.py` *(bodies)* | S2 |
 | `ra2/domain/derivation.py` *(bodies)* | S3 |
 | `ra2/persistence/repositories/{score,mismatch,ground_truth}_repo.py`, `ra2/persistence/migrations/versions/**` | S4 |
-| `ra2/ui/components/{stat_cells,contingency_table}.py` *(bodies)*, `ra2/ui/components/primitives.py` *(additions)* | S5 |
+| `ra2/ui/components/{stat_cells,contingency_table}.py` *(bodies)*, `ra2/ui/components/primitives.py` *(additions)*, `ra2/ui/theme.py` *(additions)* | S5 |
 | `ra2/services/scoring_service.py` | T1 |
 | `ra2/services/results_service.py`, `ra2/services/export_service.py` *(`presence_records_csv` body)* | T2 |
 | `ra2/services/ranking_service.py` | T3 |

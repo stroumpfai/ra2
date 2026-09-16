@@ -331,8 +331,55 @@ _FOCUS: Final = """
 }
 """
 
+#: Phase 4 (S5) — the Results family's statistical cells
+#: (`design/results/README.md`, "Design Tokens").
+#:
+#: **The tie marker is shape-coded, not colour-coded** (plan-phase-4.md §1 Q6,
+#: §15 F9): filled, outlined, empty. The design README defines a blue
+#: `--accent` for this family; this module's own header already records that
+#: the prototypes' blue is "a blue left over from an earlier pass" and that
+#: the README wins, under "colour carries **only** state and severity. No
+#: decorative hue." Three shapes read without hue, survive a greyscale print
+#: and survive a colour-blind reader — a better answer than a fourth colour.
+#:
+#: `.mk-none` keeps a transparent border rather than none, so all three states
+#: occupy the same box and the value column does not shift by 3px between
+#: rows.
+_UTILITIES_P4: Final = """
+.mk{
+  display:inline-block;width:7px;height:7px;border-radius:2px;
+  margin-right:6px;flex:none;vertical-align:middle;
+  border:1.5px solid transparent;background:transparent;
+}
+.mk-best{background:var(--accent);border-color:var(--accent);}
+.mk-tied{background:transparent;border-color:var(--accent);}
+.mk-none{background:transparent;border-color:transparent;}
+.val{
+  font-family:var(--mono);font-size:12.5px;color:var(--ink);
+  white-space:nowrap;line-height:1.35;
+}
+.val.dim{color:var(--ink2);}
+.ci{
+  font-family:var(--mono);font-size:10.5px;color:var(--ink3);
+  padding-left:13px;white-space:nowrap;line-height:1.3;
+}
+.ins{
+  font-family:var(--mono);font-size:11px;font-style:italic;
+  color:var(--ink3);white-space:nowrap;
+}
+.tab{
+  padding:0 0 9px;border-bottom:2px solid transparent;color:var(--ink2);
+  font-size:12.5px;font-weight:500;background:none;cursor:pointer;
+}
+.tab.on{border-bottom-color:var(--accent);color:var(--ink);}
+.xtab{border-collapse:collapse;}
+.xtab td,.xtab th{padding:8px 12px;font-size:12.5px;}
+.xtab .total{color:var(--ink3);}
+.xtab .finding{color:var(--warn);font-weight:600;}
+"""
+
 #: The single stylesheet. One injection, not scattered across components (§8.2).
-STYLESHEET: Final = _FONTS + _TOKENS + _RESET + _UTILITIES + _UTILITIES_P2 + _FOCUS
+STYLESHEET: Final = _FONTS + _TOKENS + _RESET + _UTILITIES + _UTILITIES_P2 + _UTILITIES_P4 + _FOCUS
 
 
 def inject() -> None:
