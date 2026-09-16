@@ -35,7 +35,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from ra2.domain.ids import FeatureId
-from ra2.domain.stats import Interval, TieMark
+from ra2.domain.stats import Interval, TieMark, macro, macro_interval
 
 __all__ = [
     "FeatureCell",
@@ -122,7 +122,43 @@ def rank_models(cells_by_model: Mapping[str, Sequence[FeatureCell]]) -> tuple[Mo
     nothing, and a `0.0` there prints as a model that scored zero (§16.4). The
     caller renders the "nothing scoreable" state instead (§16.7).
     """
-    raise NotImplementedError
+    scored = {
+        model_id: tuple(cell for cell in cells if not cell.suppressed)
+        for model_id, cells in cells_by_model.items()
+    }
+    summaries = [_summarise(model_id, cells) for model_id, cells in sorted(scored.items()) if cells]
+    if not summaries:
+        raise ValueError("every feature is suppressed: there is nothing to rank")
+    # Highest macro first, then model id, so the order is total and stable —
+    # two models with identical macros must not swap between page loads.
+    summaries.sort(key=lambda summary: (-summary.macro_f1, summary.model_id))
+
+    ranked: dict[str, int] = {}
+    remaining = list(summaries)
+    while remaining:
+        leader = remaining[0]
+        # Every model whose macro interval overlaps the leader's SHARES its
+        # rank (mvp-spec.md §11.5). The next distinct rank is then the count of
+        # models above it plus one — so a tied pair is `1, 1, 3`, never
+        # `1, 2, 3`, which would imply the order the spec refuses to claim.
+        group = [s for s in remaining if _overlaps(s.interval, leader.interval)]
+        rank = len(ranked) + 1
+        for member in group:
+            ranked[member.model_id] = rank
+        remaining = [s for s in remaining if s.model_id not in ranked]
+
+    return tuple(
+        ModelRanking(
+            model_id=summary.model_id,
+            rank=ranked[summary.model_id],
+            macro_f1=summary.macro_f1,
+            interval=summary.interval,
+            best=summary.best,
+            tied=summary.tied,
+            worse=summary.worse,
+        )
+        for summary in summaries
+    )
 
 
 def separating_features(
@@ -137,4 +173,75 @@ def separating_features(
     not a gap — the verdict banner says "this run does not separate them" from
     exactly this.
     """
-    raise NotImplementedError
+    rankings = rank_models(cells_by_model)
+    if len(rankings) < 2:
+        # One model separates from nobody. Not an error: a single-model
+        # evaluation is a legitimate run, it just answers no ranking question.
+        return ()
+    first, second = rankings[0].model_id, rankings[1].model_id
+    by_feature = {
+        model_id: {cell.feature_id: cell for cell in cells}
+        for model_id, cells in cells_by_model.items()
+    }
+
+    separating: list[SeparatingFeature] = []
+    for feature_id, leader_cell in by_feature[first].items():
+        rival_cell = by_feature[second].get(feature_id)
+        if rival_cell is None:
+            continue
+        # A feature nobody could measure separates nothing.
+        if leader_cell.suppressed or rival_cell.suppressed:
+            continue
+        if _overlaps(leader_cell.interval, rival_cell.interval):
+            continue
+        ahead = first if leader_cell.f1 >= rival_cell.f1 else second
+        separating.append(
+            SeparatingFeature(
+                feature_id=feature_id,
+                leader_model_id=ahead,
+                delta=abs(leader_cell.f1 - rival_cell.f1),
+                f1_by_model={
+                    model_id: cells[feature_id].f1
+                    for model_id, cells in by_feature.items()
+                    if feature_id in cells and not cells[feature_id].suppressed
+                },
+            )
+        )
+    separating.sort(key=lambda row: (-row.delta, row.feature_id))
+    return tuple(separating)
+
+
+@dataclass(frozen=True, slots=True)
+class _Summary:
+    """One model's macro, computed once and reused by both public functions."""
+
+    model_id: str
+    macro_f1: float
+    interval: Interval
+    best: int
+    tied: int
+    worse: int
+
+
+def _summarise(model_id: str, cells: Sequence[FeatureCell]) -> _Summary:
+    """Macro and mark counts over one model's **non-suppressed** cells.
+
+    `best + tied + worse` equals the scored-feature count for every model — a
+    drift there means the marks and the macro were computed from different
+    sets, which is why the ranking header can render both numbers.
+    """
+    marks = [cell.mark for cell in cells]
+    return _Summary(
+        model_id=model_id,
+        macro_f1=macro([cell.f1 for cell in cells]),
+        interval=macro_interval([cell.interval for cell in cells]),
+        best=marks.count(TieMark.BEST),
+        tied=marks.count(TieMark.TIED),
+        worse=marks.count(TieMark.NONE),
+    )
+
+
+def _overlaps(left: Interval, right: Interval) -> bool:
+    """Closed-interval overlap — the same rule `stats.mark_ties` applies to a
+    feature's cells, applied here to the models' macros."""
+    return left.low <= right.high and right.low <= left.high

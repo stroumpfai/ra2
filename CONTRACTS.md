@@ -339,6 +339,15 @@ is no merge conflict this phase, which is the point of saying so in advance.
 
 ---
 
+## Documented deviations phase 4 introduces
+
+| # | Decision | Why |
+|---|---|---|
+| **P4-D1** | The **macro interval** is the propagated standard error of the per-feature Wilson half-widths, not a Wilson interval over pooled counts (`domain/stats.py::macro_interval`) | sw-design.md §16 is silent, and there is no nearest existing pattern to follow, so S1 decided it. A macro F1 is **not a proportion over a pooled denominator**: pooling the counts and running `wilson` over the totals would weight each feature by its `n`, which is exactly what mvp-spec.md §11.5's *equal weight* refuses — and it would do it invisibly, producing a number that looks like every other Wilson bound on the page while answering a different question. So each Wilson half-width is read back as a standard error (`half / z`), combined as independent contributions to an unweighted mean, and turned back into a 95 % interval. Equal weight in, equal weight out. Independence across features is an approximation (the same model scored two features over overlapping records) and is the conservative direction to be wrong in when the correlation is positive, which it usually is. The honest reading is "these models are close", which is the only thing §11.5 uses it for. `tests/unit/stats/test_macro.py` pins the difference against the pooled alternative. |
+| **P4-D2** | A model is `BEST` **only when no rival interval overlaps it** — so the *best* column does **not** sum to the feature count, against `design/results/README.md` §3's note | **The design README contradicts itself**, and mvp-spec.md decides it. Its "Statistical conventions" section states the rule this implementation follows: "A model is marked *best* only if no other model's interval overlaps it; otherwise every overlapping model is marked *tied with best*." Its Ranking section then says the opposite: "the *best* column sums to 7 — **exactly one highest value per feature**", i.e. `BEST` = argmax regardless of overlap, with `TIED` for the overlappers — which is what its fixture rows and its `3/3/1 · 4/1/2 · 0/2/5` counts show. The second reading asserts an order on evidence that does not support one, and mvp-spec.md §11.5 is unambiguous: "**overlapping confidence intervals are rendered as a tie, not as an order**". The spec wins over the design (CLAUDE.md's authority order), and it happens to agree with the design's own stated rule. **Consequence, computed on the design's own numbers**: only 3 of the 7 scored features have a clear `BEST` (`road_condition`, `speed_limit`, `vehicles_involved`); on the other 4 the leaders overlap and nobody is best. Counts become qwen3 1/4/2, mistral 2/4/1, gemma3 0/2/5 — each row still sums to 7, but the best column sums to 3. `tests/unit/stats/test_golden_stats.py` pins this so a later drift back to argmax is a failure rather than a silent change. **The Ranking tab's copy must not repeat the "sums to 7" note** (V3). |
+
+---
+
 ## Documented deviations phase 3 (M17) introduces
 
 | # | Decision | Why |

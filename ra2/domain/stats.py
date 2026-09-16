@@ -30,6 +30,7 @@ Pure — no SQLAlchemy, no session, no config (sw-design.md §16.8).
 **M27 freezes the types and the signatures. S1 writes the bodies.**
 """
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -42,6 +43,7 @@ __all__ = [
     "TieMark",
     "TiedCell",
     "macro",
+    "macro_interval",
     "mark_ties",
     "suppressed",
     "wilson",
@@ -118,7 +120,19 @@ def wilson(successes: int, n: int, *, z: float = WILSON_Z_95) -> Interval:
     outside it through floating point at extreme `p`, and a probability
     rendered as `1.0000000000000002` is a bug report.
     """
-    raise NotImplementedError
+    if n <= 0:
+        return EMPTY_INTERVAL
+    proportion = successes / n
+    z_squared = z * z
+    denominator = 1.0 + z_squared / n
+    centre = (proportion + z_squared / (2 * n)) / denominator
+    spread = math.sqrt(proportion * (1.0 - proportion) / n + z_squared / (4.0 * n * n))
+    margin = (z / denominator) * spread
+    return Interval(
+        low=max(0.0, centre - margin),
+        high=min(1.0, centre + margin),
+        n=n,
+    )
 
 
 def suppressed(n: int, floor: int) -> bool:
@@ -129,7 +143,7 @@ def suppressed(n: int, floor: int) -> bool:
     its two arguments alone, and changing the floor never requires a re-score
     (`SD19`).
     """
-    raise NotImplementedError
+    return n < floor
 
 
 def mark_ties(cells: Sequence[TiedCell]) -> tuple[TieMark, ...]:
@@ -149,7 +163,27 @@ def mark_ties(cells: Sequence[TiedCell]) -> tuple[TieMark, ...]:
     - Suppressed cells are the caller's problem: they must not be passed in at
       all, because a suppressed cell has no point estimate to compare.
     """
-    raise NotImplementedError
+    if not cells:
+        return ()
+    leader = max(range(len(cells)), key=lambda index: cells[index].point)
+    overlapping = [
+        index
+        for index in range(len(cells))
+        if index != leader and _overlaps(cells[index].interval, cells[leader].interval)
+    ]
+    if not overlapping:
+        marks = [TieMark.NONE] * len(cells)
+        marks[leader] = TieMark.BEST
+        return tuple(marks)
+    tied = {leader, *overlapping}
+    return tuple(TieMark.TIED if index in tied else TieMark.NONE for index in range(len(cells)))
+
+
+def _overlaps(left: Interval, right: Interval) -> bool:
+    """Closed-interval overlap. Touching at a bound **is** an overlap: the
+    bounds are estimates, and treating `.824-.859` and `.859-.871` as separated
+    would claim a distinction the data does not support."""
+    return left.low <= right.high and right.low <= left.high
 
 
 def macro(values: Sequence[float]) -> float:
@@ -163,4 +197,50 @@ def macro(values: Sequence[float]) -> float:
     sequence **raises** rather than returning `0.0` — there is no mean of
     nothing, and a `0.0` here prints as a model that scored zero (§16.4).
     """
-    raise NotImplementedError
+    if not values:
+        raise ValueError("macro over no features: there is no mean of nothing")
+    return sum(values) / len(values)
+
+
+def macro_interval(intervals: Sequence[Interval]) -> Interval:
+    """The macro average's own interval — **P4-D1**, a decision §16 leaves open.
+
+    A macro F1 is *not* a proportion over a pooled denominator, so it has no
+    Wilson interval of its own. Pooling the counts and running `wilson` over
+    the totals would weight each feature by its `n` — which is exactly what
+    mvp-spec.md §11.5's **equal weight** refuses, and it would do it
+    invisibly: the number would look like every other Wilson bound on the page
+    while answering a different question.
+
+    So the per-feature uncertainties are **propagated** instead. Each Wilson
+    half-width is read back as a standard error (`half / z`), combined as
+    independent contributions to an unweighted mean
+    (`se_macro = sqrt(sum(se^2)) / k`), and turned back into a 95 % interval.
+    Equal weight in, equal weight out.
+
+    Independence across features is an approximation — the same model scored
+    two features on overlapping records — and it is the conservative direction
+    to be wrong in only if the correlation is positive, which it usually is.
+    The honest summary is that this interval says "these models are close", not
+    "this model's true macro lies here with 95 % probability", and §11.5 only
+    ever uses it for the first: **overlapping intervals render as a tie**.
+
+    `n` on the result is the **summed** labelled-case count across the
+    features, because that is what a reader asking "how much evidence is
+    behind this" means; it is never used as a denominator.
+    """
+    if not intervals:
+        raise ValueError("macro interval over no features")
+    centres = [(interval.low + interval.high) / 2.0 for interval in intervals]
+    standard_errors = [
+        (interval.high - interval.low) / (2.0 * WILSON_Z_95) for interval in intervals
+    ]
+    count = len(intervals)
+    centre = sum(centres) / count
+    combined = math.sqrt(sum(error * error for error in standard_errors)) / count
+    margin = WILSON_Z_95 * combined
+    return Interval(
+        low=max(0.0, centre - margin),
+        high=min(1.0, centre + margin),
+        n=sum(interval.n for interval in intervals),
+    )
