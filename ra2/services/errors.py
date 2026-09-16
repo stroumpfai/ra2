@@ -16,6 +16,7 @@ __all__ = [
     "BlockingFindingsError",
     "CodelistImportError",
     "CorpusLockedError",
+    "DeliveryCitedError",
     "DeliveryNotAnalysedError",
     "EvaluationLockedError",
     "FeatureConfigFrozenError",
@@ -24,9 +25,11 @@ __all__ = [
     "NotFoundError",
     "PromptTemplateCitedError",
     "PromptTemplateInvalidError",
+    "RunActiveError",
     "RunNotScoreableError",
     "RunNotScoredError",
     "ServiceError",
+    "TaggedWorkPresentError",
 ]
 
 
@@ -213,6 +216,67 @@ class RunNotScoreableError(ServiceError):
         super().__init__(f"run {run_id} cannot be scored: {reason}")
         self.run_id = run_id
         self.reason = reason
+
+
+# ---------------------------------------------------------------------------
+# Reset and discard (sw-design.md §18). Three errors, one per guard, and
+# **no fourth guard added without §18.2 changing first** — each one is a rule
+# a user has to learn from a message.
+#
+# No new `FindingCode`s, for the third time: a refused discard is a rendered
+# state, not an import defect (phases 2, 3 and 4 each set this precedent).
+# ---------------------------------------------------------------------------
+
+
+class RunActiveError(ServiceError):
+    """G1 — a `queued` or `running` run cannot be discarded. -> HTTP 409.
+
+    `done`, `failed` and `interrupted` all can be: an interrupted run is
+    exactly the debris this verb exists to clear, and refusing it would leave
+    the only way to remove one being the SQLite file (sw-design.md §18.2).
+
+    `run_id` is the **active** run, which for an evaluation discard is one of
+    its runs rather than the object the caller named — so the message can say
+    which one is in the way.
+    """
+
+    def __init__(self, run_id: str, status: str) -> None:
+        super().__init__(f"run {run_id} is {status}")
+        self.run_id = run_id
+        self.status = status
+
+
+class TaggedWorkPresentError(ServiceError):
+    """G2 — the discard would destroy analyst tags. -> HTTP 409 **with the
+    count**, and it is overridable.
+
+    `mismatch.analyst_tag` is the one human-authored column in the pipeline.
+    SD21 argues that a re-score must not lose it; a discard earns the identical
+    argument and gets a weaker remedy on purpose — `force=True` proceeds.
+    A hard block leaves no way to ever remove the run and pushes people to the
+    database file (sw-design.md §18.2, R-D3).
+    """
+
+    def __init__(self, kind: str, key: str, tagged_count: int) -> None:
+        super().__init__(f"{kind} {key} carries {tagged_count} tagged mismatch(es)")
+        self.kind = kind
+        self.key = key
+        self.tagged_count = tagged_count
+
+
+class DeliveryCitedError(ServiceError):
+    """A corpus was frozen from this delivery. -> HTTP 409.
+
+    Not policy so much as a hole in the schema: `corpus.delivery_id` is
+    `ondelete="SET NULL"` (SD4 — a corpus outlives its delivery), so the
+    database would quietly null the reference rather than refuse. The guard
+    lives in the service because that is the only place it can (§18.2).
+    """
+
+    def __init__(self, delivery_id: str, corpus_count: int) -> None:
+        super().__init__(f"delivery {delivery_id} is cited by {corpus_count} corpus/corpora")
+        self.delivery_id = delivery_id
+        self.corpus_count = corpus_count
 
 
 # `LlmEndpointError` is **not defined here** — it lives in `ra2/domain/llm.py`,

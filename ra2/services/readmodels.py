@@ -59,8 +59,10 @@ __all__ = [
     "CorpusSummary",
     "CorpusView",
     "CrossTabView",
+    "DataDirView",
     "DeliveryFileView",
     "DeliveryView",
+    "DiscardPreviewView",
     "EvaluationDraftView",
     "EvaluationView",
     "ExploratoryRow",
@@ -72,6 +74,7 @@ __all__ = [
     "FlagInconsistencyRow",
     "Goal1Companion",
     "MetricCell",
+    "MismatchExportRow",
     "ModelChoiceView",
     "ModelColumnView",
     "Page",
@@ -84,8 +87,10 @@ __all__ = [
     "RankingTabView",
     "ResolvedPromptView",
     "RunDescriptorView",
+    "RunExportView",
     "RunProgressView",
     "RunView",
+    "ScoreExportRow",
     "ScoringStatusView",
     "SeparatingRow",
     "SlotView",
@@ -1097,3 +1102,117 @@ class ScoringStatusView:
         exploratory. Distinct from "every feature is suppressed", which is
         scoreable and renders as suppression."""
         return self.labelled_features > 0
+
+
+# ===========================================================================
+# Reset and discard — sw-design.md §18
+# ===========================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class DiscardPreviewView:
+    """What a discard would destroy, counted before anything is destroyed.
+
+    One shape for all three kinds, because the dialog is one dialog (§18.5)
+    and a second shape is a second place for the copy to drift. A field that
+    cannot apply to a kind is `0`, not `None`: "this delivery has no scores"
+    and "nobody counted" are not different facts here.
+
+    `active` is **G1 as a rendered state** rather than as an exception. The
+    guard still raises on the action — the API owes a 409 either way — but a
+    dialog has to be able to say "a run is still going" before the analyst
+    presses anything, and a state the UI can only discover by provoking an
+    error is not a state it can render (the same reasoning §15.5 applied to
+    an unreachable endpoint).
+    """
+
+    kind: str
+    """`run` · `evaluation` · `delivery`. A plain string: the routers and the
+    dialog both key on it, and neither owns an enum the other would import."""
+    target_id: str
+    label: str
+    """What the dialog's lead sentence names — "run 3 · qwen3:14b"."""
+    runs: int
+    extractions: int
+    scores: int
+    mismatches: int
+    tagged_mismatches: int
+    files: int
+    """Delivery files that would be removed from disk. `0` for the other two."""
+    active: bool
+    """G1: this object holds a `queued` or `running` run."""
+    active_detail: str | None = None
+    """Which run, and in which status — so the refusal names the obstacle."""
+    cited_by: int = 0
+    """Corpora frozen from this delivery. Non-zero means the discard is
+    refused outright (§18.2); there is no `force` for this one."""
+
+    @property
+    def has_exportable(self) -> bool:
+        """The dialog's two states (§18.5): `False` renders "nothing to
+        export" and enables Discard immediately."""
+        return self.scores > 0 or self.mismatches > 0
+
+    @property
+    def blocked(self) -> bool:
+        """Refused whatever the analyst does. `tagged_mismatches` is **not**
+        here: that one warns and allows (R-D3)."""
+        return self.active or self.cited_by > 0
+
+
+@dataclass(frozen=True, slots=True)
+class ScoreExportRow:
+    """One `score` row on its way out of the database for good (§18.3)."""
+
+    feature_key: str
+    language: str
+    metric: str
+    value: float | None
+    n: int
+    ci_low: float | None
+    ci_high: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class MismatchExportRow:
+    """One `mismatch`, **including the analyst's own columns**.
+
+    `analyst_tag`, `tagged_at` and `note` are the only human-authored data in
+    the pipeline, which is the whole reason this export exists (SD21, §18.3).
+    """
+
+    mismatch_id: str
+    record_id: RecordId
+    feature_key: str
+    #: Nullable exactly as the column is: the corpus value is authoritative
+    #: but a `wrong` outcome can be recorded against an absent one.
+    record_value: str | None
+    extracted_value: str | None
+    evidence_span: str | None
+    analyst_tag: str | None
+    tagged_at: datetime | None
+    note: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RunExportView:
+    """A run's two exportable tables, read in one call before a discard."""
+
+    run_id: RunId
+    evaluation_id: EvaluationId
+    model_tag: str
+    scores: tuple[ScoreExportRow, ...]
+    mismatches: tuple[MismatchExportRow, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DataDirView:
+    """Which database the header chip names (§2.1 item 6).
+
+    `ui/` may not import `ra2/infra/`, so the one `Settings` value the header
+    shows arrives the way every other value does: through a service, as a read
+    model.
+    """
+
+    data_dir: str
+    database_path: str

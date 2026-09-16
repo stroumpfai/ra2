@@ -20,7 +20,7 @@ from ra2.services.census_service import CensusService
 from ra2.services.corpus_service import CorpusService
 from ra2.services.delivery_service import DeliveryService
 from ra2.services.errors import NotFoundError
-from ra2.services.readmodels import CensusColumnView, PerRecordRow, SortDir
+from ra2.services.readmodels import CensusColumnView, PerRecordRow, RunExportView, SortDir
 
 __all__ = ["CSV_BOM", "CSV_DELIMITER", "ExportService"]
 
@@ -47,6 +47,32 @@ _CENSUS_CSV_HEADER: Final = (
 )
 
 _FINDINGS_CSV_HEADER: Final = ("code", "severity", "key", "line_no", "detail")
+
+#: The two tables a run takes with it when it is discarded (sw-design.md
+#: §18.3). `analyst_tag` is in the second one because it is the only
+#: human-authored column in the pipeline — exporting the rows without it would
+#: preserve everything except the part nobody can regenerate.
+_RUN_SCORES_CSV_HEADER: Final = (
+    "feature_key",
+    "language",
+    "metric",
+    "value",
+    "n",
+    "ci_low",
+    "ci_high",
+)
+
+_RUN_MISMATCHES_CSV_HEADER: Final = (
+    "mismatch_id",
+    "record_id",
+    "feature_key",
+    "record_value",
+    "extracted_value",
+    "evidence_span",
+    "analyst_tag",
+    "tagged_at",
+    "note",
+)
 
 #: Tab 2's per-record list. `anonymised` is a column rather than a footnote
 #: because mvp-spec.md §13 requires the marking wherever the text is shown, and
@@ -227,6 +253,75 @@ class ExportService:
                     f"{row.language_confidence:.2f}",
                 )
                 for row in rows
+            ],
+        )
+
+    def run_scores_csv(self, view: RunExportView) -> bytes:
+        """A run's `score` rows, on their way out of the database for good.
+
+        **Takes the view rather than fetching it** — `P4-D3`'s reasoning, and
+        here it is load-bearing rather than tidy: the caller has already shown
+        these counts to the analyst in the discard dialog, and a second read
+        could disagree with what they agreed to.
+
+        `language` is written as stored, `'*'` included (`SD16`): this file
+        outlives the database, so translating the all-languages row into
+        something prettier would lose the one value that says which row it is.
+        """
+        comment = (
+            f"# run {view.run_id} · evaluation {view.evaluation_id} · "
+            f"model {view.model_tag} · {len(view.scores)} score rows"
+        )
+        return self._write_csv(
+            comment,
+            _RUN_SCORES_CSV_HEADER,
+            [
+                (
+                    row.feature_key,
+                    row.language,
+                    row.metric,
+                    "" if row.value is None else str(row.value),
+                    str(row.n),
+                    "" if row.ci_low is None else str(row.ci_low),
+                    "" if row.ci_high is None else str(row.ci_high),
+                )
+                for row in view.scores
+            ],
+        )
+
+    def run_mismatches_csv(self, view: RunExportView) -> bytes:
+        """A run's `mismatch` rows, **with the analyst's own columns**.
+
+        This is the file that makes a discard defensible (§18.3): the tag, the
+        timestamp and the note are the only things in the pipeline a re-run
+        cannot produce again.
+
+        The evidence spans in it are verbatim narrative. That is what makes the
+        export useful to review and what makes the file itself sensitive; it is
+        the analyst's to keep, not the app's to circulate (N1 bounds the
+        application, not the file it wrote).
+        """
+        comment = (
+            f"# run {view.run_id} · evaluation {view.evaluation_id} · "
+            f"model {view.model_tag} · {len(view.mismatches)} mismatches, "
+            f"{sum(1 for m in view.mismatches if m.analyst_tag)} tagged"
+        )
+        return self._write_csv(
+            comment,
+            _RUN_MISMATCHES_CSV_HEADER,
+            [
+                (
+                    row.mismatch_id,
+                    row.record_id,
+                    row.feature_key,
+                    row.record_value or "",
+                    row.extracted_value or "",
+                    row.evidence_span or "",
+                    row.analyst_tag or "",
+                    "" if row.tagged_at is None else row.tagged_at.isoformat(),
+                    row.note or "",
+                )
+                for row in view.mismatches
             ],
         )
 

@@ -121,6 +121,7 @@ from ra2.ui.components import (
     pagination_row,
     tick,
 )
+from ra2.ui.components.discard_dialog import discard_dialog
 from ra2.ui.components.ollama_settings import ollama_settings_dialog
 from ra2.ui.components.primitives import (
     labeled_field,
@@ -376,6 +377,7 @@ class _EvaluationPage:
             title=_ITEM.title,
             description=_ITEM.description,
             active=_ITEM.key,
+            data_dir=self._services.lifecycle.data_dir().data_dir,
             content_padding=CONTENT_PADDING,
             content_gap=CONTENT_GAP,
         ):
@@ -958,6 +960,17 @@ class _EvaluationPage:
                 _text_button("log", testid="run-log", on_click=lambda: self._open_log(run))
             elif run.is_resumable:
                 _text_button("Resume", testid="run-resume", on_click=_toggle(self._resume, run))
+            # Discard lives **in this cell**, not in a sixth column: the runs
+            # table's five widths are the design's own (README §2), and this
+            # cell already carries the row's secondary actions. G1 is why an
+            # active run has none — there is nothing to offer while a worker
+            # is writing to the row (sw-design.md §18.5).
+            if run.status not in (RunStatus.QUEUED, RunStatus.RUNNING):
+                _text_button(
+                    "discard",
+                    testid="run-discard",
+                    on_click=_toggle(self._open_discard, run),
+                )
 
     def _reproducibility_card(self) -> None:
         provenance = None if self._view is None else self._view.provenance
@@ -1170,6 +1183,75 @@ class _EvaluationPage:
             return
         await self.reload()
         self._start_polling()
+
+    # --- discard (sw-design.md §18) -----------------------------------------
+
+    async def _open_discard(self, run: RunView) -> None:
+        """Read what would be lost, then ask.
+
+        The preview is a service call rather than a count this view keeps:
+        `RunView` carries `records_done`, not scores or mismatches, and a
+        dialog that guessed at those would be a second, staler answer to the
+        question the analyst is being asked to decide on.
+        """
+        run_id = RunId(run.run_id)
+        try:
+            preview = await self._services.lifecycle.run_preview(run_id)
+        except ServiceError as exc:
+            ui.notify(str(exc), type="negative")
+            await self.reload()
+            return
+        if self._root is None:
+            return
+        # Parented to `_root`, not to the runs card: every redraw replaces that
+        # card, and a dialog parented to a destroyed element goes with it
+        # (`_open_settings`'s own note).
+        with self._root:
+            dialog = cast(
+                "ui.dialog",
+                discard_dialog(
+                    preview=preview,
+                    on_discard=lambda force: self._discard(run_id, force=force),
+                    on_export=(
+                        None if not preview.has_exportable else lambda: self._export_run(run_id)
+                    ),
+                ),
+            )
+        # `dialog.value = True` rather than `.open()`: the N4 gate scans `ra2/`
+        # for `.open(` and wants an `encoding=` beside it (Do-NOT #4).
+        dialog.value = True
+
+    async def _discard(self, run_id: RunId, *, force: bool) -> None:
+        """`force` is G2 only. G1 has no override, and the service re-checks
+        both — the dialog's disabled button is a UI state, not a guarantee."""
+        try:
+            await self._services.lifecycle.discard_run(run_id, force=force)
+        except ServiceError as exc:
+            ui.notify(str(exc), type="negative")
+            await self.reload()
+            return
+        ui.notify(f"Discarded run {run_id}.")
+        await self.reload()
+
+    async def _export_run(self, run_id: RunId) -> None:
+        """Both files, one press. They are two tables of one run, and asking
+        an analyst which half of the evidence they want before a discard is a
+        question with one sensible answer (§18.3)."""
+        try:
+            view = await self._services.lifecycle.run_export(run_id)
+        except ServiceError as exc:
+            ui.notify(str(exc), type="negative")
+            return
+        ui.download.content(
+            self._services.export.run_scores_csv(view),
+            f"{run_id}.scores.csv",
+            media_type="text/csv",
+        )
+        ui.download.content(
+            self._services.export.run_mismatches_csv(view),
+            f"{run_id}.mismatches.csv",
+            media_type="text/csv",
+        )
 
     @property
     def _settled(self) -> bool:

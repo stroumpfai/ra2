@@ -48,6 +48,19 @@ fmt:
     uv run ruff check --fix .
 
 # ---------------------------------------------------------------------------
+# Reset (sw-design.md §17, plan-reset-and-discard.md §5)
+# ---------------------------------------------------------------------------
+
+# Show what a wipe of RA2_DATA_DIR would remove. `just reset yes` carries it out.
+reset token="":
+    uv run python scripts/reset_data.py {{token}}
+
+# Wipe, then seed a working state. Needs the same token: `just reset-seed yes`.
+reset-seed token="":
+    uv run python scripts/reset_data.py {{token}}
+    uv run python scripts/seed_dev.py
+
+# ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
 

@@ -43,6 +43,7 @@ from ra2.services.delivery_service import DeliveryService
 from ra2.services.evaluation_service import EvaluationService
 from ra2.services.export_service import ExportService
 from ra2.services.feature_service import FeatureService
+from ra2.services.lifecycle_service import LifecycleService
 from ra2.services.prompt_service import PromptService
 from ra2.services.protocols import CensusMaterialiser, GroundTruthProvider, PromptResolver
 from ra2.services.ranking_service import RankingService
@@ -209,6 +210,16 @@ def create_app(
     # imports it directly.
     results_service = ResultsService(session_factory=session_factory, scorer=scoring_service)
     ranking_service = RankingService(session_factory=session_factory, scorer=scoring_service)
+    # --- reset and discard (sw-design.md §18) ------------------------------
+    # The same `upload_store` intake used, because the bytes it removes on a
+    # delivery discard are the ones intake wrote. A host-path delivery's files
+    # are the analyst's own and are never removed, so no host-path store is
+    # wired here at all.
+    lifecycle_service = LifecycleService(
+        session_factory=session_factory,
+        upload_store=upload_store,
+        settings=settings,
+    )
     services = Services(
         delivery=delivery_service,
         corpus=corpus_service,
@@ -222,6 +233,7 @@ def create_app(
         scoring=scoring_service,
         results=results_service,
         ranking=ranking_service,
+        lifecycle=lifecycle_service,
     )
 
     app = FastAPI(

@@ -23,6 +23,7 @@ from ra2.services.delivery_service import DeliveryService
 from ra2.services.evaluation_service import EvaluationService
 from ra2.services.export_service import ExportService
 from ra2.services.feature_service import FeatureService
+from ra2.services.lifecycle_service import LifecycleService
 from ra2.services.prompt_service import PromptService
 from ra2.services.ranking_service import RankingService
 from ra2.services.results_service import ResultsService
@@ -37,6 +38,7 @@ __all__ = [
     "EvaluationServiceDep",
     "ExportServiceDep",
     "FeatureServiceDep",
+    "LifecycleServiceDep",
     "PromptServiceDep",
     "RunServiceDep",
     "TaskRunnerDep",
@@ -90,6 +92,10 @@ def get_run_service(services: Annotated[Services, Depends(get_services)]) -> Run
     return services.run
 
 
+def get_lifecycle_service(services: Annotated[Services, Depends(get_services)]) -> LifecycleService:
+    return services.lifecycle
+
+
 def get_scoring_service(services: Annotated[Services, Depends(get_services)]) -> ScoringService:
     return services.scoring
 
@@ -111,6 +117,7 @@ FeatureServiceDep = Annotated[FeatureService, Depends(get_feature_service)]
 PromptServiceDep = Annotated[PromptService, Depends(get_prompt_service)]
 EvaluationServiceDep = Annotated[EvaluationService, Depends(get_evaluation_service)]
 RunServiceDep = Annotated[RunService, Depends(get_run_service)]
+LifecycleServiceDep = Annotated[LifecycleService, Depends(get_lifecycle_service)]
 ScoringServiceDep = Annotated[ScoringService, Depends(get_scoring_service)]
 ResultsServiceDep = Annotated[ResultsService, Depends(get_results_service)]
 RankingServiceDep = Annotated[RankingService, Depends(get_ranking_service)]

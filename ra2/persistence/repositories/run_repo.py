@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ra2.domain.extraction import RunStatus
 from ra2.domain.ids import EvaluationId, RunId
-from ra2.persistence.models import Extraction, Run
+from ra2.persistence.models import Extraction, Mismatch, Run, Score
 
 __all__ = ["RunRepository"]
 
@@ -120,3 +120,39 @@ class RunRepository:
             )
         )
         return int(total or 0)
+
+    # --- discard (sw-design.md §18) ----------------------------------------
+
+    async def count_scores(self, run_id: RunId) -> int:
+        """How many `score` rows this run would take with it."""
+        count = await self._session.scalar(
+            select(func.count()).select_from(Score).where(Score.run_id == run_id)
+        )
+        return int(count or 0)
+
+    async def count_mismatches(self, run_id: RunId) -> tuple[int, int]:
+        """`(all, tagged)` in one query.
+
+        The second number is **G2** (§18.2): `analyst_tag` is the one
+        human-authored column in the pipeline, and a discard that would
+        destroy some announces how many before it does.
+        """
+        row = (
+            await self._session.execute(
+                select(
+                    func.count(),
+                    func.count(Mismatch.analyst_tag),
+                ).where(Mismatch.run_id == run_id)
+            )
+        ).one()
+        return int(row[0] or 0), int(row[1] or 0)
+
+    async def delete(self, run: Run) -> None:
+        """Remove the run. `extraction`, `extraction_value`,
+        `extraction_entity`, `score` and `mismatch` go with it **by the
+        schema's own `ondelete="CASCADE"`**, not by anything written here
+        (§18.1) — which is why `foreign_keys=ON` being a connect-time PRAGMA
+        (§4.4) is load-bearing rather than tidy.
+        """
+        await self._session.delete(run)
+        await self._session.flush()

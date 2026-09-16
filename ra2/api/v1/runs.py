@@ -7,18 +7,23 @@ presses the button. Nothing auto-restarts at startup (§15 F8). Thin
 translation only, same idiom as `evaluations.py`/`features.py`.
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 
-from ra2.api.deps import RunServiceDep
+from ra2.api.deps import ExportServiceDep, LifecycleServiceDep, RunServiceDep
 from ra2.api.schemas import (
+    DiscardPreview,
+    DiscardResponse,
+    ErrorResponse,
     PageMeta,
     RunPage,
     RunProgressResponse,
     RunResponse,
     TaskAcceptedResponse,
 )
+from ra2.api.v1.discard import conflict, discard_response
+from ra2.api.v1.discard import discard_preview as to_preview
 from ra2.domain.ids import EvaluationId, RunId
-from ra2.services.errors import NotFoundError
+from ra2.services.errors import NotFoundError, RunActiveError, TaggedWorkPresentError
 from ra2.services.readmodels import Page, RunProgressView, RunView, SortDir
 
 __all__ = ["router"]
@@ -131,3 +136,71 @@ async def resume(run_id: str, service: RunServiceDep) -> TaskAcceptedResponse:
     except NotFoundError as exc:
         raise _not_found(exc) from exc
     return TaskAcceptedResponse(task_id=str(task_id))
+
+
+# ---------------------------------------------------------------------------
+# discard — sw-design.md §18
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{run_id}/discard-preview", response_model=DiscardPreview)
+async def discard_preview(run_id: str, service: LifecycleServiceDep) -> DiscardPreview:
+    """What discarding this run would destroy. Counts only; writes nothing."""
+    try:
+        view = await service.run_preview(RunId(run_id))
+    except NotFoundError as exc:
+        raise _not_found(exc) from exc
+    return to_preview(view)
+
+
+@router.get("/{run_id}/scores.csv")
+async def export_scores(
+    run_id: str, lifecycle: LifecycleServiceDep, export: ExportServiceDep
+) -> Response:
+    """Export before discard (§18.3) — UTF-8 with BOM, `;`-delimited."""
+    try:
+        view = await lifecycle.run_export(RunId(run_id))
+    except NotFoundError as exc:
+        raise _not_found(exc) from exc
+    return Response(content=export.run_scores_csv(view), media_type="text/csv")
+
+
+@router.get("/{run_id}/mismatches.csv")
+async def export_mismatches(
+    run_id: str, lifecycle: LifecycleServiceDep, export: ExportServiceDep
+) -> Response:
+    """The half a re-run cannot reproduce: `analyst_tag` and its note."""
+    try:
+        view = await lifecycle.run_export(RunId(run_id))
+    except NotFoundError as exc:
+        raise _not_found(exc) from exc
+    return Response(content=export.run_mismatches_csv(view), media_type="text/csv")
+
+
+@router.delete(
+    "/{run_id}",
+    response_model=DiscardResponse,
+    responses={409: {"model": ErrorResponse}},
+)
+async def discard_run(
+    run_id: str, service: LifecycleServiceDep, force: bool = False
+) -> DiscardResponse:
+    """Discard one run and, by the schema's cascade, everything derived from
+    it (§18.1).
+
+    409 when the run is `queued` or `running` (G1), and when it carries tagged
+    mismatches and `force` was not passed (G2). The second is overridable; the
+    first is not.
+
+    The preview is read **first**, inside the same request, because after the
+    delete those counts do not exist anywhere — this response is the receipt.
+    """
+    key = RunId(run_id)
+    try:
+        before = await service.run_preview(key)
+        await service.discard_run(key, force=force)
+    except NotFoundError as exc:
+        raise _not_found(exc) from exc
+    except (RunActiveError, TaggedWorkPresentError) as exc:
+        raise conflict(exc) from exc
+    return discard_response(before, forced=force and before.tagged_mismatches > 0)

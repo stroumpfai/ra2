@@ -127,6 +127,7 @@ class _ResultsPage:
             title=_ITEM.title,
             description=_ITEM.description,
             active=_ITEM.key,
+            data_dir=self._services.lifecycle.data_dir().data_dir,
             content_padding="0",
             content_gap="0",
         ):

@@ -89,3 +89,16 @@ class EvaluationRepository:
         for run in runs:
             self._session.add(run)
         await self._session.flush()
+
+    # --- discard (sw-design.md §18) ----------------------------------------
+
+    async def delete(self, evaluation: Evaluation) -> None:
+        """Remove the evaluation, its `evaluation_feature` snapshot and its
+        runs — all three by `ondelete="CASCADE"` (§18.1).
+
+        What the evaluation **cites** is `RESTRICT` and stays: the corpus, the
+        feature config and every prompt version. Discarding an evaluation is
+        not a way to delete a corpus.
+        """
+        await self._session.delete(evaluation)
+        await self._session.flush()

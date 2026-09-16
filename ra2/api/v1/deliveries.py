@@ -11,19 +11,24 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, UploadFile, status
 
-from ra2.api.deps import DeliveryServiceDep
+from ra2.api.deps import DeliveryServiceDep, LifecycleServiceDep
 from ra2.api.schemas import (
     AnalyseResponse,
     DeliveryFileResponse,
     DeliveryResponse,
+    DiscardPreview,
+    DiscardResponse,
+    ErrorResponse,
     FileOverrideRequest,
     FindingResponse,
     RegisterDeliveryRequest,
     SelectFileRequest,
 )
+from ra2.api.v1.discard import conflict, discard_response
+from ra2.api.v1.discard import discard_preview as to_preview
 from ra2.domain.findings import Finding
 from ra2.domain.ids import DeliveryId, FileId
-from ra2.services.errors import NotFoundError
+from ra2.services.errors import DeliveryCitedError, NotFoundError
 from ra2.services.readmodels import DeliveryFileView, DeliveryView
 
 __all__ = ["router"]
@@ -194,3 +199,49 @@ async def remove_file(delivery_id: str, file_id: str, service: DeliveryServiceDe
         await service.remove_file(DeliveryId(delivery_id), FileId(file_id))
     except NotFoundError as exc:
         raise _not_found(exc) from exc
+
+
+# ---------------------------------------------------------------------------
+# discard — sw-design.md §18
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{delivery_id}/discard-preview", response_model=DiscardPreview)
+async def discard_preview(delivery_id: str, service: LifecycleServiceDep) -> DiscardPreview:
+    """How many files would go, and whether a corpus refuses the discard."""
+    try:
+        view = await service.delivery_preview(DeliveryId(delivery_id))
+    except NotFoundError as exc:
+        raise _not_found(exc) from exc
+    return to_preview(view)
+
+
+@router.delete(
+    "/{delivery_id}",
+    response_model=DiscardResponse,
+    responses={409: {"model": ErrorResponse}},
+)
+async def discard_delivery(delivery_id: str, service: LifecycleServiceDep) -> DiscardResponse:
+    """Discard a delivery, its `delivery_file` rows and — for an **upload** —
+    its stored bytes.
+
+    A host-path delivery's files belong to the analyst and are left exactly
+    where they are; only the rows go.
+
+    409 when a corpus was frozen from it. There is no `force`: `corpus.
+    delivery_id` is `SET NULL`, so forcing would silently null a provenance
+    link rather than ask a question (§18.2).
+
+    **No UI affordance corresponds to this route** (§18.6): the Import view
+    shows one delivery and has no delivery list to hang a row action on. The
+    analyst's equivalent is `just reset`.
+    """
+    key = DeliveryId(delivery_id)
+    try:
+        before = await service.delivery_preview(key)
+        await service.discard_delivery(key)
+    except NotFoundError as exc:
+        raise _not_found(exc) from exc
+    except DeliveryCitedError as exc:
+        raise conflict(exc) from exc
+    return discard_response(before, forced=False)

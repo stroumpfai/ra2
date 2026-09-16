@@ -326,6 +326,7 @@ class _CodelistsPage:
             title=_ITEM.title,
             description=_ITEM.description,
             active=_ITEM.key,
+            data_dir=self._services.lifecycle.data_dir().data_dir,
             content_padding=CONTENT_PADDING,
             content_gap=CONTENT_GAP,
         ):

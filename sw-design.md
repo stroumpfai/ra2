@@ -587,6 +587,7 @@ Each is additive and cheap to reverse; none should change silently.
 | SD20 | Ranking's presence figure is a **macro presence rate, reported and never scored** — `mvp-spec.md` §11.5 corrected (§16.5) | The design renders it as `0.907` in a ranking table, where it reads as a quality score. §11.2 is unambiguous that presence has no independent gold label, and §11.3's reasoning applies directly: a model that flags everything present maximises it |
 | SD21 | `mismatch` is the **first mutable row** in the pipeline, and a re-score **upserts** it preserving `analyst_tag` (§16.6) | Tagging is the whole of F11. `DELETE`-then-`INSERT` is the obvious implementation and it destroys review work silently, at the moment a developer is most confident — they just fixed the scorer |
 | SD22 | `ra2/ui/views/results/` is a **package**, the first view in the repo that is (§16.8) | Three tabs of one screen get built by three agents in one wave; three files is what makes that parallel, and a single `results_view.py` would serialise the wave for no architectural gain |
+| SD23 | The one **destructive verb** in an append-only pipeline — whole-object discard of a `run`, an `evaluation` or a `delivery` — paid for with an **export**, not an audit trail (§18) | Three inconclusive evaluations are debris an analyst cannot clear, and the workaround for a tool that cannot clean up is editing the SQLite file by hand. Everything discarded is regenerable from immutable inputs; the one thing that is not is `mismatch.analyst_tag`, which is why G2 counts it and announces it. An audit table would have cost a migration and produced rows nobody reads |
 
 **Note on the design's fixture column names.** `UnfallTypAusw`, `WitterungAusw`,
 `LichtverhaeltnisAusw` and `UnfallDatumFeld` do not exist in the delivery; the real
@@ -1522,3 +1523,187 @@ a promise.
 - **Fuzzy or LLM-judge free-text matching, and accent folding** (`D6`, §8.4).
   Each needs a threshold that can be defended, and defending one wants the real
   numbers this phase is the first to produce.
+
+---
+
+## 17. Mismatch review (F11)
+
+**Reserved for phase 5, and deliberately empty here.**
+`plan-phase-5.md` §0 lists the eight things this section must settle — who
+owns which columns of `mismatch`, why tagging is an `UPDATE` that Do-NOT #2
+does not forbid, the tally computed on read, the `MismatchTag` vocabulary,
+staleness after a re-score, the read-model surface, and its own §17.5/§17.6 —
+and that plan's Wave 0 (§5.1) writes it, the way §16 was written before phase
+4's Wave 0.
+
+The reset-and-discard slice landed in between and took **§18** rather than
+this number, because a committed phase plan had already claimed §17 by number
+*and* by sub-number. Two consequences, both small and both here so nobody has
+to rediscover them: phase 5's own deviations start at **`SD24`** (§13's
+`SD23` is the discard verb), and §18's G2 exists to protect exactly the
+`analyst_tag` this section will describe — a discard announces the tagged
+count and refuses without `force`, which is the same argument `SD21` makes
+about a re-score.
+
+---
+
+## 18. Reset and discard
+
+The pipeline is append-only everywhere (§12.2, and `mvp-spec.md` N5). This
+section is where it acquires **one destructive verb**, and the whole of it
+exists to bound that verb so the invariant survives contact with a user who
+has three inconclusive evaluations cluttering a screen.
+
+The two needs that share the word "reset" are opposite and stay apart:
+
+- **The developer** wants the data directory gone and a working state back —
+  `just reset`, `just reset-seed` (`plan-reset-and-discard.md` §5). That is a
+  script over `Settings`, not an app feature, and nothing in `ra2/` knows it
+  exists.
+- **The analyst** wants the *regenerable* half of an evaluation gone and the
+  curated half kept. Everything upstream of a run — the delivery, the frozen
+  corpus and its census, the codelist import, the feature config, the prompt
+  versions — is hand-made and stays; `run`, `extraction*`, `score` and
+  `mismatch` are derived from immutable inputs and go.
+
+### 18.1 Whole objects only
+
+**Discard removes a whole `run`, a whole `evaluation`, or a whole `delivery`,
+and nothing else.** There is no partial delete anywhere: not "this run's
+scores", not "the extractions for feature X", not "every run older than a
+week".
+
+Do-NOT #2 forbids *mutating* an `extraction`, a `record` or a `corpus`.
+Deleting a whole run is not mutation — the run and everything derived from it
+leave together, and what remains still reproduces. Deleting *some* of a run's
+rows is mutation by another name: it leaves a run whose numbers no longer
+follow from its inputs, which is precisely the state the append-only rule
+exists to make impossible.
+
+The cascade does the work, and it is declared in the schema rather than
+implemented in a service: `extraction`, `extraction_value`,
+`extraction_entity`, `score` and `mismatch` are `ondelete="CASCADE"` from
+`run`; `run` and `evaluation_feature` are `CASCADE` from `evaluation`;
+`delivery_file` is `CASCADE` from `delivery`. Everything an evaluation
+*cites* — `corpus`, `feature_config`, `prompt_template` — is `RESTRICT` and
+stays that way. `foreign_keys=ON` is a connect-time PRAGMA (§4.4); the backend
+test that discards a run and counts the rows that went with it is what keeps
+that honest.
+
+### 18.2 Two guards, and no third one added quietly
+
+**G1 — nothing active is discarded.** A `queued` or `running` run is refused
+(`RunActiveError`, 409), and so is an evaluation holding one. `done`, `failed`
+and `interrupted` are all discardable: an interrupted run is exactly the
+debris this verb exists to clear, and refusing it would leave the only way to
+remove one being the SQLite file.
+
+**G2 — human work is never destroyed silently.** `mismatch.analyst_tag` is the
+one human-authored column in the pipeline. SD21 already spends a paragraph
+arguing that a re-score must not lose it; a discard earns the identical
+argument, and gets a weaker remedy on purpose: the count of tagged mismatches
+is refused with (`TaggedWorkPresentError`, 409, carrying the count) **unless
+the caller passes `force`**. Warn and allow, not block — an analyst who cannot
+clean up works around the app, and the workaround is editing the database by
+hand.
+
+A **cited delivery** is refused (`DeliveryCitedError`, 409). This one is not a
+policy so much as a hole in the schema: `corpus.delivery_id` is
+`ondelete="SET NULL"` (SD4 — a corpus outlives its delivery), so the database
+would quietly null the reference rather than refuse. The guard is in the
+service because that is the only place it can be.
+
+Those are the three. **A fourth guard is not added without this section
+changing first**, because each one is a rule a user has to learn from a
+message.
+
+### 18.3 Discard state is never persisted
+
+No `deleted_at`, no soft-delete flag, no tombstone table, and no record of
+what was discarded or by whom. A discarded run is *gone*; the row shape this
+codebase keeps is the one that reproduces a result, and a row that records the
+absence of a result reproduces nothing.
+
+This is also why the slice needs **no migration**: no new table, no new
+column, no new Alembic head.
+
+**The trace lives outside the database, in a file the analyst chose to keep**
+(**SD23**). The confirm dialog offers Export beside Discard, writing the run's
+`score` and `mismatch` rows — `analyst_tag` included — through
+`export_service`'s existing conventions (§7: UTF-8 with BOM, `;`-delimited, a
+header comment naming what this is a list of). An audit table would have cost
+a migration and produced rows nobody reads; a CSV on disk is the artefact
+someone actually opens.
+
+**The server never tracks whether an export happened.** "Has this run been
+exported" would be a mutable per-run flag recording a UI event — the kind of
+state §16's F5 reasoning rejects for scoring progress and this section rejects
+again. The dialog offers; the analyst decides; the API discards what it is
+asked to discard.
+
+### 18.4 Package layout additions
+
+```
+services/
+  lifecycle_service.py   the previews, the three discards, the two guards,
+                         and the run's export rows
+persistence/
+  repositories/          + delete/count methods on run_repo, evaluation_repo
+                         and delivery_repo — no new repository
+api/
+  v1/discard.py          the shared translation: the two response shapes and
+                         the 409 builder. Not a router
+  v1/runs.py             + DELETE, + discard-preview, + scores.csv,
+                           + mismatches.csv
+  v1/evaluations.py      + DELETE, + discard-preview
+  v1/deliveries.py       + DELETE, + discard-preview
+ui/
+  components/discard_dialog.py   one dialog, two states (§18.5)
+scripts/
+  reset_data.py          the developer's wipe, over Settings
+  seed_dev.py            wipe, then drive the services to a working state
+```
+
+`LifecycleService` is a service and not a repository method reached from three
+routers because the guards are policy, not persistence: G1 reads a status, G2
+counts rows in a different table, and the delivery guard asks a question about
+corpora. One place answers all three, and both adapters get the same answer.
+
+### 18.5 One dialog, two states
+
+The affordance is a row action on a list that already exists — the Evaluation
+view's runs table, in the status cell that already carries `log` and
+`Resume`. **No new nav item and no new column**: the nav is four groups and
+eight items asserted in E2E (§8.2), and the runs table's five column widths
+are the design's own (`design/prompt-evaluation/README.md` §2).
+
+The dialog renders what will be lost, from one `DiscardPreviewView`:
+
+- **nothing to export** — no `score` and no `mismatch` rows (a run that never
+  produced any). Discard is enabled immediately.
+- **something to export** — the counts, an Export beside Discard, and, when
+  tagged mismatches exist, the count in the lead sentence with Discard
+  carrying the `force` call.
+
+It is one dialog with two states rather than two dialogs, for the same reason
+the file report modal is one modal: a second dialog is a second place for the
+copy to drift.
+
+### 18.6 What this section deliberately does not decide
+
+- **Snapshot and restore.** Deferred until discarding runs is shown to be
+  insufficient. The design, if it is ever wanted, is a file-level `VACUUM
+  INTO` plus a manifest carrying the Alembic revision, and a restore that
+  refuses when that revision is not head — which is a permanent maintenance
+  cost to take on only once someone asks for it.
+- **An audit table.** Rejected in favour of export-before-discard (SD23).
+- **Bulk or filtered discard.** One object at a time. A bulk verb over a
+  destructive operation is how the wrong thing gets deleted.
+- **A delivery discard affordance in the UI.** The Import view shows exactly
+  one delivery and has no delivery list, so a row action has nothing to hang
+  on, and a delivery table is a change to
+  `design/nav-import-census/README.md`. The route exists; the analyst's route
+  to the same end is `just reset`, and the delivery files are the expensive
+  half this feature exists to *keep*.
+- **Corpus discard.** It already exists, with its 409-when-cited guard and its
+  `LOCKED · N eval` pill (§6.3, J3). Unchanged.

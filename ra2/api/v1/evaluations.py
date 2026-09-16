@@ -15,10 +15,12 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from ra2.api.deps import EvaluationServiceDep, RunServiceDep
+from ra2.api.deps import EvaluationServiceDep, LifecycleServiceDep, RunServiceDep
 from ra2.api.schemas import (
     ConnectionResponse,
     CreateEvaluationRequest,
+    DiscardPreview,
+    DiscardResponse,
     ErrorResponse,
     EvaluationDraftResponse,
     EvaluationLaunchResponse,
@@ -32,8 +34,16 @@ from ra2.api.schemas import (
     RunResponse,
     UpdateEvaluationRequest,
 )
+from ra2.api.v1.discard import conflict, discard_response
+from ra2.api.v1.discard import discard_preview as to_preview
 from ra2.domain.ids import CorpusId, EvaluationId, FeatureConfigId, PromptTemplateId
-from ra2.services.errors import EvaluationLockedError, FeatureValidationError, NotFoundError
+from ra2.services.errors import (
+    EvaluationLockedError,
+    FeatureValidationError,
+    NotFoundError,
+    RunActiveError,
+    TaggedWorkPresentError,
+)
 from ra2.services.readmodels import (
     ConnectionView,
     EvaluationDraftView,
@@ -307,3 +317,46 @@ async def launch(
         raise _not_found(exc) from exc
     task_id = await runs.launch_runs(eval_id)
     return EvaluationLaunchResponse(evaluation=_evaluation_response(view), task_id=str(task_id))
+
+
+# ---------------------------------------------------------------------------
+# discard — sw-design.md §18
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{evaluation_id}/discard-preview", response_model=DiscardPreview)
+async def discard_preview(evaluation_id: str, service: LifecycleServiceDep) -> DiscardPreview:
+    """The counts summed over this evaluation's runs. Writes nothing."""
+    try:
+        view = await service.evaluation_preview(EvaluationId(evaluation_id))
+    except NotFoundError as exc:
+        raise _not_found(exc) from exc
+    return to_preview(view)
+
+
+@router.delete(
+    "/{evaluation_id}",
+    response_model=DiscardResponse,
+    responses={409: {"model": ErrorResponse}},
+)
+async def discard_evaluation(
+    evaluation_id: str, service: LifecycleServiceDep, force: bool = False
+) -> DiscardResponse:
+    """Discard an evaluation and its runs (§18.1).
+
+    **The corpus, the feature config and the prompt versions it cites are
+    untouched** — they are `RESTRICT`, and discarding an evaluation is not a
+    way to delete a corpus.
+
+    409 when any run is `queued` or `running` (G1), and when tagged mismatches
+    would be destroyed without `force` (G2).
+    """
+    key = EvaluationId(evaluation_id)
+    try:
+        before = await service.evaluation_preview(key)
+        await service.discard_evaluation(key, force=force)
+    except NotFoundError as exc:
+        raise _not_found(exc) from exc
+    except (RunActiveError, TaggedWorkPresentError) as exc:
+        raise conflict(exc) from exc
+    return discard_response(before, forced=force and before.tagged_mismatches > 0)

@@ -54,6 +54,8 @@ __all__ = [
     "DeliveryResponse",
     "DerivationFilterSchema",
     "DerivationSpecSchema",
+    "DiscardPreview",
+    "DiscardResponse",
     "ErrorResponse",
     "EvaluationDraftResponse",
     "EvaluationLaunchResponse",
@@ -1073,3 +1075,57 @@ class RankingTabResponse(_Schema):
     verdict_detail: str
     scored_feature_count: int
     unscored_feature_count: int
+
+
+# ===========================================================================
+# Reset and discard — sw-design.md §18
+# ===========================================================================
+
+
+class DiscardPreview(_Schema):
+    """What a discard would destroy, counted before anything is destroyed.
+
+    One shape for all three kinds (§18.5), mirroring `DiscardPreviewView`
+    field-for-field plus its two computed properties — the wire format carries
+    them as data so a client does not re-derive a rule the service owns.
+    """
+
+    kind: str
+    target_id: str
+    label: str
+    runs: int
+    extractions: int
+    scores: int
+    mismatches: int
+    tagged_mismatches: int
+    files: int
+    #: G1 as a **state**, not an error: a caller has to be able to say "a run
+    #: is still going" without provoking the 409 to find out.
+    active: bool
+    active_detail: str | None = None
+    #: Corpora frozen from this delivery. Non-zero refuses outright — there is
+    #: no `force` for this one (§18.2).
+    cited_by: int = 0
+    has_exportable: bool = False
+    blocked: bool = False
+
+
+class DiscardResponse(_Schema):
+    """What a discard actually removed.
+
+    A body rather than a bare `204`, because the counts are the only record
+    that survives the call: nothing is written anywhere saying this happened
+    (§18.3), so the response *is* the receipt.
+    """
+
+    kind: str
+    target_id: str
+    runs: int
+    extractions: int
+    scores: int
+    mismatches: int
+    tagged_mismatches: int
+    files: int
+    #: True when the caller overrode G2 — so a client that did not mean to
+    #: force can tell that it did.
+    forced: bool = False

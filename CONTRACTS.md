@@ -339,6 +339,57 @@ is no merge conflict this phase, which is the point of saying so in advance.
 
 ---
 
+## Reset and discard — a slice, not a phase
+
+Landed in **one commit**, after `p4w4-green`, to
+`plan-reset-and-discard.md` and `sw-design.md` §18. There is **no Wave 0 and
+no new frozen baseline**: the slice is three agents' worth of work done in one
+pass, it adds one service and two scripts, and it re-freezes nothing. The
+frozen files it touches are amended in the ordinary way, one amendment file
+per branch name (`contracts/amendments/feat-reset-*.md`).
+
+**No migration, and that is the design.** No new table, no new column, no new
+Alembic head — a direct consequence of `R-D2`: the trace a discard leaves is
+an exported CSV, not an audit row (SD23, §18.3).
+
+### New files
+
+| File | Contents |
+|---|---|
+| `ra2/services/lifecycle_service.py` | The three previews, the three discards, the two guards, and a run's export rows. **The only destructive verb in this layer**, and the only place §18.2's guards are decided |
+| `ra2/api/v1/discard.py` | Shared translation for the three `DELETE` routes — the two mapping functions and the 409 builder. **Not a router**: the routes stay on the resource routers they belong to |
+| `ra2/ui/components/discard_dialog.py` | One dialog, two states (§18.5). Holds no state and no business logic; `blocked` and `has_exportable` are read off the view, never re-derived. Both callbacks are **awaitable** |
+| `scripts/reset_data.py` | `just reset` — resolves `Settings` as the app does, prints the plan, refuses without the token, then `alembic upgrade head` in-process. Never `metadata.create_all()` (Do-NOT #10) |
+| `scripts/seed_dev.py` | `just reset-seed` — drives the **services** to a delivery, a corpus, codelists, a feature set and a prompt version. Writes its own synthetic delivery; imports only column *names* from `ra2.domain.parsing.headers` |
+
+### Amended files (already frozen)
+
+| File | What changed | Amendment |
+|---|---|---|
+| `ra2/services/errors.py` | + `RunActiveError`, `TaggedWorkPresentError` (carries the count), `DeliveryCitedError`. **No new `FindingCode`s** — a refused discard is a rendered state, the fourth time this precedent applies | `feat-reset-discard-service` |
+| `ra2/services/readmodels.py` | + `DiscardPreviewView`, `ScoreExportRow`, `MismatchExportRow`, `RunExportView`, `DataDirView` | `feat-reset-discard-service` |
+| `ra2/services/container.py` | + `lifecycle: LifecycleService` | `feat-reset-discard-service` |
+| `ra2/main.py` | + `LifecycleService` construction — wiring only, and **no host-path store**: a host-path delivery's files are the analyst's own | `feat-reset-discard-service` |
+| `ra2/services/export_service.py` | + `run_scores_csv`, `run_mismatches_csv`. They **take the rows** (`P4-D3`), and the mismatch file carries `analyst_tag` — the half a re-run cannot reproduce | `feat-reset-discard-api` |
+| `ra2/api/schemas.py` | + `DiscardPreview`, `DiscardResponse`. A body rather than a bare 204: nothing else records that a discard happened | `feat-reset-discard-api` |
+| `ra2/api/deps.py` | + `LifecycleServiceDep` | `feat-reset-discard-api` |
+| `justfile` | + `reset`, `reset-seed`. The token is positional with an **empty default**, so the bare recipe removes nothing | `feat-reset-cli` |
+| `ra2/persistence/models.py` | **unchanged.** No schema change, no migration, no new head | — |
+| `pyproject.toml`, `.importlinter` | **unchanged.** No dependency, no new contract — the layer rule already forbids what this slice could get wrong | — |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/persistence/repositories/{run,evaluation,delivery}_repo.py` | `delete`, and the counts the previews and G2 need. `delivery_repo.count_citing_corpora` exists because `corpus.delivery_id` is `SET NULL` and **the database will not refuse on its own** |
+| `ra2/api/v1/{runs,evaluations,deliveries}.py` | the three `DELETE` routes, the three previews, and the two run exports |
+| `ra2/ui/views/evaluation_view.py` | the `discard` row action — **in the status cell**, beside `log` and `Resume`, because the runs table's five column widths are the design's own |
+| `ra2/ui/shell.py` + the seven built views | `shell(data_dir=…)` and the header chip. The value is a `Settings` one and `ra2/ui/` may not import `ra2/infra/`, so it arrives through `services.lifecycle.data_dir()` — one line per view |
+| `sw-design.md` | **§18 is written**, `SD23` added to §13 |
+| `plan-reset-and-discard.md` | §2.1 (no delivery list exists), §6 and §7 (four frozen files the table missed) — corrected in the same commit, per CLAUDE.md |
+
+---
+
 ## Documented deviations phase 4 introduces
 
 | # | Decision | Why |

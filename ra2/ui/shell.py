@@ -14,6 +14,7 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from html import escape
 from typing import Final
 
 from nicegui import ui
@@ -185,6 +186,7 @@ def shell(
     title: str,
     description: str,
     active: str,
+    data_dir: str | None = None,
     content_padding: str = "20px 28px",
     content_gap: str = "16px",
 ) -> Iterator[None]:
@@ -206,12 +208,19 @@ def shell(
     :param content_gap: the gap between the content column's children.
     :param active: the calling view's nav key, used only when the request path
         is not a nav route.
+    :param data_dir: the active `RA2_DATA_DIR`, rendered read-only at the right
+        of the header so which database you are looking at is never a guess
+        (plan-reset-and-discard.md §2.1 item 6). It arrives as an argument
+        because it is a `Settings` value and `ra2/ui/` may not import
+        `ra2/infra/` (§1.1); views read it from
+        `services.lifecycle.data_dir()`. `None` renders nothing — the
+        placeholder view has no services to ask.
     """
     theme.inject()
     active_key = _active_key(active)
 
     with ui.element("div").classes("ra2-root").props('data-testid="shell"'):
-        _header(title=title, description=description)
+        _header(title=title, description=description, data_dir=data_dir)
         with ui.element("div").style("display:flex;flex:1;min-height:0;"):
             _nav(active_key)
             with (
@@ -226,7 +235,7 @@ def shell(
                 yield
 
 
-def _header(*, title: str, description: str) -> None:
+def _header(*, title: str, description: str, data_dir: str | None = None) -> None:
     with (
         ui.element("header")
         .props('data-testid="header"')
@@ -263,6 +272,8 @@ def _header(*, title: str, description: str) -> None:
             ui.label(description).mark("view-description").props(
                 'data-testid="view-description"'
             ).style("color:var(--ink2);font-size:12.5px;margin-top:2px;")
+        if data_dir is not None:
+            _data_dir_chip(data_dir)
 
 
 def _nav(active_key: str) -> None:
@@ -309,3 +320,26 @@ def _nav_link(item: NavItem, *, active: bool) -> None:
             "display:inline-flex;flex:none;"
         )
         ui.label(item.label)
+
+
+def _data_dir_chip(data_dir: str) -> None:
+    """Which data directory this process is using, at the right of the header.
+
+    Read-only, muted, and never a control: it answers "am I looking at my own
+    database or the one `just dev-agent` made" without offering to change it,
+    because changing it is an environment variable and a restart
+    (`RA2_DATA_DIR`). A chip that looked clickable would imply otherwise.
+
+    It ellipsises rather than wrapping: a long path must not push the header's
+    two rows apart, and the full value is in the `title` attribute for anyone
+    who needs to read it whole.
+    """
+    with ui.element("div").style(
+        "flex:none;max-width:380px;padding:14px 28px 14px 0;"
+        "display:flex;align-items:center;justify-content:flex-end;"
+    ):
+        ui.label(data_dir).classes("mono ink3").props(
+            f'data-testid="data-dir" title="{escape(data_dir, quote=True)}"'
+        ).mark("data-dir").style(
+            "font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+        )

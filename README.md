@@ -299,6 +299,8 @@ Everything goes through `just`. Never bare `pip`, never `python -m venv`.
 | `just lint` | ruff format check, ruff, mypy strict, and the layer contracts. |
 | `just fmt` | Apply the formatter and autofixes. |
 | `just migrate` | Bring the database to head. |
+| `just reset [yes]` | Show what a wipe of `RA2_DATA_DIR` would remove; `yes` carries it out. |
+| `just reset-seed yes` | Wipe, then seed a delivery, a corpus, a feature set and a prompt. |
 | `just revision "msg"` | Create a migration. **One author per phase** — see below. |
 | `just census-export <corpus> <out>` | Export a corpus's census as CSV. |
 | `just setup-e2e` | Install the Chromium the E2E layer drives. |

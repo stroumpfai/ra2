@@ -1430,6 +1430,147 @@
         "title": "DerivationSpecSchema",
         "type": "object"
       },
+      "DiscardPreview": {
+        "additionalProperties": false,
+        "description": "What a discard would destroy, counted before anything is destroyed.\n\nOne shape for all three kinds (\u00a717.5), mirroring `DiscardPreviewView`\nfield-for-field plus its two computed properties \u2014 the wire format carries\nthem as data so a client does not re-derive a rule the service owns.",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "active_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Detail"
+          },
+          "blocked": {
+            "default": false,
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "cited_by": {
+            "default": 0,
+            "title": "Cited By",
+            "type": "integer"
+          },
+          "extractions": {
+            "title": "Extractions",
+            "type": "integer"
+          },
+          "files": {
+            "title": "Files",
+            "type": "integer"
+          },
+          "has_exportable": {
+            "default": false,
+            "title": "Has Exportable",
+            "type": "boolean"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "mismatches": {
+            "title": "Mismatches",
+            "type": "integer"
+          },
+          "runs": {
+            "title": "Runs",
+            "type": "integer"
+          },
+          "scores": {
+            "title": "Scores",
+            "type": "integer"
+          },
+          "tagged_mismatches": {
+            "title": "Tagged Mismatches",
+            "type": "integer"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "target_id",
+          "label",
+          "runs",
+          "extractions",
+          "scores",
+          "mismatches",
+          "tagged_mismatches",
+          "files",
+          "active"
+        ],
+        "title": "DiscardPreview",
+        "type": "object"
+      },
+      "DiscardResponse": {
+        "additionalProperties": false,
+        "description": "What a discard actually removed.\n\nA body rather than a bare `204`, because the counts are the only record\nthat survives the call: nothing is written anywhere saying this happened\n(\u00a717.3), so the response *is* the receipt.",
+        "properties": {
+          "extractions": {
+            "title": "Extractions",
+            "type": "integer"
+          },
+          "files": {
+            "title": "Files",
+            "type": "integer"
+          },
+          "forced": {
+            "default": false,
+            "title": "Forced",
+            "type": "boolean"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "mismatches": {
+            "title": "Mismatches",
+            "type": "integer"
+          },
+          "runs": {
+            "title": "Runs",
+            "type": "integer"
+          },
+          "scores": {
+            "title": "Scores",
+            "type": "integer"
+          },
+          "tagged_mismatches": {
+            "title": "Tagged Mismatches",
+            "type": "integer"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "target_id",
+          "runs",
+          "extractions",
+          "scores",
+          "mismatches",
+          "tagged_mismatches",
+          "files"
+        ],
+        "title": "DiscardResponse",
+        "type": "object"
+      },
       "Encoding": {
         "description": "The only two encodings the pipeline tries, in this order.\n\nUndecodable bytes **fail the file**. There is no third fallback and\n`errors=\"replace\"` is banned (mvp-spec.md \u00a74.2.1, sw-design.md \u00a712.4).",
         "enum": [
@@ -4530,6 +4671,57 @@
       }
     },
     "/api/v1/deliveries/{delivery_id}": {
+      "delete": {
+        "description": "Discard a delivery, its `delivery_file` rows and \u2014 for an **upload** \u2014\nits stored bytes.\n\nA host-path delivery's files belong to the analyst and are left exactly\nwhere they are; only the rows go.\n\n409 when a corpus was frozen from it. There is no `force`: `corpus.\ndelivery_id` is `SET NULL`, so forcing would silently null a provenance\nlink rather than ask a question (\u00a717.2).\n\n**No UI affordance corresponds to this route** (\u00a717.6): the Import view\nshows one delivery and has no delivery list to hang a row action on. The\nanalyst's equivalent is `just reset`.",
+        "operationId": "discard_delivery_api_v1_deliveries__delivery_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "title": "Delivery Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscardResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discard Delivery",
+        "tags": [
+          "deliveries"
+        ]
+      },
       "get": {
         "operationId": "get_delivery_api_v1_deliveries__delivery_id__get",
         "parameters": [
@@ -4608,6 +4800,49 @@
           }
         },
         "summary": "Analyse Delivery",
+        "tags": [
+          "deliveries"
+        ]
+      }
+    },
+    "/api/v1/deliveries/{delivery_id}/discard-preview": {
+      "get": {
+        "description": "How many files would go, and whether a corpus refuses the discard.",
+        "operationId": "discard_preview_api_v1_deliveries__delivery_id__discard_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "title": "Delivery Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscardPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discard Preview",
         "tags": [
           "deliveries"
         ]
@@ -4897,6 +5132,67 @@
       }
     },
     "/api/v1/evaluations/{evaluation_id}": {
+      "delete": {
+        "description": "Discard an evaluation and its runs (\u00a717.1).\n\n**The corpus, the feature config and the prompt versions it cites are\nuntouched** \u2014 they are `RESTRICT`, and discarding an evaluation is not a\nway to delete a corpus.\n\n409 when any run is `queued` or `running` (G1), and when tagged mismatches\nwould be destroyed without `force` (G2).",
+        "operationId": "discard_evaluation_api_v1_evaluations__evaluation_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscardResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discard Evaluation",
+        "tags": [
+          "evaluations"
+        ]
+      },
       "get": {
         "description": "One whole Evaluation screen: setup, models, connection, progress, runs\nand provenance.",
         "operationId": "get_evaluation_api_v1_evaluations__evaluation_id__get",
@@ -4995,6 +5291,49 @@
           }
         },
         "summary": "Update Draft",
+        "tags": [
+          "evaluations"
+        ]
+      }
+    },
+    "/api/v1/evaluations/{evaluation_id}/discard-preview": {
+      "get": {
+        "description": "The counts summed over this evaluation's runs. Writes nothing.",
+        "operationId": "discard_preview_api_v1_evaluations__evaluation_id__discard_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscardPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discard Preview",
         "tags": [
           "evaluations"
         ]
@@ -6567,6 +6906,67 @@
       }
     },
     "/api/v1/runs/{run_id}": {
+      "delete": {
+        "description": "Discard one run and, by the schema's cascade, everything derived from\nit (\u00a717.1).\n\n409 when the run is `queued` or `running` (G1), and when it carries tagged\nmismatches and `force` was not passed (G2). The second is overridable; the\nfirst is not.\n\nThe preview is read **first**, inside the same request, because after the\ndelete those counts do not exist anywhere \u2014 this response is the receipt.",
+        "operationId": "discard_run_api_v1_runs__run_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscardResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discard Run",
+        "tags": [
+          "runs"
+        ]
+      },
       "get": {
         "operationId": "get_run_api_v1_runs__run_id__get",
         "parameters": [
@@ -6603,6 +7003,90 @@
           }
         },
         "summary": "Get Run",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/discard-preview": {
+      "get": {
+        "description": "What discarding this run would destroy. Counts only; writes nothing.",
+        "operationId": "discard_preview_api_v1_runs__run_id__discard_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscardPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discard Preview",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/mismatches.csv": {
+      "get": {
+        "description": "The half a re-run cannot reproduce: `analyst_tag` and its note.",
+        "operationId": "export_mismatches_api_v1_runs__run_id__mismatches_csv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Mismatches",
         "tags": [
           "runs"
         ]
@@ -6732,6 +7216,47 @@
           }
         },
         "summary": "Resume",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/scores.csv": {
+      "get": {
+        "description": "Export before discard (\u00a717.3) \u2014 UTF-8 with BOM, `;`-delimited.",
+        "operationId": "export_scores_api_v1_runs__run_id__scores_csv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Scores",
         "tags": [
           "runs"
         ]

@@ -15,6 +15,7 @@ from ra2.services.delivery_service import DeliveryService
 from ra2.services.evaluation_service import EvaluationService
 from ra2.services.export_service import ExportService
 from ra2.services.feature_service import FeatureService
+from ra2.services.lifecycle_service import LifecycleService
 from ra2.services.prompt_service import PromptService
 from ra2.services.ranking_service import RankingService
 from ra2.services.results_service import ResultsService
@@ -39,3 +40,7 @@ class Services:
     scoring: ScoringService
     results: ResultsService
     ranking: RankingService
+    # --- reset and discard (sw-design.md §18) ---
+    #: The one destructive verb, and the header's data-directory chip. Both
+    #: adapters reach it through here; neither constructs it.
+    lifecycle: LifecycleService

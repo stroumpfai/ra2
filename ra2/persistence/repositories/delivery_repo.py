@@ -1,12 +1,12 @@
 # STUB — bodies owned by A3 (feat/m2-persistence). Not frozen.
 """Delivery and delivery-file persistence."""
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ra2.domain.ids import DeliveryId, FileId
-from ra2.persistence.models import Delivery, DeliveryFile
+from ra2.persistence.models import Corpus, Delivery, DeliveryFile
 
 __all__ = ["DeliveryRepository"]
 
@@ -48,3 +48,31 @@ class DeliveryRepository:
         )
         result = await self._session.scalars(stmt)
         return list(result.all())
+
+    # --- discard (sw-design.md §18) ----------------------------------------
+
+    async def count_citing_corpora(self, delivery_id: DeliveryId) -> int:
+        """Corpora frozen from this delivery.
+
+        The database will **not** refuse on its own: `corpus.delivery_id` is
+        `ondelete="SET NULL"` (SD4 — a corpus outlives its delivery), so a
+        delete would quietly null the provenance link that
+        `corpus.source_file_manifest_json` exists to make traceable. The guard
+        that turns that into a refusal is in the service, and this is the
+        query behind it (§18.2).
+        """
+        count = await self._session.scalar(
+            select(func.count()).select_from(Corpus).where(Corpus.delivery_id == delivery_id)
+        )
+        return int(count or 0)
+
+    async def delete(self, delivery: Delivery) -> None:
+        """Remove the delivery and its `delivery_file` rows (`CASCADE`).
+
+        **The stored bytes are not this class's business.** Removing them is
+        `LifecycleService`'s, through the same `FileStore` seam intake used —
+        a repository that reached the filesystem would be the first one that
+        did.
+        """
+        await self._session.delete(delivery)
+        await self._session.flush()
