@@ -14,13 +14,13 @@ import io
 from collections.abc import Sequence
 from typing import Final
 
-from ra2.domain.ids import CorpusId, DeliveryId, FileId, RunId
+from ra2.domain.ids import CorpusId, DeliveryId, EvaluationId, FileId
 from ra2.infra.clock import Clock
 from ra2.services.census_service import CensusService
 from ra2.services.corpus_service import CorpusService
 from ra2.services.delivery_service import DeliveryService
 from ra2.services.errors import NotFoundError
-from ra2.services.readmodels import CensusColumnView, SortDir
+from ra2.services.readmodels import CensusColumnView, PerRecordRow, SortDir
 
 __all__ = ["CSV_BOM", "CSV_DELIMITER", "ExportService"]
 
@@ -47,6 +47,18 @@ _CENSUS_CSV_HEADER: Final = (
 )
 
 _FINDINGS_CSV_HEADER: Final = ("code", "severity", "key", "line_no", "detail")
+
+#: Tab 2's per-record list. `anonymised` is a column rather than a footnote
+#: because mvp-spec.md §13 requires the marking wherever the text is shown, and
+#: a CSV is shown somewhere this app cannot see.
+_PRESENCE_CSV_HEADER: Final = (
+    "record_id",
+    "anonymised",
+    "record_value",
+    "finding",
+    "language",
+    "language_confidence",
+)
 
 
 class ExportService:
@@ -174,26 +186,49 @@ class ExportService:
             return None
         return corpus.version
 
-    async def presence_records_csv(
+    def presence_records_csv(
         self,
-        run_id: RunId,
-        feature_key: str,
+        rows: Sequence[PerRecordRow],
         *,
-        sort_key: str = "record_id",
-        sort_dir: SortDir = SortDir.ASC,
+        evaluation_id: EvaluationId,
+        model_id: str,
+        feature_key: str,
     ) -> bytes:
         """Tab 2's per-record list — "the actionable form of Goal 2".
 
-        The conventions are the ones already settled here and are **reused, not
-        re-derived**: UTF-8 with a BOM (Excel on Windows, N3), `;`-delimited, a
-        comment line naming the corpus id and version, and the **currently
-        filtered, currently sorted** rows only — never the whole thing
-        (sw-design.md §7).
+        **Takes the rows rather than fetching them** (`P4-D3`, a correction to
+        the signature M27 froze). Two reasons, and the second is the one that
+        matters: `ExportService` would otherwise need a `ResultsService` in its
+        constructor and a reorder of `create_app`'s wiring for a dependency
+        nothing else wants — and, more to the point, §7's rule is that an
+        export writes "the **currently filtered, currently sorted** table".
+        Re-fetching inside the exporter is how a CSV comes to disagree with the
+        screen it was exported from. The caller holds the view; it hands it
+        over.
 
-        Declared at M27 because `export_service.py` is frozen and phase 4 needs
-        one more writer on it (plan-phase-4.md C11). **T2 writes the body.**
+        The conventions are the ones already settled in this module and are
+        reused, not re-derived: UTF-8 with a BOM (Excel on Windows, N3),
+        `;`-delimited, and a comment line naming what this is a list of.
         """
-        raise NotImplementedError
+        comment = (
+            f"# evaluation {evaluation_id} · model {model_id} · feature {feature_key} · "
+            f"{len(rows)} records recorded but not written"
+        )
+        return self._write_csv(
+            comment,
+            _PRESENCE_CSV_HEADER,
+            [
+                (
+                    row.record_id,
+                    "yes" if row.anonymised else "no",
+                    row.record_value,
+                    row.finding,
+                    row.language,
+                    f"{row.language_confidence:.2f}",
+                )
+                for row in rows
+            ],
+        )
 
     @staticmethod
     def _write_csv(

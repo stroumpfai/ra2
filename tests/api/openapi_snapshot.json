@@ -67,6 +67,196 @@
         "title": "Body_upload_file_api_v1_deliveries__delivery_id__files_post",
         "type": "object"
       },
+      "BreakdownResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_name": {
+            "title": "Feature Name",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/BreakdownRowResponse"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "feature_id",
+          "feature_name",
+          "rows"
+        ],
+        "title": "BreakdownResponse",
+        "type": "object"
+      },
+      "BreakdownRowResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "f1": {
+            "title": "F1",
+            "type": "number"
+          },
+          "hit": {
+            "title": "Hit",
+            "type": "integer"
+          },
+          "missing": {
+            "title": "Missing",
+            "type": "integer"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "precision": {
+            "title": "Precision",
+            "type": "number"
+          },
+          "recall": {
+            "title": "Recall",
+            "type": "number"
+          },
+          "wrong": {
+            "title": "Wrong",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model_id",
+          "precision",
+          "recall",
+          "f1",
+          "hit",
+          "wrong",
+          "missing"
+        ],
+        "title": "BreakdownRowResponse",
+        "type": "object"
+      },
+      "ByLanguageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_name": {
+            "title": "Feature Name",
+            "type": "string"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ByLanguageRowResponse"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "feature_id",
+          "feature_name",
+          "model_id",
+          "rows"
+        ],
+        "title": "ByLanguageResponse",
+        "type": "object"
+      },
+      "ByLanguageRowResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cell": {
+            "$ref": "#/components/schemas/CellResponse"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          }
+        },
+        "required": [
+          "language",
+          "cell"
+        ],
+        "title": "ByLanguageRowResponse",
+        "type": "object"
+      },
+      "CellResponse": {
+        "additionalProperties": false,
+        "description": "One cell: either a measurement, or the reason there is not one.",
+        "properties": {
+          "ci_high": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci High"
+          },
+          "ci_low": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Low"
+          },
+          "floor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Floor"
+          },
+          "mark": {
+            "default": "none",
+            "title": "Mark",
+            "type": "string"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "suppressed": {
+            "title": "Suppressed",
+            "type": "boolean"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "suppressed",
+          "n"
+        ],
+        "title": "CellResponse",
+        "type": "object"
+      },
       "CensusBucketLabel": {
         "description": "The six population-profile buckets, over all tables (sw-design.md \u00a77).\n\nValues are stable identifiers; the \"100\u201380 %\" rendering lives in `ra2/ui/`.",
         "enum": [
@@ -849,6 +1039,55 @@
         "title": "CreatePromptTemplateRequest",
         "type": "object"
       },
+      "CrossTabResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "feature_key": {
+            "title": "Feature Key",
+            "type": "string"
+          },
+          "hit_absent": {
+            "title": "Hit Absent",
+            "type": "integer"
+          },
+          "hit_present": {
+            "title": "Hit Present",
+            "type": "integer"
+          },
+          "missing_absent": {
+            "title": "Missing Absent",
+            "type": "integer"
+          },
+          "missing_present": {
+            "title": "Missing Present",
+            "type": "integer"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "wrong_absent": {
+            "title": "Wrong Absent",
+            "type": "integer"
+          },
+          "wrong_present": {
+            "title": "Wrong Present",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "feature_key",
+          "model_id",
+          "hit_present",
+          "hit_absent",
+          "wrong_present",
+          "wrong_absent",
+          "missing_present",
+          "missing_absent"
+        ],
+        "title": "CrossTabResponse",
+        "type": "object"
+      },
       "DeliveryFileResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1409,6 +1648,57 @@
         "title": "EvaluationSize",
         "type": "string"
       },
+      "ExtractionTabResponse": {
+        "additionalProperties": false,
+        "description": "Tab 1. `scored` is `false` on a run nobody has scored yet \u2014 **200, not\n404** (\u00a716.7): the UI renders a state, and an error status would force the\ntoast the design rejects.",
+        "properties": {
+          "breakdown": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BreakdownResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "by_language": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ByLanguageResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "descriptor": {
+            "$ref": "#/components/schemas/RunDescriptorResponse"
+          },
+          "features": {
+            "$ref": "#/components/schemas/FeatureScorePage"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelColumnResponse"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "scored": {
+            "title": "Scored",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "scored",
+          "descriptor",
+          "models",
+          "features"
+        ],
+        "title": "ExtractionTabResponse",
+        "type": "object"
+      },
       "FeatureConfigResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1697,6 +1987,89 @@
         "title": "FeatureResponse",
         "type": "object"
       },
+      "FeatureScorePage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureScoreResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "sort_dir": {
+            "$ref": "#/components/schemas/SortDir"
+          },
+          "sort_key": {
+            "title": "Sort Key",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "sort_key",
+          "sort_dir"
+        ],
+        "title": "FeatureScorePage",
+        "type": "object"
+      },
+      "FeatureScoreResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cells": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CellResponse"
+            },
+            "title": "Cells",
+            "type": "object"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source_label": {
+            "title": "Source Label",
+            "type": "string"
+          },
+          "suppressed": {
+            "title": "Suppressed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "feature_id",
+          "name",
+          "source_label",
+          "n",
+          "suppressed",
+          "cells"
+        ],
+        "title": "FeatureScoreResponse",
+        "type": "object"
+      },
       "FeatureValidationErrorResponse": {
         "additionalProperties": false,
         "description": "422 from a blocked freeze. **Nothing was frozen** (mvp-spec.md \u00a77/\u00a78.2).",
@@ -1858,6 +2231,49 @@
         "title": "FindingResponse",
         "type": "object"
       },
+      "FlagInconsistencyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cell": {
+            "$ref": "#/components/schemas/CellResponse"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "cell"
+        ],
+        "title": "FlagInconsistencyResponse",
+        "type": "object"
+      },
+      "Goal1CompanionResponse": {
+        "additionalProperties": false,
+        "description": "mvp-spec.md \u00a711.2: \"Goal 2 numbers are never published without the\ncorresponding Goal 1 numbers.\"\n\nA **required** field on `PresenceRowResponse`, not an optional one, so the\nwire format cannot drop the column the read model is careful to carry.",
+        "properties": {
+          "f1": {
+            "title": "F1",
+            "type": "number"
+          },
+          "precision": {
+            "title": "Precision",
+            "type": "number"
+          },
+          "recall": {
+            "title": "Recall",
+            "type": "number"
+          }
+        },
+        "required": [
+          "f1",
+          "precision",
+          "recall"
+        ],
+        "title": "Goal1CompanionResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1995,6 +2411,30 @@
         "title": "ModelChoiceResponse",
         "type": "object"
       },
+      "ModelColumnResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "tag": {
+            "title": "Tag",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "tag",
+          "digest"
+        ],
+        "title": "ModelColumnResponse",
+        "type": "object"
+      },
       "PageMeta": {
         "additionalProperties": false,
         "description": "Paging envelope. `total` is the unpaged count matching the filter.",
@@ -2027,6 +2467,169 @@
           "sort_dir"
         ],
         "title": "PageMeta",
+        "type": "object"
+      },
+      "PerRecordPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PerRecordResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "PerRecordPage",
+        "type": "object"
+      },
+      "PerRecordResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "anonymised": {
+            "title": "Anonymised",
+            "type": "boolean"
+          },
+          "finding": {
+            "title": "Finding",
+            "type": "string"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "language_confidence": {
+            "title": "Language Confidence",
+            "type": "number"
+          },
+          "record_id": {
+            "title": "Record Id",
+            "type": "string"
+          },
+          "record_value": {
+            "title": "Record Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_id",
+          "anonymised",
+          "record_value",
+          "finding",
+          "language",
+          "language_confidence"
+        ],
+        "title": "PerRecordResponse",
+        "type": "object"
+      },
+      "PresenceRowResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "feature_key": {
+            "title": "Feature Key",
+            "type": "string"
+          },
+          "goal1": {
+            "$ref": "#/components/schemas/Goal1CompanionResponse"
+          },
+          "rates": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CellResponse"
+            },
+            "title": "Rates",
+            "type": "object"
+          }
+        },
+        "required": [
+          "feature_key",
+          "rates",
+          "goal1"
+        ],
+        "title": "PresenceRowResponse",
+        "type": "object"
+      },
+      "PresenceTabResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cross_tab": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CrossTabResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "descriptor": {
+            "$ref": "#/components/schemas/RunDescriptorResponse"
+          },
+          "flag_inconsistency": {
+            "items": {
+              "$ref": "#/components/schemas/FlagInconsistencyResponse"
+            },
+            "title": "Flag Inconsistency",
+            "type": "array"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelColumnResponse"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "records": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PerRecordPage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/PresenceRowResponse"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "scored": {
+            "title": "Scored",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "scored",
+          "descriptor",
+          "models",
+          "model_id",
+          "rows"
+        ],
+        "title": "PresenceTabResponse",
         "type": "object"
       },
       "ProbeCode": {
@@ -2265,6 +2868,145 @@
         "title": "ProvenanceResponse",
         "type": "object"
       },
+      "RankingRowResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "best": {
+            "title": "Best",
+            "type": "integer"
+          },
+          "ci_high": {
+            "title": "Ci High",
+            "type": "number"
+          },
+          "ci_low": {
+            "title": "Ci Low",
+            "type": "number"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "macro_f1": {
+            "title": "Macro F1",
+            "type": "number"
+          },
+          "median_latency_ms": {
+            "title": "Median Latency Ms",
+            "type": "integer"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "presence_rate": {
+            "title": "Presence Rate",
+            "type": "number"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "tag": {
+            "title": "Tag",
+            "type": "string"
+          },
+          "tied": {
+            "title": "Tied",
+            "type": "integer"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          },
+          "vram_bytes": {
+            "title": "Vram Bytes",
+            "type": "integer"
+          },
+          "worse": {
+            "title": "Worse",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model_id",
+          "tag",
+          "digest",
+          "rank",
+          "macro_f1",
+          "ci_low",
+          "ci_high",
+          "best",
+          "tied",
+          "worse",
+          "verdict",
+          "presence_rate",
+          "median_latency_ms",
+          "prompt_tokens",
+          "vram_bytes"
+        ],
+        "title": "RankingRowResponse",
+        "type": "object"
+      },
+      "RankingTabResponse": {
+        "additionalProperties": false,
+        "description": "Tab 3. An evaluation where every feature is suppressed returns this\nshape with empty `rows` **and** a verdict saying so \u2014 never a bare empty\nlist, which a UI renders as a blank table (\u00a716.7).",
+        "properties": {
+          "descriptor": {
+            "$ref": "#/components/schemas/RunDescriptorResponse"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/RankingRowResponse"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "scored": {
+            "title": "Scored",
+            "type": "boolean"
+          },
+          "scored_feature_count": {
+            "title": "Scored Feature Count",
+            "type": "integer"
+          },
+          "separating": {
+            "items": {
+              "$ref": "#/components/schemas/SeparatingRowResponse"
+            },
+            "title": "Separating",
+            "type": "array"
+          },
+          "unscored_feature_count": {
+            "title": "Unscored Feature Count",
+            "type": "integer"
+          },
+          "verdict_detail": {
+            "title": "Verdict Detail",
+            "type": "string"
+          },
+          "verdict_headline": {
+            "title": "Verdict Headline",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scored",
+          "descriptor",
+          "rows",
+          "separating",
+          "verdict_headline",
+          "verdict_detail",
+          "scored_feature_count",
+          "unscored_feature_count"
+        ],
+        "title": "RankingTabResponse",
+        "type": "object"
+      },
       "RegisterDeliveryRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2367,6 +3109,51 @@
           "token_estimate"
         ],
         "title": "ResolvedPromptResponse",
+        "type": "object"
+      },
+      "RunDescriptorResponse": {
+        "additionalProperties": false,
+        "description": "The identity line every tab carries \u2014 \"a score without its config is\nnot a result\".",
+        "properties": {
+          "config_fingerprint": {
+            "title": "Config Fingerprint",
+            "type": "string"
+          },
+          "corpus_label": {
+            "title": "Corpus Label",
+            "type": "string"
+          },
+          "evaluation_id": {
+            "title": "Evaluation Id",
+            "type": "string"
+          },
+          "is_dev": {
+            "title": "Is Dev",
+            "type": "boolean"
+          },
+          "min_cell_count": {
+            "title": "Min Cell Count",
+            "type": "integer"
+          },
+          "model_count": {
+            "title": "Model Count",
+            "type": "integer"
+          },
+          "record_count": {
+            "title": "Record Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "evaluation_id",
+          "corpus_label",
+          "record_count",
+          "model_count",
+          "config_fingerprint",
+          "is_dev",
+          "min_cell_count"
+        ],
+        "title": "RunDescriptorResponse",
         "type": "object"
       },
       "RunPage": {
@@ -2556,6 +3343,45 @@
         "title": "RunStatus",
         "type": "string"
       },
+      "ScoringStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "is_scoreable": {
+            "title": "Is Scoreable",
+            "type": "boolean"
+          },
+          "is_scored": {
+            "title": "Is Scored",
+            "type": "boolean"
+          },
+          "labelled_features": {
+            "title": "Labelled Features",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "scored_features": {
+            "title": "Scored Features",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "scored_features",
+          "labelled_features",
+          "running",
+          "is_scored",
+          "is_scoreable"
+        ],
+        "title": "ScoringStatusResponse",
+        "type": "object"
+      },
       "SelectFileRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2568,6 +3394,53 @@
           "selected"
         ],
         "title": "SelectFileRequest",
+        "type": "object"
+      },
+      "SeparatingRowResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "delta": {
+            "title": "Delta",
+            "type": "number"
+          },
+          "f1_by_model": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "F1 By Model",
+            "type": "object"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "reading": {
+            "title": "Reading",
+            "type": "string"
+          },
+          "source_label": {
+            "title": "Source Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "name",
+          "source_label",
+          "n",
+          "f1_by_model",
+          "delta",
+          "reading"
+        ],
+        "title": "SeparatingRowResponse",
         "type": "object"
       },
       "Severity": {
@@ -4180,6 +5053,608 @@
         ]
       }
     },
+    "/api/v1/evaluations/{evaluation_id}/presence": {
+      "get": {
+        "description": "Tab 2, one model at a time. Unscored is 200 with `scored: false`.",
+        "operationId": "presence_tab_api_v1_evaluations__evaluation_id__presence_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Model Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "feature_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresenceTabResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Presence Tab",
+        "tags": [
+          "presence"
+        ]
+      }
+    },
+    "/api/v1/evaluations/{evaluation_id}/presence/records": {
+      "get": {
+        "description": "The actionable form of Goal 2 \u2014 records recorded but not written.",
+        "operationId": "presence_records_api_v1_evaluations__evaluation_id__presence_records_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Model Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "feature_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerRecordPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Presence Records",
+        "tags": [
+          "presence"
+        ]
+      }
+    },
+    "/api/v1/evaluations/{evaluation_id}/presence/records.csv": {
+      "get": {
+        "description": "The per-record list as CSV.\n\nThe exporter is handed **the rows this endpoint just read**, not a filter\nto re-run (`P4-D3`): \u00a77's rule is that an export writes the currently\nfiltered, currently sorted table, and re-fetching inside the exporter is\nhow a CSV comes to disagree with the screen it was exported from.",
+        "operationId": "presence_records_csv_api_v1_evaluations__evaluation_id__presence_records_csv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Model Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "feature_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Presence Records Csv",
+        "tags": [
+          "presence"
+        ]
+      }
+    },
+    "/api/v1/evaluations/{evaluation_id}/ranking": {
+      "get": {
+        "description": "Tab 3 \u2014 read-only, and derived.\n\nThere is no endpoint that stores or invalidates a ranking, because there\nis nothing stored to invalidate (\u00a716.5).\n\nA run where **every** feature is suppressed returns this shape with empty\n`rows` and a verdict saying so \u2014 never a bare empty list, which a UI\nrenders as a blank table. \"No results\" and \"not enough data for results\"\nare different facts (\u00a716.7).",
+        "operationId": "ranking_tab_api_v1_evaluations__evaluation_id__ranking_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RankingTabResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ranking Tab",
+        "tags": [
+          "ranking"
+        ]
+      }
+    },
+    "/api/v1/evaluations/{evaluation_id}/results": {
+      "get": {
+        "description": "Tab 1.\n\n**An unscored run is 200 with `scored: false`, never a 404.** The UI\nrenders a state, and an error status would force exactly the toast the\ndesign rejects \u2014 the same reasoning \u00a715.5 applied to an unreachable\nendpoint.",
+        "operationId": "extraction_tab_api_v1_evaluations__evaluation_id__results_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_key",
+            "required": false,
+            "schema": {
+              "default": "name",
+              "title": "Sort Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_dir",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortDir",
+              "default": "asc"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expanded_feature_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expanded Feature Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "by_language_feature_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "By Language Feature Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "by_language_model_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "By Language Model Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractionTabResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Extraction Tab",
+        "tags": [
+          "results"
+        ]
+      }
+    },
+    "/api/v1/evaluations/{evaluation_id}/results/{feature_id}/breakdown": {
+      "get": {
+        "operationId": "breakdown_api_v1_evaluations__evaluation_id__results__feature_id__breakdown_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BreakdownResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Breakdown",
+        "tags": [
+          "results"
+        ]
+      }
+    },
+    "/api/v1/evaluations/{evaluation_id}/results/{feature_id}/by-language": {
+      "get": {
+        "operationId": "by_language_api_v1_evaluations__evaluation_id__results__feature_id__by_language_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ByLanguageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "By Language",
+        "tags": [
+          "results"
+        ]
+      }
+    },
+    "/api/v1/evaluations/{evaluation_id}/scoring-status": {
+      "get": {
+        "operationId": "scoring_status_api_v1_evaluations__evaluation_id__scoring_status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScoringStatusResponse"
+                  },
+                  "title": "Response Scoring Status Api V1 Evaluations  Evaluation Id  Scoring Status Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Scoring Status",
+        "tags": [
+          "results"
+        ]
+      }
+    },
     "/api/v1/feature-configs": {
       "get": {
         "operationId": "list_feature_configs_api_v1_feature_configs_get",
@@ -5173,6 +6648,49 @@
         "summary": "Get Progress",
         "tags": [
           "runs"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/rescore": {
+      "post": {
+        "description": "Re-score one run, **preserving analyst tags** (SD21).\n\n409 for a `failed` or `interrupted` run: a partial corpus produces\nreal-looking numbers over an unstated denominator.",
+        "operationId": "rescore_api_v1_runs__run_id__rescore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAcceptedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rescore",
+        "tags": [
+          "results"
         ]
       }
     },

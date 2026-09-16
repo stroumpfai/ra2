@@ -25,6 +25,11 @@ from ra2.services.readmodels import SortDir
 __all__ = [
     "AnalyseResponse",
     "BlockingFindingsResponse",
+    "BreakdownResponse",
+    "BreakdownRowResponse",
+    "ByLanguageResponse",
+    "ByLanguageRowResponse",
+    "CellResponse",
     "CensusColumnResponse",
     "CensusPage",
     "CensusSummaryResponse",
@@ -44,6 +49,7 @@ __all__ = [
     "CreateEvaluationRequest",
     "CreateFeatureConfigRequest",
     "CreatePromptTemplateRequest",
+    "CrossTabResponse",
     "DeliveryFileResponse",
     "DeliveryResponse",
     "DerivationFilterSchema",
@@ -52,30 +58,45 @@ __all__ = [
     "EvaluationDraftResponse",
     "EvaluationLaunchResponse",
     "EvaluationResponse",
+    "ExtractionTabResponse",
     "FeatureConfigResponse",
     "FeatureConfigSummaryResponse",
     "FeatureRequest",
     "FeatureResponse",
+    "FeatureScorePage",
+    "FeatureScoreResponse",
     "FeatureValidationErrorResponse",
     "FileOverrideRequest",
     "FindingResponse",
+    "FlagInconsistencyResponse",
+    "Goal1CompanionResponse",
     "MapColumnRequest",
     "MatchingRuleSchema",
     "ModelCatalogResponse",
     "ModelChoiceResponse",
+    "ModelColumnResponse",
     "PageMeta",
+    "PerRecordPage",
+    "PerRecordResponse",
+    "PresenceRowResponse",
+    "PresenceTabResponse",
     "ProfileBucketResponse",
     "PromptTemplateResponse",
     "PromptValidationErrorResponse",
     "PromptValidationIssueResponse",
     "ProvenanceResponse",
+    "RankingRowResponse",
+    "RankingTabResponse",
     "RegisterDeliveryRequest",
     "ResolvePromptRequest",
     "ResolvedPromptResponse",
+    "RunDescriptorResponse",
     "RunPage",
     "RunProgressResponse",
     "RunResponse",
+    "ScoringStatusResponse",
     "SelectFileRequest",
+    "SeparatingRowResponse",
     "SlotResponse",
     "TaskAcceptedResponse",
     "TaskProgressResponse",
@@ -820,3 +841,235 @@ class EvaluationLaunchResponse(_Schema):
 
     evaluation: EvaluationResponse
     task_id: str
+
+
+# ---------------------------------------------------------------------------
+# Results — phase 4 (U1, U2). mvp-spec.md §11, sw-design.md §16.7.
+#
+# The one rule this section adds to the boundary: **a suppressed cell never
+# serialises as a number.** `CellResponse` is a tagged union in one field —
+# `suppressed: true` carries `n` and `floor` and leaves `value` absent — so a
+# client that forgets to check the flag gets `null`, not a plausible figure
+# nobody measured (mvp-spec.md §11.4, SD19).
+# ---------------------------------------------------------------------------
+
+
+class CellResponse(_Schema):
+    """One cell: either a measurement, or the reason there is not one."""
+
+    suppressed: bool
+    #: The labelled-case count. Present either way — §11.4 requires every
+    #: metric to be rendered with its `n`, and the suppression notice states it.
+    n: int
+    #: `None` **exactly when** `suppressed` is true. Never `0.0` there.
+    value: float | None = None
+    ci_low: float | None = None
+    ci_high: float | None = None
+    #: `best` / `tied` / `none`, the shape-coded tie marker (P4-D2).
+    mark: str = "none"
+    #: The evaluation's own floor, so a client renders "below the minimum of
+    #: N" from data rather than from a literal (SD19).
+    floor: int | None = None
+
+
+class RunDescriptorResponse(_Schema):
+    """The identity line every tab carries — "a score without its config is
+    not a result"."""
+
+    evaluation_id: str
+    corpus_label: str
+    record_count: int
+    model_count: int
+    config_fingerprint: str
+    #: mvp-spec.md §13: the "smoke test, not a result" marker is required on
+    #: **every** dev-sized result wherever its numbers appear.
+    is_dev: bool
+    min_cell_count: int
+
+
+class ModelColumnResponse(_Schema):
+    model_id: str
+    tag: str
+    digest: str
+
+
+class FeatureScoreResponse(_Schema):
+    feature_id: str
+    name: str
+    source_label: str
+    n: int
+    suppressed: bool
+    cells: dict[str, CellResponse]
+
+
+class FeatureScorePage(_Schema):
+    items: list[FeatureScoreResponse]
+    total: int
+    page: int
+    page_size: int
+    sort_key: str
+    sort_dir: SortDir
+
+
+class BreakdownRowResponse(_Schema):
+    model_id: str
+    precision: float
+    recall: float
+    f1: float
+    #: Stored, not back-derived from P and R (SD18).
+    hit: int
+    wrong: int
+    missing: int
+
+
+class BreakdownResponse(_Schema):
+    feature_id: str
+    feature_name: str
+    rows: list[BreakdownRowResponse]
+
+
+class ByLanguageRowResponse(_Schema):
+    language: str
+    cell: CellResponse
+
+
+class ByLanguageResponse(_Schema):
+    feature_id: str
+    feature_name: str
+    model_id: str
+    rows: list[ByLanguageRowResponse]
+
+
+class ExtractionTabResponse(_Schema):
+    """Tab 1. `scored` is `false` on a run nobody has scored yet — **200, not
+    404** (§16.7): the UI renders a state, and an error status would force the
+    toast the design rejects."""
+
+    scored: bool
+    descriptor: RunDescriptorResponse
+    models: list[ModelColumnResponse]
+    features: FeatureScorePage
+    breakdown: BreakdownResponse | None = None
+    by_language: ByLanguageResponse | None = None
+
+
+class ScoringStatusResponse(_Schema):
+    run_id: str
+    scored_features: int
+    labelled_features: int
+    running: bool
+    is_scored: bool
+    #: `False` means there is nothing to score — every feature is exploratory.
+    #: Distinct from "every feature is suppressed", which **is** scoreable and
+    #: renders as suppression (§16.7).
+    is_scoreable: bool
+
+
+class Goal1CompanionResponse(_Schema):
+    """mvp-spec.md §11.2: "Goal 2 numbers are never published without the
+    corresponding Goal 1 numbers."
+
+    A **required** field on `PresenceRowResponse`, not an optional one, so the
+    wire format cannot drop the column the read model is careful to carry.
+    """
+
+    f1: float
+    precision: float
+    recall: float
+
+
+class PresenceRowResponse(_Schema):
+    feature_key: str
+    rates: dict[str, CellResponse]
+    goal1: Goal1CompanionResponse
+
+
+class CrossTabResponse(_Schema):
+    feature_key: str
+    model_id: str
+    hit_present: int
+    #: The self-contradiction cell: the model said the text does not contain
+    #: the feature and then extracted the record's exact value from it.
+    hit_absent: int
+    wrong_present: int
+    wrong_absent: int
+    missing_present: int
+    missing_absent: int
+
+
+class FlagInconsistencyResponse(_Schema):
+    model_id: str
+    cell: CellResponse
+
+
+class PerRecordResponse(_Schema):
+    record_id: str
+    #: Required wherever text is shown (mvp-spec.md §13).
+    anonymised: bool
+    record_value: str
+    finding: str
+    language: str
+    language_confidence: float
+
+
+class PerRecordPage(_Schema):
+    items: list[PerRecordResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class PresenceTabResponse(_Schema):
+    scored: bool
+    descriptor: RunDescriptorResponse
+    models: list[ModelColumnResponse]
+    model_id: str
+    rows: list[PresenceRowResponse]
+    cross_tab: CrossTabResponse | None = None
+    flag_inconsistency: list[FlagInconsistencyResponse] = Field(default_factory=list)
+    records: PerRecordPage | None = None
+
+
+class RankingRowResponse(_Schema):
+    model_id: str
+    tag: str
+    digest: str
+    #: **Shared on a tie** (`1, 1, 3`), never dense (§11.5).
+    rank: int
+    macro_f1: float
+    ci_low: float
+    ci_high: float
+    best: int
+    tied: int
+    worse: int
+    verdict: str
+    #: Reported, never scored — and neither are the three below (SD20).
+    presence_rate: float
+    median_latency_ms: int
+    prompt_tokens: int
+    vram_bytes: int
+
+
+class SeparatingRowResponse(_Schema):
+    feature_id: str
+    name: str
+    source_label: str
+    n: int
+    f1_by_model: dict[str, float]
+    delta: float
+    reading: str
+
+
+class RankingTabResponse(_Schema):
+    """Tab 3. An evaluation where every feature is suppressed returns this
+    shape with empty `rows` **and** a verdict saying so — never a bare empty
+    list, which a UI renders as a blank table (§16.7)."""
+
+    scored: bool
+    descriptor: RunDescriptorResponse
+    rows: list[RankingRowResponse]
+    separating: list[SeparatingRowResponse]
+    verdict_headline: str
+    verdict_detail: str
+    scored_feature_count: int
+    unscored_feature_count: int

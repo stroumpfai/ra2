@@ -46,7 +46,15 @@ from ra2.domain.scoring import (
 from ra2.infra.clock import Clock
 from ra2.infra.idgen import IdFactory
 from ra2.infra.tasks import ProgressReporter, TaskRunner
-from ra2.persistence.models import Evaluation, Extraction, ExtractionValue, Feature, Record, Run
+from ra2.persistence.models import (
+    Evaluation,
+    Extraction,
+    ExtractionValue,
+    Feature,
+    Record,
+    Run,
+    UnfallRow,
+)
 from ra2.persistence.repositories.mismatch_repo import MismatchRepository, MismatchWrite
 from ra2.persistence.repositories.score_repo import ScoreRepository
 from ra2.services.errors import NotFoundError, RunNotScoreableError
@@ -127,12 +135,17 @@ class ScoringService:
         run = await session.get(Run, run_id)
         if run is None:
             raise NotFoundError("run", run_id)
+        evaluation = await session.get(Evaluation, run.evaluation_id)
+        if evaluation is None:
+            raise NotFoundError("evaluation", run.evaluation_id)
         features = await self._features_for(session, run)
         scored = await ScoreRepository(session).scored_feature_ids(run_id)
         return ScoringStatus(
             run_id=run_id,
             scored_features=len(scored),
-            labelled_features=sum(1 for feature in features if _is_labelled(feature)),
+            labelled_features=await _scoreable_count(
+                session, CorpusId(evaluation.corpus_id), features
+            ),
             running=False,
         )
 
@@ -316,6 +329,36 @@ def _per_language[C: _HasLanguage](cases: Sequence[C], aggregate: _Aggregator[C]
         subset = [case for case in cases if case.language == language]
         rows.extend(aggregate(subset, language=language))
     return rows
+
+
+async def _scoreable_count(
+    session: AsyncSession, corpus_id: CorpusId, features: Sequence[Feature]
+) -> int:
+    """How many labelled features **could** produce rows for this corpus.
+
+    Not simply "how many labelled features there are", and the difference is
+    not cosmetic: a feature whose source column is populated for nobody
+    produces no `score` rows at all (§8.6, §16.2), so counting it would leave
+    a fully-scored run reporting 4 of 5 — and `is_scored` false forever, with
+    the UI parked in "scoring..." on a pass that finished.
+
+    Derived features always count: a derivation has a value for every record,
+    even when that value is `"0"`.
+
+    One grouped query for the whole corpus rather than an `EXISTS` per
+    feature, because this is polled on a timer (§9).
+    """
+    native = {f.source_column for f in features if _is_labelled(f) and f.source_column}
+    derived = sum(1 for f in features if _is_labelled(f) and not f.source_column)
+    if not native:
+        return derived
+    populated = await session.execute(
+        select(UnfallRow.column_name)
+        .join(Record, Record.id == UnfallRow.record_id)
+        .where(Record.corpus_id == corpus_id, UnfallRow.column_name.in_(native))
+        .distinct()
+    )
+    return derived + len(set(populated.scalars()))
 
 
 async def _languages(session: AsyncSession, corpus_id: CorpusId) -> Mapping[RecordId, str]:

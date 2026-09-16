@@ -311,10 +311,15 @@ async def test_status_is_derived_from_committed_rows(
     async with db_session_factory() as session:
         before = await scoring_service.status(session, seeded.run_ids[0])
     assert before.scored_features == 0
-    assert before.labelled_features == 5
+    # **Scoreable** labelled features, not all of them. `NieGefuelltFeld` is
+    # populated for nobody, so it can never produce rows — counting it would
+    # leave a finished pass reporting 4 of 5 and `is_scored` false forever,
+    # parking the UI in "scoring..." on a pass that had ended.
+    assert before.labelled_features == 4
 
     await scoring_service.score_run(seeded.run_ids[0])
 
     async with db_session_factory() as session:
         after = await scoring_service.status(session, seeded.run_ids[0])
     assert after.scored_features == 4, "the all-empty feature produces no rows"
+    assert after.scored_features == after.labelled_features, "the pass reads as finished"

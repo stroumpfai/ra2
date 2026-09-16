@@ -27,10 +27,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ra2.domain.feature import Kind
-from ra2.domain.ids import EvaluationId, FeatureId, RunId
+from ra2.domain.ids import EvaluationId, FeatureId, RecordId, RunId
 from ra2.domain.scoring import ALL_LANGUAGES, ScoreMetric
 from ra2.domain.stats import Interval, TiedCell, TieMark, mark_ties, suppressed
-from ra2.persistence.models import Evaluation, Feature, Run, Score
+from ra2.persistence.models import (
+    Evaluation,
+    Extraction,
+    ExtractionValue,
+    Feature,
+    Record,
+    Run,
+    Score,
+    UnfallRow,
+)
 from ra2.persistence.repositories.score_repo import ScoreRepository
 from ra2.services.errors import NotFoundError
 from ra2.services.protocols import Scorer
@@ -48,6 +57,7 @@ from ra2.services.readmodels import (
     MetricCell,
     ModelColumnView,
     Page,
+    PerRecordRow,
     PresenceRow,
     PresenceTabView,
     RunDescriptorView,
@@ -57,6 +67,12 @@ from ra2.services.readmodels import (
 )
 
 __all__ = ["ResultsService"]
+
+#: The per-record finding, `design/results/README.md` §2e's own sentence.
+#: Composed here rather than in `ui/` because `PerRecordRow.finding` is a
+#: frozen field of the read model — but it is **copy**, and the wording lives
+#: in exactly this one place for the same reason `FindingCode` wording does.
+PRESENCE_FINDING = "This report does not say what the {feature} was."
 
 #: `(run, feature, language) -> {metric: Score}` — the shape every read below
 #: works from. Built once per request, because five tables' worth of cells all
@@ -227,8 +243,70 @@ class ResultsService:
                 rows=rows,
                 cross_tab=_cross_tab(features, chosen, cells, feature_key),
                 flag_inconsistency=_flag_inconsistency(runs, features, cells, floor),
-                records=None,
+                records=await self._presence_records(
+                    session, chosen, features, feature_key, page=page, page_size=page_size
+                ),
             )
+
+    async def presence_records(
+        self,
+        evaluation_id: EvaluationId,
+        *,
+        model_id: str | None = None,
+        feature_key: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> Page[PerRecordRow]:
+        """**The actionable form of Goal 2** (design README §2e).
+
+        Every record whose column *is* populated and which the model flagged as
+        **not present** in the narrative: "this report does not say what the
+        weather was". Goal 2 is consumed as a record list to act on, not as a
+        rate, which is why this is a first-class read rather than a detail of
+        the tab.
+        """
+        async with self._session_factory() as session:
+            evaluation = await session.get(Evaluation, evaluation_id)
+            if evaluation is None:
+                raise NotFoundError("evaluation", evaluation_id)
+            runs = await _runs_for(session, evaluation_id)
+            if not runs:
+                raise NotFoundError("run", evaluation_id)
+            chosen = next((r for r in runs if r.id == model_id), runs[0])
+            features = await _features_for(session, evaluation_id)
+            page_view = await self._presence_records(
+                session, chosen, features, feature_key, page=page, page_size=page_size
+            )
+            if page_view is None:
+                raise NotFoundError("feature", feature_key or "")
+            return page_view
+
+    async def _presence_records(
+        self,
+        session: AsyncSession,
+        run: Run,
+        features: Sequence[Feature],
+        feature_key: str | None,
+        *,
+        page: int,
+        page_size: int,
+    ) -> Page[PerRecordRow] | None:
+        feature = next(
+            (f for f in features if feature_key is not None and f.key == feature_key),
+            next((f for f in features if f.kind == Kind.LABELLED), None),
+        )
+        if feature is None:
+            return None
+        rows = await _records_not_written(session, run, feature)
+        start = max(0, (page - 1) * page_size)
+        return Page(
+            items=tuple(rows[start : start + page_size]),
+            total=len(rows),
+            page=page,
+            page_size=page_size,
+            sort_key="record_id",
+            sort_dir=SortDir.ASC,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -576,3 +654,65 @@ def _flag_inconsistency(
         if cell is not None:
             rows.append(FlagInconsistencyRow(model_id=run.id, cell=cell))
     return tuple(rows)
+
+
+async def _records_not_written(
+    session: AsyncSession, run: Run, feature: Feature
+) -> list[PerRecordRow]:
+    """The records behind the presence rate — "N records where weather is
+    recorded but not written".
+
+    A labelled case (the column is populated) that the model flagged
+    `present = false`. The record's own value travels with it, because the
+    point of the list is to act on the gap, and an analyst cannot act on a
+    record id alone.
+
+    `anonymised` rides on every row: mvp-spec.md §13 requires the per-record
+    anonymisation marking **wherever text is shown**, and this list shows the
+    record's value.
+    """
+    evaluation = await session.get(Evaluation, run.evaluation_id)
+    assert evaluation is not None
+    if not feature.source_column:
+        # Only a native column can be "recorded but not written": a derived
+        # value was never written anywhere to begin with.
+        return []
+
+    result = await session.execute(
+        select(
+            Record.id,
+            Record.text_anonymised_flag,
+            Record.language,
+            Record.language_confidence,
+            UnfallRow.value_raw,
+        )
+        .join(UnfallRow, UnfallRow.record_id == Record.id)
+        .join(Extraction, Extraction.record_id == Record.id)
+        .join(
+            ExtractionValue,
+            (ExtractionValue.extraction_id == Extraction.id)
+            & (ExtractionValue.feature_id == feature.id),
+        )
+        .where(
+            Record.corpus_id == evaluation.corpus_id,
+            UnfallRow.column_name == feature.source_column,
+            Extraction.run_id == run.id,
+            ExtractionValue.present_flag.is_(False),
+        )
+        .order_by(Record.id)
+    )
+    finding = PRESENCE_FINDING.format(feature=feature.key)
+    return [
+        PerRecordRow(
+            record_id=RecordId(record_id),
+            anonymised=bool(anonymised),
+            record_value=value or "",
+            finding=finding,
+            language=language,
+            language_confidence=confidence,
+        )
+        for record_id, anonymised, language, confidence, value in result
+        # An empty cell is not a labelled case, so it cannot be "recorded but
+        # not written" either (§8.6).
+        if value is not None and value.strip()
+    ]
