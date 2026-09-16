@@ -24,7 +24,10 @@ from ra2.services.evaluation_service import EvaluationService
 from ra2.services.export_service import ExportService
 from ra2.services.feature_service import FeatureService
 from ra2.services.prompt_service import PromptService
+from ra2.services.ranking_service import RankingService
+from ra2.services.results_service import ResultsService
 from ra2.services.run_service import RunService
+from ra2.services.scoring_service import ScoringService
 
 __all__ = [
     "CensusServiceDep",
@@ -87,6 +90,18 @@ def get_run_service(services: Annotated[Services, Depends(get_services)]) -> Run
     return services.run
 
 
+def get_scoring_service(services: Annotated[Services, Depends(get_services)]) -> ScoringService:
+    return services.scoring
+
+
+def get_results_service(services: Annotated[Services, Depends(get_services)]) -> ResultsService:
+    return services.results
+
+
+def get_ranking_service(services: Annotated[Services, Depends(get_services)]) -> RankingService:
+    return services.ranking
+
+
 DeliveryServiceDep = Annotated[DeliveryService, Depends(get_delivery_service)]
 CorpusServiceDep = Annotated[CorpusService, Depends(get_corpus_service)]
 CensusServiceDep = Annotated[CensusService, Depends(get_census_service)]
@@ -96,4 +111,7 @@ FeatureServiceDep = Annotated[FeatureService, Depends(get_feature_service)]
 PromptServiceDep = Annotated[PromptService, Depends(get_prompt_service)]
 EvaluationServiceDep = Annotated[EvaluationService, Depends(get_evaluation_service)]
 RunServiceDep = Annotated[RunService, Depends(get_run_service)]
+ScoringServiceDep = Annotated[ScoringService, Depends(get_scoring_service)]
+ResultsServiceDep = Annotated[ResultsService, Depends(get_results_service)]
+RankingServiceDep = Annotated[RankingService, Depends(get_ranking_service)]
 TaskRunnerDep = Annotated[TaskRunner, Depends(get_task_runner)]

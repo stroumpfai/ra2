@@ -11,7 +11,10 @@ from ra2.api.v1 import (
     evaluations,
     features,
     models,
+    presence,
     prompt_templates,
+    ranking,
+    results,
     runs,
     tasks,
 )
@@ -29,3 +32,6 @@ api_router.include_router(prompt_templates.router)
 api_router.include_router(evaluations.router)
 api_router.include_router(runs.router)
 api_router.include_router(models.router)
+api_router.include_router(results.router)
+api_router.include_router(presence.router)
+api_router.include_router(ranking.router)

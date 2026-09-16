@@ -24,6 +24,8 @@ __all__ = [
     "NotFoundError",
     "PromptTemplateCitedError",
     "PromptTemplateInvalidError",
+    "RunNotScoreableError",
+    "RunNotScoredError",
     "ServiceError",
 ]
 
@@ -167,6 +169,50 @@ class EvaluationLockedError(ServiceError):
     def __init__(self, evaluation_id: str) -> None:
         super().__init__(f"evaluation {evaluation_id} is launched")
         self.evaluation_id = evaluation_id
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 (M27) — scoring. Two errors, and deliberately no new `FindingCode`s:
+# a suppressed cell and an unscoreable feature are *rendered states*, not
+# import defects, and Do-NOT #6 is about rows silently repaired or dropped
+# during ingest. Phases 2 and 3 set this precedent twice.
+# ---------------------------------------------------------------------------
+
+
+class RunNotScoredError(ServiceError):
+    """A result was asked for on a run that has no `score` rows. -> HTTP 409.
+
+    Raised only where a *caller* has no way to render a state — an export, say.
+    **The read paths do not raise it**: `GET .../results` on an unscored run is
+    **200 with `scored: false`**, never a 404, because the UI renders a state
+    and an error status would force the toast §16.7 rejects. The same reasoning
+    §15.5 applied to an unreachable endpoint.
+    """
+
+    def __init__(self, run_id: str) -> None:
+        super().__init__(f"run {run_id} has not been scored")
+        self.run_id = run_id
+
+
+class RunNotScoreableError(ServiceError):
+    """This run cannot be scored at all. -> HTTP 422.
+
+    Two causes, and the message names which:
+
+    - the run is `failed` or `interrupted`. A partial corpus produces
+      real-looking numbers over an unstated denominator, which is exactly the
+      failure §11.4's suppression rule guards against at the other end of the
+      scale. Only a `done` run is scored (sw-design.md §16.1).
+    - the evaluation has **no labelled features** — every feature is
+      exploratory, so there is no ground truth anywhere to score against
+      (§11.3). Distinct from "every feature is suppressed", which *is*
+      scoreable and renders as suppression.
+    """
+
+    def __init__(self, run_id: str, reason: str) -> None:
+        super().__init__(f"run {run_id} cannot be scored: {reason}")
+        self.run_id = run_id
+        self.reason = reason
 
 
 # `LlmEndpointError` is **not defined here** — it lives in `ra2/domain/llm.py`,

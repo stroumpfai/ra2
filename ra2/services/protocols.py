@@ -12,13 +12,15 @@ of the freeze's single all-or-nothing transaction (§6.3): a blocking failure
 must leave zero `corpus` rows **and** zero `census_*` rows.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ra2.domain.codelist_coverage import ColumnCoverage
-from ra2.domain.ids import CorpusId, EvaluationId, RecordId
+from ra2.domain.derivation import RecordProjection
+from ra2.domain.ids import CorpusId, EvaluationId, FeatureId, RecordId, RunId
 from ra2.domain.prompt import ResolvedPrompt
 
 __all__ = [
@@ -26,7 +28,10 @@ __all__ = [
     "CensusMaterialiser",
     "CensusTableInput",
     "EnumCodeTableProvider",
+    "GroundTruthProvider",
     "PromptResolver",
+    "Scorer",
+    "ScoringStatus",
 ]
 
 
@@ -116,3 +121,92 @@ class PromptResolver(Protocol):
         evaluation_id: EvaluationId,
         record_id: RecordId,
     ) -> ResolvedPrompt: ...
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 (M27, plan-phase-4.md §3.1). The seams that let Wave 2's three
+# agents build against seeded `score` rows instead of waiting on each other.
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class GroundTruthProvider(Protocol):
+    """A feature's true value for every record of a corpus.
+
+    The fourth time this trick is played, and the one that hides the most:
+    resolving ground truth means reading `unfall_row` for a native feature and
+    assembling a `RecordProjection` from `objekt_cell` / `person_cell` for a
+    derived one. S4 implements it against the EAV tables; T1 calls it and never
+    reaches into a repository's query internals.
+
+    **One pass per feature, not one per record.** The return type is a whole
+    corpus's worth of values because that is what makes the N+1 unwritable: a
+    5 000-record corpus × 13 features is 13 queries, not 65 000, and S4's test
+    asserts a bounded statement count rather than a wall-clock number
+    (sw-design.md §16.2, R4).
+
+    A record **absent from the mapping**, or present with a value
+    `matching.is_empty` accepts, is not a labelled case and leaves that
+    feature's denominator entirely (§8.6). The provider does not filter those
+    out: deciding what counts is `domain.scoring.classify`'s job, and a
+    provider that silently dropped them would make `n` unexplainable.
+    """
+
+    async def values_for(
+        self,
+        session: AsyncSession,
+        corpus_id: CorpusId,
+        feature_id: FeatureId,
+    ) -> Mapping[RecordId, str | None]:
+        """Native features: the stored cell. Derived: the evaluated catalogue."""
+        ...
+
+    async def projections_for(
+        self,
+        session: AsyncSession,
+        corpus_id: CorpusId,
+    ) -> Mapping[RecordId, RecordProjection]:
+        """Every record's objekt/person cells, for the derived catalogue.
+
+        Separate from `values_for` because one projection serves **every**
+        derived feature of the corpus: reading it per feature would multiply
+        the expensive half of the EAV scan by the number of derivations.
+        """
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class ScoringStatus:
+    """How far a run's scoring pass has got — derived, never stored.
+
+    There is no status column: `scored_features` is
+    `COUNT(DISTINCT feature_id)` over the run's `score` rows, and
+    `labelled_features` comes from the evaluation. The count that answers "how
+    far did it get" is the same one that answers "where does it resume", so the
+    two cannot disagree (sw-design.md §16.1, F5).
+
+    The three states the read models must not conflate (§16.7):
+    `scored_features == 0` is **not scored yet**, `0 < scored_features <
+    labelled_features` is **in progress or interrupted**, and
+    `labelled_features == 0` is **nothing scoreable** — which is a different
+    fact from "no results" and says which.
+    """
+
+    run_id: RunId
+    scored_features: int
+    labelled_features: int
+    #: `True` while a scoring task is in flight for this run. Polled through
+    #: `GET /api/v1/tasks/{id}`, exactly as import and runs are.
+    running: bool
+
+
+@runtime_checkable
+class Scorer(Protocol):
+    """ "Is this run scored, and how far?" without `results_service` importing
+    `scoring_service`.
+
+    T1 implements it; T2 and T3 call it to choose between rendering numbers and
+    rendering one of §16.7's three empty states.
+    """
+
+    async def status(self, session: AsyncSession, run_id: RunId) -> ScoringStatus: ...

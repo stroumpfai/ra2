@@ -14,7 +14,7 @@ import io
 from collections.abc import Sequence
 from typing import Final
 
-from ra2.domain.ids import CorpusId, DeliveryId, FileId
+from ra2.domain.ids import CorpusId, DeliveryId, FileId, RunId
 from ra2.infra.clock import Clock
 from ra2.services.census_service import CensusService
 from ra2.services.corpus_service import CorpusService
@@ -173,6 +173,27 @@ class ExportService:
         except NotFoundError:
             return None
         return corpus.version
+
+    async def presence_records_csv(
+        self,
+        run_id: RunId,
+        feature_key: str,
+        *,
+        sort_key: str = "record_id",
+        sort_dir: SortDir = SortDir.ASC,
+    ) -> bytes:
+        """Tab 2's per-record list — "the actionable form of Goal 2".
+
+        The conventions are the ones already settled here and are **reused, not
+        re-derived**: UTF-8 with a BOM (Excel on Windows, N3), `;`-delimited, a
+        comment line naming the corpus id and version, and the **currently
+        filtered, currently sorted** rows only — never the whole thing
+        (sw-design.md §7).
+
+        Declared at M27 because `export_service.py` is frozen and phase 4 needs
+        one more writer on it (plan-phase-4.md C11). **T2 writes the body.**
+        """
+        raise NotImplementedError
 
     @staticmethod
     def _write_csv(

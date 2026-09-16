@@ -32,6 +32,7 @@ from ra2.infra.ollama_client import (
     OllamaModelCatalog,
 )
 from ra2.infra.tasks import AsyncioTaskRunner, TaskRunner
+from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
 from ra2.persistence.session import create_engine, create_session_factory, ensure_database_dir
 from ra2.services.census_materialiser import RelationalCensusMaterialiser
 from ra2.services.census_service import CensusService
@@ -43,8 +44,11 @@ from ra2.services.evaluation_service import EvaluationService
 from ra2.services.export_service import ExportService
 from ra2.services.feature_service import FeatureService
 from ra2.services.prompt_service import PromptService
-from ra2.services.protocols import CensusMaterialiser, PromptResolver
+from ra2.services.protocols import CensusMaterialiser, GroundTruthProvider, PromptResolver
+from ra2.services.ranking_service import RankingService
+from ra2.services.results_service import ResultsService
 from ra2.services.run_service import RunService
+from ra2.services.scoring_service import ScoringService
 from ra2.ui import views
 from ra2.ui.theme import FONTS_DIR, FONTS_URL_PATH
 
@@ -68,6 +72,7 @@ def create_app(
     endpoint_prober: EndpointProber | None = None,
     gpu_probe: GpuProbe | None = None,
     prompt_resolver: PromptResolver | None = None,
+    ground_truth: GroundTruthProvider | None = None,
     mount_ui: bool = True,
 ) -> FastAPI:
     """Build the application.
@@ -187,6 +192,23 @@ def create_app(
         ids=ids,
         settings=settings,
     )
+    # --- phase 4 (M27): scoring and results -------------------------------
+    # `ground_truth` is a defaulted keyword argument like every other adapter
+    # (§12.12) so a test can substitute the EAV read without a test-mode branch
+    # (Do-NOT #12), and P3-D13's lesson applies: a seam only production can
+    # wire is a seam only production uses.
+    ground_truth = ground_truth or GroundTruthRepository()
+    scoring_service = ScoringService(
+        session_factory=session_factory,
+        ground_truth=ground_truth,
+        task_runner=task_runner,
+        clock=clock,
+        id_factory=ids,
+    )
+    # `scoring_service` satisfies `Scorer` structurally — neither read service
+    # imports it directly.
+    results_service = ResultsService(session_factory=session_factory, scorer=scoring_service)
+    ranking_service = RankingService(session_factory=session_factory, scorer=scoring_service)
     services = Services(
         delivery=delivery_service,
         corpus=corpus_service,
@@ -197,6 +219,9 @@ def create_app(
         prompt=prompt_service,
         evaluation=evaluation_service,
         run=run_service,
+        scoring=scoring_service,
+        results=results_service,
+        ranking=ranking_service,
     )
 
     app = FastAPI(

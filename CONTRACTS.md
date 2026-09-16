@@ -242,6 +242,103 @@ left this implicit and paid for it with a lead fix-up commit (`e386a66`).
 
 ---
 
+## Phase 4 — owner: M27 (Wave 0), amendment only
+
+Re-established at tag `p4-frozen`, the same way M17 established the phase-3
+list at `p3-frozen`. **Wave 0 of phase 4 may edit any file this document
+already lists**, including phase-1, phase-2 and phase-3 files —
+re-establishing the frozen baseline for a new phase is Wave 0's job
+(plan-phase-4.md §4). After `p4-frozen`, everything below is frozen for
+Waves 1-4 exactly as the three lists above are.
+
+**One migration author, one per phase.** A3 was phase 1's, D3 phase 2's,
+H3 phase 3's; **S4 is phase 4's**. Nobody else runs `alembic revision` against
+a chain phase 4 has touched. No parallel heads (CLAUDE.md).
+
+**This is the first phase since M0 that adds no dependency and no lint
+contract.** `pyproject.toml` and `.importlinter` are byte-unchanged, and
+`tests/test_p4_contract.py` asserts both — a decision with no gate behind it
+is a preference. The Wilson interval is a closed form over one constant, and
+the layer rule already forbids everything this phase could get wrong:
+`ra2/domain/ranking.py` **cannot** reach a session or a repository, which is
+what makes "ranking is a derivation, not a table" structural rather than
+aspirational (sw-design.md §16.5).
+
+**`sw-design.md` §16 is this wave's first and largest deliverable.** Unlike
+phases 2 and 3, phase 4 began with no architecture section — §15.8 had parked
+scoring — so §16 was written before any code in this wave, and `SD16`-`SD22`
+with it (plan-phase-4.md §0).
+
+### New files
+
+| File | Contents |
+|---|---|
+| `ra2/domain/stats.py` | `WILSON_Z_95`, `Interval`, `EMPTY_INTERVAL`, `TieMark`, `TiedCell` — **types and signatures only**; `wilson` / `suppressed` / `mark_ties` / `macro` bodies are S1's |
+| `ra2/domain/ranking.py` | `FeatureCell`, `ModelRanking`, `SeparatingFeature` — types and signatures only; `rank_models` / `separating_features` bodies are S1's. **Imports nothing outside `domain`** — that is the §16.5 invariant, and `import-linter` is what holds it |
+| `ra2/domain/matching.py` | signatures only; `is_empty` / `normalise` / `matches` bodies are S2's. **No fuzzy matching and no accent folding** — D6, and §8.4 flags accent folding as a question this phase's numbers are meant to answer |
+| `ra2/domain/scoring.py` | `Outcome`, **`ScoreMetric`** (the closed 16), `COUNT_METRICS`, `ALL_LANGUAGES`, `LabelledCase`, `ExploratoryCase`, `ScoreRow`, `CrossTab` — types and signatures only; `classify` / `aggregate_goal1/2/3` bodies are S2's |
+| `ra2/domain/derivation.py` | `RecordProjection`, `DerivationError` — types and signature only; `evaluate` body is S3's. **plan-phase-2.md Q1's deferral, coming due** |
+| `ra2/services/scoring_service.py` | constructor + typed signatures; bodies T1. Implements `Scorer`. **No `resume` entry point — resume is implicit** in `score_run`, and a second one would be a second answer to "how far did it get" |
+| `ra2/services/results_service.py` | constructor + typed signatures; bodies T2 |
+| `ra2/services/ranking_service.py` | constructor + typed signature; body T3 |
+| `ra2/persistence/repositories/score_repo.py` | stub; bodies S4. **No `scored_at` — do not add one** (§16.1, F5) |
+| `ra2/persistence/repositories/mismatch_repo.py` | stub; bodies S4. The **tag-preserving upsert**; `DELETE`-then-`INSERT` is the wrong answer (SD21) |
+| `ra2/persistence/repositories/ground_truth_repo.py` | stub; bodies S4. Implements `GroundTruthProvider`. Holds **no session** — one is passed per call, because the pass owns the transaction boundary |
+| `ra2/api/v1/results.py` | stub router; bodies U1. An unscored run is **200 with `scored: false`**, never a 404 |
+| `ra2/api/v1/presence.py`, `ra2/api/v1/ranking.py` | stub routers; bodies U2 |
+| `ra2/ui/views/results/` | **a package, not a module** (SD22) — `__init__` (route, shell, tab strip) + `extraction_tab` V1, `presence_tab` V2, `ranking_tab` V3. Signatures only; the Wave 4 seam (plan-phase-4.md §3.1) |
+| `ra2/ui/components/stat_cells.py`, `ra2/ui/components/contingency_table.py` | **signatures only**; bodies S5. The tie marker is **shape-coded on the neutral accent**, and S5's tests assert the three states structurally so it cannot be reverted into a colour |
+| `ra2/persistence/migrations/versions/20260916_0501_e5145f27bf8c_phase_4_scoring_and_results.py` | the **whole** phase-4 schema, written in full for P3-D11's reason: it alters `evaluation`. S4 still owns `migrations/versions/**` from Wave 1 |
+| `tests/test_p4_contract.py` | this wave's exit criteria as tests — lead-owned, frozen |
+
+### Amended files (already frozen; re-frozen here)
+
+| File | What changed |
+|---|---|
+| `ra2/domain/ids.py` | + `MismatchId`. `score` gets none — it carries mvp-spec.md §5's composite key, the same treatment `extraction_value` gets |
+| `ra2/persistence/models.py` | + `Score`, `Mismatch`; `Evaluation` gains `min_cell_count`; `Run` gains the two cascading relationships. Also + **`UtcDateTime`** (P3-D15, its own commit) |
+| `ra2/services/protocols.py` | + `GroundTruthProvider`, `Scorer`, `ScoringStatus` (the Wave 2 seams, plan-phase-4.md §3.1) |
+| `ra2/services/container.py` | + `scoring: ScoringService`, `results: ResultsService`, `ranking: RankingService` |
+| `ra2/services/errors.py` | + `RunNotScoredError`, `RunNotScoreableError`. **No new `FindingCode`s** — a suppressed cell is a rendered state, not an import defect; phases 2 and 3 set this precedent twice |
+| `ra2/services/readmodels.py` | + `SuppressedCell`, `MetricCell`, `Cell`, `RunDescriptorView`, `ModelColumnView`, `BreakdownRowView`, `BreakdownView`, `FeatureScoreRow`, `ByLanguageRow`, `ByLanguageView`, `ExploratoryRow`, `ExtractionTabView`, `Goal1Companion`, `PresenceRow`, `CrossTabView`, `FlagInconsistencyRow`, `PerRecordRow`, `PresenceTabView`, `RankingRow`, `SeparatingRow`, `RankingTabView`, `ScoringStatusView` |
+| `ra2/services/export_service.py` | + the `presence_records_csv` signature (plan-phase-4.md C11); body is T2's |
+| `ra2/api/deps.py` | + `ScoringServiceDep`, `ResultsServiceDep`, `RankingServiceDep` |
+| `ra2/api/v1/router.py` | + the three new routers |
+| `ra2/main.py` | + the `ground_truth` keyword argument and the three new services' construction |
+| `ra2/infra/config.py` | **unchanged.** `min_cell_count` already existed and now serves as the per-evaluation *default*, not the value itself |
+| `ra2/ui/shell.py` | **unchanged.** `results` has existed as a `NavItem` with `built=False` since phase 1, icon already wired — the first phase since M0 to add no nav entry |
+| `mvp-spec.md` | §5 (+ `evaluation.min_cell_count`; `score.metric` documented as a closed vocabulary carrying counts; `score.language` NOT NULL), §11.4 (the column that makes "per evaluation" true), §11.5 (presence rate is reported, never scored) |
+| `CLAUDE.md` | the fourth migration author |
+| `pyproject.toml`, `.importlinter` | **byte-unchanged, and asserted so** (see above) |
+
+### Stubs — a body is expected; the file is **not** frozen (phase 4)
+
+| Path | Owner |
+|---|---|
+| `ra2/domain/{stats,ranking}.py` *(bodies)* | S1 |
+| `ra2/domain/{matching,scoring}.py` *(bodies)* | S2 |
+| `ra2/domain/derivation.py` *(bodies)* | S3 |
+| `ra2/persistence/repositories/{score,mismatch,ground_truth}_repo.py`, `ra2/persistence/migrations/versions/**` | S4 |
+| `ra2/ui/components/{stat_cells,contingency_table}.py` *(bodies)*, `ra2/ui/components/primitives.py` *(additions)* | S5 |
+| `ra2/services/scoring_service.py` | T1 |
+| `ra2/services/results_service.py`, `ra2/services/export_service.py` *(`presence_records_csv` body)* | T2 |
+| `ra2/services/ranking_service.py` | T3 |
+| `ra2/api/v1/results.py` | U1 |
+| `ra2/api/v1/{presence,ranking}.py` | U2 |
+| `ra2/ui/views/results/__init__.py`, `ra2/ui/views/results/extraction_tab.py`, `ra2/ui/state.py` *(additions)* | V1 |
+| `ra2/ui/views/results/presence_tab.py` | V2 |
+| `ra2/ui/views/results/ranking_tab.py` | V3 |
+
+### The one-line nav exception
+
+Phase 3 declared this for two agents and phase 2 paid for leaving it implicit
+(`e386a66`). Phase 4 needs it for **one**: **V1 may flip exactly the `results`
+`built` flag and add exactly its own line to `register_all`.** Nothing else in
+either file. V2 and V3 touch neither — they render into V1's tab shell. There
+is no merge conflict this phase, which is the point of saying so in advance.
+
+---
+
 ## Documented deviations phase 3 (M17) introduces
 
 | # | Decision | Why |

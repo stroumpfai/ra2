@@ -24,6 +24,7 @@ __all__ = [
     "FeatureConfigId",
     "FeatureId",
     "FileId",
+    "MismatchId",
     "ObjektRowId",
     "PersonRowId",
     "PromptTemplateId",
@@ -97,3 +98,15 @@ RunId = NewType("RunId", str)
 #: One model's output for one `(run, record)` (mvp-spec.md §5, §10.3).
 #: **IMMUTABLE** — a re-run adds rows, never updates them (N5).
 ExtractionId = NewType("ExtractionId", str)
+
+
+# --- phase 4 (M27, plan-phase-4.md §3) --------------------------------------
+
+#: One `wrong` outcome, for one `(run, record, feature)` (mvp-spec.md §5, §12).
+#:
+#: The **one mutable row** in this pipeline: `analyst_tag`, `tagged_at` and
+#: `note` are written by review, and a re-score upserts the derived columns
+#: around them rather than replacing the row (sw-design.md §16.6, SD21).
+#: `score` needs no id type — it carries mvp-spec.md §5's composite key, the
+#: same treatment `extraction_value` gets.
+MismatchId = NewType("MismatchId", str)

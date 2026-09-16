@@ -271,7 +271,11 @@ prompt_template(id, version, source, created_at, activated_at, fingerprint)
 
 evaluation(id, name, corpus_id, feature_config_id, prompt_template_id,
            prompt_language, temperature, seed, size, selected_models_json,
-           created_at, launched_at, is_dev)
+           min_cell_count, created_at, launched_at, is_dev)
+      -- min_cell_count added at phase 4 (SD19): §11.4 always said the floor
+      -- is "configurable per evaluation", and a column is what makes that
+      -- true. Cheap because suppression is applied at READ time from stored
+      -- n, so changing the floor never requires a re-score.
       -- editable while launched_at IS NULL; immutable after (SD13)
 evaluation_feature(evaluation_id, feature_id, enum_codelist_json, fingerprint)
       -- written once, inside the launch transaction (SD12). A frozen
@@ -294,9 +298,24 @@ extraction_value(extraction_id, feature_id, value_raw, value_normalised,
 extraction_entity(extraction_id, entity_kind, entity_ref, attributes_json)
            -- per-entity output: captured, not scored in MVP
 
-score(run_id, feature_id, language|NULL, metric, value, n, ci_low, ci_high)
+score(run_id, feature_id, language, metric, value, n, ci_low, ci_high)
+      -- composite PK (run_id, feature_id, language, metric).
+      -- `language` is NOT NULL, with '*' for the all-languages row (SD16):
+      -- SQL treats two NULLs as distinct in a unique constraint, so a
+      -- nullable column here permits exactly the duplicate rows the key
+      -- looks like it prevents, and a re-score would orphan the old ones.
+      -- `metric` is a CLOSED vocabulary (domain/scoring.py's ScoreMetric)
+      -- carrying raw counts as well as rates (SD18) — the breakdown row needs
+      -- hit/wrong/missing and the cross-tab needs six cells, and recovering
+      -- counts from three rounded floats is off by one exactly at small n.
+      -- ci_low/ci_high are NULL for a count.
 mismatch(id, run_id, record_id, feature_id, record_value, extracted_value,
          evidence_span, analyst_tag, tagged_at, note)
+      -- UNIQUE (run_id, record_id, feature_id). The ONE mutable row in this
+      -- pipeline: analyst_tag/tagged_at/note are written by review, and a
+      -- re-score UPSERTS the derived columns around them rather than
+      -- replacing the row (SD21). DELETE-then-INSERT destroys review work
+      -- silently, at the moment a developer is most confident.
 ```
 
 **Never overwrite an extraction.** A re-run creates a new `run` and new
@@ -622,7 +641,11 @@ a weak extractor manufactures false "missing" flags.
 - Every metric is rendered with its **n** and its interval.
 - **Cells with n below the minimum count render as "insufficient data"**, never as
   a number. Default **20**, configurable per evaluation. *(Chosen default — the
-  vision left this open at 10 or 20.)*
+  vision left this open at 10 or 20.)* The setting is
+  `evaluation.min_cell_count`, defaulted from `RA2_MIN_CELL_COUNT` when the
+  draft is created and pinned at launch like every other input. Suppression is
+  applied when a result is **read**, from the stored `n` — so raising or
+  lowering the floor never requires a re-score (sw-design.md §16.4, SD19).
 
 ### 11.5 Ranking (Goal 4)
 
@@ -631,6 +654,13 @@ a weak extractor manufactures false "missing" flags.
 - **Overlapping confidence intervals are rendered as a tie**, not as an order.
 - Exploratory attributes take no part.
 - Every cross-corpus number, if ever shown, carries its corpus label.
+- **Latency, VRAM and the macro presence rate are reported, never scored** —
+  the tie-breaker the analyst applies, not one the tool applies. The presence
+  figure is in that group rather than in the ranking for §11.2's reason: there
+  is no independent gold label for presence, and §11.3's logic applies to it
+  directly — a model that flags everything present maximises the rate. It is
+  rendered beside the ranking and takes no part in computing it
+  (sw-design.md §16.5, SD20).
 
 ---
 

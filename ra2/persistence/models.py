@@ -5,7 +5,9 @@
 feature configs, and phase 3 (M17) adds prompts and runs — `prompt_template`,
 `evaluation_feature`, `run`, `extraction`, `extraction_value`,
 `extraction_entity`, plus the setup columns `evaluation` was always implying.
-`score` and `mismatch` are still *out*: scoring is phase 4.
+Phase 4 (M27) adds the last two tables mvp-spec.md §5 names — `score` and
+`mismatch` — plus `evaluation.min_cell_count`. Nothing in §5 is unbuilt after
+this.
 
 **Immutability (N5, §12.2).** `corpus` and everything below it —
 `record`, `unfall_row`, `objekt_row`, `objekt_cell`, `person_row`,
@@ -62,12 +64,14 @@ from ra2.domain.ids import (
     FeatureConfigId,
     FeatureId,
     FileId,
+    MismatchId,
     ObjektRowId,
     PersonRowId,
     PromptTemplateId,
     RecordId,
     RunId,
 )
+from ra2.domain.scoring import ScoreMetric
 
 __all__ = [
     "Base",
@@ -88,6 +92,7 @@ __all__ = [
     "ExtractionValue",
     "Feature",
     "FeatureConfig",
+    "Mismatch",
     "ObjektCell",
     "ObjektRow",
     "PersonCell",
@@ -95,6 +100,7 @@ __all__ = [
     "PromptTemplate",
     "Record",
     "Run",
+    "Score",
     "UnfallRow",
     "UtcDateTime",
 ]
@@ -175,6 +181,7 @@ class Base(DeclarativeBase):
         PromptTemplateId: String(_ID_LEN),
         RunId: String(_ID_LEN),
         ExtractionId: String(_ID_LEN),
+        MismatchId: String(_ID_LEN),
         FileKind: String(16),
         SourceKind: String(16),
         DeliveryStatus: String(16),
@@ -184,6 +191,7 @@ class Base(DeclarativeBase):
         ValueType: String(16),
         RunStatus: String(16),
         EvaluationSize: String(16),
+        ScoreMetric: String(32),
         datetime: UtcDateTime(),
         str: Text(),
         int: Integer(),
@@ -678,6 +686,18 @@ class Evaluation(Base):
     #: not the moment the draft row appeared (sw-design.md §15.2).
     launched_at: Mapped[datetime | None] = mapped_column(default=None)
 
+    # --- phase 4 (M27) ------------------------------------------------------
+
+    #: mvp-spec.md §11.4's floor: "cells with n below the minimum count render
+    #: as 'insufficient data', never as a number. Default **20**, configurable
+    #: **per evaluation**." Defaulted from `config.min_cell_count` when the
+    #: draft is created, and pinned like every other input at launch.
+    #:
+    #: A column rather than a global constant because the spec says so, and
+    #: because it is cheap: **suppression is applied at read time** from stored
+    #: `n` (SD19), so raising or lowering this never requires a re-score.
+    min_cell_count: Mapped[int] = mapped_column(default=20)
+
     features: Mapped[list[EvaluationFeature]] = relationship(
         back_populates="evaluation", cascade="all, delete-orphan", passive_deletes=True
     )
@@ -1022,6 +1042,15 @@ class Run(Base):
     extractions: Mapped[list[Extraction]] = relationship(
         back_populates="run", cascade="all, delete-orphan", passive_deletes=True
     )
+    #: Phase 4. Deleting a run takes its scores with it — they are derived, so
+    #: there is nothing to preserve. Its mismatches go too: a tag on a run that
+    #: no longer exists describes nothing.
+    scores: Mapped[list[Score]] = relationship(
+        back_populates="run", cascade="all, delete-orphan", passive_deletes=True
+    )
+    mismatches: Mapped[list[Mismatch]] = relationship(
+        back_populates="run", cascade="all, delete-orphan", passive_deletes=True
+    )
 
 
 class Extraction(Base):
@@ -1142,3 +1171,128 @@ class ExtractionEntity(Base):
     attributes_json: Mapped[str]
 
     extraction: Mapped[Extraction] = relationship(back_populates="entities")
+
+
+# ===========================================================================
+# Scoring — phase 4 (M27), mvp-spec.md §5/§11/§12, sw-design.md §16.
+#
+# `score` is derived and rewritable: it is a pure function of immutable inputs,
+# so a re-score either reproduces a feature's rows byte-for-byte or the scorer
+# changed, and in both cases replacement is correct. `mismatch` is **not** —
+# it is the one row in this pipeline a human writes to (SD21).
+# ===========================================================================
+
+
+class Score(Base):
+    """One metric, for one `(run, feature, language)` (mvp-spec.md §5, §11).
+
+    **Written one `(run, feature)` at a time, in one transaction** — every
+    language and every metric for that pair together (sw-design.md §16.1). That
+    boundary is what makes the pass resumable: the features of a run with no
+    `score` rows are the work left, which is a query rather than bookkeeping,
+    and an interrupted pass leaves whole features done and whole features
+    absent, never a feature half-scored from two different reads of the corpus.
+
+    **There is no scoring-status column anywhere**, for the reason §15.3
+    refused `records_done`: the count that answers "how far did it get" is the
+    same one that answers "where does it resume", so the two cannot disagree.
+
+    `metric` is `domain.scoring.ScoreMetric`'s closed vocabulary, and it holds
+    **raw counts as well as rates** (SD18) — the design's breakdown row needs
+    hit/wrong/missing and its cross-tab needs six cells, and back-deriving
+    those from three rounded floats is off by one exactly at small `n`, where
+    the number matters most. `ci_low`/`ci_high` are `None` for a count.
+
+    `n` is the **labelled-case count** for this cell, never the corpus size: a
+    record whose source column is empty left the denominator entirely (§8.6).
+    Suppression is *not* applied here — every cell is computed and stored, and
+    the read model substitutes the insufficient-data shape (SD19).
+    """
+
+    __tablename__ = "score"
+    __table_args__ = (Index("ix_score_run_id", "run_id"),)
+
+    run_id: Mapped[RunId] = mapped_column(
+        ForeignKey("run.id", ondelete="CASCADE"), primary_key=True
+    )
+    feature_id: Mapped[FeatureId] = mapped_column(
+        ForeignKey("feature.id", ondelete="RESTRICT"), primary_key=True
+    )
+    #: The language this cell is about, or `domain.scoring.ALL_LANGUAGES`
+    #: (`'*'`) for the all-languages row.
+    #:
+    #: **`NOT NULL`, against mvp-spec.md §5's `language|NULL`** (SD16). SQL
+    #: treats two NULLs as distinct in a unique constraint, so a composite key
+    #: over a nullable column permits exactly the duplicate rows it looks like
+    #: it prevents — and "rewrite this feature's rows" would orphan the old
+    #: ones on every re-score. The sentinel makes the key real.
+    language: Mapped[str] = mapped_column(String(16), primary_key=True)
+    metric: Mapped[ScoreMetric] = mapped_column(primary_key=True)
+    #: The rate, or the count as a float for `scoring.COUNT_METRICS`.
+    value: Mapped[float]
+    n: Mapped[int]
+    #: Wilson 95 % bounds (D4). `None` for a count — a count has no interval,
+    #: and a renderer must not reach for one.
+    ci_low: Mapped[float | None] = mapped_column(default=None)
+    ci_high: Mapped[float | None] = mapped_column(default=None)
+
+    run: Mapped[Run] = relationship(back_populates="scores")
+
+
+class Mismatch(Base):
+    """One `wrong` outcome, for review (mvp-spec.md §5, §12).
+
+    **The one mutable row in this pipeline.** Everything else is append-only:
+    Do-NOT #2 covers `corpus`, `record` and `extraction`, prompt templates are
+    copy-on-write, and code tables are superseded rather than edited. Tagging a
+    mismatch is the whole of F11, so `analyst_tag`, `tagged_at` and `note` are
+    written by review — and a **re-score upserts around them** rather than
+    replacing the row (SD21).
+
+    `UNIQUE (run_id, record_id, feature_id)` is what makes that upsert
+    expressible. The obvious implementation — `DELETE` then `INSERT` — destroys
+    review work silently, at the moment a developer is most confident, because
+    they have just fixed the scorer.
+
+    **The structured record is fully authoritative** (§12). `record_value` is
+    what the corpus holds, `extracted_value` what the model said, and no
+    adjudication step exists anywhere in the pipeline: the analyst's tag is a
+    tally, and **nothing is ever rescored from it**.
+
+    Phase 4 writes these rows and never reads them; `analyst_tag` stays `None`
+    for the whole phase. The review view is F11, deliberately out of scope
+    (plan-phase-4.md §1 Q1) — which is exactly why the rows are written now,
+    so that phase is a view over data that already exists.
+    """
+
+    __tablename__ = "mismatch"
+    __table_args__ = (
+        UniqueConstraint("run_id", "record_id", "feature_id"),
+        Index("ix_mismatch_run_id_feature_id", "run_id", "feature_id"),
+    )
+
+    id: Mapped[MismatchId] = mapped_column(primary_key=True)
+    run_id: Mapped[RunId] = mapped_column(ForeignKey("run.id", ondelete="CASCADE"))
+    record_id: Mapped[RecordId] = mapped_column(ForeignKey("record.id", ondelete="CASCADE"))
+    feature_id: Mapped[FeatureId] = mapped_column(ForeignKey("feature.id", ondelete="RESTRICT"))
+    #: What the corpus holds — authoritative, always.
+    record_value: Mapped[str | None] = mapped_column(default=None)
+    #: What the model said. Non-null by construction: a null model value is a
+    #: `MISSING`, not a `WRONG`, and produces no row here.
+    extracted_value: Mapped[str | None] = mapped_column(default=None)
+    #: Quoted verbatim from the narrative. The evidence automatic
+    #: hallucination triage would need, captured now because it is free and
+    #: unrecoverable later (mvp-spec.md §16).
+    evidence_span: Mapped[str | None] = mapped_column(default=None)
+
+    # --- review (F11, phase 5). Preserved across a re-score. ---------------
+
+    #: `hallucination` | `structured_data_error` | `unclear` (mvp-spec.md §12).
+    #: Not an enum column: the vocabulary is the analyst's, a fourth tag must
+    #: be a value rather than a migration, and **the tag never feeds back into
+    #: a metric** — nothing is rescored from it, so nothing joins on it.
+    analyst_tag: Mapped[str | None] = mapped_column(String(32), default=None)
+    tagged_at: Mapped[datetime | None] = mapped_column(default=None)
+    note: Mapped[str | None] = mapped_column(default=None)
+
+    run: Mapped[Run] = relationship(back_populates="mismatches")

@@ -34,13 +34,20 @@ from ra2.domain.ids import (
     FeatureId,
     FileId,
     PromptTemplateId,
+    RecordId,
     RunId,
 )
 from ra2.domain.llm import EndpointStatus, ProbeCode
 from ra2.domain.prompt import PromptValidationError, SlotName
+from ra2.domain.stats import TieMark
 
 __all__ = [
+    "BreakdownRowView",
+    "BreakdownView",
+    "ByLanguageRow",
+    "ByLanguageView",
     "CatalogueView",
+    "Cell",
     "CensusBucket",
     "CensusColumnView",
     "CensusSummary",
@@ -51,22 +58,39 @@ __all__ = [
     "ConnectionView",
     "CorpusSummary",
     "CorpusView",
+    "CrossTabView",
     "DeliveryFileView",
     "DeliveryView",
     "EvaluationDraftView",
     "EvaluationView",
+    "ExploratoryRow",
+    "ExtractionTabView",
     "FeatureConfigView",
+    "FeatureScoreRow",
     "FeatureSetSummary",
     "FeatureView",
+    "FlagInconsistencyRow",
+    "Goal1Companion",
+    "MetricCell",
     "ModelChoiceView",
+    "ModelColumnView",
     "Page",
+    "PerRecordRow",
+    "PresenceRow",
+    "PresenceTabView",
     "PromptTemplateView",
     "ProvenanceView",
+    "RankingRow",
+    "RankingTabView",
     "ResolvedPromptView",
+    "RunDescriptorView",
     "RunProgressView",
     "RunView",
+    "ScoringStatusView",
+    "SeparatingRow",
     "SlotView",
     "SortDir",
+    "SuppressedCell",
 ]
 
 
@@ -676,3 +700,400 @@ class EvaluationView:
             and self.draft.prompt_template_id is not None
             and not self.draft.is_launched
         )
+
+
+# ===========================================================================
+# Results — phase 4 (M27), sw-design.md §16.7. One route, three tabs, one
+# evaluation.
+#
+# Two rules here are expressed as **shapes** rather than as conventions,
+# because a convention is what a later refactor drops:
+#
+#   - a suppressed cell is `SuppressedCell`, which has no `value` field at
+#     all. It cannot be formatted into a string by accident and it cannot be
+#     sorted as zero (SD19, §16.4).
+#   - `PresenceRow` carries its `goal1` block and there is no constructor that
+#     omits it. "Goal 2 numbers are never published without the Goal 1 numbers
+#     beside them" (§11.2) is then a type error rather than a review comment.
+# ===========================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class SuppressedCell:
+    """A cell below the evaluation's floor — `mvp-spec.md` §11.4.
+
+    **Carries no value, by construction.** "Cells with n below the minimum
+    count render as 'insufficient data', **never as a number**", and the
+    cheapest way to keep that true through four layers is for the number not to
+    exist in the shape at all.
+
+    `n` and `floor` are both here because the notice states them — "17 labelled
+    cases, below the minimum of 20" — and the floor is per-evaluation (`SD19`),
+    so a renderer must not reach for a constant.
+    """
+
+    n: int
+    floor: int
+
+
+@dataclass(frozen=True, slots=True)
+class MetricCell:
+    """A point estimate with its Wilson interval — `mvp-spec.md` §11.4's
+    "every metric is rendered with its **n** and its interval"."""
+
+    value: float
+    ci_low: float
+    ci_high: float
+    n: int
+    mark: TieMark = TieMark.NONE
+
+
+#: Either a number or the reason there is no number. Every renderer must
+#: handle both, which is the point: `MetricCell | None` would have let a
+#: suppressed cell render as an empty string.
+Cell = MetricCell | SuppressedCell
+
+
+@dataclass(frozen=True, slots=True)
+class RunDescriptorView:
+    """The identity line every tab carries — "a score without its config is not
+    a result" (`design/results/README.md`).
+
+    `is_dev` is not decoration: `mvp-spec.md` §13 requires the "smoke test, not
+    a result" marker on **every** dev-sized result wherever its numbers appear.
+    On these boards it *replaces* the "Evaluation run" pill rather than sitting
+    beside it, so there is no state in which a dev number renders unmarked.
+    """
+
+    evaluation_id: EvaluationId
+    corpus_label: str
+    record_count: int
+    model_count: int
+    #: The short `cfg` hash the design chips — the frozen feature config's
+    #: fingerprint, not the evaluation's id.
+    config_fingerprint: str
+    is_dev: bool
+    min_cell_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class ModelColumnView:
+    """One model column header: the tag, and the digest that is its identity."""
+
+    model_id: str
+    tag: str
+    digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class BreakdownRowView:
+    """One model's row of an expanded feature: P · R · F1 · hit · wrong · missing.
+
+    Six `score` rows of one table, not a join (`SD18`). The counts are stored
+    rather than back-derived from P and R, which is off by one exactly at small
+    `n`.
+    """
+
+    model_id: str
+    precision: float
+    recall: float
+    f1: float
+    hit: int
+    wrong: int
+    missing: int
+
+
+@dataclass(frozen=True, slots=True)
+class BreakdownView:
+    """The expanded row under one feature. One open at a time.
+
+    `hallucination_note` is rendered verbatim and is a **spec guarantee**, not
+    a caption: `D1` and §11.1's warning say a hallucination rate is not
+    computable and must never be presented as if it were measured. It renders
+    even though the mismatch list it points at is phase 5 — a promise the
+    product keeps by not making a claim.
+    """
+
+    feature_id: FeatureId
+    feature_name: str
+    rows: tuple[BreakdownRowView, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class FeatureScoreRow:
+    """One feature's row of the extraction table: name, source, `n`, one cell
+    per model.
+
+    `cells` is keyed by `model_id` and every model column has an entry — a
+    missing key would render as a gap that looks like a layout bug rather than
+    like a missing measurement.
+
+    `suppressed` is the row-level fact (`n` below the floor), which tints the
+    row and replaces **all** the model cells with one notice. It is `True`
+    exactly when every entry in `cells` is a `SuppressedCell`.
+    """
+
+    feature_id: FeatureId
+    name: str
+    #: `Witter0Ausw · enum`, or `derived · count_objects · integer`.
+    source_label: str
+    n: int
+    suppressed: bool
+    cells: Mapping[str, Cell]
+
+
+@dataclass(frozen=True, slots=True)
+class ByLanguageRow:
+    """One language's cell for one feature × model (`mvp-spec.md` §11.1)."""
+
+    language: str
+    cell: Cell
+
+
+@dataclass(frozen=True, slots=True)
+class ByLanguageView:
+    """The per-language breakdown, and the caveat it may never be shown without.
+
+    `mvp-spec.md` §13 requires the language breakdown to carry "a **standing
+    caveat** that encoding loss affects French more than German and cannot be
+    quantified". It is part of this shape rather than of the template so that a
+    breakdown cannot be rendered somewhere else without it.
+    """
+
+    feature_id: FeatureId
+    feature_name: str
+    model_id: str
+    rows: tuple[ByLanguageRow, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ExploratoryRow:
+    """One Goal 3 attribute — `no ground truth · not ranked` (`mvp-spec.md` §11.3).
+
+    **There is no model dimension here, deliberately.** "Discovery rates are
+    never compared between models as a quality signal — a freely hallucinating
+    model wins this metric." The comparison is not merely undrawn; there is no
+    shape that expresses it.
+
+    `reviewed` / `review_total` are `None` for the whole of phase 4: the
+    counter implies the tagging machinery F11 defers, and building a second one
+    for exploratory attributes would duplicate it (plan-phase-4.md C6). The
+    card renders `— / n` and names the deferral, never a fake zero.
+    """
+
+    attribute_key: FeatureId
+    name: str
+    discovery_rate: float
+    evidence_span_count: int
+    reviewed: int | None = None
+    review_total: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractionTabView:
+    """Tab 1 — the only tab with ground truth, and the input every other tab is
+    read against."""
+
+    descriptor: RunDescriptorView
+    models: tuple[ModelColumnView, ...]
+    features: Page[FeatureScoreRow]
+    #: The open breakdown, if any. One at a time.
+    breakdown: BreakdownView | None = None
+    by_language: ByLanguageView | None = None
+    exploratory: tuple[ExploratoryRow, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class Goal1Companion:
+    """The Goal 1 numbers that travel with every presence row.
+
+    `mvp-spec.md` §11.2: "Goal 2 numbers are **never published without the
+    corresponding Goal 1 numbers** — a weak extractor manufactures false
+    'missing' flags." A separate type, required by `PresenceRow`, so dropping
+    the column is a type error and not an edit.
+    """
+
+    f1: float
+    precision: float
+    recall: float
+
+
+@dataclass(frozen=True, slots=True)
+class PresenceRow:
+    """One feature's presence rates, per language, with its Goal 1 companions."""
+
+    feature_key: str
+    #: Keyed by language, plus `domain.scoring.ALL_LANGUAGES` for the
+    #: all-languages column.
+    rates: Mapping[str, Cell]
+    goal1: Goal1Companion
+
+
+@dataclass(frozen=True, slots=True)
+class CrossTabView:
+    """Goal 1 outcome × presence, for one feature × model (`mvp-spec.md` §11.2).
+
+    `hit_absent` is the card's whole point and is styled as the finding: the
+    model said the text does not contain the feature and then extracted the
+    record's exact value from it. Self-contradiction, automatically countable.
+    """
+
+    feature_key: str
+    model_id: str
+    hit_present: int
+    hit_absent: int
+    wrong_present: int
+    wrong_absent: int
+    missing_present: int
+    missing_absent: int
+
+
+@dataclass(frozen=True, slots=True)
+class FlagInconsistencyRow:
+    """`present = false`, yet the extracted value matched — per model.
+
+    The one Goal 2 number that is a quality signal rather than a description,
+    because it is a self-contradiction rather than a comparison against a gold
+    label nobody has (§11.2).
+    """
+
+    model_id: str
+    cell: Cell
+
+
+@dataclass(frozen=True, slots=True)
+class PerRecordRow:
+    """One record where the column is populated and the narrative does not say so.
+
+    **This list is the deliverable** — Goal 2 is consumed as a record list to
+    act on, not as a rate (`design/results/README.md` §2e). `finding` is the
+    plain sentence: "This report does not say what the weather was."
+
+    `anonymised` is required wherever text is shown (`mvp-spec.md` §13's "the
+    per-record anonymisation marking").
+    """
+
+    record_id: RecordId
+    anonymised: bool
+    record_value: str
+    finding: str
+    language: str
+    language_confidence: float
+
+
+@dataclass(frozen=True, slots=True)
+class PresenceTabView:
+    """Tab 2 — one model at a time, because presence is per-flag and a
+    three-model grid would not be readable.
+
+    Reports presence rate, the cross-tab and flag inconsistency, and
+    **deliberately refuses presence precision / recall / F1** (`D2`): there is
+    no independent gold label for presence, and deriving one from Goal 1
+    correctness would be circular. The scope banner states that to the analyst
+    verbatim and is not dismissible.
+    """
+
+    descriptor: RunDescriptorView
+    models: tuple[ModelColumnView, ...]
+    model_id: str
+    rows: tuple[PresenceRow, ...]
+    cross_tab: CrossTabView | None = None
+    flag_inconsistency: tuple[FlagInconsistencyRow, ...] = ()
+    records: Page[PerRecordRow] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RankingRow:
+    """One model's row of the ranking table.
+
+    `rank` **repeats on a tie** (`1, 1, 3`), never enumerates (`1, 2, 3`):
+    §11.5 renders overlapping intervals as a tie, not as an order.
+
+    The last three fields are **reported, never scored** — the design's own
+    rule 4, "the tie-breaker you apply, not one the tool applies". The presence
+    rate joins them (`SD20`): §11.2 is unambiguous that presence has no gold
+    label, and a model that flags everything present maximises it. None of the
+    three takes any part in `rank`.
+    """
+
+    model_id: str
+    tag: str
+    digest: str
+    rank: int
+    macro_f1: float
+    ci_low: float
+    ci_high: float
+    best: int
+    tied: int
+    worse: int
+    verdict: str
+    presence_rate: float
+    median_latency_ms: int
+    prompt_tokens: int
+    vram_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class SeparatingRow:
+    """A feature where the two leaders' intervals do not overlap."""
+
+    feature_id: FeatureId
+    name: str
+    source_label: str
+    n: int
+    #: Keyed by `model_id`, **in ranking order** when rendered.
+    f1_by_model: Mapping[str, float]
+    delta: float
+    #: The plain sentence: "mistral leads alone — intervals clear by .020".
+    reading: str
+
+
+@dataclass(frozen=True, slots=True)
+class RankingTabView:
+    """Tab 3 — which model to pick, and where the evidence does not separate them.
+
+    **Every number here is derived from tab 1's rows** through
+    `domain/ranking.py`; nothing is stored and nothing is cached independently.
+    If this and `ExtractionTabView` disagree, this one is wrong by construction
+    (sw-design.md §16.5), which is what J13 asserts in the browser.
+
+    An empty `separating` is a result, not a gap: it means this run does not
+    separate the models, and the verdict says so.
+    """
+
+    descriptor: RunDescriptorView
+    rows: tuple[RankingRow, ...]
+    separating: tuple[SeparatingRow, ...]
+    #: "Two models are tied at the top. This run does not separate them."
+    #: Composed from the computed ranks, never authored.
+    verdict_headline: str
+    verdict_detail: str
+    scored_feature_count: int
+    unscored_feature_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class ScoringStatusView:
+    """Which of §16.7's three states a tab should render.
+
+    Three states that must not share a rendering: **not scored yet**,
+    **scoring…**, and **nothing scoreable** — and the third says *which*,
+    because "no results" and "not enough data for results" are different facts
+    about the run.
+    """
+
+    run_id: RunId
+    scored_features: int
+    labelled_features: int
+    running: bool
+
+    @property
+    def is_scored(self) -> bool:
+        return self.labelled_features > 0 and self.scored_features >= self.labelled_features
+
+    @property
+    def is_scoreable(self) -> bool:
+        """`False` means there is nothing to score — every feature is
+        exploratory. Distinct from "every feature is suppressed", which is
+        scoreable and renders as suppression."""
+        return self.labelled_features > 0

@@ -16,7 +16,10 @@ from ra2.services.evaluation_service import EvaluationService
 from ra2.services.export_service import ExportService
 from ra2.services.feature_service import FeatureService
 from ra2.services.prompt_service import PromptService
+from ra2.services.ranking_service import RankingService
+from ra2.services.results_service import ResultsService
 from ra2.services.run_service import RunService
+from ra2.services.scoring_service import ScoringService
 
 __all__ = ["Services"]
 
@@ -32,3 +35,7 @@ class Services:
     prompt: PromptService
     evaluation: EvaluationService
     run: RunService
+    # --- phase 4 (M27) ---
+    scoring: ScoringService
+    results: ResultsService
+    ranking: RankingService
