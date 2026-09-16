@@ -20,11 +20,15 @@ from ra2.services.readmodels import SortDir
 
 __all__ = [
     "EVALUATION_KEY",
+    "RESULTS_KEY",
     "STORAGE_KEY",
     "EvaluationSetup",
+    "ResultsState",
     "TableState",
     "evaluation_setup",
+    "results_state",
     "set_evaluation_setup",
+    "set_results_state",
     "set_table_state",
     "table_state",
 ]
@@ -35,6 +39,10 @@ STORAGE_KEY: Final = "ra2.tables"
 
 #: The Evaluation view's own namespace, beside the tables' one.
 EVALUATION_KEY: Final = "ra2.evaluation"
+
+#: The Results view's own namespace. One entry for all three tabs, because
+#: they are one route and share a descriptor.
+RESULTS_KEY: Final = "ra2.results"
 
 
 @dataclass(slots=True)
@@ -133,3 +141,44 @@ def evaluation_setup() -> EvaluationSetup:
 def set_evaluation_setup(setup: EvaluationSetup) -> None:
     """Replace this client's `EvaluationSetup`."""
     app.storage.client[EVALUATION_KEY] = setup
+
+
+# --- Phase 4 (Results) additions --------------------------------------------
+#
+# Additive only. The Results view is one route with three tabs, so a browser
+# tab has to remember which of them it is on, which evaluation it is looking
+# at, which feature row is expanded, and which model the presence tab shows.
+
+
+@dataclass(slots=True)
+class ResultsState:
+    """Which of the three tabs this client is on, and what it has opened.
+
+    `tab` is navigation, not data: the sidebar's "Results" entry stays active
+    on all three, and the run descriptor and `cfg` chip persist across them
+    (design/results/README.md, Interactions).
+
+    `expanded_feature_id` is `None` most of the time — **one breakdown is open
+    at a time**, which is a property of this single field rather than of a
+    collection somebody has to remember to prune.
+    """
+
+    tab: str = "extraction"
+    evaluation_id: str = ""
+    expanded_feature_id: str | None = None
+    #: Tab 2 shows one model at a time; tab 1 shows them all side by side.
+    presence_model_id: str = ""
+    presence_feature_key: str = ""
+
+
+def results_state() -> ResultsState:
+    """This client's Results state, created on first use."""
+    state: ResultsState | None = app.storage.client.get(RESULTS_KEY)
+    if state is None:
+        state = ResultsState()
+        app.storage.client[RESULTS_KEY] = state
+    return state
+
+
+def set_results_state(state: ResultsState) -> None:
+    app.storage.client[RESULTS_KEY] = state

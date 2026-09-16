@@ -311,11 +311,30 @@ def _migrate(settings: Settings) -> None:
 
 
 @pytest.fixture(scope="session")
-def server_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
-    """A real RA2 on a random port, for the whole session."""
+def e2e_settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
+    """The session server's own `Settings`, migrated.
+
+    Exposed as its own fixture (phase 4, V1) so a journey can seed rows the
+    app has no UI or API to create — a **scored** evaluation needs
+    `extraction` and `score` rows, and nothing in the product writes those
+    except the run worker and the scoring pass.
+    """
     data_dir: Path = tmp_path_factory.mktemp("ra2-e2e")
     settings = Settings(data_dir=data_dir, _env_file=None)
     _migrate(settings)
+    return settings
+
+
+def start_server(settings: Settings) -> Iterator[str]:
+    """Run one RA2 on a random free port until the caller is done with it.
+
+    Factored out (phase 4, V1) so a journey that needs **its own database**
+    can have one. The session server's database is shared by every journey,
+    which is fine while each of them creates what it needs through the UI —
+    but a *scored* evaluation has to be seeded directly, and a corpus that
+    appears out of nowhere changes what the journeys reading "the newest
+    corpus" see. Isolation beats depending on file-name ordering.
+    """
     _register_demo()
     app = create_app(
         settings=settings,
@@ -349,6 +368,12 @@ def server_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     finally:
         server.should_exit = True
         thread.join(timeout=15)
+
+
+@pytest.fixture(scope="session")
+def server_url(e2e_settings: Settings) -> Iterator[str]:
+    """A real RA2 on a random port, for the whole session."""
+    yield from start_server(e2e_settings)
 
 
 @pytest.fixture

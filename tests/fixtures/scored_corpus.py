@@ -106,6 +106,7 @@ async def seed_scored_corpus(
     *,
     suffix: str = "s",
     records: int = 40,
+    template_version: int = 1,
     models: tuple[str, ...] = ("qwen3:14b", "mistral-small:24b"),
 ) -> ScoredCorpus:
     """Seed one scoreable corpus carrying every hazard above.
@@ -139,7 +140,10 @@ async def seed_scored_corpus(
     session.add(
         PromptTemplate(
             id=template_id,
-            version=1,
+            # `prompt_template.version` is UNIQUE across the whole database
+            # (sw-design.md §15.1), so a fixture that hard-coded 1 could not
+            # share a database with J9's own template lineage.
+            version=template_version,
             source="{{feature_block}}{{narrative}}",
             created_at=NOW,
             activated_at=NOW,
@@ -177,7 +181,7 @@ async def seed_scored_corpus(
                 evaluation_id=evaluation_id,
                 model_name=model,
                 model_digest=f"{model}-digest",
-                prompt_template_version=1,
+                prompt_template_version=template_version,
                 prompt_template_id=template_id,
                 prompt_template_fingerprint="f" * 64,
                 temperature=0.0,

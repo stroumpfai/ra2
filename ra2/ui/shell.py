@@ -124,7 +124,7 @@ NAV_ITEMS: Final[tuple[NavItem, ...]] = (
         path="/results",
         title="Results",
         description="Per-feature, per-model precision, recall and F1, with intervals.",
-        built=False,
+        built=True,
     ),
     NavItem(
         key="mismatches",
