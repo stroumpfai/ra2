@@ -66,11 +66,13 @@ async def test_add_and_get_round_trips_a_delivery(
     # reloaded from a fresh session.
     assert fetched.source_kind == SourceKind.UPLOAD
     assert fetched.status == DeliveryStatus.REGISTERED
-    # SQLite's DATETIME storage format has no timezone offset, regardless of
-    # `DateTime(timezone=True)` — a dialect limitation, not a repository bug.
-    # Every timestamp in this app is UTC (`Clock` protocol), so a naive
-    # round-trip value is still the right instant.
-    assert fetched.created_at == NOW.replace(tzinfo=None)
+    # Aware on the way out, not merely "the right instant if you assume UTC".
+    # SQLite's DATETIME storage has no offset field, so this column round
+    # tripped naive until `models.UtcDateTime` re-attached UTC on load
+    # (P3-D15). The assertion that used to live here compared against
+    # `NOW.replace(tzinfo=None)` and documented the dialect limitation as
+    # expected behaviour; it was asserting the defect.
+    assert fetched.created_at == NOW
     assert len(fetched.files) == 1
     assert fetched.files[0].filename == "unfall_ag.txt"
 

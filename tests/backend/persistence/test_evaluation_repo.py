@@ -236,7 +236,7 @@ async def test_launch_writes_the_feature_snapshot_and_runs_and_stamps_launched_a
         repo = EvaluationRepository(session)
         fetched = await repo.get(EvaluationId("eval-1"))
         assert fetched is not None
-        assert fetched.launched_at == launched_at.replace(tzinfo=None)
+        assert fetched.launched_at == launched_at
         assert fetched.is_dev is False
         assert [f.feature_id for f in fetched.features] == ["feat-1"]
         assert fetched.features[0].fingerprint == "feature-fp-1"

@@ -140,7 +140,7 @@ async def test_freeze_sets_frozen_at_on_the_existing_row(
         fetched = await repo.get_config(config_id)
 
     assert fetched is not None
-    assert fetched.frozen_at == frozen_at.replace(tzinfo=None)
+    assert fetched.frozen_at == frozen_at
     # Freezing is an update: still exactly one `feature_config` row.
     async with db_session_factory() as session:
         repo = FeatureRepository(session)

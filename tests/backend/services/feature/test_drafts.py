@@ -14,9 +14,8 @@ async def test_create_draft_is_version_one_and_not_frozen(feature_service, clock
     assert view.name == "Weather & conditions"
     assert view.version == 1
     assert view.description == "v1 draft"
-    # SQLite has no `timestamptz`, so a stored instant reads back naive —
-    # the same comparison `tests/backend/persistence/` makes.
-    assert view.created_at == clock.now().replace(tzinfo=None)
+    # Aware, because `models.UtcDateTime` re-attaches UTC on load (P3-D15).
+    assert view.created_at == clock.now()
     assert view.frozen_at is None
     assert view.is_frozen is False
     assert view.features == ()

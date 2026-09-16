@@ -31,7 +31,7 @@ import json
 import platform
 import statistics
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Final
 
 from sqlalchemy import select
@@ -1048,25 +1048,12 @@ def _exceeds_vram(choice: ModelChoiceView, vram_bytes: int | None) -> str:
     )
 
 
-def _as_utc(value: datetime) -> datetime:
-    """A stored timestamp, back in the `Clock`'s own terms.
-
-    `Clock.now()` is always timezone-aware UTC ("never naive — every stored
-    timestamp carries its offset so a Windows and a Linux run agree"), but
-    SQLite's `DateTime` has nowhere to keep the offset and hands the value
-    back **naive**. Subtracting the two raises, so the naive side is read as
-    what it is: UTC. Attaching the offset here rather than making every
-    caller remember keeps the asymmetry in one place.
-    """
-    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-
-
 def _elapsed_ms(run: Run, now: datetime) -> int | None:
     """Wall time since the run started, or its full duration once finished."""
     if run.started_at is None:
         return None
-    end = _as_utc(run.finished_at or now)
-    return max(0, int((end - _as_utc(run.started_at)).total_seconds() * 1000))
+    end = run.finished_at or now
+    return max(0, int((end - run.started_at).total_seconds() * 1000))
 
 
 def _eta_ms(done: int, total: int, elapsed_ms: int | None) -> int | None:

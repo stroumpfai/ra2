@@ -335,7 +335,7 @@ def seed(
             feature. Anything but `{code: label}` means "no snapshot to check
             against", never a guess.
         """
-        now = clock.now().replace(tzinfo=None)
+        now = clock.now()
         corpus_id = CorpusId(f"corpus-{suffix}")
         config_id = FeatureConfigId(f"config-{suffix}")
         template_id = PromptTemplateId(f"template-{suffix}")

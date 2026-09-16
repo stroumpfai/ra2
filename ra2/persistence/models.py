@@ -28,7 +28,7 @@ the mutable ones: re-parsing after an encoding override rewrites a
   even in tests (§12.10).
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -44,6 +44,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.types import TypeDecorator
 
 from ra2.domain.census import TypeHint
 from ra2.domain.delivery import DeliveryStatus, FileKind, SourceKind
@@ -95,6 +96,7 @@ __all__ = [
     "Record",
     "Run",
     "UnfallRow",
+    "UtcDateTime",
 ]
 
 #: Explicit constraint naming. Without it, SQLite produces unnamed constraints
@@ -112,6 +114,41 @@ NAMING_CONVENTION = {
 #: follow the same shape. 36 leaves room for our own generated ids.
 _ID_LEN = 36
 _UID_LEN = 32
+
+
+class UtcDateTime(TypeDecorator[datetime]):
+    """`DateTime(timezone=True)` that always hands back an **aware** UTC value.
+
+    `Clock.now()` is "timezone-aware, UTC. Never naive — every stored timestamp
+    carries its offset so a Windows and a Linux run agree" (`infra/clock.py`).
+    SQLite has nowhere to keep that offset: it stores the wall clock as text and
+    returns it **naive**, so subtracting a stored timestamp from a fresh
+    `Clock.now()` raises `TypeError`.
+
+    Phase 3 hit this twice — `evaluation_service` and `run_service` each grew a
+    private `_as_utc` helper within a wave of each other — and `P3-D15` recorded
+    that near-identical code in two services means the asymmetry belongs one
+    layer down, where every caller inherits the fix instead of remembering it.
+    Same column type, same stored bytes, **no migration**.
+
+    Binding normalises to UTC first, which is what makes reading a naive value
+    back *as* UTC sound rather than merely conventional: a caller that passed a
+    `+02:00` timestamp would otherwise have its wall clock stored and reread two
+    hours wrong, silently.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect: object) -> datetime | None:
+        if value is None:
+            return None
+        return value.astimezone(UTC) if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+    def process_result_value(self, value: datetime | None, dialect: object) -> datetime | None:
+        if value is None:
+            return None
+        return value.astimezone(UTC) if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 class Base(DeclarativeBase):
@@ -147,7 +184,7 @@ class Base(DeclarativeBase):
         ValueType: String(16),
         RunStatus: String(16),
         EvaluationSize: String(16),
-        datetime: DateTime(timezone=True),
+        datetime: UtcDateTime(),
         str: Text(),
         int: Integer(),
         float: Float(),

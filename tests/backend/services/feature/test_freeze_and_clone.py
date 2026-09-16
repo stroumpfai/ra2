@@ -47,7 +47,7 @@ async def test_freeze_stamps_frozen_at_and_stores_every_fingerprint(
     frozen = await feature_service.freeze(view.feature_config_id)
 
     assert frozen.is_frozen is True
-    assert frozen.frozen_at == clock.now().replace(tzinfo=None)
+    assert frozen.frozen_at == clock.now()
     assert all(f.fingerprint is not None for f in frozen.features)
     # Q3: the preview and the real value differ only in the §8.5 snapshot,
     # which is still `None` in phase 2 — so here they must agree exactly.

@@ -172,7 +172,7 @@ async def test_set_status_moves_the_run_through_its_lifecycle(
         running = await repo.get(RunId("run-1"))
         assert running is not None
         assert running.status == RunStatus.RUNNING
-        assert running.started_at == started_at.replace(tzinfo=None)
+        assert running.started_at == started_at
 
     finished_at = datetime(2026, 9, 13, 11, 0, tzinfo=UTC)
     async with db_session_factory() as session:
@@ -187,7 +187,7 @@ async def test_set_status_moves_the_run_through_its_lifecycle(
         failed = await repo.get(RunId("run-1"))
         assert failed is not None
         assert failed.status == RunStatus.FAILED
-        assert failed.finished_at == finished_at.replace(tzinfo=None)
+        assert failed.finished_at == finished_at
         assert failed.error == "endpoint timed out"
         # A status transition is an update, never a new row.
         assert len(await repo.list_by_evaluation(EvaluationId("eval-1"))) == 1

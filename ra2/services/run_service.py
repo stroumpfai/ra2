@@ -716,10 +716,10 @@ class RunService:
             return done, len(pending)
 
     def _elapsed_ms(self, run: Run) -> int | None:
-        started = _as_utc(run.started_at)
+        started = run.started_at
         if started is None:
             return None
-        end = _as_utc(run.finished_at) or self._clock.now()
+        end = run.finished_at or self._clock.now()
         return max(int((end - started).total_seconds() * 1000), 0)
 
 
@@ -786,26 +786,13 @@ def _sort_runs(views: list[RunView], *, key: str, sort_dir: SortDir) -> None:
         views.sort(
             key=lambda v: (
                 (v.started_at is not None) if descending else (v.started_at is None),
-                _as_utc(v.started_at) or datetime.min.replace(tzinfo=UTC),
+                v.started_at or datetime.min.replace(tzinfo=UTC),
                 v.run_id,
             ),
             reverse=descending,
         )
         return
     views.sort(key=lambda v: (str(getattr(v, key)), v.run_id), reverse=descending)
-
-
-def _as_utc(value: datetime | None) -> datetime | None:
-    """A stored timestamp as an aware UTC one.
-
-    SQLite has no timezone type: a `DateTime(timezone=True)` column round trips
-    as naive on some drivers and aware on others, and an elapsed-time
-    subtraction across the two raises. Naive is read as UTC because UTC is what
-    `Clock.now()` writes.
-    """
-    if value is None:
-        return None
-    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 def _eta_ms(elapsed_ms: int | None, *, done: int, remaining: int) -> int | None:

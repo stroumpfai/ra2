@@ -194,7 +194,7 @@ async def test_activate_sets_the_flag_and_clears_any_previous_active_version(
         assert (await repo.get(PromptTemplateId("pt-1"))).activated_at is None  # type: ignore[union-attr]
         second = await repo.get(PromptTemplateId("pt-2"))
         assert second is not None
-        assert second.activated_at == activated_second.replace(tzinfo=None)
+        assert second.activated_at == activated_second
         assert await repo.get_active() == second
 
 
