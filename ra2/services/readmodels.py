@@ -1309,7 +1309,6 @@ class MismatchFeatureView:
 
     feature_id: FeatureId
     feature_key: str
-    name: str
     #: Mismatches for this feature in this run, unfiltered by tag state.
     total: int
 
@@ -1325,7 +1324,6 @@ class ReviewTallyView:
 
     feature_id: FeatureId
     feature_key: str
-    name: str
     tally: ReviewTally
 
 

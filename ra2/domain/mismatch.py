@@ -20,12 +20,13 @@ a session to find one — the absence of the edge is the whole of §17.3.
 
 Pure — no SQLAlchemy, no session, no filesystem.
 
-**M35 freezes the types and the signatures. W1 writes the bodies.**
+**M35 froze the types and the signatures; W1 wrote the bodies.**
 """
 
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Final
 
 __all__ = [
@@ -155,4 +156,31 @@ def tally(counts: Mapping[str | None, int]) -> ReviewTally:
     dishonest about "0 reviewed"; there is a great deal dishonest about a macro
     F1 over no features.
     """
-    raise NotImplementedError
+    per_tag: dict[MismatchTag, int] = dict.fromkeys(MismatchTag, 0)
+    untagged = 0
+    other = 0
+    for stored, rows in counts.items():
+        if not stored:
+            untagged += rows
+            continue
+        try:
+            named = MismatchTag(stored)
+        except ValueError:
+            # **Counted, never dropped** (§17.5). A tally that silently omitted
+            # a value this enum does not name would report "of 40 reviewed"
+            # over 38 — the one failure mode the open column's asymmetry can
+            # produce, and the reason `other` exists at all.
+            other += rows
+        else:
+            per_tag[named] += rows
+    reviewed = sum(per_tag.values()) + other
+    return ReviewTally(
+        total=reviewed + untagged,
+        reviewed=reviewed,
+        untagged=untagged,
+        # Read-only, because a renderer assembling a strip is exactly who would
+        # be tempted to fold two buckets together in place — and the identity
+        # `sum(counts) + other == reviewed` is what the strip is asserted on.
+        counts=MappingProxyType(per_tag),
+        other=other,
+    )

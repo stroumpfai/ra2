@@ -26,15 +26,16 @@ side writes the other's — `upsert_feature` rewrites the derived three and
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ra2.domain.ids import FeatureId, MismatchId, RecordId, RunId
-from ra2.domain.mismatch import TagFilter
-from ra2.persistence.models import Mismatch
+from ra2.domain.mismatch import MismatchTag, TagFilter, TagState
+from ra2.persistence.models import Feature, Mismatch, Record
 
-__all__ = ["MismatchRepository", "MismatchWrite"]
+__all__ = ["MismatchListRow", "MismatchRepository", "MismatchWrite"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +51,40 @@ class MismatchWrite:
     record_value: str | None
     extracted_value: str | None
     evidence_span: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class MismatchListRow:
+    """One row of the review list, **with the two joined facts it needs**.
+
+    `list_for` returns these rather than `Mismatch` objects, and that is what
+    makes the N+1 unwritable rather than merely discouraged (`R4`, one table
+    over). The Feature column shows `feature.key` and `mvp-spec.md` §13
+    requires the anonymisation marking wherever record text is shown — so a
+    caller handed bare ORM rows would have to walk a relationship per row to
+    draw a page, which is exactly the shape sw-design.md §17.8 rules out.
+
+    Both come out of the same `SELECT` as the mismatch itself.
+    """
+
+    id: MismatchId
+    record_id: RecordId
+    feature_id: FeatureId
+    #: `feature.key` — the Feature column, the filter option and the tally
+    #: strip all name the same string (amendment:
+    #: feat/p5-mismatch-domain-persistence).
+    feature_key: str
+    #: `record.text_anonymised_flag` (mvp-spec.md §13).
+    anonymised: bool
+    record_value: str | None
+    extracted_value: str | None
+    evidence_span: str | None
+    #: The stored value, **verbatim** — never narrowed here. A value
+    #: `MismatchTag` does not name has to survive the whole way to the screen
+    #: (`SD24`, §17.5).
+    analyst_tag: str | None
+    tagged_at: datetime | None
+    note: str | None
 
 
 class MismatchRepository:
@@ -129,23 +164,23 @@ class MismatchRepository:
         )
         return list(result.scalars())
 
-    # --- phase 5 (M35 signatures, W1 bodies). sw-design.md §17 -------------
+    # --- phase 5 (W1). sw-design.md §17 -----------------------------------
     #
     # The review side of the ownership split (§17.1). `upsert_feature` above
-    # is the scorer's side and must stay exactly as it is: the tag-preservation
-    # test that guards it belongs to phase 4.
+    # is the scorer's side and is unchanged: the tag-preservation test that
+    # guards it belongs to phase 4.
 
     async def list_for(
         self,
         run_id: RunId,
         *,
         feature_id: FeatureId | None = None,
-        tag_state: TagFilter,
-        sort_key: str,
-        descending: bool,
-        offset: int,
-        limit: int,
-    ) -> tuple[Sequence[Mismatch], int]:
+        tag_state: TagFilter = TagState.ANY,
+        sort_key: str = "feature",
+        descending: bool = False,
+        offset: int = 0,
+        limit: int = 25,
+    ) -> tuple[Sequence[MismatchListRow], int]:
         """One filtered, sorted, paged page of a run's mismatches, and the
         unpaged total.
 
@@ -154,15 +189,28 @@ class MismatchRepository:
         feature is the cross-model agreement §16.9 defers.
 
         `sort_key` is one of `domain.mismatch.MISMATCH_SORT_KEYS` and there is
-        no fifth; **sorting is stable on ties**, so paging a list whose rows
-        share a feature does not reshuffle it between page 1 and page 2.
+        no fifth. **Sorting is stable on ties**: every order ends in the
+        mismatch id, so paging a list whose rows share a feature — which is
+        most of them — does not reshuffle between page 1 and page 2 and cannot
+        show a row twice or skip one.
 
-        The statement count is **bounded and asserted** on a 1 000-row run
-        (the R4 lesson, one table over): a per-row lookup of the feature key or
-        the record's anonymisation flag is exactly the N+1 this signature
-        exists to make unwritable.
+        **Two statements, whatever the run holds**: one page, one count. The
+        feature key and the anonymisation flag are joined rather than looked up
+        (`MismatchListRow`), which is what keeps that true.
         """
-        raise NotImplementedError
+        where = self._filters(run_id, feature_id=feature_id, tag_state=tag_state)
+        page = (
+            select(Mismatch, Feature.key, Record.text_anonymised_flag)
+            .join(Feature, Feature.id == Mismatch.feature_id)
+            .join(Record, Record.id == Mismatch.record_id)
+            .where(*where)
+            .order_by(*self._order(sort_key, descending=descending))
+            .offset(offset)
+            .limit(limit)
+        )
+        rows = [_to_row(*found) for found in (await self._session.execute(page)).all()]
+        total = await self._session.scalar(select(func.count()).select_from(Mismatch).where(*where))
+        return rows, total or 0
 
     async def set_tag(
         self,
@@ -171,34 +219,55 @@ class MismatchRepository:
         tag: str | None,
         note: str | None,
         now: datetime,
-    ) -> Mismatch | None:
+    ) -> MismatchListRow | None:
         """Write the **three review columns and nothing else** (§17.1).
 
-        `tag=None` clears, and **clears `tagged_at` with it** — a cleared row
-        that kept its timestamp would read as reviewed in the `Reviewed`
-        column and be counted as untagged in the tally.
+        `tag=None` clears, and **clears `tagged_at` and `note` with it** — a
+        cleared row that kept its timestamp would read as reviewed in the
+        `Reviewed` column while counting as untagged in the tally, and a note
+        annotates a judgement that no longer exists.
 
         `record_value`, `extracted_value` and `evidence_span` come out
-        byte-identical. That is asserted on the row rather than on a count,
-        and it is the mirror of the assertion that guards `upsert_feature`.
+        byte-identical. That is asserted on the row rather than on a count, and
+        it is the mirror of the assertion that guards `upsert_feature`.
 
         Does not commit: the caller owns the transaction boundary, as
         everywhere else in this package. Returns `None` for an unknown id, so
-        the service raises `NotFoundError` rather than the repository owning
-        an HTTP fact.
+        the service raises `NotFoundError` rather than the repository owning an
+        HTTP fact.
 
         Takes `now` rather than reading a clock: `ra2/persistence/` may not
         import `ra2/infra/` (sw-design.md §1.1), the same reason
         `upsert_feature` is handed `new_id`.
         """
-        raise NotImplementedError
+        stored = await self._session.get(Mismatch, mismatch_id)
+        if stored is None:
+            return None
+        stored.analyst_tag = tag
+        stored.tagged_at = None if tag is None else now
+        stored.note = None if tag is None else note
+        await self._session.flush()
+        #: Read back through the same join the list uses, so the row a handler
+        #: redraws is the row the list would have drawn — one query, not a
+        #: re-fetch of the page it came from.
+        return await self._row(mismatch_id)
+
+    async def _row(self, mismatch_id: MismatchId) -> MismatchListRow | None:
+        one = (
+            select(Mismatch, Feature.key, Record.text_anonymised_flag)
+            .join(Feature, Feature.id == Mismatch.feature_id)
+            .join(Record, Record.id == Mismatch.record_id)
+            .where(Mismatch.id == mismatch_id)
+        )
+        found = (await self._session.execute(one)).first()
+        return None if found is None else _to_row(*found)
 
     async def tally_for(
         self,
         run_id: RunId,
         *,
         feature_id: FeatureId | None = None,
-        tag_state: TagFilter,
+        tag_state: TagFilter = TagState.ANY,
     ) -> Mapping[FeatureId, Mapping[str | None, int]]:
         """Stored tag values and their row counts, per feature, for one run.
 
@@ -212,7 +281,95 @@ class MismatchRepository:
         way into the domain instead of being expanded into rows and recounted.
 
         Takes the same filters as `list_for` so the strip under the table and
-        the table itself cannot disagree — the one exception being
-        `feature_id`, which scopes both identically.
+        the table itself cannot disagree.
         """
-        raise NotImplementedError
+        grouped = (
+            select(Mismatch.feature_id, Mismatch.analyst_tag, func.count())
+            .where(*self._filters(run_id, feature_id=feature_id, tag_state=tag_state))
+            .group_by(Mismatch.feature_id, Mismatch.analyst_tag)
+        )
+        counts: dict[FeatureId, dict[str | None, int]] = {}
+        for feature, stored_tag, rows in (await self._session.execute(grouped)).all():
+            counts.setdefault(FeatureId(feature), {})[stored_tag] = rows
+        return counts
+
+    # --- the one place the filter and the order are decided ----------------
+    #
+    # `list_for` and `tally_for` share both, which is what makes "the strip
+    # agrees with the table" a property of this module rather than a promise
+    # two call sites keep independently (§17.4).
+
+    @staticmethod
+    def _filters(
+        run_id: RunId,
+        *,
+        feature_id: FeatureId | None,
+        tag_state: TagFilter,
+    ) -> list[ColumnElement[bool]]:
+        where: list[ColumnElement[bool]] = [Mismatch.run_id == run_id]
+        if feature_id is not None:
+            where.append(Mismatch.feature_id == feature_id)
+        #: A stored `""` is untagged, the same rule `domain.mismatch.tally`
+        #: applies — nothing writes one, and a filter that disagreed with the
+        #: tally about it would put a row in the list that the strip did not
+        #: count.
+        untagged = or_(Mismatch.analyst_tag.is_(None), Mismatch.analyst_tag == "")
+        if isinstance(tag_state, MismatchTag):
+            where.append(Mismatch.analyst_tag == tag_state.value)
+        elif tag_state is TagState.UNTAGGED:
+            where.append(untagged)
+        elif tag_state is TagState.TAGGED:
+            #: **Any** tag, including one `MismatchTag` does not name — an
+            #: `other` row has been reviewed, whatever the word was.
+            where.append(and_(Mismatch.analyst_tag.is_not(None), Mismatch.analyst_tag != ""))
+        return where
+
+    @staticmethod
+    def _order(sort_key: str, *, descending: bool) -> list[Any]:
+        """C3's four keys, and **nothing that ranks "how wrong"**.
+
+        An unknown key falls back to `feature` rather than raising: a sort is a
+        rendering input, and a stale bookmark should redraw the list, not 500.
+        The closed vocabulary is enforced where it can be answered to a caller
+        — `MISMATCH_SORT_KEYS`, and the API's own validation.
+
+        `Any` for the same reason `census_repo._SORT_COLUMNS` uses it: a dict
+        over four differently-typed `InstrumentedAttribute`s has no common
+        static type that `order_by` also accepts.
+        """
+        columns: dict[str, Any] = {
+            "feature": Feature.key,
+            "record": Mismatch.record_id,
+            "tag": Mismatch.analyst_tag,
+            "reviewed": Mismatch.tagged_at,
+        }
+        primary = columns.get(sort_key, Feature.key)
+        ordered = primary.desc() if descending else primary.asc()
+        #: The id is the tie-break on every order, so the sort is **total**.
+        #: Without it SQLite is free to return equal rows in any order, and
+        #: page 2 of a list sorted by tag could repeat a row from page 1.
+        return [ordered, Mismatch.id.asc()]
+
+
+def _to_row(mismatch: Mismatch, feature_key: str, anonymised: bool) -> MismatchListRow:
+    """One joined `(mismatch, feature.key, record.anonymised)` triple as the
+    detached row the service renders.
+
+    A module function rather than a classmethod because it holds no session and
+    knows nothing about the query that produced it — the same reason every
+    other mapping helper in `persistence/` sits beside its repository instead
+    of inside it.
+    """
+    return MismatchListRow(
+        id=MismatchId(mismatch.id),
+        record_id=RecordId(mismatch.record_id),
+        feature_id=FeatureId(mismatch.feature_id),
+        feature_key=feature_key,
+        anonymised=anonymised,
+        record_value=mismatch.record_value,
+        extracted_value=mismatch.extracted_value,
+        evidence_span=mismatch.evidence_span,
+        analyst_tag=mismatch.analyst_tag,
+        tagged_at=mismatch.tagged_at,
+        note=mismatch.note,
+    )

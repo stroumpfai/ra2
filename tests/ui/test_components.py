@@ -1885,3 +1885,276 @@ async def test_the_cross_tab_totals_are_the_sums_of_its_own_cells(user: User) ->
     cells = _cross_tab_text(user)
     assert cells[("total", "total")] == "4 047"
     assert cells[("hit", "total")] == "2 304"
+
+
+# --- Phase 5 (W2): the two additions the Mismatches view needs --------------
+#
+# sw-design.md §17, plan-phase-5.md §3.2. That section is a **boundary**, not
+# a starting point (R2): the screen is assembled from components, tokens and
+# widths that already exist. What did not exist was a style, twice — the
+# trailing clear of a three-way tag control, and a wrapped evidence-span cell.
+# No new component, no new colour, no second table scale.
+
+#: mvp-spec.md §12's three, in the words the view renders (C4). These tests
+#: assert on structure, so what the strings *say* does not matter here — what
+#: matters is that there are three of them and a clear beside.
+TAG_OPTIONS = ["Hallucination", "Record error", "Unclear"]
+
+
+async def test_the_tag_control_is_three_values_and_a_clear_that_is_not_a_fourth(user):
+    """`Q2`/`Q5`: three segments plus a clear, and the clear must not read as a
+    fourth tag anywhere — not in the DOM, not in the accessibility tree.
+
+    "How many values does this control have" has to have the same answer as
+    `len(MismatchTag)`, or the screen and the tally disagree about what an
+    analyst is able to say.
+    """
+
+    def build() -> None:
+        segmented_control(
+            options=TAG_OPTIONS,
+            value="Hallucination",
+            label="Tag",
+            on_change=lambda _: None,
+            on_clear=lambda: None,
+        )
+
+    page("/t/seg3", build)
+    await user.open("/t/seg3")
+
+    values = _ordered(user.find(marker="seg-option"))
+    assert len(values) == 3
+    assert [e._props["aria-pressed"] for e in values] == ["true", "false", "false"]
+    assert [("on" in e.classes) for e in values] == [True, False, False]
+
+    (clear,) = user.find(marker="seg-clear").elements
+    #: An action, not a value: no `aria-pressed`, and not a `seg-option`.
+    assert "aria-pressed" not in clear._props
+    assert clear._props["data-testid"] == "seg-clear"
+    assert clear._props["aria-label"] == "Clear"
+
+
+async def test_every_tag_value_can_be_chosen_and_reports_itself(user):
+    """All three, one click each — the vocabulary is only closed *on the
+    screen* if every member of it is reachable from the screen."""
+    seen: list[str] = []
+
+    def build() -> None:
+        segmented_control(options=TAG_OPTIONS, value=None, label="Tag", on_change=seen.append)
+
+    page("/t/seg3/pick", build)
+    await user.open("/t/seg3/pick")
+
+    user.find(marker="seg-hallucination").click()
+    user.find(marker="seg-record-error").click()
+    user.find(marker="seg-unclear").click()
+    assert seen == ["Hallucination", "Record error", "Unclear"]
+
+
+async def test_an_untagged_row_renders_as_a_real_cleared_state(user):
+    """`value=None` is **the normal state of a row nobody has reviewed**, not a
+    missing value.
+
+    Every segment reports `aria-pressed="false"`, which is what a screen reader
+    should hear — and none carries `on`, so nothing on screen suggests a
+    judgement that was never made.
+    """
+
+    def build() -> None:
+        segmented_control(options=TAG_OPTIONS, value=None, label="Tag", on_clear=lambda: None)
+
+    page("/t/seg3/none", build)
+    await user.open("/t/seg3/none")
+
+    values = _ordered(user.find(marker="seg-option"))
+    assert [e._props["aria-pressed"] for e in values] == ["false", "false", "false"]
+    assert not [e for e in values if "on" in e.classes]
+
+
+async def test_the_clear_is_disabled_rather_than_hidden_when_there_is_nothing_to_clear(user):
+    """The `pagination_row` rule, one control over: disabled, not hidden.
+
+    A clear that appeared and vanished would change the control's width as an
+    analyst worked down the list, so the row under the cursor would move — and
+    tagging happens inline, while scanning (`Q2`).
+    """
+    cleared: list[str] = []
+
+    def build() -> None:
+        segmented_control(
+            options=TAG_OPTIONS, value=None, label="Tag", on_clear=lambda: cleared.append("x")
+        )
+
+    page("/t/seg3/clear-off", build)
+    await user.open("/t/seg3/clear-off")
+
+    (clear,) = user.find(marker="seg-clear").elements
+    assert "disabled" in clear.classes
+    assert "disabled" in clear._props
+    #: And it does nothing: a cleared row has no tag and no `tagged_at`, so a
+    #: second clear would be a write with nothing to write.
+    user.find(marker="seg-clear").click()
+    assert cleared == []
+
+
+async def test_clearing_a_tagged_row_reports_once(user):
+    """`Q4`: a judgement made on the wrong row must be correctable, or the
+    first mis-click is permanent in the one table a human writes to."""
+    cleared: list[str] = []
+
+    def build() -> None:
+        segmented_control(
+            options=TAG_OPTIONS, value="Unclear", label="Tag", on_clear=lambda: cleared.append("x")
+        )
+
+    page("/t/seg3/clear-on", build)
+    await user.open("/t/seg3/clear-on")
+
+    (clear,) = user.find(marker="seg-clear").elements
+    assert "disabled" not in clear.classes
+    assert "disabled" not in clear._props
+    user.find(marker="seg-clear").click()
+    assert cleared == ["x"]
+
+
+def test_the_two_segment_control_keeps_its_phase_2_defaults():
+    """Phase 2's `Labelled | Exploratory` is the same call it always was.
+
+    `value` widened to `str | None` and `on_clear` defaults to `None`, so the
+    Features edit zone renders no clear and gains no segment. Asserted on the
+    signature as well as on the rendering below, because a *default* that
+    changed would be a silent edit to another phase's screen.
+    """
+    import inspect
+
+    parameters = inspect.signature(segmented_control).parameters
+    assert parameters["on_clear"].default is None
+    assert parameters["value"].default is inspect.Parameter.empty
+    assert parameters["clear_label"].default == "Clear"
+
+
+async def test_the_features_kind_field_still_renders_two_values_and_no_clear(user):
+    """The regression the signature test cannot see: what a caller that passes
+    neither `on_clear` nor `None` actually draws."""
+
+    def build() -> None:
+        segmented_control(options=["Labelled", "Exploratory"], value="Labelled", label="Kind")
+
+    page("/t/seg2/regression", build)
+    await user.open("/t/seg2/regression")
+
+    assert len(user.find(marker="seg-option").elements) == 2
+    #: `user.find` raises when nothing matches, so the absence is asserted over
+    #: the page rather than through it.
+    assert not [e for e in _all(user) if e._props.get("data-testid") == "seg-clear"]
+
+
+def test_the_evidence_span_cell_wraps_to_three_lines_at_the_existing_table_scale():
+    """`Q6`. The span is the one field `mvp-spec.md` §19's criterion 7 names
+    explicitly, and it is free text of unbounded length.
+
+    One line would hide the thing the criterion asks for; a hover reveal would
+    put it out of reach of a keyboard and a screen reader. Three lines at the
+    `.td` scale this family already has — **no second table scale**, which is
+    the R2 failure mode this rule sits closest to.
+    """
+    assert ".td-wrap{" in STYLESHEET
+    rule = STYLESHEET.split(".td-wrap{")[1].split("}")[0]
+    #: `.td` is `nowrap`; the modifier is what undoes it, so a cell without it
+    #: behaves exactly as every other table cell in the app does.
+    assert "white-space:nowrap" in STYLESHEET.split(".td{")[1].split("}")[0]
+    assert "white-space:normal;" in rule
+    assert "-webkit-line-clamp:3;" in rule
+    assert "line-clamp:3;" in rule
+    #: The clamp is by line count; `max-height` bounds the row wherever the
+    #: clamp does not apply. Either way three lines, never four.
+    assert "max-height:calc(3 * 1.35em);" in rule
+    #: No new font size. If this ever fails, §3.2's boundary has been crossed.
+    assert "font-size" not in rule
+
+
+def test_the_clear_segment_reuses_the_segment_box_and_adds_no_colour():
+    """R2, as a test. `.seg-clear` differs from `.seg-btn` in ink only — it
+    carries both classes, so the segments keep one height and one border — and
+    every colour it names is a token that already existed."""
+    rule = STYLESHEET.split(".seg-clear{")[1].split("}")[0]
+    assert "background" not in rule
+    assert "border" not in rule
+    #: Tokens only. A literal colour here would be the fourth colour §3.2
+    #: forbids, arriving in the smallest possible increment.
+    assert "oklch(" not in rule
+    assert "#" not in rule
+    assert "var(--ink3)" in rule
+
+
+#: §3.2's column table, verbatim. The span is the one flexible column.
+MISMATCH_WIDTHS: tuple[tuple[str, str | None], ...] = (
+    ("feature", "180px"),
+    ("record", "190px"),
+    ("record_value", "140px"),
+    ("extracted_value", "140px"),
+    ("evidence_span", None),
+    ("tag", "210px"),
+    ("reviewed", "96px"),
+)
+
+
+@dataclass(frozen=True)
+class SpanRow:
+    feature: str
+    span: str
+
+
+async def test_the_mismatch_table_does_not_wrap_at_1024px(user):
+    """`tests/ui` has no real viewport, so this is the layer-3 equivalent of
+    `tests/e2e/test_j4_layout.py` — the same substitution
+    `test_the_master_detail_split_never_wraps_and_floors_both_panes` makes.
+
+    What *can* be asserted here is the mechanism: the table is
+    `table-layout:fixed`, **exactly one column is flexible**, and a long
+    evidence span lands in a `.td-wrap` cell. Under fixed layout that is what
+    makes a 200-character span wrap inside its own column instead of widening
+    the table — so the six fixed widths hold and nothing reflows, at 1024px as
+    at 1920.
+    """
+    row = SpanRow(
+        "weather",
+        "the driver stated that it had been raining heavily for some time before "
+        "the collision, and that the road surface was standing in water across "
+        "both lanes where the vehicle left the carriageway",
+    )
+    columns: tuple[ColumnSpec[SpanRow], ...] = tuple(
+        ColumnSpec(
+            key=key,
+            label=key,
+            width=width,
+            cell_class="td-wrap" if key == "evidence_span" else "",
+            render=(
+                (lambda r: ui.label(r.span).mark("span"))
+                if key == "evidence_span"
+                else (lambda r: ui.label(r.feature))
+            ),
+        )
+        for key, width in MISMATCH_WIDTHS
+    )
+
+    page(
+        "/t/mismatch/widths",
+        lambda: data_table(columns=columns, rows=[row], state=TableState("feature"), wide=True),
+    )
+    await user.open("/t/mismatch/widths")
+
+    (table,) = user.find(marker="data-table").elements
+    assert table._style["table-layout"] == "fixed"
+
+    widths = [
+        e._style.get("width") for e in _all(user) if e.tag == "th" and "data-column" in e._props
+    ]
+    assert widths == [width for _, width in MISMATCH_WIDTHS]
+    #: Exactly one flexible column. Two would make the layout ambiguous, and
+    #: §3.2 names the span as the one that takes the rest.
+    assert widths.count(None) == 1
+
+    wrapped = [e for e in _all(user) if e.tag == "td" and "td-wrap" in e.classes]
+    assert len(wrapped) == 1
+    await user.should_see("standing in water")

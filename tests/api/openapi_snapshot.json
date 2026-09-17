@@ -2502,10 +2502,6 @@
             "title": "Feature Key",
             "type": "string"
           },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
           "total": {
             "title": "Total",
             "type": "integer"
@@ -2514,7 +2510,6 @@
         "required": [
           "feature_id",
           "feature_key",
-          "name",
           "total"
         ],
         "title": "MismatchFeatureResponse",
@@ -3567,10 +3562,6 @@
             "title": "Feature Key",
             "type": "string"
           },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
           "other": {
             "title": "Other",
             "type": "integer"
@@ -3591,7 +3582,6 @@
         "required": [
           "feature_id",
           "feature_key",
-          "name",
           "total",
           "reviewed",
           "untagged",

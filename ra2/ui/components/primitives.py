@@ -455,16 +455,33 @@ _PILL_TONES: Final[frozenset[str]] = frozenset({"ok", "danger", "accent"})
 def segmented_control(
     *,
     options: Sequence[str],
-    value: str,
+    value: str | None,
     label: str,
     on_change: Callable[[str], None] | None = None,
+    on_clear: Callable[[], None] | None = None,
+    clear_label: str = "Clear",
 ) -> Element:
-    """A `.seg` two-segment toggle — the Features edit zone's Kind field,
-    `Labelled | Exploratory` (README, "Kind / Grain / Value type").
+    """A `.seg` toggle — the Features edit zone's Kind field,
+    `Labelled | Exploratory` (README, "Kind / Grain / Value type"), and the
+    Mismatches row's three-way tag control (sw-design.md §17, W2).
 
     Real `<button>`s in a `role="group"`, not a styled `<div>`: Tab reaches
     every segment and the active one carries `aria-pressed="true"`. Which
     option is active is the caller's fact; this only reports a click.
+
+    **Any number of options, and `value=None` is a real state.** Phase 5 needs
+    three segments where phase 2 needed two, and it needs "nothing chosen yet"
+    to be renderable — an untagged mismatch is the *normal* state of a row
+    nobody has reviewed, not a missing value. With `value=None` every segment
+    carries `aria-pressed="false"`, which is exactly what a screen reader
+    should hear.
+
+    `on_clear` adds a trailing **action**, not a fourth value. It carries no
+    `aria-pressed` and is not in `options`, so "how many values does this
+    control have" has the same answer in the DOM, in the accessibility tree
+    and in `MismatchTag`. It is **disabled when there is nothing to clear**
+    rather than hidden — the same rule `pagination_row` follows, so the
+    control does not change width as an analyst tags rows (`Q4`).
     """
     group = (
         ui.element("div")
@@ -489,7 +506,36 @@ def segmented_control(
                 button.on("click", lambda _, o=option: on_change(o))
             with button:
                 ui.label(option)
+        if on_clear is not None:
+            _clear_segment(label=clear_label, enabled=value is not None, on_clear=on_clear)
     return group
+
+
+def _clear_segment(*, label: str, enabled: bool, on_clear: Callable[[], None]) -> None:
+    """The trailing clear action of a `segmented_control`.
+
+    Deliberately **not** a `seg-option`: no `aria-pressed`, its own marker and
+    its own `data-testid`, so a test counting the control's values counts
+    three and not four.
+    """
+    button = (
+        ui.element("button")
+        .classes("seg-btn seg-clear" if enabled else "seg-btn seg-clear disabled")
+        .props(
+            'type="button" '
+            f'aria-label="{label}" '
+            f"{'' if enabled else 'disabled '}"
+            'data-testid="seg-clear"'
+        )
+        .mark("seg-clear")
+    )
+    if enabled:
+        button.on("click", lambda _: on_clear())
+    with button:
+        #: A multiplication sign, not an "x": it is the glyph the rest of this
+        #: design family uses for a dismiss and it is not a letter a screen
+        #: reader will try to pronounce. The `aria-label` is what is announced.
+        ui.label("×").props('aria-hidden="true"')
 
 
 def field_select(

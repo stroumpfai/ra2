@@ -378,8 +378,43 @@ _UTILITIES_P4: Final = """
 .xtab .finding{color:var(--warn);font-weight:600;}
 """
 
+#: Phase 5 (W2) — the two things the Mismatches view needs that the kit
+#: lacked (sw-design.md §17, plan-phase-5.md §3.2).
+#:
+#: **Two rules, no new component, no new colour and no new table scale.** §3.2
+#: is this view's design and it is a boundary, not a starting point (R2): every
+#: element of the screen is assembled from what already exists, and what did
+#: not exist was a *style* in both cases.
+#:
+#: `.seg-clear` is the trailing action of a three-way tag control. It reuses
+#: `.seg-btn`'s box so the segments stay the same height, and differs only in
+#: ink — it is an action, not a fourth value, and nothing about it should read
+#: as selectable. Disabled is `--ink3` with the pointer unchanged, the same
+#: treatment `pagination_row`'s arrows get at the ends of a list.
+#:
+#: `.td-wrap` is `Q6`: an evidence span is a model-quoted narrative fragment of
+#: unbounded length, and §19's criterion 7 names it explicitly, so it cannot be
+#: truncated to one line and it cannot hide behind a hover — a hover reveal is
+#: out of reach of a keyboard and a screen reader. Three lines at the existing
+#: 12.5px `.td`, clamped; **no second table scale**. `-webkit-line-clamp` is
+#: the only cross-browser way to clamp by line count and is supported
+#: unprefixed nowhere useful, so both spellings are written; `max-height` is
+#: the fallback that bounds the row even where neither applies.
+_UTILITIES_P5: Final = """
+.seg-clear{color:var(--ink3);padding:6px 9px;font-size:12px;line-height:1;}
+.seg-clear:hover{color:var(--ink);}
+.seg-clear.disabled{color:var(--rule);cursor:default;}
+.seg-clear.disabled:hover{color:var(--rule);}
+.td-wrap{
+  white-space:normal;overflow:hidden;line-height:1.35;max-height:calc(3 * 1.35em);
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3;
+}
+"""
+
 #: The single stylesheet. One injection, not scattered across components (§8.2).
-STYLESHEET: Final = _FONTS + _TOKENS + _RESET + _UTILITIES + _UTILITIES_P2 + _UTILITIES_P4 + _FOCUS
+STYLESHEET: Final = (
+    _FONTS + _TOKENS + _RESET + _UTILITIES + _UTILITIES_P2 + _UTILITIES_P4 + _UTILITIES_P5 + _FOCUS
+)
 
 
 def inject() -> None:

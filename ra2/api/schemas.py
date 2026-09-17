@@ -1200,7 +1200,6 @@ class ReviewTallyResponse(_Schema):
 
     feature_id: str
     feature_key: str
-    name: str
     total: int
     reviewed: int
     untagged: int
@@ -1213,7 +1212,6 @@ class MismatchFeatureResponse(_Schema):
 
     feature_id: str
     feature_key: str
-    name: str
     total: int
 
 

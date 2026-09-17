@@ -442,14 +442,14 @@ express a rule between two modules of one layer) and the `MismatchWrite` /
 |---|---|
 | `ra2/services/protocols.py` | + `MismatchTally` — the fifth seam (plan-phase-5.md §3.1). Keyed by `RunId`, and it **returns counts and nothing else**: the absence of any other method is the contract |
 | `ra2/services/container.py` | + `mismatch: MismatchService` |
-| `ra2/services/readmodels.py` | + `MismatchRowView`, `MismatchFeatureView`, `ReviewTallyView`, `MismatchFilters`, `MismatchListView`, and `TagFilter`/`TagState` re-exported. **Five, where plan-phase-5.md §5.1 named four**: `MismatchFeatureView` is the Feature filter's option list, which cannot be the tally strip because the strip is scoped to the current filter and would collapse to one entry the moment a feature was picked |
+| `ra2/services/readmodels.py` | + `MismatchRowView`, `MismatchFeatureView`, `ReviewTallyView`, `MismatchFilters`, `MismatchListView`, and `TagFilter`/`TagState` re-exported. **Five, where plan-phase-5.md §5.1 named four**: `MismatchFeatureView` is the Feature filter's option list, which cannot be the tally strip because the strip is scoped to the current filter and would collapse to one entry the moment a feature was picked. *Amended at Wave 1 (`feat-p5-mismatch-domain-persistence.md`): `name` dropped from `MismatchFeatureView` and `ReviewTallyView` — `Feature` has no display name, every read model in the app resolves this as `feature.key`, and two fields that are always equal are the second source of truth this codebase refuses everywhere else* |
 | `ra2/services/errors.py` | **unchanged, and asserted so.** Phases 2, 3 and 4 each added errors; a phase that adds none is a phase that introduced no new failure. An unknown mismatch is a `NotFoundError`; an unknown tag never reaches the service |
 | `ra2/services/export_service.py` | + the `mismatches_csv` signature and `_MISMATCHES_CSV_HEADER`; body is Y1's. **It takes the rows** (`P4-D3`), and it carries `anonymised` where `run_mismatches_csv` does not — this file is the review list, and the span is record text (mvp-spec.md §13) |
-| `ra2/api/schemas.py` | + `MismatchResponse`, `MismatchPage`, `ReviewTallyResponse`, `MismatchFeatureResponse`, `MismatchFiltersResponse`, `MismatchListResponse`, `TagMismatchRequest`. The request takes a `MismatchTag` and the response carries a plain `analyst_tag` string — `SD24` on the wire |
+| `ra2/api/schemas.py` | + `MismatchResponse`, `MismatchPage`, `ReviewTallyResponse`, `MismatchFeatureResponse`, `MismatchFiltersResponse`, `MismatchListResponse`, `TagMismatchRequest`. The request takes a `MismatchTag` and the response carries a plain `analyst_tag` string — `SD24` on the wire. *Same Wave 1 amendment: `name` dropped from the two responses that mirror the amended read models* |
 | `ra2/api/deps.py` | + `MismatchServiceDep` |
 | `ra2/api/v1/router.py` | + the mismatches router |
 | `ra2/main.py` | + `MismatchService` construction. A session factory and a clock, and **no scorer** — §17.3's absent edge in the wiring as well as in the imports |
-| `ra2/persistence/repositories/mismatch_repo.py` | + the `list_for` / `set_tag` / `tally_for` signatures; bodies W1. **`upsert_feature` is byte-unchanged** and must stay so: it is the scorer's half of the ownership split, and phase 4 owns the test that guards it |
+| `ra2/persistence/repositories/mismatch_repo.py` | + the `list_for` / `set_tag` / `tally_for` signatures; bodies W1, which also added **`MismatchListRow`** — the list returns detached rows carrying `feature.key` and the record's anonymisation flag out of the same `SELECT`, which is what makes the N+1 unwritable rather than merely discouraged (`R4`, §17.8). **`upsert_feature` is byte-unchanged** and must stay so: it is the scorer's half of the ownership split, and phase 4 owns the test that guards it |
 | `mvp-spec.md` | §5 (`mismatch`'s comment gains the column-ownership split and names `MismatchTag`'s three values while keeping the column a string), §12 (a note that the three names are identifiers and "record error" is how `structured_data_error` renders) |
 | `sw-design.md` | **§17 is written** — §17.1-§17.10. `SD24`-`SD26` added to §13; §16.9's "Mismatch review" bullet superseded |
 | `CLAUDE.md` | the fifth migration author |
@@ -483,6 +483,17 @@ has declared it. Phase 5 needs **two lines and one link**, all Z1's:
    in that file**, which belongs to V1. This is a cross-phase edit, which is
    why it is written down rather than assumed; if it grows past one link it is
    an amendment.
+
+### Wave 1 additions (W1, W2) — not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/domain/mismatch.py` *(body)* | `tally`. An unrecognised stored tag is counted under `other`, never dropped; an empty input is a zero tally rather than a raise; `counts` comes back read-only, because a renderer assembling the strip is exactly who would fold two buckets together in place |
+| `ra2/persistence/repositories/mismatch_repo.py` *(bodies)* | `list_for`, `set_tag`, `tally_for`, `MismatchListRow`, and the two private helpers `_filters` / `_order` that **both reads share** — which is what makes "the strip agrees with the table" a property of the module rather than a promise two call sites keep separately (§17.4) |
+| `ra2/ui/components/primitives.py` | `segmented_control` takes any number of options, accepts `value=None` as a real cleared state, and grows an optional trailing `on_clear` **action** carrying no `aria-pressed`. **No new component** — W2's reportable event (R2) did not fire |
+| `ra2/ui/theme.py` | `_UTILITIES_P5`: `.seg-clear` and `.td-wrap`. Two rules, no new colour, no second table scale |
+| `tests/unit/mismatch/test_tally.py` *(new)*, `tests/backend/persistence/test_mismatch_repo.py`, `tests/ui/test_components.py` | W1's and W2's exit criteria |
+| `ra2/persistence/migrations/versions/**` | **unchanged.** W1 is phase 5's migration author and did not need a revision (C7): the filtered list rides `ix_mismatch_run_id_feature_id`, and the bounded-statement test is what says so |
 
 ---
 
