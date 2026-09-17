@@ -16,18 +16,23 @@ from typing import Final
 
 from nicegui import app
 
+from ra2.domain.mismatch import TagState
 from ra2.services.readmodels import SortDir
 
 __all__ = [
     "EVALUATION_KEY",
+    "MISMATCHES_KEY",
     "RESULTS_KEY",
     "STORAGE_KEY",
     "EvaluationSetup",
+    "MismatchesState",
     "ResultsState",
     "TableState",
     "evaluation_setup",
+    "mismatches_state",
     "results_state",
     "set_evaluation_setup",
+    "set_mismatches_state",
     "set_results_state",
     "set_table_state",
     "table_state",
@@ -43,6 +48,9 @@ EVALUATION_KEY: Final = "ra2.evaluation"
 #: The Results view's own namespace. One entry for all three tabs, because
 #: they are one route and share a descriptor.
 RESULTS_KEY: Final = "ra2.results"
+
+#: The Mismatches view's own namespace.
+MISMATCHES_KEY: Final = "ra2.mismatches"
 
 
 @dataclass(slots=True)
@@ -182,3 +190,49 @@ def results_state() -> ResultsState:
 
 def set_results_state(state: ResultsState) -> None:
     app.storage.client[RESULTS_KEY] = state
+
+
+# --- Phase 5 (Mismatches) additions -----------------------------------------
+#
+# Additive only. The review list is one route with three filters, a sort and a
+# page; the sort and the page are a `TableState` like every other table's, and
+# what is left is which evaluation, which run and which filter this browser tab
+# is looking at.
+
+
+@dataclass(slots=True)
+class MismatchesState:
+    """What this client's Mismatches view is filtered to.
+
+    All four are plain `str` rather than their `NewType` ids, the same rule
+    `EvaluationSetup` follows: this is an `app.storage.client` payload, NiceGUI
+    serialises it, and the view narrows back to `EvaluationId`/`RunId`/
+    `FeatureId` at the service call where the type is load-bearing.
+
+    `run_id` empty means "the evaluation's first run" — **not** "all runs",
+    which is not a state this view has (sw-design.md §17.6, `SD26`). A list
+    mixing two models' mismatches for one record and feature is the
+    cross-model agreement §16.9 defers.
+
+    `tag_state` holds a `TagState` or a `MismatchTag` **value**; the two enums'
+    values are disjoint, so the string round-trips through storage without a
+    second field saying which of them it came from.
+    """
+
+    evaluation_id: str = ""
+    run_id: str = ""
+    feature_id: str = ""
+    tag_state: str = TagState.ANY.value
+
+
+def mismatches_state() -> MismatchesState:
+    """This client's Mismatches state, created on first use."""
+    state: MismatchesState | None = app.storage.client.get(MISMATCHES_KEY)
+    if state is None:
+        state = MismatchesState()
+        app.storage.client[MISMATCHES_KEY] = state
+    return state
+
+
+def set_mismatches_state(state: MismatchesState) -> None:
+    app.storage.client[MISMATCHES_KEY] = state

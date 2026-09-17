@@ -27,6 +27,7 @@ accent (plan-phase-4.md §1 Q6, F9). Do not reach for a hue.
 
 from collections.abc import Awaitable, Callable
 from typing import Final
+from urllib.parse import urlencode
 
 from nicegui import ui
 
@@ -146,6 +147,47 @@ def _table(
                 _row(row, view, on_toggle_feature)
 
 
+#: Where the "wrong" answers behind this row are reviewed. **The one link
+#: plan-phase-5.md §6.1 permits this file**, and the one
+#: `design/results/README.md` asks for: "mismatch drill-downs open the
+#: Mismatches view filtered to that run × feature". Phase 4 had nowhere to
+#: point it; phase 5 built both ends (C2).
+MISMATCH_LINK: Final = "review mismatches"
+MISMATCHES_PATH: Final = "/mismatches"
+
+
+def _mismatch_link(row: FeatureScoreRow, view: ExtractionTabView) -> None:
+    """The drill-down, carrying `evaluation`, `run` and `feature`.
+
+    **The run is the leftmost model column.** This row spans every model and
+    §6.1 permits exactly one link, so it names the first run — which is the one
+    the Mismatches view would have picked for itself anyway (`SD26`,
+    sw-design.md §17.6), and its Run chip switches from there. A link per model
+    cell would be three links in a row that is already a click target, and it
+    would be an amendment rather than the declared exception.
+
+    `stop_propagation` because the row itself toggles the breakdown: without
+    it, following the link would also expand a panel the analyst is leaving.
+    """
+    if not view.models:
+        return
+    query = urlencode(
+        {
+            "evaluation": str(view.descriptor.evaluation_id),
+            "run": view.models[0].model_id,
+            "feature": str(row.feature_id),
+        }
+    )
+    link = (
+        ui.link(MISMATCH_LINK, f"{MISMATCHES_PATH}?{query}")
+        .classes("mono")
+        .props('data-testid="mismatch-link"')
+        .mark("mismatch-link")
+        .style("display:block;font-size:10.5px;color:var(--accent);margin-top:2px;")
+    )
+    link.on("click", js_handler="(e) => e.stopPropagation()")
+
+
 def _th(label: str, width: str | None) -> None:
     cell = (
         ui.element("th")
@@ -180,6 +222,7 @@ def _row(
         with ui.element("td").classes("td").style("padding:8px 12px;"):
             ui.label(row.name).style("font-weight:500;font-size:12.5px;")
             ui.label(row.source_label).classes("mono").style("font-size:10.5px;color:var(--ink3);")
+            _mismatch_link(row, view)
         count = (
             ui.element("td")
             .classes("td mono")

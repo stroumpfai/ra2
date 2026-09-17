@@ -2088,13 +2088,16 @@ def test_the_clear_segment_reuses_the_segment_box_and_adds_no_colour():
 
 
 #: §3.2's column table, verbatim. The span is the one flexible column.
+#: §3.2's column table, as `P5-D5` corrects it: the tag column holds a control
+#: that renders 290px wide, so it takes 60px back from the two value columns
+#: and the fixed total stays 956px.
 MISMATCH_WIDTHS: tuple[tuple[str, str | None], ...] = (
     ("feature", "180px"),
     ("record", "190px"),
-    ("record_value", "140px"),
-    ("extracted_value", "140px"),
+    ("record_value", "110px"),
+    ("extracted_value", "110px"),
     ("evidence_span", None),
-    ("tag", "210px"),
+    ("tag", "270px"),
     ("reviewed", "96px"),
 )
 

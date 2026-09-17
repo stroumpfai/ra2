@@ -12,6 +12,8 @@ Three things this layer is responsible for and nothing below it can guarantee:
   UTF-8 without it and a CSV is read somewhere this app cannot see.
 """
 
+from typing import Any
+
 import pytest
 from httpx import AsyncClient
 from tests.fixtures.scored_corpus import WEATHER, ScoredCorpus
@@ -21,12 +23,12 @@ from ra2.services.export_service import CSV_BOM
 pytestmark = pytest.mark.backend
 
 
-async def _first_mismatch(api_client: AsyncClient, scored: ScoredCorpus) -> dict:
+async def _first_mismatch(api_client: AsyncClient, scored: ScoredCorpus) -> dict[str, Any]:
     response = await api_client.get(
         f"/api/v1/evaluations/{scored.evaluation_id}/mismatches", params={"page_size": 100}
     )
     assert response.status_code == 200
-    rows = response.json()["rows"]["items"]
+    rows: list[dict[str, Any]] = response.json()["rows"]["items"]
     assert rows, "the fixture's wrong answers must produce mismatches"
     return rows[0]
 

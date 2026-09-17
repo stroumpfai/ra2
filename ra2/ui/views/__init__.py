@@ -16,6 +16,7 @@ from ra2.ui.views import (
     evaluation_view,
     features_view,
     import_view,
+    mismatches_view,
     placeholder_view,
     prompts_view,
     results,
@@ -37,6 +38,7 @@ def register_all(services: Services) -> None:
     prompts_view.register(services)
     evaluation_view.register(services)
     results.register(services)
+    mismatches_view.register(services)
     for item in NAV_ITEMS:
         if not item.built:
             placeholder_view.register(item)

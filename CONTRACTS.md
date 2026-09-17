@@ -528,6 +528,48 @@ convention. A test asserts the tally endpoint's body equals the list's
 422 before the service is reached, and a test re-reads the list afterwards to
 confirm nothing was written (`SD24`, §17.5).
 
+### Wave 4 additions (Z1) — not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/ui/views/mismatches_view.py` | The view, to §3.2: the filter toolbar, one flat table with inline tagging, the tally strip, the export, and the three empty states. `TAG_LABELS` and `tally_sentence` are the **one rendering table** and the one sentence — the only copy in the phase, and the reason `structured_data_error` reads as "record error" without the identifier moving (C4) |
+| `ra2/ui/state.py` *(additions)* | `MismatchesState`. `run_id` empty means "the evaluation's first run", **not** "all runs", which is not a state this view has (`SD26`) |
+| `ra2/ui/theme.py` *(additions)* | `.seg-tight` and `.td-clip` — both from `P5-D5` |
+| `tests/ui/test_mismatches_view.py`, `tests/e2e/test_results_j14_mismatches.py` | Z1's exit criteria, and **J14** |
+| `tests/ui/test_components.py` *(one constant)* | `MISMATCH_WIDTHS`, corrected with §3.2 (`P5-D5`) |
+
+### The two declared exceptions, taken exactly as declared
+
+1. **`ra2/ui/shell.py`** — one character: `mismatches`' `built` flag, `False`
+   to `True`. **The last one in the nav**, which is what `p5w4-green` means.
+   `ra2/ui/views/__init__.py` gains its two lines (the import and the
+   `register_all` call). Nothing else in either file.
+2. **`ra2/ui/views/results/extraction_tab.py`** — one link in the feature row,
+   carrying `evaluation`, `run` and `feature`, the one
+   `design/results/README.md` asks for and phase 4 had nowhere to point (C2).
+   The run it names is the **leftmost model column**: the row spans every
+   model and §6.1 permits exactly one link, so it names the run the Mismatches
+   view would have picked for itself anyway (`SD26`), and the Run chip
+   switches from there. It stops propagation, because the row itself toggles
+   the breakdown.
+
+**A consequence worth naming**: two tests now have an empty parameter set and
+skip — `tests/ui/test_shell_nav.py`'s
+`test_unbuilt_views_render_the_placeholder_inside_the_real_shell` and
+`tests/e2e/test_j5_nav.py`'s equivalent. Neither is a regression; both are the
+signal. There are no unbuilt views left, so there is no placeholder to render,
+and their siblings — `test_built_views_do_not_render_the_placeholder` and J5's
+own — now cover all eight. They are left as they are rather than deleted:
+they belong to phase 1's agent, and a permanently-skipped test that says "no
+view is unbuilt" is a truer record of `p5w4-green` than a deleted one.
+
+**`tests/test_p5_contract.py` gains its one planned edit.**
+`test_the_nav_still_has_eight_items_and_mismatches_is_still_unbuilt` was Wave
+0's exit criterion and becomes
+`test_the_nav_has_eight_items_and_every_one_of_them_is_built` in the wave that
+flips the flag §6.1 declared it would. It now asserts the stronger thing:
+**no nav item is unbuilt**, which is the whole meaning of this tag.
+
 ---
 
 ## Documented deviations phase 5 introduces
@@ -537,6 +579,7 @@ confirm nothing was written (`SD24`, §17.5).
 | **P5-D1** | **The Mismatches list is one run at a time** (`SD26`, sw-design.md §17.6) — the Run filter has no "all runs" option, `MismatchFilters.run_id` is required, and `MismatchTally` is keyed by `RunId` | `plan-phase-5.md` §3.2 draws seven columns and none of them is the model, while `mvp-spec.md` §12 names `run` as part of the row. Both can be right only if the run is a scope rather than a column. The scope is the better answer for a reason that is not about column widths: **a list mixing two models' mismatches for the same record and feature *is* cross-model agreement**, one of the three things §16.9 defers by name. Refusing the mixed list is not a limitation of this view, it is the deferral caught where it would otherwise have entered as a convenience — and it makes `run_finished_at` well-defined for Q7. `ResultsService.presence_records` already resolves one run the same way. **Consequence:** the plan's §3.2 column table stands unchanged, and the toolbar names the run once instead of every row repeating it |
 | **P5-D2** | **`domain.mismatch.tally` takes `Mapping[str \| None, int]`** — stored tag values mapped to row counts — not a sequence of rows, a correction to `plan-phase-5.md` §7's "counting stored tag strings" | The repository's `tally_for` is specified as **one grouped query per run, never one per feature**. A domain signature taking rows would have forced the service to expand that `GROUP BY` back into individual values and recount them, which is the same N+1 the grouped query exists to avoid, one layer up and harder to see. Taking the shape `GROUP BY` produces keeps the grouping intact all the way into the domain, and a caller that genuinely holds rows spends one `Counter` to get there |
 | **P5-D3** | **The staleness anchor is `run.finished_at`, and a re-score goes undated** (`SD25`, §17.7) — a correction to `plan-phase-5.md` Q7's "the view says when the run was scored" | RA2 records no scoring timestamp, and this phase does not add one. Scoring chains off the run's terminal `done` (`SD17`), so for a run scored once `finished_at` *is* when it was scored; a **re-score** moves the list without moving it. Closing that gap means a `scored_at` column, which `sw-design.md` §16.1 F5 declined so that "how far did it get" has exactly one answer and which `tests/test_p4_contract.py` asserts the absence of by name. Naming the gap is honest; adding a column against a standing decision, at the end of a phase, for a mitigation R5 already calls cheap, is not. If it bites in real use the next step is **a count of tags lost, not a lock and not a timestamp** |
+| **P5-D5** | The Tag column is **270px** and the two value columns **110px**, against §3.2's 210 / 140 / 140 — the fixed total unchanged at 956px | The three-way control renders **290px** wide at the component kit's own 12px segment padding, so in a 210px column the Tag cell overflowed and the Reviewed cell beside it intercepted every click on the clear — a control that cannot be clicked is not a control. **J14 found it, and nothing below a browser could have**: `table-layout:fixed` overlaps rather than reflows, and no layer below the DOM computes a text width. Shortening the words was not available, because `mvp-spec.md` §12's own tally prints them (C4), so the fix is `.seg-tight` (7px padding, ~260px) plus 60px taken back from two columns holding enum codes. `.td-clip` lands with it so a future long value truncates visibly instead of silently killing the control beside it. This is exactly the failure `R2` predicted for a phase whose design section could specify a layout but not measure one |
 | **P5-D4** | The list's **default page size is 25**, not the 10 `plan-phase-5.md` §3.2 names | §3.2 contradicts itself in one row — "`pagination_row`, 10/page, "1-25 of 162"" — and both halves come from Census, whose page size is 25 and whose "1-25 of 162" is the string being quoted. This view is the Census shape (Q1), so it takes the Census number; `PAGE_SIZES` offers 10/25/50/100 and an analyst who wants shorter pages has one click to get them |
 
 ---

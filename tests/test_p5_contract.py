@@ -407,17 +407,26 @@ def test_services_bundle_has_the_new_field(app_factory):
     assert app.state.services.mismatch is not None
 
 
-def test_the_nav_still_has_eight_items_and_mismatches_is_still_unbuilt():
-    """§5.1: `shell.py` is **untouched** at Wave 0. `mismatches` has existed as
-    a `NavItem` with `built=False` since phase 1, icon already wired; Z1 flips
-    exactly that one flag in Wave 4 (§6.1)."""
+def test_the_nav_has_eight_items_and_every_one_of_them_is_built():
+    """`mismatches` has existed as a `NavItem` since phase 1, icon already
+    wired; §5.1 left `shell.py` untouched at Wave 0 and §6.1 declared that Z1
+    would flip exactly that one flag in Wave 4.
+
+    **It is the last one**, which is the whole meaning of `p5w4-green`: eight
+    nav entries, eight built views, every capability F1-F12 on screen. The
+    assertion moved from "still unbuilt" to "all built" in the wave that
+    flipped it, which is the one edit to this file the phase plans for.
+    """
     from ra2.ui.shell import NAV_ITEMS
 
     assert len(NAV_ITEMS) == 8
     item = next(i for i in NAV_ITEMS if i.key == "mismatches")
     assert item.group == "Review"
     assert item.path == "/mismatches"
-    assert item.built is False
+    assert item.built is True
+    assert [i.key for i in NAV_ITEMS if not i.built] == [], (
+        "phase 5 is the phase after which there is no placeholder route left"
+    )
 
 
 def test_the_tag_words_live_in_exactly_one_rendering_table():

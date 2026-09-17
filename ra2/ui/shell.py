@@ -134,7 +134,7 @@ NAV_ITEMS: Final[tuple[NavItem, ...]] = (
         path="/mismatches",
         title="Mismatches",
         description="Every wrong outcome, with its evidence span, for tagging.",
-        built=False,
+        built=True,
     ),
 )
 

@@ -392,6 +392,16 @@ _UTILITIES_P4: Final = """
 #: as selectable. Disabled is `--ink3` with the pointer unchanged, the same
 #: treatment `pagination_row`'s arrows get at the ends of a list.
 #:
+#: `.seg-tight` is the in-row tag control's own padding, and `.td-clip` is what
+#: stops a fixed-width cell overflowing into the one beside it. Both come from
+#: the same defect, found by a browser rather than by a layer below it: at the
+#: kit's 12px segment padding the three-way control renders **290px** wide in
+#: the 210px column `plan-phase-5.md` §3.2 allots it, so it overlapped the
+#: Reviewed cell — which then intercepted every click on the clear button, and
+#: a control that cannot be clicked is not a control. `table-layout:fixed` does
+#: not clip on its own; `overflow:hidden` is what turns a future long value
+#: into a visible ellipsis instead of an invisible dead control.
+#:
 #: `.td-wrap` is `Q6`: an evidence span is a model-quoted narrative fragment of
 #: unbounded length, and §19's criterion 7 names it explicitly, so it cannot be
 #: truncated to one line and it cannot hide behind a hover — a hover reveal is
@@ -402,6 +412,8 @@ _UTILITIES_P4: Final = """
 #: the fallback that bounds the row even where neither applies.
 _UTILITIES_P5: Final = """
 .seg-clear{color:var(--ink3);padding:6px 9px;font-size:12px;line-height:1;}
+.seg-tight .seg-btn{padding:6px 7px;}
+.td-clip{overflow:hidden;text-overflow:ellipsis;}
 .seg-clear:hover{color:var(--ink);}
 .seg-clear.disabled{color:var(--rule);cursor:default;}
 .seg-clear.disabled:hover{color:var(--rule);}

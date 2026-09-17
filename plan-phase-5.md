@@ -241,11 +241,23 @@ one flexible column is the span.
 |---|---|---|
 | Feature | 180px | the feature key, mono |
 | Record | 190px | truncated record id, mono, + the `anonymised` chip |
-| Record value | 140px | authoritative, always (§12) |
-| Extracted value | 140px | what the model said |
+| Record value | ~~140px~~ **110px** | authoritative, always (§12) |
+| Extracted value | ~~140px~~ **110px** | what the model said |
 | Evidence span | flexible | wrapped, three lines (Q6) |
-| Tag | 210px | the three-way `segmented_control` + clear |
+| Tag | ~~210px~~ **270px** | the three-way `segmented_control` + clear |
 | Reviewed | 96px | `tagged_at` date, or `—` |
+
+**Two of these widths were wrong, and `P5-D5` corrects them in place.** The
+three-way control renders **290px** wide at the component kit's own segment
+padding — 80 more than the 210 this table allotted it — so the Tag cell
+overflowed and the Reviewed cell beside it intercepted every click on the
+clear. J14 found it; no layer below a browser could, because
+`table-layout:fixed` overlaps rather than reflows and nothing below the
+browser computes a text width. The 60px comes back from the two value
+columns, which hold enum codes and had it to spare, so **the fixed total is
+unchanged at 956px**. This is the failure mode `R2` names — §3.2 stood in for
+a design and could not measure what it specified — caught by the gate that
+exists for it rather than by an analyst.
 
 **There is no Model column, and that is a scope rather than an omission.**
 `mvp-spec.md` §12 names `run` as part of the row; the view satisfies it by
@@ -525,7 +537,11 @@ live here (C4), every count and every row arrives made.
 clear, the filter round-trip, the tally strip agreeing with the rendered rows,
 the anonymisation chip on every row that shows text (Q6), and all three empty
 states — including **"no mismatches", which must not read like an error**;
-`tests/e2e/test_j14_mismatches.py` (**J14**, new): seed a scored evaluation,
+`tests/e2e/test_results_j14_mismatches.py` (**J14**, new — named
+`test_results_*` for the collection order this paragraph goes on to describe,
+and seeding **its own** corpus rather than reusing J11-J13's, because this
+journey *writes* and a tally asserted at exactly three cannot depend on what
+another file did to a shared one): seed a scored evaluation,
 open Mismatches filtered from a Results feature row (proving C2's link),
 tag three rows with three different values, reload, assert the tags survived
 and the tally reads "3 reviewed", then export and assert the CSV carries them.
