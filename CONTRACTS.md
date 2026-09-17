@@ -495,6 +495,19 @@ has declared it. Phase 5 needs **two lines and one link**, all Z1's:
 | `tests/unit/mismatch/test_tally.py` *(new)*, `tests/backend/persistence/test_mismatch_repo.py`, `tests/ui/test_components.py` | W1's and W2's exit criteria |
 | `ra2/persistence/migrations/versions/**` | **unchanged.** W1 is phase 5's migration author and did not need a revision (C7): the filtered list rides `ix_mismatch_run_id_feature_id`, and the bounded-statement test is what says so |
 
+### Wave 2 additions (Y1) — not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/services/mismatch_service.py` | `list_mismatches`, `tag`, `clear_tag`, `tally`, `export_rows`. **Imports no scoring module**, and `tests/test_p5_contract.py` asserts it on the AST. `list_mismatches` and `export_rows` differ only in how much they ask for and share one private `_view`, so a CSV cannot be assembled from a different filter, sort or run than the screen it was exported from (`P4-D3`) |
+| `ra2/services/export_service.py` *(`mismatches_csv` body)* | The rows it was handed, UTF-8 with a BOM, `;`-delimited, a comment line naming the evaluation, the run and the filter. `analyst_tag` crosses **verbatim** — a stored value the enum does not name has to reach the file as itself, or the export disagrees with the screen about what an analyst wrote |
+| `tests/backend/services/mismatch/**` | Y1's exit criteria, including the two this phase exists to make: a tag moves no `score` row (byte-compared across a tagging session) and the tally agrees with the list for the same filter |
+
+**`_descriptor` is built here rather than imported from `results_service`.**
+Two read services of one layer, and the Results one holds a `Scorer` this
+module must not acquire (§17.3) — so the six values are read off the evaluation
+again rather than reaching through a module that has an edge to scoring.
+
 ---
 
 ## Documented deviations phase 5 introduces

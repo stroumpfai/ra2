@@ -305,9 +305,41 @@ class ExportService:
         being re-derived here: the file has to say which run and which filter
         produced it, and the screen is the only place that knows.
 
-        **M35 freezes this signature. Y1 writes the body.**
+        The evidence spans in it are verbatim narrative, which is what makes
+        the file useful to review and what makes it sensitive. `anonymised`
+        travels as a column for that reason (mvp-spec.md §13): a CSV is read
+        somewhere this app cannot see.
+
+        **M35 froze this signature; Y1 wrote the body.**
         """
-        raise NotImplementedError
+        reviewed = sum(1 for row in rows if row.analyst_tag)
+        comment = (
+            f"# evaluation {evaluation_id} · {run_label} · {filter_label} · "
+            f"{len(rows)} mismatches, {reviewed} reviewed"
+        )
+        return self._write_csv(
+            comment,
+            _MISMATCHES_CSV_HEADER,
+            [
+                (
+                    row.mismatch_id,
+                    row.record_id,
+                    "yes" if row.anonymised else "no",
+                    row.feature_key,
+                    row.record_value or "",
+                    row.extracted_value or "",
+                    row.evidence_span or "",
+                    # **Verbatim**, never narrowed: a stored value
+                    # `MismatchTag` does not name has to reach the file as
+                    # itself, or the export disagrees with the screen about
+                    # what an analyst wrote (`SD24`).
+                    row.analyst_tag or "",
+                    "" if row.tagged_at is None else row.tagged_at.isoformat(),
+                    row.note or "",
+                )
+                for row in rows
+            ],
+        )
 
     def run_scores_csv(self, view: RunExportView) -> bytes:
         """A run's `score` rows, on their way out of the database for good.
