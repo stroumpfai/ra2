@@ -35,6 +35,12 @@ test:
 e2e:
     uv run pytest -m e2e --tracing=retain-on-failure --screenshot=only-on-failure
 
+# Refuse any tracked file that looks like a real delivery (risk C1). The same
+# check the pre-commit hook runs per file, over the whole tree — which is what
+# CI runs.
+check-data:
+    uv run python scripts/check_no_real_data.py --all
+
 # ruff + mypy strict + the §1.1 layer contract. All three, or it is not green.
 lint:
     uv run ruff format --check .

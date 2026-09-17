@@ -1,5 +1,8 @@
 # Gates from sw-design.md §11.7.
 #
+# `no-real-data` is first and depends on nothing, because it is the only gate
+# whose failure cannot be fixed by a later commit (risk C1).
+#
 # Layers 1-3 run on **Linux and Windows** (N3: the app runs on both, and N4's
 # explicit-encoding rule fails late and quietly if Windows is never
 # exercised). E2E runs on Linux only, with Playwright traces on failure.
@@ -22,6 +25,22 @@ env:
   FORCE_COLOR: "1"
 
 jobs:
+  # Runs first and needs nothing: no uv sync, no virtualenv, no cache. The
+  # guard imports `ra2.domain.parsing.headers` and otherwise only the stdlib,
+  # so CI exercises the same no-dependency property the pre-commit hook relies
+  # on. `--all` checks every tracked file rather than the pull request's
+  # changed ones: the question here is not what this branch added but whether
+  # any of it is in the repository at all (risk C1).
+  no-real-data:
+    name: no real data (content-shaped, every tracked file)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: python scripts/check_no_real_data.py --all
+
   lint:
     name: lint (ruff · mypy strict · import-linter)
     runs-on: ubuntu-latest

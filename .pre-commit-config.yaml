@@ -30,7 +30,10 @@ repos:
   - repo: local
     hooks:
       # mypy, import-linter and the real-data guard run from the project venv
-      # so they see the same versions CI does.
+      # so they see the same interpreter CI does. The guard needs no package
+      # from it — CI runs the same script on a bare 3.14 with no `uv sync` —
+      # but it is a 3.14 source file, and `python` on a developer's PATH is
+      # not reliably 3.14.
       - id: mypy
         name: mypy (strict on ra2/)
         entry: uv run mypy
@@ -46,12 +49,14 @@ repos:
         pass_filenames: false
 
       - id: no-real-data
-        name: no real data (the .gitignore delivery patterns)
+        name: no real data (name and content)
         description: >
           The VUM delivery is classified sensitive and must stay on the host
           (§12.11). This refuses any staged file matching the real-data
-          patterns in .gitignore, whatever its path.
-        entry: python scripts/check_no_real_data.py
+          patterns in .gitignore, and any file that *looks* like a delivery —
+          read from its header and its keys, so `Unfall.csv` is caught whatever
+          it is called and wherever it sits (risk C1).
+        entry: uv run python scripts/check_no_real_data.py
         language: system
         pass_filenames: true
         always_run: true

@@ -23,11 +23,11 @@ and rebases the branches that have not merged yet.
 | File | Contents |
 |---|---|
 | `pyproject.toml` | uv, Python 3.14, **every M0-M8 dependency pinned**; ruff (`PLW1514` on), mypy `strict` on `ra2/`, coverage `fail_under = 85` scoped to `ra2/domain` + `ra2/services`, all seven pytest markers |
-| `justfile` | `dev test e2e lint fmt migrate revision census-export setup-e2e eval` — final |
+| `justfile` | `dev test e2e lint fmt migrate revision census-export setup-e2e eval`, + `dev-agent`, `reset`, `reset-seed`, `check-data`. "Final" has been amended three times; it means *by amendment only*, not *never* |
 | `.importlinter` | the §1.1 layer contract, api/ui independence, the pure-domain and one-LLM-seam contracts |
 | `.pre-commit-config.yaml` | ruff, ruff-format, mypy, import-linter, the `no-real-data` hook |
-| `scripts/check_no_real_data.py` | the hook's implementation; stdlib only |
-| `.github/workflows/ci.yml` | layers 1-3 on `ubuntu-latest` **and** `windows-latest`; E2E linux-only with traces on failure; `alembic check` |
+| `scripts/check_no_real_data.py` | the hook's implementation; **name and content** (`fix-c1-real-data-guard`). No third-party import — it reaches `ra2.domain.parsing.headers` rather than keeping a second copy of the column vocabulary |
+| `.github/workflows/ci.yml` | `no-real-data` first, on a bare interpreter; layers 1-3 on `ubuntu-latest` **and** `windows-latest`; E2E linux-only with traces on failure; `alembic check` |
 | `alembic.ini` | script location, UTC file template, ruff post-write hook. No URL — `env.py` reads `Settings` |
 
 ### The contract — owner: M0, amendment only
@@ -387,6 +387,41 @@ an exported CSV, not an audit row (SD23, §18.3).
 | `ra2/ui/shell.py` + the seven built views | `shell(data_dir=…)` and the header chip. The value is a `Settings` one and `ra2/ui/` may not import `ra2/infra/`, so it arrives through `services.lifecycle.data_dir()` — one line per view |
 | `sw-design.md` | **§18 is written**, `SD23` added to §13 |
 | `plan-reset-and-discard.md` | §2.1 (no delivery list exists), §6 and §7 (four frozen files the table missed) — corrected in the same commit, per CLAUDE.md |
+
+---
+
+## Risk remediation — a slice, not a phase
+
+Findings from `risk-assesment.md`, the external review at `616bf2b`, landed one
+at a time after `p5w4-green`. **No Wave 0 and no new frozen baseline**: each is
+a fix to a control that already exists, and none adds a table, a column or an
+Alembic head. The frozen files a fix touches are amended in the ordinary way,
+one amendment file per branch.
+
+Progress is tracked in `risk-assesment.md` — a `Status` column in §1 and §5,
+and one §8 entry per finding closed. The register in §4 is left as written.
+
+### Amended files (already frozen)
+
+| File | What changed | Amendment |
+|---|---|---|
+| `scripts/check_no_real_data.py` | **Rewritten: content-shaped.** Keeps the `.gitignore` name patterns as defence one and adds the check that decides what a file *is*, through `ra2.domain.parsing.headers.classify_header` — the importer's own classifier, so there is no second copy of the column vocabulary to drift. A delivery-shaped file is refused unless it is under `tests/fixtures/deliveries/` **and** its keys were invented rather than delivered. + `--all` | `fix-c1-real-data-guard` |
+| `.github/workflows/ci.yml` | + the `no-real-data` job, **first and depending on nothing** — no `uv sync`, no cache, no `needs`. C1's third gap was that CI never ran the guard at all | `fix-c1-real-data-guard` |
+| `.pre-commit-config.yaml` | The hook's name and description say *name and content*; `entry` runs through `uv run python`, because the guard is a 3.14 source file and a hook that dies with a `SyntaxError` fails open | `fix-c1-real-data-guard` |
+| `justfile` | + `check-data` | `fix-c1-real-data-guard` |
+| `ra2/infra/ollama_client.py` | **not frozen** — the transport half of the loopback rule (`SD27`). Listed here because it is the other finding closed in this slice | — |
+| `.gitignore` | **unchanged, deliberately.** Adding `Unfall.csv` would be the name-shaped fix again, and it would block the hazard fixtures, which carry the same names | — |
+| `pyproject.toml`, `.importlinter`, `tests/conftest.py` | **unchanged.** No dependency, no new contract, no new root fixture | — |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `tests/backend/scripts/test_check_no_real_data.py` | The guard's tests. Built by asking `generate_hazards` for a **genuine** delivery file and putting delivered-entropy keys in it — a guard tested against the author's idea of a delivery is a guard tested against nothing. No real value appears |
+| `tests/backend/infra/test_ollama_client.py` | *The environment cannot move the socket* — eleven tests, with a positive control |
+| `sw-design.md` | `SD27`, and §15.5's transport paragraph |
+| `README.md`, `CLAUDE.md` | The loopback rule now states both halves |
+| `risk-assesment.md` | The `Status` column, and §8 |
 
 ---
 
