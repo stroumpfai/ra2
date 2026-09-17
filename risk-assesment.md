@@ -46,13 +46,18 @@ patterns account for almost everything found:
 
 **Top five actions**, in order:
 
-| # | Action | Effort | Risk |
-|---|---|---|---|
-| 1 | Build the adapter's HTTP client with `trust_env=False` (a proxy env var currently redirects loopback traffic off-host — reproduced) | ~1 h | **A1** |
-| 2 | Write the data-handling rules the app cannot enforce: outputs, retention, destruction, named owner, incident path | ~1 day, no code | **F1, B2, B3** |
-| 3 | Suppress or gate verbatim value samples in the census export; screen every export before it leaves the machine | ~½ day | **B1** |
-| 4 | Make the real-data commit guard content-shaped and run it in CI; reconsider the repository being public | ~½ day | **C1** |
-| 5 | Measure and bound the prompt against the model's context window before the evaluation corpus is cut | ~1 day | **D1** |
+**Status** is maintained as findings close: `open` until there is a
+remediation entry in §8, then `✓ §8.n` pointing at it. It is the only part
+of this document that is kept current — the register in §4 stays as written
+at `616bf2b`.
+
+| # | Status | Action | Effort | Risk |
+|---|---|---|---|---|
+| 1 | **✓ §8.1** | Build the adapter's HTTP client with `trust_env=False` (a proxy env var currently redirects loopback traffic off-host — reproduced) | ~1 h | **A1** |
+| 2 | open | Write the data-handling rules the app cannot enforce: outputs, retention, destruction, named owner, incident path | ~1 day, no code | **F1, B2, B3** |
+| 3 | open | Suppress or gate verbatim value samples in the census export; screen every export before it leaves the machine | ~½ day | **B1** |
+| 4 | open | Make the real-data commit guard content-shaped and run it in CI; reconsider the repository being public | ~½ day | **C1** |
+| 5 | open | Measure and bound the prompt against the model's context window before the evaluation corpus is cut | ~1 day | **D1** |
 
 Nothing found here calls the architecture into question. Items 1, 3 and 4 are
 small fixes to controls that already exist; item 2 is the gap that no amount of
@@ -129,6 +134,11 @@ machine boundary.
 
 **A1 · A proxy environment variable redirects "loopback" traffic off-host**
 · Severity: **High** · Control status: **absent** · **Verified**
+
+> **Remediated 2026-09-17 — see §8.1.** The finding below is left as written:
+> this document is a point-in-time review at `616bf2b`, and rewriting it would
+> lose the reasoning that found the defect. Control status at the time of
+> writing was *absent*; it is now *in place*.
 
 *Scenario.* RA2 is installed on a managed workstation where `HTTP_PROXY` (or
 `ALL_PROXY`) is set machine-wide, as it is on most corporate and government
@@ -846,43 +856,48 @@ land.
 
 ## 5. Consolidated recommendations
 
+**Status** is maintained as findings close: `open` until there is a
+remediation entry in §8, then `✓ §8.n` pointing at it. It is the only part
+of this document that is kept current — the register in §4 stays as written
+at `616bf2b`.
+
 **Now — before the next real import** (small, mostly code)
 
-| # | Action | Risk | Effort |
-|---|---|---|---|
-| 1 | `trust_env=False` on every HTTP client the adapter builds, plus a proxy-environment test | A1 | 1 h |
-| 2 | Content-shaped real-data guard, wired into CI as well as pre-commit | C1 | ½ d |
-| 3 | Add Do-NOT #13 (agents never read `data/` or `RA2_DATA_DIR`) and a matching permission deny rule | C2 | 1 h |
-| 4 | Suppress verbatim value samples for non-coded columns; classification header on every export | B1 | ½ d |
-| 5 | Render the anonymisation marking as three states until its semantics are confirmed | B5 | 2 h |
+| # | Status | Action | Risk | Effort |
+|---|---|---|---|---|
+| 1 | **✓ §8.1** | `trust_env=False` on every HTTP client the adapter builds, plus a proxy-environment test | A1 | 1 h |
+| 2 | open | Content-shaped real-data guard, wired into CI as well as pre-commit | C1 | ½ d |
+| 3 | open | Add Do-NOT #13 (agents never read `data/` or `RA2_DATA_DIR`) and a matching permission deny rule | C2 | 1 h |
+| 4 | open | Suppress verbatim value samples for non-coded columns; classification header on every export | B1 | ½ d |
+| 5 | open | Render the anonymisation marking as three states until its semantics are confirmed | B5 | 2 h |
 
 **Before the evaluation corpus is cut** (validity of the answer)
 
-| # | Action | Risk | Effort |
-|---|---|---|---|
-| 6 | Record prompt token estimate per extraction; validate against a context budget at setup; decide how context size is set | D1 | 1 d |
-| 7 | Carry the parse-failure rate onto Results and Ranking | D2 | 2 h |
-| 8 | Record model-server version and decoding options on the run; state the determinism caveat in the report template | D3 | 3 h |
-| 9 | Constrain `root_path` to an allowed root; make the server honour `Settings.host` or drop it | A4 | ½ d |
-| 10 | Standing copy on Results: a mismatch rate is not a model error rate until the list is read | D6 | 1 h |
+| # | Status | Action | Risk | Effort |
+|---|---|---|---|---|
+| 6 | open | Record prompt token estimate per extraction; validate against a context budget at setup; decide how context size is set | D1 | 1 d |
+| 7 | open | Carry the parse-failure rate onto Results and Ranking | D2 | 2 h |
+| 8 | open | Record model-server version and decoding options on the run; state the determinism caveat in the report template | D3 | 3 h |
+| 9 | open | Constrain `root_path` to an allowed root; make the server honour `Settings.host` or drop it | A4 | ½ d |
+| 10 | open | Standing copy on Results: a mismatch rate is not a model error rate until the list is read | D6 | 1 h |
 
 **Organisational — no code, highest leverage**
 
-| # | Action | Risk | Effort |
-|---|---|---|---|
-| 11 | The governance page: owner, basis, retention, destruction, permitted outputs, incident path | F1, B2, B3 | 1 d |
-| 12 | Deployment conditions in the runbook: disk encryption, custody, no cloud-synced data dir, loopback bind, model-server pinning, no tunnels | B4, A2, A3, F2 | ½ d |
-| 13 | Extend the NDA or equivalent to the reviewing domain expert before Goal 3's review | B2 | — |
-| 14 | Delivery delete + `VACUUM`; decide and document backup vs. accepted re-run | B3, E1 | ½ d |
-| 15 | Close B1–B4 with named owners and dates; write the decommission condition and the "to operate for real" list | F5, F3 | ½ d |
+| # | Status | Action | Risk | Effort |
+|---|---|---|---|---|
+| 11 | open | The governance page: owner, basis, retention, destruction, permitted outputs, incident path | F1, B2, B3 | 1 d |
+| 12 | open | Deployment conditions in the runbook: disk encryption, custody, no cloud-synced data dir, loopback bind, model-server pinning, no tunnels | B4, A2, A3, F2 | ½ d |
+| 13 | open | Extend the NDA or equivalent to the reviewing domain expert before Goal 3's review | B2 | — |
+| 14 | open | Delivery delete + `VACUUM`; decide and document backup vs. accepted re-run | B3, E1 | ½ d |
+| 15 | open | Close B1–B4 with named owners and dates; write the decommission condition and the "to operate for real" list | F5, F3 | ½ d |
 
 **At the acceptance pass (M34)**
 
-| # | Action | Risk |
-|---|---|---|
-| 16 | Independent recomputation of one run's statistics outside this codebase | D5 |
-| 17 | Verify a long record is not silently truncated by the real server | D1 |
-| 18 | Check one run's provenance against the machine it claims to have run on | A2 |
+| # | Status | Action | Risk |
+|---|---|---|---|
+| 16 | open | Independent recomputation of one run's statistics outside this codebase | D5 |
+| 17 | open | Verify a long record is not silently truncated by the real server | D1 |
+| 18 | open | Check one run's provenance against the machine it claims to have run on | A2 |
 
 ---
 
@@ -918,3 +933,49 @@ land.
 | A4 | Read of `ra2/api/v1/deliveries.py`, `ra2/services/delivery_service.py`, `ra2/infra/filestore.py`; grep for readers of `Settings.host` | Arbitrary `root_path` accepted; whole files read to hash; no module reads `Settings.host` |
 | D1 | grep over `ra2/` for `num_ctx`, `max_tokens`, `context`, `truncat`, and for callers of `estimate_tokens` | No context option sent, no length validation; `estimate_tokens` used only in the prompt preview |
 | D2 | Read of `ra2/services/scoring_service.py:373` and `ra2/ui/components/progress_card.py:84` | No `extraction_value` rows → `missing`; rate shown on the progress card only |
+
+---
+
+## 8. Remediation log
+
+Appended after the review, one entry per finding closed. The register above is
+**not** edited: it says what was true at `616bf2b`, and an entry here says what
+changed since and where to verify it. A finding with no entry is still open.
+
+### 8.1 A1 — the proxy environment variable · closed 2026-09-17 · `39c72e0`
+
+**Status: in place.** Severity was **High**; the residual is the part no code
+reaches — see *What this does not close*.
+
+**What changed.**
+
+| Where | Change |
+|---|---|
+| `ra2/infra/ollama_client.py` | `_build_client` now builds the transport itself, `openai.DefaultAsyncHttpx2Client(trust_env=False, follow_redirects=False)`, instead of letting the SDK construct one with `trust_env=True`. All three classes — `OllamaLLMClient`, `OllamaModelCatalog`, `OllamaEndpointProber` — route through it, so one change covers every client the adapter builds |
+| `ra2/infra/ollama_client.py` | `_reject_environment_reading_client` refuses an **injected** `http_client` carrying either flag. The `http_client` seam exists so the tests can drive a `MockTransport` (Do-NOT #12); a seam that accepted a looser client than production builds would make the guarantee true only of the path nobody runs |
+| `tests/backend/infra/test_ollama_client.py` | A section of eleven tests, *The environment cannot move the socket*. The proxy ones set `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and a `NO_PROXY` that deliberately does **not** cover localhost, then assert on the transport `_transport_for_url` actually selects for the loopback URL — not on the flag, because the transport is what the defect was. They exercise the **production** path, with no `http_client` injected, which is the one path the rest of the file never touched and the only one that had the defect |
+| `sw-design.md` §13, §15.5 | **SD27**, and the paragraph *The guard is half the rule; the transport is the other half* |
+| `README.md` | *The loopback rule* now says both halves. The claim that the guard makes off-host traffic "impossible rather than merely discouraged" is true again |
+| `CLAUDE.md` | The *Loopback only* agreement names the transport half |
+
+**`follow_redirects=False` was not in the recommendation** and is added here as
+a second finding of the same shape, found while fixing the first: the SDK's
+default is `True`, and a `307`/`308` preserves the method and the body, so
+whatever answers on `127.0.0.1:11434` can hand the narrative to an off-host URL
+that the guard never saw. Same hole, read the other direction.
+
+**How it was verified.**
+
+| Check | Result |
+|---|---|
+| The reviewer's own reproduction, re-run on the pinned versions before the change | `trust_env: True`; transport for the loopback URL is `httpcore2.AsyncHTTPProxy` with `_proxy_url` `proxy.corp.example:3128` — the finding confirmed on `main` |
+| The same inspection after the change | `trust_env False`, `_mounts {}`, pool `AsyncConnectionPool`, no proxy URL |
+| The new tests against the **unfixed** adapter (`git stash` of the one module) | 9 of them fail — the regression gate is real, not tautological |
+| `test_the_proxy_check_can_tell_the_difference` | A positive control: under the same environment, a client built with `trust_env=True` **is** seen to dial through the proxy. Every other assertion in the section is a negative one, and a negative assertion that cannot fail is worse than none. The reviewer's `_proxy` / `_proxy_url` distinction is exactly how this would have gone quiet |
+| `just lint`, `just test` | Green |
+
+**What this does not close.** **A2 is untouched and unchanged.** This makes the
+environment unable to move the socket; it still cannot see what is listening on
+the other end of it. A tunnel, a forwarder or an Ollama configured to relay
+remains invisible to every control in this codebase, and the answer to it is
+still the runbook sentence A2 asks for and the M34 provenance check.
