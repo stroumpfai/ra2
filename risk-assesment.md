@@ -47,16 +47,17 @@ patterns account for almost everything found:
 **Top five actions**, in order:
 
 **Status** is maintained as findings close: `open` until there is a
-remediation entry in §8, then `✓ §8.n` pointing at it. It is the only part
-of this document that is kept current — the register in §4 stays as written
-at `616bf2b`.
+remediation entry in §8, then `✓ §8.n` pointing at it. **`◑`** means the code
+is done and a decision for the project is not — the entry says which. It is
+the only part of this document that is kept current; the register in §4 stays
+as written at `616bf2b`.
 
 | # | Status | Action | Effort | Risk |
 |---|---|---|---|---|
 | 1 | **✓ §8.1** | Build the adapter's HTTP client with `trust_env=False` (a proxy env var currently redirects loopback traffic off-host — reproduced) | ~1 h | **A1** |
 | 2 | open | Write the data-handling rules the app cannot enforce: outputs, retention, destruction, named owner, incident path | ~1 day, no code | **F1, B2, B3** |
 | 3 | open | Suppress or gate verbatim value samples in the census export; screen every export before it leaves the machine | ~½ day | **B1** |
-| 4 | open | Make the real-data commit guard content-shaped and run it in CI; reconsider the repository being public | ~½ day | **C1** |
+| 4 | **◑ §8.2** | Make the real-data commit guard content-shaped and run it in CI; reconsider the repository being public | ~½ day | **C1** |
 | 5 | open | Measure and bound the prompt against the model's context window before the evaluation corpus is cut | ~1 day | **D1** |
 
 Nothing found here calls the architecture into question. Items 1, 3 and 4 are
@@ -441,6 +442,10 @@ about a column whose meaning is unknown. The risk is in the label.
 **C1 · The barrier against committing real data is name-shaped, opt-in, and
 not in CI — and the repository is public** · Severity: **High** ·
 Control status: **partial** · **Verified**
+
+> **Partly remediated 2026-09-17 — see §8.2.** The guard is content-shaped and
+> runs in CI; **public visibility is still open**, and it is a decision rather
+> than a diff.
 
 *Scenario.* A real delivery file is copied into the working tree while
 debugging an import — the single most natural thing to do when a parser fails
@@ -857,16 +862,17 @@ land.
 ## 5. Consolidated recommendations
 
 **Status** is maintained as findings close: `open` until there is a
-remediation entry in §8, then `✓ §8.n` pointing at it. It is the only part
-of this document that is kept current — the register in §4 stays as written
-at `616bf2b`.
+remediation entry in §8, then `✓ §8.n` pointing at it. **`◑`** means the code
+is done and a decision for the project is not — the entry says which. It is
+the only part of this document that is kept current; the register in §4 stays
+as written at `616bf2b`.
 
 **Now — before the next real import** (small, mostly code)
 
 | # | Status | Action | Risk | Effort |
 |---|---|---|---|---|
 | 1 | **✓ §8.1** | `trust_env=False` on every HTTP client the adapter builds, plus a proxy-environment test | A1 | 1 h |
-| 2 | open | Content-shaped real-data guard, wired into CI as well as pre-commit | C1 | ½ d |
+| 2 | **✓ §8.2** | Content-shaped real-data guard, wired into CI as well as pre-commit | C1 | ½ d |
 | 3 | open | Add Do-NOT #13 (agents never read `data/` or `RA2_DATA_DIR`) and a matching permission deny rule | C2 | 1 h |
 | 4 | open | Suppress verbatim value samples for non-coded columns; classification header on every export | B1 | ½ d |
 | 5 | open | Render the anonymisation marking as three states until its semantics are confirmed | B5 | 2 h |
@@ -979,3 +985,52 @@ environment unable to move the socket; it still cannot see what is listening on
 the other end of it. A tunnel, a forwarder or an Ollama configured to relay
 remains invisible to every control in this codebase, and the answer to it is
 still the runbook sentence A2 asks for and the M34 provenance check.
+
+
+### 8.2 C1 — the real-data commit guard · code closed 2026-09-17 · `2e401bc` · visibility open
+
+**Status: in place for the guard, open for the repository's visibility.** Two
+of the three recommendations are done; the third is a project decision.
+
+**What changed.**
+
+| Where | Change |
+|---|---|
+| `scripts/check_no_real_data.py` | Rewritten. The `.gitignore` name patterns stay as defence one; the new content check decides what a file **is**, through `ra2.domain.parsing.headers.classify_header` — the importer's own classifier, so there is no second copy of the column vocabulary. Two copies of one pattern list, both wrong in the same way, is what C1 found; the fix keeps one copy and it is not this script's |
+| `scripts/check_no_real_data.py` | A delivery-shaped file is refused unless it is under `tests/fixtures/deliveries/` **and** its keys were invented rather than delivered. `generate_hazards.uid()` yields three to five distinct characters out of thirty-two; a real 32-hex key yields about thirteen, so `MAX_INVENTED_DISTINCT_CHARS = 8` sits in empty space between two populations rather than on a guess |
+| `.github/workflows/ci.yml` | A `no-real-data` job, **first and depending on nothing** — no `uv sync`, no cache, no `needs`. It runs `--all`: every tracked file, not the pull request's changed ones |
+| `.pre-commit-config.yaml`, `justfile` | The hook says *name and content* and runs through `uv run python`; `just check-data` runs the same check over the tree |
+| `tests/backend/scripts/test_check_no_real_data.py` | Twenty-four tests |
+| `contracts/amendments/fix-c1-real-data-guard.md`, `CONTRACTS.md` | All four files are M0-frozen. Amended and applied in one commit, the way the reset-and-discard slice did |
+
+**The second rule is the one no other control covered.** CLAUDE.md requires the
+hazards to be synthesised byte-exactly and forbids real data reaching a test.
+Until now that was prose. Lifting five real rows into a fixture because the
+synthesised one did not reproduce the bug is the plausible, tempting mistake,
+and it passed every check in this repository.
+
+**How it was verified.**
+
+| Check | Result |
+|---|---|
+| `Unfall.csv` — the reviewer's own example — generated with delivered-entropy keys, staged with `git add -f`, and the **real pre-commit hook** run against it | Refused: *"looks like a delivery file, and only tests/fixtures/deliveries/ may hold one"*. The old guard passed this file |
+| The same content renamed `notes/scratch.bak`, and a headerless tail with no header line at all | Both refused |
+| The fourteen committed hazard fixtures, which are delivery files by construction — real header, real delimiters, 32-hex keys | All pass. A guard that refused them would be switched off within a day |
+| A fixture-directory file carrying delivered-entropy keys | Refused: *"fixtures are synthesised, never sampled"* |
+| `--all` over every tracked file | Green — so, as of this commit, there is no real delivery content anywhere in the repository |
+| `python -S -E scripts/check_no_real_data.py` (no `site`, no `site-packages`) | Exit 0, which is what lets CI's job run on a bare interpreter with no install step |
+| `just lint`, `just test` | Green |
+
+**What this does not close.** **The repository is public**
+(`github.com/stroumpfai/ra2`, `"private": false`). C1's third recommendation is
+to reconsider that for the duration, and it is a decision rather than a diff. A
+private repository gives a window to force-push a mistake away; a public one
+does not — content should be assumed mirrored the moment it is pushed. The
+guard makes the mistake much harder to make; it cannot make it recoverable.
+That is why C1's row is marked `◑` and not `✓`.
+
+**A limit of the guard itself, recorded rather than hidden.** The headerless
+detector keys on the *first* field, so a RADIS tail is caught and an Astrana
+tail — whose key sits at column 2, after `Jahr` and `Datum` (§4.1) — is not.
+Both are caught the moment the header line is present, which is how a delivery
+arrives.
