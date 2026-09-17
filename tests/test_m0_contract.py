@@ -97,8 +97,16 @@ def test_claude_md_carries_the_do_not_list():
         "sw-design.md",
     ):
         assert phrase in text, f"CLAUDE.md is missing the invariant mentioning {phrase!r}"
-    # The twelve Do-NOT items of sw-design.md §12, numbered.
-    assert len(re.findall(r"^\d+\. \*\*Never\*\*", text, flags=re.MULTILINE)) == 12
+    # The Do-NOT items of sw-design.md §12, which CLAUDE.md carries verbatim.
+    # Counted **against that section** rather than against a literal: a magic
+    # number here is one that gets bumped in this file without anyone opening
+    # the other, which is the drift the assertion exists to catch. Adding an
+    # invariant to one document and not the other is now a red test.
+    design = (REPO_ROOT / "sw-design.md").read_text(encoding="utf-8")
+    section = design.split("## 12. Invariants")[1].split("\n## ")[0]
+    expected = len(re.findall(r"^\d+\. \*\*Never\*\*", section, flags=re.MULTILINE))
+    assert expected >= 13, "sw-design.md §12 lost an invariant"
+    assert len(re.findall(r"^\d+\. \*\*Never\*\*", text, flags=re.MULTILINE)) == expected
 
 
 def test_no_errors_replace_anywhere():

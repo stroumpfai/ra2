@@ -556,6 +556,24 @@ settled.
 10. **Never** use `metadata.create_all()`, in the app or in tests.
 11. **Never** commit anything matching the real-data patterns in `.gitignore`.
 12. **Never** add a branch to production code that exists only for tests.
+13. **Never** open, query, print or paste the contents of `data/` or
+    `RA2_DATA_DIR`. Reproduce the hazard in a fixture instead.
+
+**On #13.** It is the only invariant addressed to the *people and agents*
+building RA2 rather than to the code, and it is here because this project is
+built with an AI coding assistant by explicit design (`vision.md` →
+Environment) on the machine that holds the real corpus. Agent transcripts are
+processed off the host by construction, so an agent that reads a real file to
+debug an import has exported that record as surely as an upload would — and
+until this rule existed, nothing said not to. Do-NOT #11 forbids *committing*
+real data, which is a different act.
+
+It is backed by `permissions.deny` rules over `data/` and `var/` in
+`.claude/settings.json`, which is committed rather than ignored so the control
+reaches everyone who clones. `RA2_DATA_DIR` is configurable and a deny rule can
+only name a literal path, so the rule covers the default `./var` and the
+sentence covers the rest — which is why the sentence is the invariant and the
+configuration is the backstop, not the other way round.
 
 ---
 

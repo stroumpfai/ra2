@@ -18,6 +18,13 @@ first*, in the same commit.
 sw-design.md §12, verbatim. These are invariants, not preferences. Each one has
 a test, a lint rule or a CI gate behind it.
 
+**#13 is addressed to you.** The rest constrain the code; that one constrains
+the agent reading this. Your transcript leaves this machine — so a real
+narrative you `cat` to debug an import has left the host, whatever the reason
+was. `.claude/settings.json` denies reads of `data/` and `var/`, but the rule
+is the sentence, not the deny list: `RA2_DATA_DIR` can point anywhere, and no
+glob covers a path it has not been told about.
+
 1. **Never** import `openai` or `ollama` outside the `LLMClient` implementation.
 2. **Never** mutate an `extraction`, `record` or `corpus` row. A re-run adds rows.
 3. **Never** edit an applied Alembic migration. Add a new one.
@@ -35,6 +42,8 @@ a test, a lint rule or a CI gate behind it.
 10. **Never** use `metadata.create_all()`, in the app or in tests.
 11. **Never** commit anything matching the real-data patterns in `.gitignore`.
 12. **Never** add a branch to production code that exists only for tests.
+13. **Never** open, query, print or paste the contents of `data/` or
+    `RA2_DATA_DIR`. Reproduce the hazard in a fixture instead.
 
 ---
 

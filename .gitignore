@@ -41,8 +41,13 @@ var/
 htmlcov/
 test-results/
 
-# Claude Code session/agent state, including nested worktrees for parallel waves
-.claude/
+# Claude Code session/agent state, including nested worktrees for parallel waves.
+# `settings.json` is the exception and is **committed on purpose**: it carries
+# the Do-NOT #13 deny rules over `data/` and `var/`, and a control that lives
+# only in one developer's ignored directory protects only that developer
+# (risk C2).
+.claude/*
+!.claude/settings.json
 
 # OS
 .DS_Store

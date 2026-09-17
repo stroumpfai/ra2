@@ -409,18 +409,27 @@ and one §8 entry per finding closed. The register in §4 is left as written.
 | `.github/workflows/ci.yml` | + the `no-real-data` job, **first and depending on nothing** — no `uv sync`, no cache, no `needs`. C1's third gap was that CI never ran the guard at all | `fix-c1-real-data-guard` |
 | `.pre-commit-config.yaml` | The hook's name and description say *name and content*; `entry` runs through `uv run python`, because the guard is a 3.14 source file and a hook that dies with a `SyntaxError` fails open | `fix-c1-real-data-guard` |
 | `justfile` | + `check-data` | `fix-c1-real-data-guard` |
+| `CLAUDE.md` | + **Do-NOT #13** (never open, query, print or paste `data/` or `RA2_DATA_DIR`), verbatim from §12, and the paragraph saying the item is addressed to the agent reading the file. **Also, retroactively:** the *Loopback only* agreement's transport half, edited in `39c72e0` without an amendment | `fix-c2-agent-data-access` |
+| `tests/test_m0_contract.py` | `test_claude_md_carries_the_do_not_list` counts the Do-NOT items **against `sw-design.md` §12** instead of against the literal `12`. Bumping the literal would have left the same trap: a magic number here is one that gets changed without anyone opening the other document, which is the drift the assertion exists to catch | `fix-c2-agent-data-access` |
 | `ra2/infra/ollama_client.py` | **not frozen** — the transport half of the loopback rule (`SD27`). Listed here because it is the other finding closed in this slice | — |
 | `.gitignore` | **unchanged, deliberately.** Adding `Unfall.csv` would be the name-shaped fix again, and it would block the hazard fixtures, which carry the same names | — |
 | `pyproject.toml`, `.importlinter`, `tests/conftest.py` | **unchanged.** No dependency, no new contract, no new root fixture | — |
+
+### New files
+
+| File | Contents |
+|---|---|
+| `.claude/settings.json` | The Do-NOT #13 deny rules — `Read(./data/**)`, `Read(./var/**)`, `Bash(sqlite3 *)`, and the matching `sandbox.filesystem.denyRead`. **Committed, not ignored**: a control in an ignored directory protects the one machine it was written on (`fix-c2-agent-data-access`) |
 
 ### Not frozen, and changed
 
 | Path | What |
 |---|---|
+| `.gitignore` | `.claude/` -> `.claude/*` + `!.claude/settings.json`, so the deny rules ship with the repository. Nothing else about the directory changes |
 | `tests/backend/scripts/test_check_no_real_data.py` | The guard's tests. Built by asking `generate_hazards` for a **genuine** delivery file and putting delivered-entropy keys in it — a guard tested against the author's idea of a delivery is a guard tested against nothing. No real value appears |
 | `tests/backend/infra/test_ollama_client.py` | *The environment cannot move the socket* — eleven tests, with a positive control |
-| `sw-design.md` | `SD27`, and §15.5's transport paragraph |
-| `README.md`, `CLAUDE.md` | The loopback rule now states both halves |
+| `sw-design.md` | `SD27`, and §15.5's transport paragraph; **§12 gains the thirteenth invariant** and the paragraph on why it is the only one addressed to people rather than to code |
+| `README.md` | The loopback rule now states both halves |
 | `risk-assesment.md` | The `Status` column, and §8 |
 
 ---

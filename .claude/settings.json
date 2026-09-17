@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "permissions": {
+    "deny": [
+      "Read(./data/**)",
+      "Read(./var/**)",
+      "Bash(sqlite3 *)"
+    ]
+  },
+  "sandbox": {
+    "filesystem": {
+      "denyRead": [
+        "./data",
+        "./var"
+      ]
+    }
+  }
+}
