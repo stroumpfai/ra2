@@ -485,6 +485,11 @@ on real data — and is committed.
 **C2 · AI-assisted development on the machine that holds the real corpus**
 · Severity: **Medium–High** · Control status: **partial**
 
+> **Partly remediated 2026-09-17 — see §8.3.** Do-NOT #13 and the deny rules
+> exist and are verified live. **Keeping real data off the development
+> checkout entirely is still open**, and it is the recommendation that would
+> make the rule unnecessary rather than merely stated.
+
 *Scenario.* The project is built with an AI coding assistant by explicit design
 (`vision.md` → Environment). The assistant runs on the same machine as
 `data/` (real samples) and `var/ra2.sqlite` (2 695 real records). Agent
@@ -873,7 +878,7 @@ as written at `616bf2b`.
 |---|---|---|---|---|
 | 1 | **✓ §8.1** | `trust_env=False` on every HTTP client the adapter builds, plus a proxy-environment test | A1 | 1 h |
 | 2 | **✓ §8.2** | Content-shaped real-data guard, wired into CI as well as pre-commit | C1 | ½ d |
-| 3 | open | Add Do-NOT #13 (agents never read `data/` or `RA2_DATA_DIR`) and a matching permission deny rule | C2 | 1 h |
+| 3 | **✓ §8.3** | Add Do-NOT #13 (agents never read `data/` or `RA2_DATA_DIR`) and a matching permission deny rule | C2 | 1 h |
 | 4 | open | Suppress verbatim value samples for non-coded columns; classification header on every export | B1 | ½ d |
 | 5 | open | Render the anonymisation marking as three states until its semantics are confirmed | B5 | 2 h |
 
@@ -1034,3 +1039,51 @@ detector keys on the *first* field, so a RADIS tail is caught and an Astrana
 tail — whose key sits at column 2, after `Jahr` and `Datum` (§4.1) — is not.
 Both are caught the moment the header line is present, which is how a delivery
 arrives.
+
+
+### 8.3 C2 — reading the real corpus while building · rule closed 2026-09-17 · `e8c5a45` · checkout separation open
+
+**Status: in place for the rule and the deny list, open for the second
+recommendation.** Do-NOT #11 forbade *committing* real data. Nothing forbade
+*reading* it — and agent transcripts leave the host by construction, so an
+agent that opens a real narrative to debug an import has exported that record
+as surely as an upload would.
+
+**What changed.**
+
+| Where | Change |
+|---|---|
+| `sw-design.md` §12, `CLAUDE.md` | **Do-NOT #13** — *never open, query, print or paste the contents of `data/` or `RA2_DATA_DIR`. Reproduce the hazard in a fixture instead.* Worded as an act, not as a path: "do not access" reads as a filesystem rule, and the database is the easier mistake. The only invariant addressed to the people and agents building RA2 rather than to the code, and §12 says why |
+| `.claude/settings.json` *(new, committed)* | `Read(./data/**)`, `Read(./var/**)`, `Bash(sqlite3 *)`, plus the matching `sandbox.filesystem.denyRead`. A `Read(...)` deny rule is merged into the sandbox's read denials, so it covers a sandboxed `cat` and `grep` as well as the Read tool |
+| `.gitignore` | `.claude/` -> `.claude/*` + `!.claude/settings.json`. **The load-bearing half**: a deny rule in an ignored directory protects the one machine it was written on, and C2 is about the development practice, not one workstation |
+| `tests/test_m0_contract.py` | The Do-NOT count is now compared against `sw-design.md` §12 instead of the literal `12`, so adding an invariant to one document and not the other is a red test |
+| `contracts/amendments/fix-c2-agent-data-access.md`, `CONTRACTS.md` | `sw-design.md`, `CLAUDE.md` and the contract test are amended. The amendment also **retroactively covers** `CLAUDE.md`'s loopback edit in `39c72e0`, which went in without one, and corrects its row in `CONTRACTS.md` |
+
+**How it was verified.** The rules were exercised live in the session that
+wrote them, not merely written:
+
+| Probe | Result |
+|---|---|
+| `cat data/nonexistent-c2-probe.txt` — a path that does **not** exist | Denied. The block is on the path, before the file is resolved, which is the property worth having |
+| A write and read under `var/` | Denied |
+| `head -c 40 README.md` — the control | Allowed, exit 0. The denial is specific to `data/` and `var/`, not a blanket block that would be turned off within a day |
+| Removing #13 from `CLAUDE.md` alone | `test_claude_md_carries_the_do_not_list` fails |
+| `just lint`, `just test` | Green |
+
+**What this does not close.**
+
+**C2's second recommendation — keep real data off the development checkout
+entirely.** Real delivery files and the real corpus on the target machine,
+synthetic hazards everywhere else. `data/` and `var/ra2.sqlite` are on this
+machine today. That is the control that would make #13 unnecessary rather than
+merely stated, and it is a project decision. The fixture discipline that makes
+it affordable is already in place.
+
+**And the honest limit of a deny rule.** It guards one tool on one configured
+path. `RA2_DATA_DIR` can point anywhere and a glob cannot cover a path it has
+not been told about; a subprocess that opens a file itself is not intercepted;
+`Bash(sqlite3 *)` is a speed bump that `python -c "import sqlite3"` walks
+around; and a Playwright trace taken against a real corpus would land in
+`test-results/`, which is deliberately **not** denied, because E2E runs on
+synthetic data today and denying it would block debugging a hazard that does
+not yet exist. **#13 is the control. The deny list is what catches the lapse.**
