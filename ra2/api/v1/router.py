@@ -10,6 +10,7 @@ from ra2.api.v1 import (
     deliveries,
     evaluations,
     features,
+    mismatches,
     models,
     presence,
     prompt_templates,
@@ -35,3 +36,4 @@ api_router.include_router(models.router)
 api_router.include_router(results.router)
 api_router.include_router(presence.router)
 api_router.include_router(ranking.router)
+api_router.include_router(mismatches.router)

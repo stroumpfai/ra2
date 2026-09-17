@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ra2.domain.codelist_coverage import ColumnCoverage
 from ra2.domain.derivation import RecordProjection
 from ra2.domain.ids import CorpusId, EvaluationId, FeatureId, RecordId, RunId
+from ra2.domain.mismatch import ReviewTally
 from ra2.domain.prompt import ResolvedPrompt
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "CensusTableInput",
     "EnumCodeTableProvider",
     "GroundTruthProvider",
+    "MismatchTally",
     "PromptResolver",
     "Scorer",
     "ScoringStatus",
@@ -210,3 +212,37 @@ class Scorer(Protocol):
     """
 
     async def status(self, session: AsyncSession, run_id: RunId) -> ScoringStatus: ...
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 (M35, plan-phase-5.md §3.1). The fifth time this trick is played.
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class MismatchTally(Protocol):
+    """Per-feature review counts, without `results_service` importing
+    `mismatch_service`.
+
+    The same seam as `CensusMaterialiser`, `EnumCodeTableProvider`,
+    `PromptResolver` and `GroundTruthProvider`/`Scorer`: Y1 implements it, and
+    any later Results surface that wants "how much of this has been reviewed"
+    calls it without either module depending on the other.
+
+    Takes the *session*, not a session factory, for the reason every protocol
+    here does: the caller owns the transaction boundary.
+
+    Keyed by **`RunId`**, because the list is one run at a time (sw-design.md
+    §17.6) — a tally over two models' mismatches would be the cross-model
+    agreement §16.9 defers.
+
+    **It returns counts and nothing else.** There is deliberately no method
+    here that could influence a score, and the absence *is* the contract
+    (mvp-spec.md §12: "the tag never feeds back into a metric. Nothing is
+    rescored"). §17.3 draws the missing edge; this protocol is where it would
+    have been drawn.
+    """
+
+    async def tally(
+        self, session: AsyncSession, run_id: RunId
+    ) -> Mapping[FeatureId, ReviewTally]: ...

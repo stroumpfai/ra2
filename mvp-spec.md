@@ -312,10 +312,20 @@ score(run_id, feature_id, language, metric, value, n, ci_low, ci_high)
 mismatch(id, run_id, record_id, feature_id, record_value, extracted_value,
          evidence_span, analyst_tag, tagged_at, note)
       -- UNIQUE (run_id, record_id, feature_id). The ONE mutable row in this
-      -- pipeline: analyst_tag/tagged_at/note are written by review, and a
-      -- re-score UPSERTS the derived columns around them rather than
-      -- replacing the row (SD21). DELETE-then-INSERT destroys review work
-      -- silently, at the moment a developer is most confident.
+      -- pipeline, and TWO OWNERS SHARE IT (sw-design.md §17.1):
+      --   derived -- record_value, extracted_value, evidence_span -- belong
+      --     to the scorer and are rewritten on every score and re-score;
+      --   review  -- analyst_tag, tagged_at, note -- belong to §12's review
+      --     view and are the only human-authored data in the pipeline.
+      -- Neither side writes the other's. A re-score UPSERTS the derived
+      -- columns around the review ones rather than replacing the row (SD21);
+      -- DELETE-then-INSERT destroys review work silently, at the moment a
+      -- developer is most confident.
+      -- analyst_tag stays a STRING, not an enum column: the vocabulary is
+      -- domain/mismatch.py's MismatchTag -- hallucination |
+      -- structured_data_error | unclear (§12) -- and a fourth tag must be a
+      -- value, not a migration. A stored value the enum does not name renders
+      -- as itself and is counted under `other` (SD24).
 ```
 
 **Never overwrite an extraction.** A re-run creates a new `run` and new
@@ -681,6 +691,13 @@ evidence span, record key, feature, run.
 *(`unclear` is included because a real list will contain cases that are neither —
 the model read the text correctly and the text genuinely disagrees with the record.
 It costs nothing and answers the question from data.)*
+
+*(The three names above are the **stable identifiers** — the enum values, the
+stored column values, the CSV values and what tests assert on. The words on the
+screen are the UI's, in one rendering table, exactly as `FindingCode` works: the
+tally example's "record error" is how `structured_data_error` renders, so this
+paragraph and the screen agree without the identifier moving. sw-design.md
+§17.5, plan-phase-5.md C4.)*
 
 ---
 

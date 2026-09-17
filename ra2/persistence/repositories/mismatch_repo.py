@@ -1,4 +1,4 @@
-# STUB — bodies owned by S4 (feat/p4-persistence). Not frozen.
+# STUB — bodies owned by S4 (phase 4) and W1 (phase 5). Not frozen.
 """`mismatch` persistence (mvp-spec.md §5/§12, sw-design.md §16.6).
 
 **The one mutable row in this pipeline**, and the one repository in the project
@@ -15,15 +15,23 @@ that no longer mismatches is deleted; a row that still does keeps its tag.
 destroys review work silently, at the moment a developer is most confident,
 because they have just fixed the scorer (SD21, R5). The preservation test is
 what makes this a fact rather than a comment.
+
+**Phase 5 adds the other half of that contract** (sw-design.md §17.1): the
+three review columns acquire a writer. The split is now symmetric and neither
+side writes the other's — `upsert_feature` rewrites the derived three and
+**is unchanged**, `set_tag` writes the review three and nothing else, and
+`MismatchWrite` still cannot name a review column.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ra2.domain.ids import FeatureId, MismatchId, RecordId, RunId
+from ra2.domain.mismatch import TagFilter
 from ra2.persistence.models import Mismatch
 
 __all__ = ["MismatchRepository", "MismatchWrite"]
@@ -120,3 +128,91 @@ class MismatchRepository:
             .order_by(Mismatch.feature_id, Mismatch.record_id)
         )
         return list(result.scalars())
+
+    # --- phase 5 (M35 signatures, W1 bodies). sw-design.md §17 -------------
+    #
+    # The review side of the ownership split (§17.1). `upsert_feature` above
+    # is the scorer's side and must stay exactly as it is: the tag-preservation
+    # test that guards it belongs to phase 4.
+
+    async def list_for(
+        self,
+        run_id: RunId,
+        *,
+        feature_id: FeatureId | None = None,
+        tag_state: TagFilter,
+        sort_key: str,
+        descending: bool,
+        offset: int,
+        limit: int,
+    ) -> tuple[Sequence[Mismatch], int]:
+        """One filtered, sorted, paged page of a run's mismatches, and the
+        unpaged total.
+
+        **One run at a time** (§17.6) — there is no evaluation-wide overload,
+        because a list mixing two models' mismatches for the same record and
+        feature is the cross-model agreement §16.9 defers.
+
+        `sort_key` is one of `domain.mismatch.MISMATCH_SORT_KEYS` and there is
+        no fifth; **sorting is stable on ties**, so paging a list whose rows
+        share a feature does not reshuffle it between page 1 and page 2.
+
+        The statement count is **bounded and asserted** on a 1 000-row run
+        (the R4 lesson, one table over): a per-row lookup of the feature key or
+        the record's anonymisation flag is exactly the N+1 this signature
+        exists to make unwritable.
+        """
+        raise NotImplementedError
+
+    async def set_tag(
+        self,
+        mismatch_id: MismatchId,
+        *,
+        tag: str | None,
+        note: str | None,
+        now: datetime,
+    ) -> Mismatch | None:
+        """Write the **three review columns and nothing else** (§17.1).
+
+        `tag=None` clears, and **clears `tagged_at` with it** — a cleared row
+        that kept its timestamp would read as reviewed in the `Reviewed`
+        column and be counted as untagged in the tally.
+
+        `record_value`, `extracted_value` and `evidence_span` come out
+        byte-identical. That is asserted on the row rather than on a count,
+        and it is the mirror of the assertion that guards `upsert_feature`.
+
+        Does not commit: the caller owns the transaction boundary, as
+        everywhere else in this package. Returns `None` for an unknown id, so
+        the service raises `NotFoundError` rather than the repository owning
+        an HTTP fact.
+
+        Takes `now` rather than reading a clock: `ra2/persistence/` may not
+        import `ra2/infra/` (sw-design.md §1.1), the same reason
+        `upsert_feature` is handed `new_id`.
+        """
+        raise NotImplementedError
+
+    async def tally_for(
+        self,
+        run_id: RunId,
+        *,
+        feature_id: FeatureId | None = None,
+        tag_state: TagFilter,
+    ) -> Mapping[FeatureId, Mapping[str | None, int]]:
+        """Stored tag values and their row counts, per feature, for one run.
+
+        **One grouped query per run, never one per feature** (§17.4):
+
+            SELECT feature_id, analyst_tag, COUNT(*) FROM mismatch
+             WHERE run_id = ? GROUP BY feature_id, analyst_tag
+
+        `ix_mismatch_run_id_feature_id` already covers it. The return shape is
+        what `domain.mismatch.tally` takes, so the grouping survives all the
+        way into the domain instead of being expanded into rows and recounted.
+
+        Takes the same filters as `list_for` so the strip under the table and
+        the table itself cannot disagree — the one exception being
+        `feature_id`, which scopes both identically.
+        """
+        raise NotImplementedError

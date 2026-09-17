@@ -18,6 +18,7 @@ from ra2.domain.delivery import DeliveryStatus, Encoding, FileKind, SourceKind
 from ra2.domain.extraction import EvaluationSize, RunStatus
 from ra2.domain.findings import FindingCode, Severity
 from ra2.domain.llm import EndpointStatus, ProbeCode
+from ra2.domain.mismatch import MismatchTag, TagFilter
 from ra2.domain.prompt import PromptValidationCode, SlotName
 from ra2.infra.tasks import TaskStatus
 from ra2.services.readmodels import SortDir
@@ -74,6 +75,11 @@ __all__ = [
     "Goal1CompanionResponse",
     "MapColumnRequest",
     "MatchingRuleSchema",
+    "MismatchFeatureResponse",
+    "MismatchFiltersResponse",
+    "MismatchListResponse",
+    "MismatchPage",
+    "MismatchResponse",
     "ModelCatalogResponse",
     "ModelChoiceResponse",
     "ModelColumnResponse",
@@ -92,6 +98,7 @@ __all__ = [
     "RegisterDeliveryRequest",
     "ResolvePromptRequest",
     "ResolvedPromptResponse",
+    "ReviewTallyResponse",
     "RunDescriptorResponse",
     "RunPage",
     "RunProgressResponse",
@@ -100,6 +107,7 @@ __all__ = [
     "SelectFileRequest",
     "SeparatingRowResponse",
     "SlotResponse",
+    "TagMismatchRequest",
     "TaskAcceptedResponse",
     "TaskProgressResponse",
     "TestConnectionRequest",
@@ -1129,3 +1137,127 @@ class DiscardResponse(_Schema):
     #: True when the caller overrode G2 — so a client that did not mean to
     #: force can tell that it did.
     forced: bool = False
+
+
+# ===========================================================================
+# Mismatch review — phase 5 (Y2). mvp-spec.md §12, sw-design.md §17
+#
+# The one rule this section adds to the boundary: **the wire vocabulary is
+# closed even though the column is not** (`SD24`, §17.5). `TagMismatchRequest`
+# takes a `MismatchTag`, so an unknown tag is a 422 from FastAPI rather than a
+# silent write — while `MismatchResponse.analyst_tag` stays a plain string,
+# because a value the enum does not name must still render as itself.
+# ===========================================================================
+
+
+class MismatchResponse(_Schema):
+    """One row of the flat list.
+
+    Carries no run: the list is one run at a time (§17.6), and the run is
+    named once on `MismatchListResponse`.
+    """
+
+    mismatch_id: str
+    record_id: str
+    #: mvp-spec.md §13 — required wherever text is shown, and this row shows an
+    #: evidence span.
+    anonymised: bool
+    feature_id: str
+    feature_key: str
+    record_value: str | None = None
+    extracted_value: str | None = None
+    evidence_span: str | None = None
+    #: The **stored** value, verbatim. A tag `MismatchTag` does not name
+    #: travels as itself rather than being nulled on the way out.
+    analyst_tag: str | None = None
+    tagged_at: datetime | None = None
+    note: str | None = None
+    #: The read model's narrowing, carried as data so a client does not
+    #: re-derive a rule the service owns — the same treatment `DiscardPreview`
+    #: gives `blocked`.
+    tag: MismatchTag | None = None
+    is_other: bool = False
+    reviewed: bool = False
+
+
+class MismatchPage(_Schema):
+    items: list[MismatchResponse]
+    total: int
+    page: int
+    page_size: int
+    sort_key: str
+    sort_dir: SortDir
+
+
+class ReviewTallyResponse(_Schema):
+    """One feature's review counts — §12's "of 40 reviewed, 32 hallucination,
+    8 record error".
+
+    `counts` is keyed by `MismatchTag` value and always carries all three, so
+    a client cannot miss one that nobody has used yet. `other` is the bucket
+    for a stored value the enum does not name (§17.5).
+    """
+
+    feature_id: str
+    feature_key: str
+    name: str
+    total: int
+    reviewed: int
+    untagged: int
+    counts: dict[str, int]
+    other: int
+
+
+class MismatchFeatureResponse(_Schema):
+    """One option of the Feature filter, and how much work is behind it."""
+
+    feature_id: str
+    feature_key: str
+    name: str
+    total: int
+
+
+class MismatchFiltersResponse(_Schema):
+    """What the list was filtered by — echoed back, so a client can render the
+    toolbar from the response rather than from what it thinks it asked for."""
+
+    run_id: str
+    feature_id: str | None = None
+    tag_state: TagFilter
+
+
+class MismatchListResponse(_Schema):
+    """The whole screen.
+
+    **An evaluation with no mismatches is 200 with an empty list**, never a
+    404: "nothing was wrong" is a result, not an error (the §16.7 reasoning,
+    reapplied).
+
+    `run_finished_at` is `SD25`'s staleness anchor — a re-score can delete a
+    tagged row, and this is the closest honest thing RA2 records to "when was
+    this scored" (§17.7).
+    """
+
+    descriptor: RunDescriptorResponse
+    runs: list[ModelColumnResponse]
+    run_label: str
+    run_finished_at: datetime | None = None
+    features: list[MismatchFeatureResponse]
+    filters: MismatchFiltersResponse
+    rows: MismatchPage
+    tallies: list[ReviewTallyResponse]
+
+
+class TagMismatchRequest(_Schema):
+    """**Where the closed half of `SD24` is enforced on the wire.**
+
+    `tag` is a `MismatchTag`, so a value outside the three is a 422 from
+    FastAPI's own validation and never reaches the column. The column stays
+    `String(32)` so a fourth tag needs no migration; nothing in the MVP can
+    write one, and that asymmetry is deliberate (§17.5).
+    """
+
+    tag: MismatchTag
+    #: Optional and single-line. The column exists, the service writes it and
+    #: the CSV carries it; nothing in mvp-spec.md §12 describes more.
+    note: str | None = None

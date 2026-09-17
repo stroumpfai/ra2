@@ -20,7 +20,13 @@ from ra2.services.census_service import CensusService
 from ra2.services.corpus_service import CorpusService
 from ra2.services.delivery_service import DeliveryService
 from ra2.services.errors import NotFoundError
-from ra2.services.readmodels import CensusColumnView, PerRecordRow, RunExportView, SortDir
+from ra2.services.readmodels import (
+    CensusColumnView,
+    MismatchRowView,
+    PerRecordRow,
+    RunExportView,
+    SortDir,
+)
 
 __all__ = ["CSV_BOM", "CSV_DELIMITER", "ExportService"]
 
@@ -65,6 +71,25 @@ _RUN_SCORES_CSV_HEADER: Final = (
 _RUN_MISMATCHES_CSV_HEADER: Final = (
     "mismatch_id",
     "record_id",
+    "feature_key",
+    "record_value",
+    "extracted_value",
+    "evidence_span",
+    "analyst_tag",
+    "tagged_at",
+    "note",
+)
+
+#: The Mismatches view's export (mvp-spec.md §12, sw-design.md §17.8). Close
+#: to `_RUN_MISMATCHES_CSV_HEADER` and deliberately not the same: that one is a
+#: run's rows on their way out of the database for good (§18.3), while this one
+#: is the **currently filtered, currently sorted** review list, so it carries
+#: `anonymised` — the span is record text, and mvp-spec.md §13 requires the
+#: marking wherever text is shown, including in a file this app cannot see.
+_MISMATCHES_CSV_HEADER: Final = (
+    "mismatch_id",
+    "record_id",
+    "anonymised",
     "feature_key",
     "record_value",
     "extracted_value",
@@ -255,6 +280,34 @@ class ExportService:
                 for row in rows
             ],
         )
+
+    def mismatches_csv(
+        self,
+        rows: Sequence[MismatchRowView],
+        *,
+        evaluation_id: EvaluationId,
+        run_label: str,
+        filter_label: str,
+    ) -> bytes:
+        """The Mismatches view's export — mvp-spec.md §12's "exportable list".
+
+        **Takes the rows** (`P4-D3`, and §7's rule): an export writes the
+        currently filtered, currently sorted table, and re-fetching inside the
+        exporter is how a CSV comes to disagree with the screen it was
+        exported from. The caller holds the view; it hands it over.
+
+        It carries **the tag and the note**, because an export whose whole
+        point is review has to carry the review — and because those three
+        columns are the only data in the pipeline no re-run can reproduce
+        (`SD21`).
+
+        `run_label` and `filter_label` go in the comment line rather than
+        being re-derived here: the file has to say which run and which filter
+        produced it, and the screen is the only place that knows.
+
+        **M35 freezes this signature. Y1 writes the body.**
+        """
+        raise NotImplementedError
 
     def run_scores_csv(self, view: RunExportView) -> bytes:
         """A run's `score` rows, on their way out of the database for good.

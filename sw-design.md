@@ -588,6 +588,9 @@ Each is additive and cheap to reverse; none should change silently.
 | SD21 | `mismatch` is the **first mutable row** in the pipeline, and a re-score **upserts** it preserving `analyst_tag` (§16.6) | Tagging is the whole of F11. `DELETE`-then-`INSERT` is the obvious implementation and it destroys review work silently, at the moment a developer is most confident — they just fixed the scorer |
 | SD22 | `ra2/ui/views/results/` is a **package**, the first view in the repo that is (§16.8) | Three tabs of one screen get built by three agents in one wave; three files is what makes that parallel, and a single `results_view.py` would serialise the wave for no architectural gain |
 | SD23 | The one **destructive verb** in an append-only pipeline — whole-object discard of a `run`, an `evaluation` or a `delivery` — paid for with an **export**, not an audit trail (§18) | Three inconclusive evaluations are debris an analyst cannot clear, and the workaround for a tool that cannot clean up is editing the SQLite file by hand. Everything discarded is regenerable from immutable inputs; the one thing that is not is `mismatch.analyst_tag`, which is why G2 counts it and announces it. An audit table would have cost a migration and produced rows nobody reads |
+| SD24 | `MismatchTag` is a **closed domain enum over a column that stays `String(32)`**, with an `other` bucket for a value it does not name (§17.5) | Both halves are load-bearing and the asymmetry is the point. The enum makes the list, the tally, the CSV and the wire agree on three identifiers and makes a typo a lint error — `FindingCode` is the precedent. The string column keeps `models.py`'s promise that "a fourth tag must be a value, not a migration". The bucket is what stops the asymmetry becoming a crash: a stored value the enum does not name renders as itself and counts under `other`, because a tally that silently omitted those rows would report "of 40 reviewed" over 38 |
+| SD25 | Review's staleness anchor is the run's **`finished_at`**; **no `scored_at` column is added**, and a re-score therefore goes undated (§17.7) | A re-score can delete a tagged row under an analyst, so the view owes a visible reason for a list that changed. `run.finished_at` is the closest honest thing that exists: scoring chains off the run's terminal `done` (`SD17`), so for a run scored once it *is* the moment it was scored. Recording a re-score would mean a `scored_at` column, which §16.1 F5 declined so that "how far did it get" has exactly one answer and which `tests/test_p4_contract.py` asserts the absence of by name. The gap is named rather than papered over, and the next step if it bites is a **count of tags lost, not a lock** |
+| SD26 | The Mismatches list is scoped to **one run at a time**, with no "all runs" option (§17.6) | `mvp-spec.md` §12 names `run` as part of the row, and a list mixing two models' mismatches for the same record and feature **is** cross-model agreement — one of the three things §16.9 defers by name. Refusing it is not a limitation of the view; it is the deferral, caught where it would otherwise have entered as a convenience. `ResultsService.presence_records` already resolves one run the same way |
 
 **Note on the design's fixture column names.** `UnfallTypAusw`, `WitterungAusw`,
 `LichtverhaeltnisAusw` and `UnfallDatumFeld` do not exist in the delivery; the real
@@ -1501,6 +1504,7 @@ a promise.
   affordance, the per-feature tally. The rows exist from this phase (§16.6) and
   `analyst_tag` stays `NULL` throughout it. Phase 5 is a view over data that is
   already there, which is the whole reason the rows are written now.
+  **Superseded by §17**, which is the other half of §16.6's contract.
 - **Presence precision / recall / F1** (`D2`, §16). They need a human-labelled
   presence subset of ~50 records × features, and the labelling tool for it is
   not designed. Tab 2's scope banner states the deferral to the analyst
@@ -1528,22 +1532,325 @@ a promise.
 
 ## 17. Mismatch review (F11)
 
-**Reserved for phase 5, and deliberately empty here.**
-`plan-phase-5.md` §0 lists the eight things this section must settle — who
-owns which columns of `mismatch`, why tagging is an `UPDATE` that Do-NOT #2
-does not forbid, the tally computed on read, the `MismatchTag` vocabulary,
-staleness after a re-score, the read-model surface, and its own §17.5/§17.6 —
-and that plan's Wave 0 (§5.1) writes it, the way §16 was written before phase
-4's Wave 0.
+The shortest architecture section in this document, and it says so on purpose.
+There is **no new table, no new column, no new outbound call, no new job and
+no new statistic**. Phase 4 wrote the rows and never read them; §16.6 wrote
+half of a contract and this section writes the other half.
 
-The reset-and-discard slice landed in between and took **§18** rather than
-this number, because a committed phase plan had already claimed §17 by number
-*and* by sub-number. Two consequences, both small and both here so nobody has
-to rediscover them: phase 5's own deviations start at **`SD24`** (§13's
-`SD23` is the discard verb), and §18's G2 exists to protect exactly the
-`analyst_tag` this section will describe — a discard announces the tagged
-count and refuses without `force`, which is the same argument `SD21` makes
-about a re-score.
+What is genuinely new is one thing: **this is the first time a human writes to
+the database.** Everything before it was append-only or job-owned. Every
+decision below follows from that sentence.
+
+### 17.1 Who owns which columns of `mismatch`
+
+`mismatch` has two halves and two owners, and neither writes the other's.
+
+| Half | Columns | Owner | Written by |
+|---|---|---|---|
+| Derived | `record_value`, `extracted_value`, `evidence_span` | the scorer | `MismatchRepository.upsert_feature`, on every score and re-score |
+| Review | `analyst_tag`, `tagged_at`, `note` | review | `MismatchRepository.set_tag`, one row at a time, from a click |
+
+`run_id`, `record_id` and `feature_id` are the key and are written once, at
+insert.
+
+The scorer's half of this contract is already built and already tested
+(`SD21`, §16.6): the upsert rewrites the derived three and leaves the review
+three alone. This section adds the mirror obligation — **`set_tag` writes the
+review three and nothing else**, and its exit criterion is byte-equality on
+the derived columns, asserted on the row rather than on a count.
+
+Two owners over one row is the arrangement that makes a re-score survivable.
+It is also the arrangement that makes a careless `UPDATE mismatch SET …`
+destroy work in either direction, which is why neither side is expressed as a
+general-purpose write: `MismatchWrite` cannot name a review column, and
+`set_tag` takes a tag and a note and no derived value at all. The type is the
+guard; the test is the proof.
+
+### 17.2 Tagging is an `UPDATE`, and Do-NOT #2 is intact
+
+Do-NOT #2 reads: *never mutate an `extraction`, a `record` or a `corpus` row.*
+`mismatch` is none of those, and the omission is deliberate rather than
+accidental — `SD21` named it "the first mutable row in this codebase" one
+phase before anything mutated it.
+
+The invariant Do-NOT #2 protects is **reproducibility of the pipeline's
+inputs and outputs**: a corpus, a record and an extraction are evidence, and
+evidence that can be edited is not evidence. A tag is not evidence. It is a
+human's opinion *about* evidence, it is the only thing in the database no
+re-run can reproduce, and §12's whole purpose is that a person writes it.
+
+So there is no contradiction to resolve, but there is a boundary to state:
+**the mutability of `mismatch` is confined to three columns and one method.**
+`MismatchRepository.set_tag` is the only query anywhere that writes
+`analyst_tag`, `tagged_at` or `note`, and `mismatch_service` is its only
+caller; `upsert_feature` is the only thing that writes the derived three, and
+`scoring_service` is its only caller. The rest of the codebase's relationship
+with this table is reading it and — once, deliberately, under two guards —
+deleting whole rows with the run they belong to (§18.2's G2, which counts the
+tagged ones and announces them precisely because they are the half no re-run
+can reproduce).
+
+### 17.3 What a tag is worth: nothing, by construction
+
+`mvp-spec.md` §12 is categorical — *"The tag never feeds back into a metric.
+Nothing is rescored."* This is the second invariant in this codebase that is
+easy to state, convenient to violate and **invisible once violated** (the
+first was the loopback guard, §15.5): a number that moved because of a tag is
+not visibly wrong, it is just wrong.
+
+It is therefore expressed as an **absent edge**, not as a rule anybody has to
+remember:
+
+```
+run_worker ──> scoring_service ──> score, mismatch (derived columns)
+                    │
+                    └── domain/scoring.py, domain/stats.py
+
+mismatch_service ──> mismatch (review columns)
+                 └─> domain/mismatch.py  (tally — counting, and nothing else)
+
+                 ╳  no edge, in either direction
+```
+
+Three things hold it:
+
+1. **`mismatch_service.py` imports neither `scoring_service` nor
+   `ranking_service`**, and `tests/test_p5_contract.py` asserts that on the
+   module's AST rather than on a linter's transitive view. `import-linter`
+   cannot express "this service may not import that service" — both are one
+   layer — so the assertion is a test, the same way the `openai` one-seam
+   gate is an AST test on top of a contract (§15.5).
+2. **The `MismatchTally` protocol returns counts and nothing else**
+   (`services/protocols.py`). There is deliberately no method on it that
+   could influence a score; the absence is the contract. A later Results
+   surface that wants review counts calls `tally` and gets integers.
+3. **`domain/mismatch.py` computes only a tally.** It has no access to
+   `ScoreRow`, `Outcome` or `MetricCell`, and `domain` cannot reach a session
+   to find one.
+
+The converse edge is equally absent: a re-score reads no tag and branches on
+no tag. It preserves them and is otherwise blind to them.
+
+### 17.4 The tally, computed on read
+
+The tally is **per feature, computed on read from stored tags, and never
+stored** — the third time this phase family makes the same call (scoring
+status §16.1, ranking §16.5, now this). A stored tally is a second source of
+truth that both a re-score and a tag can desynchronise, and the query is one
+`GROUP BY` over an indexed column.
+
+`ix_mismatch_run_id_feature_id` already exists, so `tally_for(run_id)` is
+**one grouped query per run, never one per feature**:
+
+```sql
+SELECT feature_id, analyst_tag, COUNT(*) FROM mismatch
+ WHERE run_id = ? GROUP BY feature_id, analyst_tag
+```
+
+The pure half lives in `domain/mismatch.py`:
+
+```python
+def tally(counts: Mapping[str | None, int]) -> ReviewTally: ...
+```
+
+It takes **stored tag values mapped to row counts** — exactly the shape that
+`GROUP BY` produces — rather than a list of rows, so the grouped query stays
+grouped all the way into the domain. `None` and `""` are untagged; anything
+else is a tag.
+
+`ReviewTally` carries `total`, `reviewed`, `untagged`, `counts` (one entry
+for every `MismatchTag`, always all three, so no renderer can `KeyError`) and
+`other`. Two identities hold and are asserted:
+
+    sum(counts.values()) + other == reviewed
+    reviewed + untagged == total
+
+**An empty input yields a zero tally rather than raising** — unlike
+`domain/stats.py`'s `macro`, because there is nothing dishonest about
+"0 reviewed" and a great deal dishonest about a macro F1 over no features.
+
+The tally the screen shows is scoped to **the filter the list is showing**, so
+the strip under the table and the table itself can never disagree. That is
+`MismatchService`'s exit criterion, not a convention.
+
+### 17.5 The vocabulary: a closed enum over an open column
+
+`MismatchTag` is a closed `StrEnum` in `domain/mismatch.py` over
+`mismatch.analyst_tag`, which stays `String(32)`. **Both halves are
+load-bearing and the asymmetry is deliberate.**
+
+- The **enum** is what makes the list, the tally, the CSV and the API agree on
+  three identifiers, and what makes a typo a lint error instead of a row
+  nobody can find. `FindingCode` and `ProbeCode` are the precedent: the value
+  is the stable identifier and is what tests assert on.
+- The **string column** keeps `models.py`'s promise that *"a fourth tag must be
+  a value, not a migration"*.
+- The **`other` bucket** is what stops the asymmetry becoming a crash. A
+  stored value `MismatchTag` does not name is **never dropped and never
+  raises**: it renders in the row as itself, it counts under `other` in the
+  tally, and it travels verbatim in the CSV. A tally that silently omitted
+  such rows would report "of 40 reviewed" over 38, which is the one failure
+  mode this whole section exists to avoid.
+
+`OTHER_TAG` is a plain constant and **not a `MismatchTag` member**, so no
+code path can write it. It is a bucket, not a vocabulary word.
+
+The wire is closed even though the column is not: `POST /tag` accepts only the
+three and answers **422** to anything else. Nothing in the MVP can therefore
+create an `other` row; the bucket exists for a value a later phase, a
+migration or a hand-edited database introduces, and `R7` records honestly
+that it is exercised by a fixture writing a raw string rather than by real
+data.
+
+The filter vocabulary is closed too (`TagState`: `any` · `untagged` ·
+`tagged`, or one named `MismatchTag`). A fourth stored tag is visible,
+counted and exported; it is simply not offered as a filter option until
+somebody adds it. That is the honest boundary of the asymmetry, stated here
+so it is not discovered as a bug.
+
+### 17.6 Scope: one run at a time, and what that refuses
+
+`/mismatches?evaluation=<id>`, with optional `&run=` and `&feature=`, and the
+standard empty card listing launched evaluations when the parameter is absent
+— the resolution `ui/views/results/__init__.py` already implements (§16.7).
+
+**The list shows exactly one run.** `mvp-spec.md` §12 names `run` as part of
+the row, and there are two ways to honour that: a Model column, or a scope.
+The scope is right, for a reason that is not about column widths:
+
+> A list mixing two models' mismatches for the same record and feature **is**
+> cross-model agreement, which §16.9 defers by name along with clustering and
+> sampling. Refusing the mixed list is not a limitation of this view; it is
+> the deferral, arriving where it would otherwise have sneaked in.
+
+So the Run filter switches between the evaluation's runs and has **no "all
+runs" option**. Absent `&run=`, the view picks the evaluation's first run, the
+same resolution `ResultsService.presence_records` already uses for its own
+one-model-at-a-time tab. `MismatchTally.tally` is keyed by `RunId` for the
+same reason.
+
+### 17.7 Staleness: nothing guards a review, and the view says so
+
+A re-score deletes the rows that no longer mismatch, tags included (§16.6),
+because a tag describing a mismatch that no longer exists is review work
+attached to nothing. **Nothing protects an analyst mid-review**, and nothing
+should: this is a single-user, single-mode app with no login (§13). A lock is
+machinery for a concurrency that does not exist, and optimistic versioning
+would be a second source of truth about a row whose derived half a job owns.
+
+What the view owes the analyst is a **visible reason for a list that
+changed**, and it shows the closest honest thing it has: the run's
+`finished_at`, beside the run label, **in the Mismatches toolbar**.
+
+Not inside `chrome.run_descriptor`: that helper renders a `RunDescriptorView`,
+which carries no timestamp, and it belongs to the Results package. This view
+reuses it for corpus, record count and the dev pill, and puts the run label
+and `finished_at` in its own toolbar — one line of markup here instead of one
+amendment to a frozen file there.
+
+**RA2 does not record when a run was scored, and this section does not add
+it.** `run.finished_at` is when the pass ran the first time — scoring chains
+off the run's terminal `done` (`SD17`), so for a run scored once they are the
+same moment. A **re-score** is the one event that moves the list without
+moving that timestamp, and it goes undated. Adding a `scored_at` column to
+record it is refused here: §16.1 F5 declined a scoring column so that "how far
+did it get" has exactly one answer, and `tests/test_p4_contract.py` asserts
+the absence by name. The gap is named rather than papered over (`SD25`), and
+`R5`'s next step if it proves insufficient is **a count of tags lost, not a
+lock**.
+
+### 17.8 The read model surface
+
+No ORM object crosses the service boundary (§1.1, unchanged since phase 1),
+and `ui/` holds no business logic: every count, every narrowed tag and every
+"is this row reviewed" arrives already decided.
+
+| Read model | Carries |
+|---|---|
+| `MismatchRowView` | one row of the table: record, feature, the three derived values, the stored tag and its narrowing, `tagged_at`, `note`, and the **`anonymised` flag** — required wherever record text is shown (`mvp-spec.md` §13), and this cell shows an evidence span |
+| `MismatchFeatureView` | one option of the Feature filter: the feature, and how many mismatches it has in this run |
+| `ReviewTallyView` | one feature's `ReviewTally`, for the strip under the table |
+| `MismatchFilters` | what the toolbar asked for — **one shape**, so the list, the tally and the CSV cannot end up filtered differently |
+| `MismatchListView` | the descriptor, the run label and its `finished_at` (§17.7), the two filter option lists, the filters, `Page[MismatchRowView]` and the tallies |
+
+`MismatchRowView.tag` and `.is_other` are **properties over the stored
+string**, not a second field. One stored value, one place it is narrowed, and
+Q5's asymmetry is a property of the type rather than a rule four renderers
+apply.
+
+**One query behind the list** — filter by run, feature and tag state; sort by
+one of four keys; page — and its statement count is bounded and asserted on a
+1 000-row run (the `R4` lesson, one table over).
+
+The four sort keys are **feature, record, tag and reviewed**
+(`MISMATCH_SORT_KEYS`). There is no fifth, and in particular nothing sorts by
+"how wrong": there is no such number, and inventing one is §16.9's
+clustering / agreement / sampling deferral arriving as a helpful-looking
+feature. The closed tuple is what makes that a test rather than a review
+comment.
+
+The export reuses `export_service.py`'s conventions unchanged — UTF-8 with a
+BOM (N3), `;`-delimited, a comment line naming the evaluation, the run and the
+filter, and the **currently filtered, currently sorted** rows only (§7).
+`mismatches_csv` **takes the rows** (`P4-D3`): re-fetching inside the exporter
+is how a CSV comes to disagree with the screen it was exported from. It
+carries the tag and the note, because an export whose point is review has to
+carry the review.
+
+### 17.9 Package layout additions
+
+```
+domain/
+  mismatch.py       MismatchTag, OTHER_TAG, TagState, TagFilter,
+                    MISMATCH_SORT_KEYS, ReviewTally, tally (pure)
+persistence/
+  repositories/
+    mismatch_repo.py  + list_for, set_tag, tally_for.
+                      upsert_feature is UNCHANGED — the scorer's half
+services/
+  mismatch_service.py  list, tag, clear_tag, tally, export rows.
+                       Imports no scoring module (§17.3)
+  protocols.py         + MismatchTally
+api/
+  v1/mismatches.py     list, tag, clear, tally, CSV
+ui/
+  views/mismatches_view.py   a module, not a package — one screen, one agent
+                             (the SD22 reasoning, read the other way)
+```
+
+**No new domain module beyond `mismatch.py`, no new component, no new
+dependency and no new lint contract.** `pyproject.toml` and `.importlinter`
+are byte-unchanged, and `tests/test_p5_contract.py` asserts it — the same gate
+phase 4 introduced, for the same reason: a decision with no gate behind it is
+a preference.
+
+`ui/views/mismatches_view.py` is a **module**, deliberately, where Results is
+a package (`SD22`). The reasoning there was that three tabs built by three
+agents in one wave need three files; here one screen is built by one agent in
+a wave of one, and a package would be ceremony.
+
+### 17.10 What this section deliberately does not decide
+
+- **Mismatch clustering, cross-model agreement and unbiased sampling**
+  (`mvp-spec.md` §16, §16.9). Unchanged and refused twice over: §17.6's
+  one-run scope is where the second of the three would otherwise have entered.
+- **Automatic hallucination triage** (`D1`). `hallucinated` stays a review tag
+  reported as a tally, never a metric. That is exactly what this section
+  builds and exactly where it stops.
+- **Bulk tagging.** One row at a time. "Tag all filtered" is one line of UI
+  over the same service call, and it is also how forty rows get the wrong tag
+  in one click. It waits until somebody has reviewed a real list and asked.
+- **Tag history and adjudication.** §12 asks for a tally, not an audit trail,
+  and *"the structured record is fully authoritative in every case. No
+  adjudication step exists anywhere in the pipeline."* A tag can be changed
+  and cleared; nothing is versioned; nothing reconciles.
+- **A review queue, assignment or per-analyst attribution.** Single-user,
+  single-mode, no login (§13). There is nobody to assign to and nobody to
+  attribute to.
+- **Notes as a designed affordance.** The column exists, the service writes
+  it, the CSV carries it, and the view offers a single-line input — because
+  nothing in §12 describes more than that.
+- **Cross-evaluation review.** The same boundary §16.9 draws for results.
 
 ---
 

@@ -31,7 +31,12 @@ scope, milestones *and* the wave-by-wave sub-agent breakdown.
 
 ---
 
-## 0. The architecture this plan sits under — `sw-design.md` §17, which is not yet written
+## 0. The architecture this plan sits under — `sw-design.md` §17
+
+*(**Written at Wave 0**, before any code in it, as this section asked. §17.1-
+§17.10 settle the eight items below; `SD24`-`SD26` are its deviations. The rest
+of this section is kept as written, because the reasoning is what a later
+reader needs.)*
 
 Phase 4 opened the same way and the lesson held: **§17 is Wave 0's first
 deliverable, and the lead should draft it before spawning Wave 0**, so that
@@ -57,9 +62,9 @@ writes to the database.
 | 5 | **The vocabulary**: `MismatchTag` as a closed domain enum over a column that stays `String(32)`, and what happens to a value the enum does not name (§1 Q5) |
 | 6 | **Staleness.** A re-score deletes rows that no longer mismatch, tags included (§16.6). A tally can therefore move under an analyst, and §17 says whether anything guards that (§1 Q7: nothing does, and the view says when the run was scored) |
 | 7 | **The read model surface** and the one query behind it — filter, sort, page — and that no ORM object crosses the boundary |
-| 8 | **§17.5 package layout additions** and **§17.6 what it deliberately does not decide** (clustering, cross-model agreement, sampling, automatic triage), in the shape of §15.8 and §16.9 |
+| 8 | **Package layout additions** and **what it deliberately does not decide** (clustering, cross-model agreement, sampling, automatic triage), in the shape of §15.8 and §16.9 — landed as **§17.9** and **§17.10** |
 
-`sw-design.md` §13 gains this phase's deviations from **`SD23`**.
+`sw-design.md` §13 gains this phase's deviations from **`SD24`** — not `SD23`, which the reset-and-discard slice took for the discard verb while this plan was being written. §17 itself records the renumbering.
 
 **Everything below is subordinate to §17.** Where this file and §17 disagree,
 §17 wins and this file gets corrected in the same commit; where §17 is silent,
@@ -78,11 +83,11 @@ recorded with the reasoning that produced it and each is cheap to reverse.
 |---|---|---|---|
 | Q1 | What shape is the screen? Every other view in this app is either a filtered table (Census) or a master/detail split (Codelists, Features, Prompts). | **A filtered table — the Census shape**, not master/detail. | `mvp-spec.md` §12's first word is the instruction: "Presented as a **flat**, sortable, exportable list." A master/detail split asserts a hierarchy the spec explicitly refuses, and Census is the existing view whose whole job is "one wide filtered sortable table with an export". Reusing its layout costs no new idiom and no new component (§3.2). |
 | Q2 | Where does tagging happen — inline in the row, or in a panel the row opens? | **Inline, in the row**, as a three-way control plus a clear. | `P3-D22`'s lesson, verbatim: re-parse and delete moved *into* the Import row because "deciding to re-run or drop a file is a judgement made **while scanning the State column**, not after opening a report", and doing it for twelve files was twelve modal round trips. Tagging is that workflow exactly — §12's own example is "of **40** reviewed" — and a panel per row would be forty. |
-| Q3 | Which mismatches does the view show? There is no "all mismatches ever" question anybody asks. | **`/mismatches?evaluation=<id>`**, with optional `&run=` and `&feature=`, and the standard empty card listing launched evaluations when the parameter is absent. | The same resolution `plan-phase-4.md` C7 took for Results, for the same reason — and it is what makes the Results deep link work (C2). A mismatch belongs to a run; a run belongs to an evaluation; asking the question any other way means joining across corpora nobody asked to compare. |
+| Q3 | Which mismatches does the view show? There is no "all mismatches ever" question anybody asks. | **`/mismatches?evaluation=<id>`**, with optional `&run=` and `&feature=`, and the standard empty card listing launched evaluations when the parameter is absent. **Corrected at Wave 0 (`P5-D1`, `SD26`): `&run=` selects rather than filters — the list shows exactly one run and there is no "all runs" option**, because a mixed list is the cross-model agreement §16.9 defers. Absent, the first run is chosen. | The same resolution `plan-phase-4.md` C7 took for Results, for the same reason — and it is what makes the Results deep link work (C2). A mismatch belongs to a run; a run belongs to an evaluation; asking the question any other way means joining across corpora nobody asked to compare. |
 | Q4 | Can a tag be changed or removed once set? | **Yes.** The control is three-way plus a clear; `tagged_at` is stamped on every write and cleared with the tag. | A tag is a judgement, and a judgement made on the wrong row must be correctable — otherwise the first mis-click is permanent, in the one table a human writes to. Nothing is versioned: `mvp-spec.md` §12 asks for a tally, not an audit trail, and the tag feeds no metric so there is nothing downstream to reconcile. |
 | Q5 | Is `analyst_tag` a closed enum? `models.py` says it is deliberately **not** an enum column — "a fourth tag must be a value, not a migration". | **A closed `MismatchTag` enum in `domain/`, over a column that stays `String(32)`.** A stored value the enum does not name renders as itself and is counted under `other`. | Both halves are load-bearing. The enum is what lets the UI, the tally and the CSV agree on three names and what makes a typo a lint error. The string column is what lets a fourth tag arrive without a migration — and the `other` bucket is what stops an unrecognised value crashing a tally instead of being visible in one. `FindingCode` is the precedent for the first half; `entity_kind` for the second. |
 | Q6 | How is the evidence span rendered? It is the one field `mvp-spec.md` §19's criterion 7 names explicitly, and it is free text of unbounded length. | **A wrapped cell capped at three lines, with the full value in the export.** No hover-only reveal. | A span is a model-quoted narrative fragment; truncating it to one line hides the thing the criterion asks for, and revealing it on hover puts it out of reach of a keyboard and a screen reader. Three lines fits the design family's 12.5px `.td` without a second table scale. **And because this cell shows record text, the per-record anonymisation marking is required here** (`mvp-spec.md` §13, "required everywhere text is shown"). |
-| Q7 | A re-score deletes mismatches that no longer mismatch, tags included (§16.6). What protects an analyst mid-review? | **Nothing, and the view says when the run was scored.** | This is a single-user, single-mode app with no login and everything permitted (§13). A lock would be machinery for a concurrency that does not exist; optimistic versioning would be a second source of truth about a row whose derived half is owned by a job. What is honest is to show the scoring timestamp beside the list, so a tally that moved has a visible reason. |
+| Q7 | A re-score deletes mismatches that no longer mismatch, tags included (§16.6). What protects an analyst mid-review? | **Nothing, and the view shows the run's `finished_at`.** *Corrected at Wave 0 (`P5-D3`, `SD25`): RA2 records no scoring timestamp and this phase does not add one — §16.1 F5 declined a scoring column and `test_p4_contract.py` asserts its absence. `finished_at` is when the pass ran the first time; a **re-score goes undated**, and the gap is named rather than closed.* | This is a single-user, single-mode app with no login and everything permitted (§13). A lock would be machinery for a concurrency that does not exist; optimistic versioning would be a second source of truth about a row whose derived half is owned by a job. What is honest is to show a dated anchor beside the list, so a tally that moved has a visible reason. |
 
 Smaller items, resolved here rather than left blocking:
 
@@ -148,11 +153,13 @@ Same-commit corrections, per `CLAUDE.md`. All are Wave 0's, all reviewed at the
 
 | Document | Correction |
 |---|---|
-| `sw-design.md` | **§17 is written** — §0's eight items. `SD23`+ added to §13. §16.9's "Mismatch review" bullet is superseded by a pointer to §17. |
+| `sw-design.md` | **§17 is written** — §0's eight items, as §17.1-§17.10. `SD24`-`SD26` added to §13. §16.9's "Mismatch review" bullet is superseded by a pointer to §17. |
 | `mvp-spec.md` §5 | `mismatch`'s comment gains the column-ownership split (§0 item 1) and names `MismatchTag`'s three values as the vocabulary, while keeping the column a string. |
 | `mvp-spec.md` §12 | Unchanged in substance. A note records that `structured_data_error` renders as "record error" (C4) so the spec's own example and the screen agree. |
 | `CLAUDE.md` | "One migration author, one per phase — A3 for phase 1, D3 for phase 2, H3 for phase 3, S4 for phase 4" → "…, **W1 for phase 5**" (even if no revision proves necessary — C7). |
-| `CONTRACTS.md` | A "Phase 5 — owner: M35 (Wave 0)" section in the shape of the phase-4 one. |
+| `CONTRACTS.md` | A "Phase 5 — owner: M35 (Wave 0)" section in the shape of the phase-4 one, plus "Documented deviations phase 5 introduces" (`P5-D1`…`P5-D4`). |
+| `justfile` | One comment. The Reset section cited "sw-design.md §17", which is now *this* phase's section; it is §18. |
+| This file | §0, §1 Q3/Q7, §2.4, §3.1, §3.2, §5.1 and §7, wherever §17 decided differently — same-commit corrections per `CLAUDE.md`, each one carrying its `P5-D*` number. |
 | `pyproject.toml`, `.importlinter` | **No change, and asserted so** — the same gate phase 4 introduced (F10 there). This phase adds no dependency and no contract; the layer rule already forbids what it could get wrong. |
 
 ---
@@ -197,6 +204,9 @@ class MismatchTally(Protocol):
     ) -> Mapping[FeatureId, ReviewTally]: ...
 ```
 
+Landed at Wave 0 as written. The `RunId` key is load-bearing rather than
+incidental: it is `SD26`'s one-run scope (§17.6) showing up in the seam.
+
 ### 3.2 The screen, derived from the views that exist
 
 **This section replaces the design handoff** (C1). Every element below is
@@ -213,7 +223,7 @@ the only view in the app whose job is the same as this one's.
 |---|---|---|
 | A **flat, sortable list** | `mvp-spec.md` §12 | `components/data_table.py` — `ColumnSpec` with fixed widths, `table-layout:fixed`, and sort headers that **report** rather than sort (the service sorts) |
 | **Filter by run, feature, tag state** | §12's list is per run; C3 | Census's filter toolbar: `field_select` per filter, the same 12.5px row |
-| **Pagination** | every table in the app | `pagination_row`, 10/page, "1–25 of 162", disabled rather than hidden |
+| **Pagination** | every table in the app | `pagination_row`, **25/page** (`P5-D4` — 10 and "1–25 of 162" in the same cell could not both be right, and both come from Census, whose page size is 25), "1–25 of 162", disabled rather than hidden |
 | **Inline tagging**, three values plus clear | §12, Q2 | `segmented_control` — it is already a `role="group"` of real `<button>`s where Tab reaches every segment and the active one carries `aria-pressed="true"`. Three options instead of two; **no new component** |
 | The **tag vocabulary** | §12, C4 | One rendering table in `ui/`, `MismatchTag` → words, exactly as `FindingCode` and `ProbeCode` work |
 | **Evidence span**, visible | §19 criterion 7, Q6 | A `.td` cell wrapped and capped at three lines. No new scale, no hover reveal |
@@ -221,7 +231,7 @@ the only view in the app whose job is the same as this one's.
 | **The tally**, per feature | §12, "of 40 reviewed, 32 hallucination, 8 record error" | A `card` + `card_header` strip under the table, the shape Census's summary cards already have |
 | **Export CSV** | §12, §19 criterion 7 | `export_service.py`'s conventions unchanged (C6); the toolbar button Census already has |
 | **Which evaluation** | Q3 | The empty card + query-parameter resolution `ui/views/results/__init__.py` already implements — **read it, do not re-derive it** |
-| **Scored-at, so a moved tally has a reason** | Q7 | The `run-descriptor` line `ui/views/results/chrome.py` already exports |
+| **Run label + `finished_at`, so a moved tally has a reason** | Q7, `P5-D3` | `chrome.run_descriptor` for corpus / records / dev pill; the run label and `finished_at` go in **this view's own toolbar** — `RunDescriptorView` carries no timestamp and `chrome.py` is V1's (sw-design.md §17.7) |
 | **Empty states** | phases 1–4 | `chrome.empty_card`: no evaluation · nothing scored yet · **no mismatches at all**, which is a *good* result and must not read like an error |
 
 **Columns, in order.** Widths follow the design family's existing scale; the
@@ -237,9 +247,16 @@ one flexible column is the span.
 | Tag | 210px | the three-way `segmented_control` + clear |
 | Reviewed | 96px | `tagged_at` date, or `—` |
 
+**There is no Model column, and that is a scope rather than an omission.**
+`mvp-spec.md` §12 names `run` as part of the row; the view satisfies it by
+showing one run at a time and naming it in the toolbar (`P5-D1`, `SD26`,
+sw-design.md §17.6). A mixed list would be cross-model agreement, which §16
+defers.
+
 **One thing this screen must not grow**: a column, sort or filter that ranks
 mismatches by anything other than the facts above. That is §16's clustering /
 agreement / sampling deferral, and it arrives as a helpful-looking feature.
+`domain.mismatch.MISMATCH_SORT_KEYS` is the closed four that makes it a test.
 
 ---
 
@@ -293,7 +310,10 @@ drafted it — writes **`sw-design.md` §17** before writing any code (§0).
   expectation is part of what §5.3 reviews. Phases 2, 3 and 4 each added
   errors; a phase that adds none is a phase that introduced no new failure.
 - **`ra2/services/readmodels.py` (amendment)** — `MismatchRowView`,
-  `MismatchListView`, `ReviewTallyView`, `MismatchFilters`.
+  `MismatchListView`, `ReviewTallyView`, `MismatchFilters`, and — added at
+  Wave 0 — **`MismatchFeatureView`**, the Feature filter's option list. It
+  cannot be the tally strip: the strip is scoped to the current filter and
+  would collapse to a single entry the moment a feature was picked.
 - **`ra2/services/export_service.py` (amendment)** — the `mismatches_csv`
   signature. **It takes the rows**, per `P4-D3`: an export writes the
   currently filtered, currently sorted table, and re-fetching inside the
@@ -397,8 +417,10 @@ Base tag `p5-frozen`. Two agents, isolated worktrees.
 amended at Wave 0). Nobody else runs `alembic revision`, and the expectation is
 that nobody runs it at all (C7).
 
-**Build:** `domain/mismatch.py` bodies — `tally(rows)`, pure, counting stored
-tag strings into `ReviewTally`. A value `MismatchTag` does not name goes to
+**Build:** `domain/mismatch.py` bodies — `tally(counts)`, pure, folding a
+mapping of **stored tag value -> row count** into `ReviewTally` (`P5-D2`: the
+signature takes what `GROUP BY` produces, so `tally_for`'s one-query-per-run
+stays one query per run all the way into the domain). A value `MismatchTag` does not name goes to
 `other`; it is **never dropped and never crashes the count**, because a tally
 that silently omitted rows would report "of 40 reviewed" over 38.
 

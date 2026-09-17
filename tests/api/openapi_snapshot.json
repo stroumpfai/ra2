@@ -1432,7 +1432,7 @@
       },
       "DiscardPreview": {
         "additionalProperties": false,
-        "description": "What a discard would destroy, counted before anything is destroyed.\n\nOne shape for all three kinds (\u00a717.5), mirroring `DiscardPreviewView`\nfield-for-field plus its two computed properties \u2014 the wire format carries\nthem as data so a client does not re-derive a rule the service owns.",
+        "description": "What a discard would destroy, counted before anything is destroyed.\n\nOne shape for all three kinds (\u00a718.5), mirroring `DiscardPreviewView`\nfield-for-field plus its two computed properties \u2014 the wire format carries\nthem as data so a client does not re-derive a rule the service owns.",
         "properties": {
           "active": {
             "title": "Active",
@@ -1518,7 +1518,7 @@
       },
       "DiscardResponse": {
         "additionalProperties": false,
-        "description": "What a discard actually removed.\n\nA body rather than a bare `204`, because the counts are the only record\nthat survives the call: nothing is written anywhere saying this happened\n(\u00a717.3), so the response *is* the receipt.",
+        "description": "What a discard actually removed.\n\nA body rather than a bare `204`, because the counts are the only record\nthat survives the call: nothing is written anywhere saying this happened\n(\u00a718.3), so the response *is* the receipt.",
         "properties": {
           "extractions": {
             "title": "Extractions",
@@ -2490,6 +2490,302 @@
         "title": "MatchingRuleSchema",
         "type": "object"
       },
+      "MismatchFeatureResponse": {
+        "additionalProperties": false,
+        "description": "One option of the Feature filter, and how much work is behind it.",
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_key": {
+            "title": "Feature Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "feature_id",
+          "feature_key",
+          "name",
+          "total"
+        ],
+        "title": "MismatchFeatureResponse",
+        "type": "object"
+      },
+      "MismatchFiltersResponse": {
+        "additionalProperties": false,
+        "description": "What the list was filtered by \u2014 echoed back, so a client can render the\ntoolbar from the response rather than from what it thinks it asked for.",
+        "properties": {
+          "feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Id"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "tag_state": {
+            "$ref": "#/components/schemas/TagFilter"
+          }
+        },
+        "required": [
+          "run_id",
+          "tag_state"
+        ],
+        "title": "MismatchFiltersResponse",
+        "type": "object"
+      },
+      "MismatchListResponse": {
+        "additionalProperties": false,
+        "description": "The whole screen.\n\n**An evaluation with no mismatches is 200 with an empty list**, never a\n404: \"nothing was wrong\" is a result, not an error (the \u00a716.7 reasoning,\nreapplied).\n\n`run_finished_at` is `SD25`'s staleness anchor \u2014 a re-score can delete a\ntagged row, and this is the closest honest thing RA2 records to \"when was\nthis scored\" (\u00a717.7).",
+        "properties": {
+          "descriptor": {
+            "$ref": "#/components/schemas/RunDescriptorResponse"
+          },
+          "features": {
+            "items": {
+              "$ref": "#/components/schemas/MismatchFeatureResponse"
+            },
+            "title": "Features",
+            "type": "array"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/MismatchFiltersResponse"
+          },
+          "rows": {
+            "$ref": "#/components/schemas/MismatchPage"
+          },
+          "run_finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Finished At"
+          },
+          "run_label": {
+            "title": "Run Label",
+            "type": "string"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/ModelColumnResponse"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "tallies": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewTallyResponse"
+            },
+            "title": "Tallies",
+            "type": "array"
+          }
+        },
+        "required": [
+          "descriptor",
+          "runs",
+          "run_label",
+          "features",
+          "filters",
+          "rows",
+          "tallies"
+        ],
+        "title": "MismatchListResponse",
+        "type": "object"
+      },
+      "MismatchPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MismatchResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "sort_dir": {
+            "$ref": "#/components/schemas/SortDir"
+          },
+          "sort_key": {
+            "title": "Sort Key",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "sort_key",
+          "sort_dir"
+        ],
+        "title": "MismatchPage",
+        "type": "object"
+      },
+      "MismatchResponse": {
+        "additionalProperties": false,
+        "description": "One row of the flat list.\n\nCarries no run: the list is one run at a time (\u00a717.6), and the run is\nnamed once on `MismatchListResponse`.",
+        "properties": {
+          "analyst_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analyst Tag"
+          },
+          "anonymised": {
+            "title": "Anonymised",
+            "type": "boolean"
+          },
+          "evidence_span": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Span"
+          },
+          "extracted_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extracted Value"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_key": {
+            "title": "Feature Key",
+            "type": "string"
+          },
+          "is_other": {
+            "default": false,
+            "title": "Is Other",
+            "type": "boolean"
+          },
+          "mismatch_id": {
+            "title": "Mismatch Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "record_id": {
+            "title": "Record Id",
+            "type": "string"
+          },
+          "record_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Value"
+          },
+          "reviewed": {
+            "default": false,
+            "title": "Reviewed",
+            "type": "boolean"
+          },
+          "tag": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MismatchTag"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tagged_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tagged At"
+          }
+        },
+        "required": [
+          "mismatch_id",
+          "record_id",
+          "anonymised",
+          "feature_id",
+          "feature_key"
+        ],
+        "title": "MismatchResponse",
+        "type": "object"
+      },
+      "MismatchTag": {
+        "description": "The three words an analyst may write (mvp-spec.md \u00a712).\n\nThe **values** are the stable identifiers \u2014 asserted on in tests, carried\non the wire, stored in the column, written to the CSV. The *words* on the\nscreen are `ui/`'s, in one rendering table, exactly as `FindingCode` and\n`ProbeCode` work: \u00a712's own example says \"record error\" where this enum\nsays `structured_data_error`, and the screen has to agree with the spec\nwithout the identifier changing.",
+        "enum": [
+          "hallucination",
+          "structured_data_error",
+          "unclear"
+        ],
+        "title": "MismatchTag",
+        "type": "string"
+      },
       "ModelCatalogResponse": {
         "additionalProperties": false,
         "description": "`GET /api/v1/models` \u2014 the catalogue and the connection, together.",
@@ -3252,6 +3548,59 @@
         "title": "ResolvedPromptResponse",
         "type": "object"
       },
+      "ReviewTallyResponse": {
+        "additionalProperties": false,
+        "description": "One feature's review counts \u2014 \u00a712's \"of 40 reviewed, 32 hallucination,\n8 record error\".\n\n`counts` is keyed by `MismatchTag` value and always carries all three, so\na client cannot miss one that nobody has used yet. `other` is the bucket\nfor a stored value the enum does not name (\u00a717.5).",
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_key": {
+            "title": "Feature Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "other": {
+            "title": "Other",
+            "type": "integer"
+          },
+          "reviewed": {
+            "title": "Reviewed",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "untagged": {
+            "title": "Untagged",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "feature_id",
+          "feature_key",
+          "name",
+          "total",
+          "reviewed",
+          "untagged",
+          "counts",
+          "other"
+        ],
+        "title": "ReviewTallyResponse",
+        "type": "object"
+      },
       "RunDescriptorResponse": {
         "additionalProperties": false,
         "description": "The identity line every tab carries \u2014 \"a score without its config is\nnot a result\".",
@@ -3648,6 +3997,51 @@
           "host_path"
         ],
         "title": "SourceKind",
+        "type": "string"
+      },
+      "TagFilter": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/TagState"
+          },
+          {
+            "$ref": "#/components/schemas/MismatchTag"
+          }
+        ]
+      },
+      "TagMismatchRequest": {
+        "additionalProperties": false,
+        "description": "**Where the closed half of `SD24` is enforced on the wire.**\n\n`tag` is a `MismatchTag`, so a value outside the three is a 422 from\nFastAPI's own validation and never reaches the column. The column stays\n`String(32)` so a fourth tag needs no migration; nothing in the MVP can\nwrite one, and that asymmetry is deliberate (\u00a717.5).",
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "tag": {
+            "$ref": "#/components/schemas/MismatchTag"
+          }
+        },
+        "required": [
+          "tag"
+        ],
+        "title": "TagMismatchRequest",
+        "type": "object"
+      },
+      "TagState": {
+        "description": "The three tag-*states* the list may be filtered by, beside the three\ntags themselves.",
+        "enum": [
+          "any",
+          "untagged",
+          "tagged"
+        ],
+        "title": "TagState",
         "type": "string"
       },
       "TaskAcceptedResponse": {
@@ -4672,7 +5066,7 @@
     },
     "/api/v1/deliveries/{delivery_id}": {
       "delete": {
-        "description": "Discard a delivery, its `delivery_file` rows and \u2014 for an **upload** \u2014\nits stored bytes.\n\nA host-path delivery's files belong to the analyst and are left exactly\nwhere they are; only the rows go.\n\n409 when a corpus was frozen from it. There is no `force`: `corpus.\ndelivery_id` is `SET NULL`, so forcing would silently null a provenance\nlink rather than ask a question (\u00a717.2).\n\n**No UI affordance corresponds to this route** (\u00a717.6): the Import view\nshows one delivery and has no delivery list to hang a row action on. The\nanalyst's equivalent is `just reset`.",
+        "description": "Discard a delivery, its `delivery_file` rows and \u2014 for an **upload** \u2014\nits stored bytes.\n\nA host-path delivery's files belong to the analyst and are left exactly\nwhere they are; only the rows go.\n\n409 when a corpus was frozen from it. There is no `force`: `corpus.\ndelivery_id` is `SET NULL`, so forcing would silently null a provenance\nlink rather than ask a question (\u00a718.2).\n\n**No UI affordance corresponds to this route** (\u00a718.6): the Import view\nshows one delivery and has no delivery list to hang a row action on. The\nanalyst's equivalent is `just reset`.",
         "operationId": "discard_delivery_api_v1_deliveries__delivery_id__delete",
         "parameters": [
           {
@@ -5133,7 +5527,7 @@
     },
     "/api/v1/evaluations/{evaluation_id}": {
       "delete": {
-        "description": "Discard an evaluation and its runs (\u00a717.1).\n\n**The corpus, the feature config and the prompt versions it cites are\nuntouched** \u2014 they are `RESTRICT`, and discarding an evaluation is not a\nway to delete a corpus.\n\n409 when any run is `queued` or `running` (G1), and when tagged mismatches\nwould be destroyed without `force` (G2).",
+        "description": "Discard an evaluation and its runs (\u00a718.1).\n\n**The corpus, the feature config and the prompt versions it cites are\nuntouched** \u2014 they are `RESTRICT`, and discarding an evaluation is not a\nway to delete a corpus.\n\n409 when any run is `queued` or `running` (G1), and when tagged mismatches\nwould be destroyed without `force` (G2).",
         "operationId": "discard_evaluation_api_v1_evaluations__evaluation_id__delete",
         "parameters": [
           {
@@ -5389,6 +5783,345 @@
         "summary": "Launch",
         "tags": [
           "evaluations"
+        ]
+      }
+    },
+    "/api/v1/evaluations/{evaluation_id}/mismatches": {
+      "get": {
+        "description": "The flat list, filtered, sorted and paged.\n\n`run` absent picks the evaluation's first run \u2014 there is no \"all runs\"\nscope (\u00a717.6). An evaluation with no mismatches is **200 with an empty\nlist**.",
+        "operationId": "list_mismatches_api_v1_evaluations__evaluation_id__mismatches_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Run"
+            }
+          },
+          {
+            "in": "query",
+            "name": "feature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TagState"
+                },
+                {
+                  "$ref": "#/components/schemas/MismatchTag"
+                }
+              ],
+              "default": "any",
+              "title": "Tag State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_key",
+            "required": false,
+            "schema": {
+              "default": "feature",
+              "title": "Sort Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_dir",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortDir",
+              "default": "asc"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MismatchListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Mismatches",
+        "tags": [
+          "mismatches"
+        ]
+      }
+    },
+    "/api/v1/evaluations/{evaluation_id}/mismatches.csv": {
+      "get": {
+        "description": "The currently filtered, currently sorted rows as CSV.\n\nThe exporter is handed **the rows this endpoint just read**, not a filter\nto re-run (`P4-D3`, \u00a77). It carries the tag and the note, because an\nexport whose point is review has to carry the review.",
+        "operationId": "mismatches_csv_api_v1_evaluations__evaluation_id__mismatches_csv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Run"
+            }
+          },
+          {
+            "in": "query",
+            "name": "feature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TagState"
+                },
+                {
+                  "$ref": "#/components/schemas/MismatchTag"
+                }
+              ],
+              "default": "any",
+              "title": "Tag State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_key",
+            "required": false,
+            "schema": {
+              "default": "feature",
+              "title": "Sort Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_dir",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortDir",
+              "default": "asc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mismatches Csv",
+        "tags": [
+          "mismatches"
+        ]
+      }
+    },
+    "/api/v1/evaluations/{evaluation_id}/mismatches/tally": {
+      "get": {
+        "description": "Per-feature review counts, scoped to the **same filters** as the list,\nso the strip and the table cannot disagree (\u00a717.4).",
+        "operationId": "mismatch_tally_api_v1_evaluations__evaluation_id__mismatches_tally_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Run"
+            }
+          },
+          {
+            "in": "query",
+            "name": "feature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TagState"
+                },
+                {
+                  "$ref": "#/components/schemas/MismatchTag"
+                }
+              ],
+              "default": "any",
+              "title": "Tag State"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReviewTallyResponse"
+                  },
+                  "title": "Response Mismatch Tally Api V1 Evaluations  Evaluation Id  Mismatches Tally Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mismatch Tally",
+        "tags": [
+          "mismatches"
         ]
       }
     },
@@ -6484,6 +7217,100 @@
         ]
       }
     },
+    "/api/v1/mismatches/{mismatch_id}/tag": {
+      "delete": {
+        "description": "Clear the tag, `tagged_at` and `note` (Q4).\n\nReturns the row rather than a bare 204: the cleared row is what the screen\nredraws, and a body means it does not have to re-read to find out.",
+        "operationId": "clear_mismatch_tag_api_v1_mismatches__mismatch_id__tag_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mismatch_id",
+            "required": true,
+            "schema": {
+              "title": "Mismatch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MismatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Mismatch Tag",
+        "tags": [
+          "mismatches"
+        ]
+      },
+      "post": {
+        "description": "Write one judgement. **Idempotent** \u2014 the same tag twice leaves one row\nand one `tagged_at`.\n\n404 for an unknown mismatch; 422 for a tag outside `MismatchTag`, which\nFastAPI answers before this function runs.",
+        "operationId": "tag_mismatch_api_v1_mismatches__mismatch_id__tag_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mismatch_id",
+            "required": true,
+            "schema": {
+              "title": "Mismatch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagMismatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MismatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Tag Mismatch",
+        "tags": [
+          "mismatches"
+        ]
+      }
+    },
     "/api/v1/models": {
       "get": {
         "description": "Tag, digest, size and `fits_vram` per model, plus the connection line.\n\n`refresh` is the settings dialog's \"refresh model list\" \u2014 there is no\ncache to bypass here (`connection_status()`/`list_models()` always ask\nthe catalogue fresh), so the parameter exists for the UI's intent and the\nOpenAPI contract rather than to select a different code path: reachability\nis re-checked on **every** call, on view load and on that press, **never\non a timer** (plan-phase-3.md C3).",
@@ -6907,7 +7734,7 @@
     },
     "/api/v1/runs/{run_id}": {
       "delete": {
-        "description": "Discard one run and, by the schema's cascade, everything derived from\nit (\u00a717.1).\n\n409 when the run is `queued` or `running` (G1), and when it carries tagged\nmismatches and `force` was not passed (G2). The second is overridable; the\nfirst is not.\n\nThe preview is read **first**, inside the same request, because after the\ndelete those counts do not exist anywhere \u2014 this response is the receipt.",
+        "description": "Discard one run and, by the schema's cascade, everything derived from\nit (\u00a718.1).\n\n409 when the run is `queued` or `running` (G1), and when it carries tagged\nmismatches and `force` was not passed (G2). The second is overridable; the\nfirst is not.\n\nThe preview is read **first**, inside the same request, because after the\ndelete those counts do not exist anywhere \u2014 this response is the receipt.",
         "operationId": "discard_run_api_v1_runs__run_id__delete",
         "parameters": [
           {
@@ -7223,7 +8050,7 @@
     },
     "/api/v1/runs/{run_id}/scores.csv": {
       "get": {
-        "description": "Export before discard (\u00a717.3) \u2014 UTF-8 with BOM, `;`-delimited.",
+        "description": "Export before discard (\u00a718.3) \u2014 UTF-8 with BOM, `;`-delimited.",
         "operationId": "export_scores_api_v1_runs__run_id__scores_csv_get",
         "parameters": [
           {

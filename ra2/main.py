@@ -44,6 +44,7 @@ from ra2.services.evaluation_service import EvaluationService
 from ra2.services.export_service import ExportService
 from ra2.services.feature_service import FeatureService
 from ra2.services.lifecycle_service import LifecycleService
+from ra2.services.mismatch_service import MismatchService
 from ra2.services.prompt_service import PromptService
 from ra2.services.protocols import CensusMaterialiser, GroundTruthProvider, PromptResolver
 from ra2.services.ranking_service import RankingService
@@ -210,6 +211,12 @@ def create_app(
     # imports it directly.
     results_service = ResultsService(session_factory=session_factory, scorer=scoring_service)
     ranking_service = RankingService(session_factory=session_factory, scorer=scoring_service)
+    # --- phase 5 (M35): mismatch review ------------------------------------
+    # Review's half of `mismatch` (sw-design.md §17). It takes a clock because
+    # `tagged_at` is stamped on every write, and nothing else: there is no
+    # scorer here and no path to one, which is §17.3's absent edge expressed in
+    # the wiring as well as in the imports.
+    mismatch_service = MismatchService(session_factory=session_factory, clock=clock)
     # --- reset and discard (sw-design.md §18) ------------------------------
     # The same `upload_store` intake used, because the bytes it removes on a
     # delivery discard are the ones intake wrote. A host-path delivery's files
@@ -233,6 +240,7 @@ def create_app(
         scoring=scoring_service,
         results=results_service,
         ranking=ranking_service,
+        mismatch=mismatch_service,
         lifecycle=lifecycle_service,
     )
 

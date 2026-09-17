@@ -103,8 +103,10 @@ gate.
   phase 3. `tests/conftest.py` is frozen; per-layer conftests belong to
   whoever owns that layer in the current wave.
 - **One migration author, one per phase — A3 for phase 1, D3 for phase 2,
-  H3 for phase 3, S4 for phase 4.** Nobody else runs `alembic revision`. No
-  parallel heads.
+  H3 for phase 3, S4 for phase 4, W1 for phase 5.** Nobody else runs
+  `alembic revision`. No parallel heads. Phase 5 expects to need **no**
+  revision (`plan-phase-5.md` C7); the author is named anyway, because the
+  rule that matters is that there is exactly one.
 - **Fixtures must contain the real hazards** — mixed encodings, a stray `|`, an
   embedded newline, an orphan key, a key duplicated across two cantonal sets,
   an all-empty column, French already lossy. Clean fixtures are not acceptable

@@ -48,7 +48,7 @@ fmt:
     uv run ruff check --fix .
 
 # ---------------------------------------------------------------------------
-# Reset (sw-design.md §17, plan-reset-and-discard.md §5)
+# Reset (sw-design.md §18, plan-reset-and-discard.md §5)
 # ---------------------------------------------------------------------------
 
 # Show what a wipe of RA2_DATA_DIR would remove. `just reset yes` carries it out.

@@ -33,11 +33,13 @@ from ra2.domain.ids import (
     FeatureConfigId,
     FeatureId,
     FileId,
+    MismatchId,
     PromptTemplateId,
     RecordId,
     RunId,
 )
 from ra2.domain.llm import EndpointStatus, ProbeCode
+from ra2.domain.mismatch import MismatchTag, ReviewTally, TagFilter, TagState
 from ra2.domain.prompt import PromptValidationError, SlotName
 from ra2.domain.stats import TieMark
 
@@ -75,6 +77,10 @@ __all__ = [
     "Goal1Companion",
     "MetricCell",
     "MismatchExportRow",
+    "MismatchFeatureView",
+    "MismatchFilters",
+    "MismatchListView",
+    "MismatchRowView",
     "ModelChoiceView",
     "ModelColumnView",
     "Page",
@@ -86,6 +92,7 @@ __all__ = [
     "RankingRow",
     "RankingTabView",
     "ResolvedPromptView",
+    "ReviewTallyView",
     "RunDescriptorView",
     "RunExportView",
     "RunProgressView",
@@ -96,6 +103,8 @@ __all__ = [
     "SlotView",
     "SortDir",
     "SuppressedCell",
+    "TagFilter",
+    "TagState",
 ]
 
 
@@ -1216,3 +1225,149 @@ class DataDirView:
 
     data_dir: str
     database_path: str
+
+
+# ===========================================================================
+# Mismatch review — phase 5 (M35). mvp-spec.md §12, sw-design.md §17
+# ===========================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class MismatchRowView:
+    """One row of the flat list (`mvp-spec.md` §12, `plan-phase-5.md` §3.2).
+
+    Carries no run: **the list is one run at a time** (§17.6), so naming it on
+    every row would repeat a fact the toolbar already states — and a list that
+    mixed two runs would be the cross-model agreement §16.9 defers.
+
+    `anonymised` is not decoration. This row shows an **evidence span**, which
+    is record text, and `mvp-spec.md` §13 requires the per-record anonymisation
+    marking "everywhere text is shown".
+
+    `analyst_tag` is the **stored string**, verbatim. `tag` and `is_other`
+    narrow it. One field, one place it is narrowed, so `SD24`'s asymmetry is a
+    property of the type rather than a rule four renderers have to apply.
+    """
+
+    mismatch_id: MismatchId
+    record_id: RecordId
+    #: `mvp-spec.md` §13 — required wherever text is shown, and the span is text.
+    anonymised: bool
+    feature_id: FeatureId
+    feature_key: str
+    #: What the corpus holds — **authoritative, always** (§12). Nullable
+    #: exactly as the column is.
+    record_value: str | None
+    #: What the model said.
+    extracted_value: str | None
+    #: Quoted verbatim from the narrative. `mvp-spec.md` §19's criterion 7
+    #: names it explicitly, so it is shown in the table and never hidden
+    #: behind a hover.
+    evidence_span: str | None
+    #: The stored value, verbatim — **not** narrowed to `MismatchTag`, because
+    #: a value the enum does not name must still render as itself (`SD24`).
+    analyst_tag: str | None
+    tagged_at: datetime | None
+    note: str | None
+
+    @property
+    def tag(self) -> MismatchTag | None:
+        """The stored tag as a `MismatchTag`, or `None` — which means either
+        untagged or a value the enum does not name. `is_other` tells them
+        apart."""
+        if not self.analyst_tag:
+            return None
+        try:
+            return MismatchTag(self.analyst_tag)
+        except ValueError:
+            return None
+
+    @property
+    def is_other(self) -> bool:
+        """A stored tag `MismatchTag` does not name (§17.5). Nothing in the MVP
+        writes one — the wire answers 422 — but a row that has one renders and
+        counts rather than crashing a tally."""
+        return bool(self.analyst_tag) and self.tag is None
+
+    @property
+    def reviewed(self) -> bool:
+        """Whether an analyst has been here. The `Reviewed` column's fact, and
+        one of the four sort keys."""
+        return bool(self.analyst_tag)
+
+
+@dataclass(frozen=True, slots=True)
+class MismatchFeatureView:
+    """One option of the Feature filter, and how much work is behind it.
+
+    Separate from `ReviewTallyView` because the two answer different questions:
+    the filter's options are every feature with a mismatch **in this run**,
+    while the tally strip is scoped to whatever the toolbar currently asks for.
+    Deriving one from the other would collapse the option list to a single
+    entry the moment a feature was picked.
+    """
+
+    feature_id: FeatureId
+    feature_key: str
+    name: str
+    #: Mismatches for this feature in this run, unfiltered by tag state.
+    total: int
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewTallyView:
+    """One feature's tally, for the strip under the table.
+
+    Nests the domain's `ReviewTally` rather than restating its five numbers:
+    the arithmetic is `domain/mismatch.py`'s, and a second copy of the fields
+    is a second place for them to disagree.
+    """
+
+    feature_id: FeatureId
+    feature_key: str
+    name: str
+    tally: ReviewTally
+
+
+@dataclass(frozen=True, slots=True)
+class MismatchFilters:
+    """What the toolbar asked for.
+
+    **One shape, passed to all three reads** — the list, the tally and the CSV
+    — so they cannot end up filtered differently. A tally strip that disagreed
+    with the table under it would be worse than no strip at all.
+
+    `run_id` is required: the list is one run at a time (§17.6), and there is
+    no "all runs" option to represent.
+    """
+
+    run_id: RunId
+    feature_id: FeatureId | None = None
+    tag_state: TagFilter = TagState.ANY
+
+
+@dataclass(frozen=True, slots=True)
+class MismatchListView:
+    """The whole screen: `mvp-spec.md` §12's "flat, sortable, exportable list".
+
+    `run_finished_at` is `SD25`'s staleness anchor. A re-score deletes rows
+    that no longer mismatch, tags included (§16.6), so a tally can move under
+    an analyst; nothing guards that, and what the view owes instead is a
+    visible reason for a list that changed. It is the run's completion, not a
+    scoring timestamp — RA2 records none, and §17.7 says why it does not gain
+    one here.
+    """
+
+    descriptor: RunDescriptorView
+    #: The runs of this evaluation — the Run filter's options. `model_id` is
+    #: the run id, the same convention the Results tabs use.
+    runs: tuple[ModelColumnView, ...]
+    #: Which of them this list is showing, as the toolbar names it.
+    run_label: str
+    #: When that run finished — `SD25`.
+    run_finished_at: datetime | None
+    features: tuple[MismatchFeatureView, ...]
+    filters: MismatchFilters
+    rows: Page[MismatchRowView]
+    #: Per feature, scoped to `filters`, so the strip and the table agree.
+    tallies: tuple[ReviewTallyView, ...]

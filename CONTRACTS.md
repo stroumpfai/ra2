@@ -390,6 +390,113 @@ an exported CSV, not an audit row (SD23, §18.3).
 
 ---
 
+## Phase 5 — owner: M35 (Wave 0), amendment only
+
+Re-established at tag `p5-frozen`, the same way M27 established the phase-4
+list at `p4-frozen`. **Wave 0 of phase 5 may edit any file this document
+already lists**; after `p5-frozen`, everything below is frozen for Waves 1-4
+exactly as the lists above are.
+
+**One migration author, one per phase.** A3 was phase 1's, D3 phase 2's,
+H3 phase 3's, S4 phase 4's; **W1 is phase 5's** — and the expectation is that
+nobody runs `alembic revision` at all (plan-phase-5.md C7). `mismatch` has
+carried its `UNIQUE (run_id, record_id, feature_id)` and its
+`ix_mismatch_run_id_feature_id` since phase 4, which is what the filtered list
+and the grouped tally are built on. `tests/test_p5_contract.py` asserts the
+chain is still five revisions long.
+
+**The second phase in a row that adds no dependency and no lint contract, and
+the first that adds no test fixture.** `pyproject.toml` and `.importlinter` are
+byte-unchanged and the contract test pins the whole dependency list;
+`tests/fixtures/scored_corpus.py` already produces mismatches, because phase 4
+built the hazard set that makes them. A phase that needs nothing new is the
+return on having built the foundations deliberately.
+
+**`sw-design.md` §17 is this wave's first deliverable**, written before any
+code in it, the way §16 was written before phase 4's Wave 0 — and `SD24`-`SD26`
+with it. §17 was reserved and deliberately empty from the reset-and-discard
+slice onward; it is now written, and §16.9's "Mismatch review" bullet points at
+it.
+
+**This is the first phase in which a human writes to the database.** Everything
+before it was append-only or job-owned. The whole of §17 follows from that
+sentence, and two of its consequences are gates rather than prose:
+`tests/test_p5_contract.py::test_review_has_no_edge_to_scoring` (mvp-spec.md
+§12's "nothing is rescored", asserted on the AST because `import-linter` cannot
+express a rule between two modules of one layer) and the `MismatchWrite` /
+`set_tag` split that keeps each owner out of the other's columns.
+
+### New files
+
+| File | Contents |
+|---|---|
+| `ra2/domain/mismatch.py` | `MismatchTag` (the closed three), `OTHER_TAG` (a bucket, **not** an enum member), `TagState`/`TagFilter`, `MISMATCH_SORT_KEYS` (four keys, and **nothing that ranks "how wrong"**), `ReviewTally` — types and signatures only; the `tally` body is W1's. **Imports nothing from `ra2/`** — that is §17.3's absent edge, and `import-linter` holds it |
+| `ra2/services/mismatch_service.py` | constructor + typed signatures; bodies Y1. Implements `MismatchTally` structurally. **Imports no scoring module**, and the contract test asserts it |
+| `ra2/api/v1/mismatches.py` | stub router; bodies Y2. An evaluation with no mismatches is **200 with an empty list**, never a 404; an unknown tag is **422**, because the wire is closed even though the column is not |
+| `ra2/ui/views/mismatches_view.py` | stub; body Z1. **A module, not a package** — the `SD22` reasoning read the other way (§17.9). Holds `TAG_LABELS`, the one rendering table where `structured_data_error` becomes "record error" (C4) |
+| `tests/test_p5_contract.py` | this wave's exit criteria as tests — lead-owned, frozen |
+
+### Amended files (already frozen; re-frozen here)
+
+| File | What changed |
+|---|---|
+| `ra2/services/protocols.py` | + `MismatchTally` — the fifth seam (plan-phase-5.md §3.1). Keyed by `RunId`, and it **returns counts and nothing else**: the absence of any other method is the contract |
+| `ra2/services/container.py` | + `mismatch: MismatchService` |
+| `ra2/services/readmodels.py` | + `MismatchRowView`, `MismatchFeatureView`, `ReviewTallyView`, `MismatchFilters`, `MismatchListView`, and `TagFilter`/`TagState` re-exported. **Five, where plan-phase-5.md §5.1 named four**: `MismatchFeatureView` is the Feature filter's option list, which cannot be the tally strip because the strip is scoped to the current filter and would collapse to one entry the moment a feature was picked |
+| `ra2/services/errors.py` | **unchanged, and asserted so.** Phases 2, 3 and 4 each added errors; a phase that adds none is a phase that introduced no new failure. An unknown mismatch is a `NotFoundError`; an unknown tag never reaches the service |
+| `ra2/services/export_service.py` | + the `mismatches_csv` signature and `_MISMATCHES_CSV_HEADER`; body is Y1's. **It takes the rows** (`P4-D3`), and it carries `anonymised` where `run_mismatches_csv` does not — this file is the review list, and the span is record text (mvp-spec.md §13) |
+| `ra2/api/schemas.py` | + `MismatchResponse`, `MismatchPage`, `ReviewTallyResponse`, `MismatchFeatureResponse`, `MismatchFiltersResponse`, `MismatchListResponse`, `TagMismatchRequest`. The request takes a `MismatchTag` and the response carries a plain `analyst_tag` string — `SD24` on the wire |
+| `ra2/api/deps.py` | + `MismatchServiceDep` |
+| `ra2/api/v1/router.py` | + the mismatches router |
+| `ra2/main.py` | + `MismatchService` construction. A session factory and a clock, and **no scorer** — §17.3's absent edge in the wiring as well as in the imports |
+| `ra2/persistence/repositories/mismatch_repo.py` | + the `list_for` / `set_tag` / `tally_for` signatures; bodies W1. **`upsert_feature` is byte-unchanged** and must stay so: it is the scorer's half of the ownership split, and phase 4 owns the test that guards it |
+| `mvp-spec.md` | §5 (`mismatch`'s comment gains the column-ownership split and names `MismatchTag`'s three values while keeping the column a string), §12 (a note that the three names are identifiers and "record error" is how `structured_data_error` renders) |
+| `sw-design.md` | **§17 is written** — §17.1-§17.10. `SD24`-`SD26` added to §13; §16.9's "Mismatch review" bullet superseded |
+| `CLAUDE.md` | the fifth migration author |
+| `justfile` | one comment: the Reset section cited "sw-design.md §17", which is now this phase's section. It is §18 |
+| `plan-phase-5.md` | §1 Q7, §3.1, §3.2, §5.1 and §7 corrected in the same commit where §17 decided differently — see "Documented deviations phase 5 introduces" |
+| `ra2/ui/shell.py` | **untouched.** `mismatches` has existed as a `NavItem` with `built=False` since phase 1, icon already wired. Z1 flips one flag in Wave 4 |
+| `pyproject.toml`, `.importlinter` | **byte-unchanged, and asserted so** (see above) |
+
+### Stubs — a body is expected; the file is **not** frozen (phase 5)
+
+| Path | Owner |
+|---|---|
+| `ra2/domain/mismatch.py` *(the `tally` body)*, `ra2/persistence/repositories/mismatch_repo.py` *(the three new methods)*, `ra2/persistence/migrations/versions/**` | W1 |
+| `ra2/ui/components/primitives.py` *(additions)*, `ra2/ui/theme.py` *(additions)* | W2 |
+| `ra2/services/mismatch_service.py`, `ra2/services/export_service.py` *(`mismatches_csv` body)* | Y1 |
+| `ra2/api/v1/mismatches.py` | Y2 |
+| `ra2/ui/views/mismatches_view.py`, `ra2/ui/state.py` *(additions)* | Z1 |
+
+### The two-line exception
+
+Phase 2 paid for leaving its nav wiring implicit (`e386a66`); every phase since
+has declared it. Phase 5 needs **two lines and one link**, all Z1's:
+
+1. **Z1 may flip exactly the `mismatches` `built` flag** in `ra2/ui/shell.py`
+   and add exactly its own line to `ra2/ui/views/__init__.py`'s
+   `register_all`. Nothing else in either file.
+2. **Z1 may add exactly the mismatch deep link** to
+   `ra2/ui/views/results/extraction_tab.py` — the one `design/results/README.md`
+   asks for and phase 4 had nowhere to point (plan-phase-5.md C2). One link, in
+   the feature row, carrying `evaluation`, `run` and `feature`. **Nothing else
+   in that file**, which belongs to V1. This is a cross-phase edit, which is
+   why it is written down rather than assumed; if it grows past one link it is
+   an amendment.
+
+---
+
+## Documented deviations phase 5 introduces
+
+| # | Decision | Why |
+|---|---|---|
+| **P5-D1** | **The Mismatches list is one run at a time** (`SD26`, sw-design.md §17.6) — the Run filter has no "all runs" option, `MismatchFilters.run_id` is required, and `MismatchTally` is keyed by `RunId` | `plan-phase-5.md` §3.2 draws seven columns and none of them is the model, while `mvp-spec.md` §12 names `run` as part of the row. Both can be right only if the run is a scope rather than a column. The scope is the better answer for a reason that is not about column widths: **a list mixing two models' mismatches for the same record and feature *is* cross-model agreement**, one of the three things §16.9 defers by name. Refusing the mixed list is not a limitation of this view, it is the deferral caught where it would otherwise have entered as a convenience — and it makes `run_finished_at` well-defined for Q7. `ResultsService.presence_records` already resolves one run the same way. **Consequence:** the plan's §3.2 column table stands unchanged, and the toolbar names the run once instead of every row repeating it |
+| **P5-D2** | **`domain.mismatch.tally` takes `Mapping[str \| None, int]`** — stored tag values mapped to row counts — not a sequence of rows, a correction to `plan-phase-5.md` §7's "counting stored tag strings" | The repository's `tally_for` is specified as **one grouped query per run, never one per feature**. A domain signature taking rows would have forced the service to expand that `GROUP BY` back into individual values and recount them, which is the same N+1 the grouped query exists to avoid, one layer up and harder to see. Taking the shape `GROUP BY` produces keeps the grouping intact all the way into the domain, and a caller that genuinely holds rows spends one `Counter` to get there |
+| **P5-D3** | **The staleness anchor is `run.finished_at`, and a re-score goes undated** (`SD25`, §17.7) — a correction to `plan-phase-5.md` Q7's "the view says when the run was scored" | RA2 records no scoring timestamp, and this phase does not add one. Scoring chains off the run's terminal `done` (`SD17`), so for a run scored once `finished_at` *is* when it was scored; a **re-score** moves the list without moving it. Closing that gap means a `scored_at` column, which `sw-design.md` §16.1 F5 declined so that "how far did it get" has exactly one answer and which `tests/test_p4_contract.py` asserts the absence of by name. Naming the gap is honest; adding a column against a standing decision, at the end of a phase, for a mitigation R5 already calls cheap, is not. If it bites in real use the next step is **a count of tags lost, not a lock and not a timestamp** |
+| **P5-D4** | The list's **default page size is 25**, not the 10 `plan-phase-5.md` §3.2 names | §3.2 contradicts itself in one row — "`pagination_row`, 10/page, "1-25 of 162"" — and both halves come from Census, whose page size is 25 and whose "1-25 of 162" is the string being quoted. This view is the Census shape (Q1), so it takes the Census number; `PAGE_SIZES` offers 10/25/50/100 and an analyst who wants shorter pages has one click to get them |
+
+---
+
 ## Documented deviations phase 4 introduces
 
 | # | Decision | Why |
