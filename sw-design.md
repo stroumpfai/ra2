@@ -591,6 +591,7 @@ Each is additive and cheap to reverse; none should change silently.
 | SD24 | `MismatchTag` is a **closed domain enum over a column that stays `String(32)`**, with an `other` bucket for a value it does not name (§17.5) | Both halves are load-bearing and the asymmetry is the point. The enum makes the list, the tally, the CSV and the wire agree on three identifiers and makes a typo a lint error — `FindingCode` is the precedent. The string column keeps `models.py`'s promise that "a fourth tag must be a value, not a migration". The bucket is what stops the asymmetry becoming a crash: a stored value the enum does not name renders as itself and counts under `other`, because a tally that silently omitted those rows would report "of 40 reviewed" over 38 |
 | SD25 | Review's staleness anchor is the run's **`finished_at`**; **no `scored_at` column is added**, and a re-score therefore goes undated (§17.7) | A re-score can delete a tagged row under an analyst, so the view owes a visible reason for a list that changed. `run.finished_at` is the closest honest thing that exists: scoring chains off the run's terminal `done` (`SD17`), so for a run scored once it *is* the moment it was scored. Recording a re-score would mean a `scored_at` column, which §16.1 F5 declined so that "how far did it get" has exactly one answer and which `tests/test_p4_contract.py` asserts the absence of by name. The gap is named rather than papered over, and the next step if it bites is a **count of tags lost, not a lock** |
 | SD26 | The Mismatches list is scoped to **one run at a time**, with no "all runs" option (§17.6) | `mvp-spec.md` §12 names `run` as part of the row, and a list mixing two models' mismatches for the same record and feature **is** cross-model agreement — one of the three things §16.9 defers by name. Refusing it is not a limitation of the view; it is the deferral, caught where it would otherwise have entered as a convenience. `ResultsService.presence_records` already resolves one run the same way |
+| SD27 | The adapter builds its own HTTP transport, with `trust_env=False` and `follow_redirects=False` (§15.5) | The loopback guard reasons about the URL; the transport decides which socket that URL is dialled over, and the `openai` SDK builds its own with `trust_env=True`. On a managed workstation with a machine-wide `HTTP_PROXY` and no `NO_PROXY` for localhost, a request for `http://127.0.0.1:11434/v1` therefore left for the proxy host with the guard satisfied — reproduced on the pinned versions. A redirect is the same hole read the other way: a `307` preserves the body, so the endpoint could hand the narrative to an off-host URL the guard never saw. Both are refused for the same reason the guard has no opt-out |
 
 **Note on the design's fixture column names.** `UnfallTypAusw`, `WitterungAusw`,
 `LichtverhaeltnisAusw` and `UnfallDatumFeld` do not exist in the delivery; the real
@@ -972,6 +973,33 @@ setting** — an opt-out is how "no data leaves the host" becomes "no data
 leaves the host by default". This is also why phase 1's "no egress at all"
 posture ends here rather than lapsing: the rule becomes *loopback only*, and
 the guard plus `import-linter` are what make it a gate.
+
+**The guard is half the rule; the transport is the other half** (**SD27**).
+`classify_endpoint` reasons about the **URL**. Which socket that URL is
+actually dialled over is decided later, by the transport, out of the process
+environment — and the `openai` SDK, left to build its own client, builds it
+with `trust_env=True`. On a workstation where `HTTP_PROXY` or `ALL_PROXY` is
+set machine-wide and `NO_PROXY` does not cover localhost, which is the default
+on most managed estates, a request for `http://127.0.0.1:11434/v1` is handed to
+the proxy host: guard satisfied, narrative attached. So `_build_client` builds
+the transport itself:
+
+- **`trust_env=False`** — no `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `.netrc`
+  or `SSLKEYLOGFILE` is read. The environment cannot move the socket.
+- **`follow_redirects=False`** — a `307`/`308` preserves the method and the
+  body, so whatever answers on `127.0.0.1:11434` could otherwise hand the
+  narrative to an off-host URL the guard never saw.
+
+Both apply to all three classes, because all three build through
+`_build_client`. The `http_client` seam is **checked, not trusted**: an
+injected client with either flag on is refused at construction, so the stub the
+tests drive cannot be looser than the client production builds — a seam that
+could be is a guarantee true only of the path nobody runs.
+
+The adapter tests assert this on the transport `_transport_for_url` actually
+selects for the loopback URL rather than on the flag, with a positive control
+that fails if the check stops discriminating: every assertion there is a
+negative one, and a negative assertion that cannot fail is worse than none.
 
 **Unreachable is a state, not an error.** `reachable()` returns a status; the
 service hands the view an empty model list and a reason; the view renders it

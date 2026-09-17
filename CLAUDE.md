@@ -121,9 +121,12 @@ gate.
   `::1`, `localhost`); `OllamaLLMClient` refuses anything else **at
   construction**, and there is deliberately **no opt-out setting** — an
   opt-out is how "no data leaves the host" (N1) becomes "no data leaves the
-  host by default". `mvp-spec.md` §19.10 and `sw-design.md` §15.5 are the
-  rule; `import-linter`'s `one-llm-seam` contract and H4's guard tests are
-  what make it a gate. J6 is unchanged and stays exactly as strict: it
+  host by default". **The URL is only half of it**: a proxy is chosen by the
+  transport, out of the environment, so the adapter builds its own HTTP
+  client with `trust_env=False` and `follow_redirects=False` and refuses an
+  injected one that has either flag on (`SD27`). `mvp-spec.md` §19.10 and
+  `sw-design.md` §15.5 are the rule; `import-linter`'s `one-llm-seam`
+  contract and H4's guard tests are what make it a gate. J6 is unchanged and stays exactly as strict: it
   watches the *browser*, and the browser still talks only to the server under
   test.
 - **Design fidelity is a requirement, not a suggestion** (sw-design.md §8.2):

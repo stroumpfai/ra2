@@ -166,6 +166,17 @@ these narratives are not anonymised. A typo or a copied `.env` pointing at a LAN
 address would ship accident text off the machine; the guard is what makes that
 impossible rather than merely discouraged.
 
+**The guard covers the URL; the client covers the environment. Both are
+needed.** A proxy is chosen by the HTTP transport, not by the URL, so on a
+machine where `HTTP_PROXY` or `ALL_PROXY` is set and `NO_PROXY` does not cover
+localhost — the default on most managed workstations — a request for
+`127.0.0.1` would otherwise be handed to the proxy host with the guard
+satisfied. RA2 therefore builds its own HTTP client with `trust_env=False`, so
+no proxy variable, `.netrc` or `SSLKEYLOGFILE` is read, and with
+`follow_redirects=False`, so the endpoint cannot redirect the request (and its
+body) somewhere the guard never saw. Neither is configurable, for the same
+reason the loopback rule is not.
+
 ### VRAM and model fit
 
 RA2 reads your GPU's name and total VRAM through NVML's library bindings

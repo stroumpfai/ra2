@@ -15,7 +15,7 @@ import json
 from collections import deque
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx2
 import pytest
@@ -31,6 +31,9 @@ from ra2.domain.llm import (
     ProbeCode,
 )
 from ra2.infra.config import Settings
+
+# The private one, on purpose: the prober builds its client per call, so the
+# only way to inspect the transport it *would* dial with is to ask for it.
 from ra2.infra.ollama_client import (
     LOOPBACK_HOSTS,
     PROBE_TIMEOUT_S,
@@ -38,6 +41,7 @@ from ra2.infra.ollama_client import (
     OllamaEndpointProber,
     OllamaLLMClient,
     OllamaModelCatalog,
+    _build_client,
     native_api_url,
     require_loopback,
 )
@@ -147,7 +151,19 @@ class StubOllama:
         return httpx2.Response(status, json=body)
 
     def http_client(self) -> httpx2.AsyncClient:
-        return httpx2.AsyncClient(transport=httpx2.MockTransport(self.handle))
+        return env_blind_client(httpx2.MockTransport(self.handle))
+
+
+def env_blind_client(transport: httpx2.MockTransport) -> httpx2.AsyncClient:
+    """A stub client built the way `_build_client` builds the real one.
+
+    `trust_env=False` and `follow_redirects=False` are not decoration here:
+    the adapter **refuses** an injected client that has either of them, so a
+    fixture that left the defaults on would fail at construction. That is the
+    point of checking the seam — the stub cannot be looser than production,
+    which is what keeps the guarantee true of the path the tests exercise.
+    """
+    return httpx2.AsyncClient(transport=transport, trust_env=False, follow_redirects=False)
 
 
 def refusing_transport() -> httpx2.AsyncClient:
@@ -160,7 +176,7 @@ def refusing_transport() -> httpx2.AsyncClient:
     def handle(request: httpx2.Request) -> httpx2.Response:
         raise AssertionError(f"the guard let a request through to {request.url}")
 
-    return httpx2.AsyncClient(transport=httpx2.MockTransport(handle))
+    return env_blind_client(httpx2.MockTransport(handle))
 
 
 @pytest.fixture
@@ -284,6 +300,176 @@ def test_the_error_carries_the_endpoint_and_names_the_status() -> None:
 
     assert "192.168.1.9" in str(excinfo.value)
     assert EndpointStatus.REFUSED_NOT_LOOPBACK.value in str(excinfo.value)
+
+
+# ===========================================================================
+# The environment cannot move the socket — the other half of the loopback rule
+# ===========================================================================
+#
+# `require_loopback` inspects the **URL**. Which socket that URL is dialled
+# over is decided later, by the transport, out of the process environment —
+# and `openai`'s own client is built with `trust_env=True`, so on a machine
+# with a machine-wide `HTTP_PROXY` and no `NO_PROXY` for localhost, a request
+# for `http://127.0.0.1:11434/v1` went to the proxy host with the guard
+# satisfied and the narrative attached. These assert on the transport actually
+# chosen for the loopback URL, not merely on the flag, because the transport is
+# what the defect was.
+
+#: Every spelling of "send it somewhere else" that `httpx2` reads from the
+#: environment. `NO_PROXY` is set to something that does *not* cover localhost
+#: on purpose: the realistic managed-estate configuration is one where an
+#: exemption list exists and is wrong, not one where none exists.
+PROXY_ENVIRONMENT = {
+    "HTTP_PROXY": "http://proxy.corp.example:3128",
+    "HTTPS_PROXY": "http://proxy.corp.example:3128",
+    "ALL_PROXY": "http://proxy.corp.example:3128",
+    "NO_PROXY": "example.com",
+}
+
+
+@pytest.fixture
+def proxy_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A workstation behind a corporate proxy, in both spellings `httpx2`
+    accepts."""
+    for name, value in PROXY_ENVIRONMENT.items():
+        monkeypatch.setenv(name, value)
+        monkeypatch.setenv(name.lower(), value)
+
+
+def dials_through_a_proxy(http_client: httpx2.AsyncClient) -> bool:
+    """Whether a request for the loopback endpoint would leave through a proxy.
+
+    `_transport_for_url` is the same lookup a real request performs, so this
+    reads the decision itself rather than the flag that informs it. Both the
+    pool's class and its proxy attributes are consulted: `httpcore2` answers a
+    proxied URL with an `AsyncHTTPProxy` holding `_proxy_url`, and checking
+    only one of the two would pass vacuously the day the other is renamed —
+    which is exactly how this defect stayed invisible.
+    """
+    transport = http_client._transport_for_url(httpx2.URL(f"{LOOPBACK_URL}/chat/completions"))
+    pool = getattr(transport, "_pool", transport)
+    if "proxy" in type(pool).__name__.lower():
+        return True
+    return any(getattr(pool, name, None) for name in ("_proxy", "_proxy_url", "_proxy_headers"))
+
+
+def transport_of(adapter: Any) -> httpx2.AsyncClient:
+    """The `httpx2` client the SDK ended up holding for this adapter.
+
+    Two underscores deep on purpose: the question is not what the adapter was
+    configured with but what will actually carry the narrative.
+    """
+    return cast("httpx2.AsyncClient", adapter._client._client)
+
+
+#: The two adapters built the way `create_app()` builds them — **no
+#: `http_client` injected**, which is the one path the rest of this file never
+#: exercises and the only one that had the defect.
+PRODUCTION_ADAPTERS = [
+    pytest.param(lambda: OllamaLLMClient(base_url=LOOPBACK_URL), id="llm-client"),
+    pytest.param(lambda: OllamaModelCatalog(base_url=LOOPBACK_URL), id="model-catalogue"),
+]
+
+
+def test_the_proxy_check_can_tell_the_difference(proxy_environment: None) -> None:
+    """Guards the guard.
+
+    Every assertion below is a negative one, and a negative assertion that
+    cannot fail is worse than no assertion at all. This is the positive
+    control: under the same environment, a client that *does* read it dials
+    the loopback endpoint through the proxy.
+    """
+    assert dials_through_a_proxy(httpx2.AsyncClient(trust_env=True)) is True
+
+
+@pytest.mark.parametrize("build", PRODUCTION_ADAPTERS)
+def test_a_proxy_environment_cannot_redirect_the_loopback_socket(
+    proxy_environment: None, build: Any
+) -> None:
+    """The A1 regression itself."""
+    assert dials_through_a_proxy(transport_of(build())) is False
+
+
+def test_a_proxy_environment_cannot_redirect_the_probers_socket(
+    proxy_environment: None,
+) -> None:
+    """The prober builds its client per call, so it needs its own check: it
+    dials whatever an analyst typed into the settings dialog, which is the
+    first request a freshly configured machine makes."""
+    assert dials_through_a_proxy(probe_transport_of(OllamaEndpointProber())) is False
+
+
+@pytest.mark.parametrize("build", PRODUCTION_ADAPTERS)
+def test_the_production_client_reads_nothing_from_the_environment(
+    proxy_environment: None, build: Any
+) -> None:
+    """`trust_env` covers `.netrc` and `SSLKEYLOGFILE` as well as the proxy
+    variables. None of them has any business influencing a loopback call."""
+    http_client = transport_of(build())
+
+    assert http_client.trust_env is False
+    assert http_client._mounts == {}
+
+
+@pytest.mark.parametrize("build", PRODUCTION_ADAPTERS)
+def test_the_production_client_does_not_follow_a_redirect(build: Any) -> None:
+    """A `307`/`308` preserves the method and the body, so whatever answers on
+    `127.0.0.1:11434` could otherwise hand the narrative to an off-host URL and
+    `httpx2` would carry it there — past the guard, which only ever saw the
+    first URL."""
+    assert transport_of(build()).follow_redirects is False
+
+
+def test_the_prober_is_built_the_same_way(proxy_environment: None) -> None:
+    http_client = probe_transport_of(OllamaEndpointProber())
+
+    assert http_client.trust_env is False
+    assert http_client.follow_redirects is False
+
+
+@pytest.mark.parametrize(
+    ("trust_env", "follow_redirects", "smell"),
+    [
+        pytest.param(True, False, "trust_env", id="trust_env"),
+        pytest.param(False, True, "follow_redirects", id="follow_redirects"),
+    ],
+)
+def test_an_injected_client_that_reads_the_environment_is_refused(
+    *, trust_env: bool, follow_redirects: bool, smell: str
+) -> None:
+    """The seam cannot be looser than the path it stands in for.
+
+    `http_client` exists so the tests can drive a `MockTransport` (Do-NOT
+    #12); a seam that accepted a client production would never build would
+    make the guarantee true only of the code nobody runs. This is also what
+    makes `env_blind_client` above load-bearing rather than tidy.
+    """
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        raise AssertionError(f"nothing should reach {request.url}")
+
+    loose = httpx2.AsyncClient(
+        transport=httpx2.MockTransport(handle),
+        trust_env=trust_env,
+        follow_redirects=follow_redirects,
+    )
+
+    with pytest.raises(ValueError, match=smell):
+        OllamaLLMClient(base_url=LOOPBACK_URL, http_client=loose)
+
+
+def probe_transport_of(prober: OllamaEndpointProber) -> httpx2.AsyncClient:
+    """The transport the prober would dial the loopback URL with.
+
+    The prober holds no `base_url` and no client — it builds one per call,
+    after `classify_endpoint` — so there is nothing to inspect until one is
+    asked for. This asks for exactly the client `probe()` would construct.
+    """
+    return _build_client(
+        base_url=LOOPBACK_URL,
+        timeout_s=PROBE_TIMEOUT_S,
+        http_client=prober._http_client,
+    )._client
 
 
 # ===========================================================================

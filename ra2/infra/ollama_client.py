@@ -26,6 +26,13 @@ accident narratives to a LAN address. **There is deliberately no opt-out
 setting** — an opt-out is how "no data leaves the host" becomes "no data
 leaves the host by default".
 
+**The guard is only half of it.** `require_loopback` reasons about the URL;
+which socket that URL is dialled over is decided later, by the transport, out
+of the process environment. So this module builds the transport too, with
+`trust_env=False` and `follow_redirects=False` — see `_build_client`. Without
+the first, a machine-wide `HTTP_PROXY` sends a request for `127.0.0.1` to the
+proxy host with the guard satisfied and the narrative attached.
+
 **Unreachable is a state, not an error.** `reachable()` returns a status; the
 service hands the view an empty model list and a reason; the view renders it
 beside the endpoint line and disables Launch. Never a toast, never a 502.
@@ -194,6 +201,31 @@ def native_api_url(base_url: str, path: str) -> str:
     return f"{root.rstrip('/')}{path}"
 
 
+def _reject_environment_reading_client(http_client: httpx2.AsyncClient) -> None:
+    """The injected client must be as environment-blind as the built one.
+
+    `http_client` is a seam, not a test-mode branch (Do-NOT #12), and a seam
+    that could be handed a looser client than production builds would make
+    the guarantee below true only of the path nobody exercises. Checking it
+    here means the rule reads "no client this adapter dials through consults
+    the environment or follows a redirect", with no "unless somebody passed
+    one in" clause — which is the same reason the loopback guard has no
+    opt-out.
+    """
+    if http_client.trust_env:
+        raise ValueError(
+            "the injected http_client must be built with trust_env=False: "
+            "a proxy environment variable would route a loopback URL off this "
+            "host (N1, sw-design.md §15.5)"
+        )
+    if http_client.follow_redirects:
+        raise ValueError(
+            "the injected http_client must be built with follow_redirects=False: "
+            "a 307 from the endpoint would carry the narrative off this host "
+            "(N1, sw-design.md §15.5)"
+        )
+
+
 def _build_client(
     *, base_url: str, timeout_s: int, http_client: httpx2.AsyncClient | None
 ) -> openai.AsyncOpenAI:
@@ -204,13 +236,38 @@ def _build_client(
     same shape as `create_app()`'s injectable adapters, and production passes
     nothing. It is how the adapter tests drive a `httpx2.MockTransport` stub
     of the endpoint without a socket, a GPU or anything on port 11434.
+
+    **The transport is built here rather than left to the SDK, and that is the
+    second half of the loopback rule.** `require_loopback` reasons about the
+    *URL*; the decision of which socket a URL is dialled over is made later,
+    by the transport, out of the process environment — so a machine with
+    `HTTP_PROXY` or `ALL_PROXY` set and no `NO_PROXY` for localhost sends a
+    request for `http://127.0.0.1:11434/v1` to the proxy host, guard passed and
+    narrative attached. That is not hypothetical: it is the default on most
+    managed estates, and `openai`'s own client is built with `trust_env=True`.
+    So:
+
+    - `trust_env=False` — no `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `.netrc`
+      or `SSLKEYLOGFILE` is read. The environment cannot move the socket.
+    - `follow_redirects=False` — a `307`/`308` preserves the method and the
+      body, so whatever answers on `127.0.0.1:11434` could otherwise hand the
+      narrative to an off-host URL and `httpx2` would carry it there. A
+      redirect from a local model server is a misconfiguration in every case
+      that is not an attack, and neither is worth following.
+
+    `openai.DefaultAsyncHttpx2Client` rather than a bare `httpx2.AsyncClient`
+    so the SDK's own connection limits and timeouts still apply: the only
+    thing this changes is where the transport is allowed to look.
     """
+    if http_client is not None:
+        _reject_environment_reading_client(http_client)
     return openai.AsyncOpenAI(
         base_url=base_url,
         api_key=_UNUSED_API_KEY,
         timeout=float(timeout_s),
         max_retries=0,
-        http_client=http_client,
+        http_client=http_client
+        or openai.DefaultAsyncHttpx2Client(trust_env=False, follow_redirects=False),
     )
 
 
