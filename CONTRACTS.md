@@ -508,6 +508,26 @@ Two read services of one layer, and the Results one holds a `Scorer` this
 module must not acquire (§17.3) — so the six values are read off the evaluation
 again rather than reaching through a module that has an edge to scoring.
 
+### Wave 3 additions (Y2) — not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/api/v1/mismatches.py` | The five routes' bodies and the read-model→wire mapping. Thin translation only; `descriptor_response` is reused from `results.py` rather than copied, the same way `presence.py` and `ranking.py` reuse it |
+| `tests/backend/api/mismatches/**` | Y2's exit criteria, through `httpx.ASGITransport` |
+| `tests/api/openapi_snapshot.json` | **Three docstring descriptions and nothing else.** Verified by set comparison: no path added or removed, no schema added, removed or changed. Wave 0 froze the wire surface and Wave 3 filled the bodies without moving it |
+
+**`GET .../mismatches/tally` reads through `list_mismatches`, not through
+`MismatchTally`.** That protocol takes a session and a router does not own one
+(§3.1) — and going through the same service call is what makes the two
+endpoints' numbers the same numbers rather than two reads that agree by
+convention. A test asserts the tally endpoint's body equals the list's
+`tallies` field exactly.
+
+**The filter vocabulary is closed on the wire in both directions.** An unknown
+`tag_state` is 422, not a silently empty page; an unknown `tag` on the write is
+422 before the service is reached, and a test re-reads the list afterwards to
+confirm nothing was written (`SD24`, §17.5).
+
 ---
 
 ## Documented deviations phase 5 introduces

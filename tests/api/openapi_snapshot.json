@@ -5778,7 +5778,7 @@
     },
     "/api/v1/evaluations/{evaluation_id}/mismatches": {
       "get": {
-        "description": "The flat list, filtered, sorted and paged.\n\n`run` absent picks the evaluation's first run \u2014 there is no \"all runs\"\nscope (\u00a717.6). An evaluation with no mismatches is **200 with an empty\nlist**.",
+        "description": "The flat list, filtered, sorted and paged.\n\n`run` absent picks the evaluation's first run \u2014 there is no \"all runs\"\nscope (\u00a717.6). An evaluation whose run has no mismatches is **200 with an\nempty list**: \"nothing was wrong\" is a result, and a status code would\nforce a toast where the page should simply be in a state.",
         "operationId": "list_mismatches_api_v1_evaluations__evaluation_id__mismatches_get",
         "parameters": [
           {
@@ -6021,7 +6021,7 @@
     },
     "/api/v1/evaluations/{evaluation_id}/mismatches/tally": {
       "get": {
-        "description": "Per-feature review counts, scoped to the **same filters** as the list,\nso the strip and the table cannot disagree (\u00a717.4).",
+        "description": "Per-feature review counts, scoped to the **same filters** as the list,\nso the strip and the table cannot disagree (\u00a717.4).\n\nIt reads through the same service call the list does rather than through\n`MismatchTally`: that protocol takes a session, and a router does not own\none. What it gets back is the same tuple the list carries, which is the\npoint \u2014 one read, one answer.",
         "operationId": "mismatch_tally_api_v1_evaluations__evaluation_id__mismatches_tally_get",
         "parameters": [
           {
@@ -7250,7 +7250,7 @@
         ]
       },
       "post": {
-        "description": "Write one judgement. **Idempotent** \u2014 the same tag twice leaves one row\nand one `tagged_at`.\n\n404 for an unknown mismatch; 422 for a tag outside `MismatchTag`, which\nFastAPI answers before this function runs.",
+        "description": "Write one judgement. **Idempotent** \u2014 the same tag twice leaves one row\nand one `tagged_at`.\n\n404 for an unknown mismatch. **422 for a tag outside `MismatchTag`**,\nanswered by FastAPI's own validation before this function runs: the column\nis open so a fourth tag needs no migration, and the wire is closed so\nnothing in this codebase creates one (`SD24`, \u00a717.5).",
         "operationId": "tag_mismatch_api_v1_mismatches__mismatch_id__tag_post",
         "parameters": [
           {
