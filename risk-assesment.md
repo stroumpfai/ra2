@@ -56,7 +56,7 @@ as written at `616bf2b`.
 |---|---|---|---|---|
 | 1 | **✓ §8.1** | Build the adapter's HTTP client with `trust_env=False` (a proxy env var currently redirects loopback traffic off-host — reproduced) | ~1 h | **A1** |
 | 2 | open | Write the data-handling rules the app cannot enforce: outputs, retention, destruction, named owner, incident path | ~1 day, no code | **F1, B2, B3** |
-| 3 | open | Suppress or gate verbatim value samples in the census export; screen every export before it leaves the machine | ~½ day | **B1** |
+| 3 | **◑ §8.4** | Suppress or gate verbatim value samples in the census export; screen every export before it leaves the machine | ~½ day | **B1** |
 | 4 | **◑ §8.2** | Make the real-data commit guard content-shaped and run it in CI; reconsider the repository being public | ~½ day | **C1** |
 | 5 | open | Measure and bound the prompt against the model's context window before the evaluation corpus is cut | ~1 day | **D1** |
 
@@ -288,6 +288,11 @@ app and then carried out by a person doing their job.
 
 **B1 · The census export contains verbatim identifying values**
 · Severity: **High** · Control status: **absent** · **Verified**
+
+> **Remediated 2026-09-17 — see §8.4.** Samples are withheld for every column
+> the delivery does not mark as coded, and every export carries a
+> classification line. **Screening an export before it is shared is still
+> open** — that is a runbook sentence, not a predicate.
 
 *Scenario.* The column-population census is the week-one deliverable, explicitly
 intended to be reported on its own ("a finding about the data worth reporting")
@@ -879,7 +884,7 @@ as written at `616bf2b`.
 | 1 | **✓ §8.1** | `trust_env=False` on every HTTP client the adapter builds, plus a proxy-environment test | A1 | 1 h |
 | 2 | **✓ §8.2** | Content-shaped real-data guard, wired into CI as well as pre-commit | C1 | ½ d |
 | 3 | **✓ §8.3** | Add Do-NOT #13 (agents never read `data/` or `RA2_DATA_DIR`) and a matching permission deny rule | C2 | 1 h |
-| 4 | open | Suppress verbatim value samples for non-coded columns; classification header on every export | B1 | ½ d |
+| 4 | **✓ §8.4** | Suppress verbatim value samples for non-coded columns; classification header on every export | B1 | ½ d |
 | 5 | open | Render the anonymisation marking as three states until its semantics are confirmed | B5 | 2 h |
 
 **Before the evaluation corpus is cut** (validity of the answer)
@@ -1087,3 +1092,67 @@ around; and a Playwright trace taken against a real corpus would land in
 `test-results/`, which is deliberately **not** denied, because E2E runs on
 synthetic data today and denying it would block debugging a hazard that does
 not yet exist. **#13 is the control. The deny list is what catches the lapse.**
+
+
+### 8.4 B1 — verbatim values in the census export · closed 2026-09-17 · `72f311b` · screening open
+
+**Status: in place for the suppression and the marking, open for the human
+step.** The census CSV is the week-one deliverable and the artefact most
+*meant* to be shown to other people, and it carried the top 20 raw values of
+every column — including four `Koordinate` columns at metre precision and three
+UID columns, 16 to 20 of each column's 20 stored values occurring exactly once.
+A value that occurs once is one accident.
+
+**What changed.**
+
+| Where | Change |
+|---|---|
+| `ra2/domain/census.py` | `SHAREABLE_TYPE_HINTS` / `sample_is_shareable` — the one statement of which columns' values may leave the corpus, true only for `ENUM`. In `domain` because `census_service` and `export_service` both need the same answer; a rule stated twice is a rule that drifts, and the half that drifts is the half nobody looks at |
+| `ra2/services/census_service.py` | Applied in `_to_view`, so the Census view, the API and the CSV get one answer. **Read time, never write time**: a corpus is immutable, so a write-time filter would leave every corpus frozen before today still carrying its values into every export. This covers those and needs no migration — the `SD19` shape |
+| `ra2/services/readmodels.py`, `ra2/api/schemas.py`, the CSV header and the OpenAPI snapshot | `top_values_withheld`. `top_values == ()` already meant *empty in every row* (hazard h08), which is the **opposite** conclusion for feature selection. Collapsing the two would hand a reader a finding the data does not support |
+| `ra2/services/export_service.py` | `CLASSIFICATION_COMMENT`, written by `_write_csv` — the one place all **six** exports pass through, so the line is guaranteed rather than remembered, and written first because the first line is the one a reader sees before deciding what to do with the file |
+| `ra2/ui/views/census_view.py` | The third bar state. The screen holds to the rule the export holds to, because the screen is the easier of the two places to copy a value out of by hand |
+| `mvp-spec.md` §6, `sw-design.md` §7 + `SD28` | The *what* changed, so it landed in `mvp-spec.md` first (CLAUDE.md's document authority) |
+
+**Only the raw values are withheld.** Populated count and rate, distinct count,
+top-value share, long-tail flag and type hint all survive — those are what
+feature selection actually reads (mvp-spec.md §6), and a rule that took them
+too would have made the deliverable useless rather than safe.
+
+**How it was verified.**
+
+| Check | Result |
+|---|---|
+| The existing hand-computed census fixture, which already held all three states — `UnfallUid` (five values, each once), `WetterAusw` (coded), `StrasseName` (empty in every row) | Sample withheld, sample kept, sample absent-and-not-withheld. No new fixture was needed to show the finding |
+| The census CSV, byte-exact, through the HTTP API | A coded column keeps `5:3\|3:1`; a `Koordinate` column exports `;;True` and the coordinate string appears nowhere in the row |
+| The Census view, through the real renderer | The withheld row draws an empty track and the legend *values withheld · aggregates only* — never "no values", which an analyst would read as an empty column |
+| The view handed the contradictory state (flagged withheld, still carrying values) | Nothing of them reaches the page. The branch is on the flag, so the property holds for any caller of the read model, not only the one that empties it |
+| The same UI tests with the view's branch removed | Two fail. The branch is load-bearing, not decorative |
+| `just lint`, `just test` | Green |
+
+**The cost, chosen rather than discovered.** A code appearing in a single
+record is still exported, because the line is drawn at the **header** — the
+delivery's own `Ausw` / `` UAP`` marking — rather than at a frequency. The
+mirror of it is that Astrana's `Kanton Kürzel`, a two-letter canton code by any
+reading, loses its sample because that format does not use the suffix. A
+frequency floor reusing `Settings.min_cell_count` (20) was the alternative and
+would have caught the rare code and kept the canton; the header rule was
+preferred because it is one sentence a reader can check against the data
+dictionary, and it does not make the deliverable's contents depend on how large
+the corpus happens to be.
+
+**What this does not close.**
+
+**Screening an export before it leaves the machine.** B1's third recommendation
+is a runbook sentence — *a census export is sensitive until someone has looked
+at it* — and this repository has no runbook (risk F1, recommendation 12). The
+file now says what it is; a person still has to read it. That is why B1's §1 row
+is `◑` and not `✓`.
+
+**B2 is untouched and unchanged.** The mismatch list carries **evidence
+spans** — verbatim narrative fragments, mandatory by design — and the
+per-record lists and the evaluation report carry their own content. All of
+them now leave with a line saying what they are, which is not the same as a
+rule about what may be in them. B1 was a sample nobody had decided to include;
+B2 is content the design requires, and it needs a decision rather than a
+predicate.
