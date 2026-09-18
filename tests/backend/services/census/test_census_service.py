@@ -88,13 +88,12 @@ async def test_columns_round_trips_the_hand_computed_fixture(
     assert unfall_uid.populated_count == 5
     assert unfall_uid.populated_rate == pytest.approx(1.0)
     assert unfall_uid.distinct_count == 5
-    assert [(v.value_raw, v.count) for v in unfall_uid.top_values] == [
-        ("u1", 1),
-        ("u2", 1),
-        ("u3", 1),
-        ("u4", 1),
-        ("u5", 1),
-    ]
+    # Five stored values, each occurring exactly once — the shape the reviewer
+    # measured on the three real UID columns, 20 of 20 (risk B1). The sample is
+    # withheld; every aggregate beside it survives, because those are what
+    # feature selection reads.
+    assert unfall_uid.top_values == ()
+    assert unfall_uid.top_values_withheld is True
     assert unfall_uid.top_value_share == pytest.approx(0.2)
     assert unfall_uid.long_tail is False
     assert unfall_uid.type_hint == TypeHint.TEXT
@@ -103,14 +102,22 @@ async def test_columns_round_trips_the_hand_computed_fixture(
     assert wetter.populated_count == 4
     assert wetter.populated_rate == pytest.approx(0.8)
     assert wetter.distinct_count == 2
+    # `Ausw` is the delivery's own marking that the column holds codes, so the
+    # sample travels — including `02`, seen once. That is the rule's stated
+    # cost: the line is drawn at the header, not at a frequency.
     assert [(v.value_raw, v.count) for v in wetter.top_values] == [("01", 3), ("02", 1)]
+    assert wetter.top_values_withheld is False
     assert wetter.top_value_share == pytest.approx(0.75)
     assert wetter.type_hint == TypeHint.ENUM
 
     strasse = by_name["StrasseName"]
     assert strasse.populated_count == 0
     assert strasse.populated_rate == 0.0
+    # Empty in every row (h08) — an empty sample, but nothing was withheld.
+    # The two states share `top_values == ()` and mean opposite things, which
+    # is the whole reason the flag exists.
     assert strasse.top_values == ()
+    assert strasse.top_values_withheld is False
 
 
 async def test_columns_in_config_reflects_a_real_feature(

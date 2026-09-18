@@ -8,7 +8,13 @@ happened once, at freeze.
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ra2.domain.census import CensusBucket, CensusBucketLabel, TypeHint, ValueCount
+from ra2.domain.census import (
+    CensusBucket,
+    CensusBucketLabel,
+    TypeHint,
+    ValueCount,
+    sample_is_shareable,
+)
 from ra2.domain.ids import CorpusId
 from ra2.persistence.models import CensusColumn, Feature
 from ra2.persistence.repositories.census_repo import CensusRepository
@@ -45,22 +51,35 @@ def _to_column_view(row: CensusColumn, *, columns_in_config: frozenset[str]) -> 
     `CensusColumnView.type_hint` lies about its own type and `.value` raises
     `AttributeError` on the first caller that trusts the annotation.
     """
+    # Read-time, never write-time. The values stay in `census_value` — they are
+    # on the host either way, and a corpus is immutable, so a write-time filter
+    # would leave every corpus frozen before today still carrying them into
+    # every export. Suppressing here fixes the corpora that already exist and
+    # needs no migration; it is the shape `SD19` settled for scoring cells, for
+    # the same reason.
+    type_hint = TypeHint(row.type_hint)
+    shareable = sample_is_shareable(type_hint)
     return CensusColumnView(
         census_column_id=row.id,
         table_name=row.table_name,
         column_name=row.column_name,
-        type_hint=TypeHint(row.type_hint),
+        type_hint=type_hint,
         record_count=row.record_count,
         populated_count=row.populated_count,
         populated_rate=row.populated_rate,
         distinct_count=row.distinct_count,
         top_value_share=row.top_value_share,
         long_tail=row.long_tail,
-        top_values=tuple(
-            ValueCount(value_raw=value.value_raw, count=value.count, share=value.share)
-            for value in row.values
+        top_values=(
+            tuple(
+                ValueCount(value_raw=value.value_raw, count=value.count, share=value.share)
+                for value in row.values
+            )
+            if shareable
+            else ()
         ),
         in_config=row.column_name in columns_in_config,
+        top_values_withheld=not shareable and bool(row.values),
     )
 
 

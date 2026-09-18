@@ -304,6 +304,10 @@ class CensusColumnResponse(_Schema):
     long_tail: bool
     #: Top 20 stored; the view renders 4 segments and 3 legend entries.
     top_values: list[ValueCountResponse] = Field(default_factory=list)
+    #: True when the column has stored values and the sample rule withheld them
+    #: (risk B1). Without it an empty `top_values` is ambiguous with a column
+    #: that is empty in every row, which is the opposite conclusion.
+    top_values_withheld: bool = False
     #: Always `false` in phase 1 — no feature config exists yet.
     in_config: bool = False
 

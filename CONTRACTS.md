@@ -410,6 +410,10 @@ and one §8 entry per finding closed. The register in §4 is left as written.
 | `.pre-commit-config.yaml` | The hook's name and description say *name and content*; `entry` runs through `uv run python`, because the guard is a 3.14 source file and a hook that dies with a `SyntaxError` fails open | `fix-c1-real-data-guard` |
 | `justfile` | + `check-data` | `fix-c1-real-data-guard` |
 | `CLAUDE.md` | + **Do-NOT #13** (never open, query, print or paste `data/` or `RA2_DATA_DIR`), verbatim from §12, and the paragraph saying the item is addressed to the agent reading the file. **Also, retroactively:** the *Loopback only* agreement's transport half, edited in `39c72e0` without an amendment | `fix-c2-agent-data-access` |
+| `ra2/domain/census.py` | + `SHAREABLE_TYPE_HINTS`, `sample_is_shareable` — the one statement of which columns' **values** may leave the corpus. In `domain` because `census_service` and `export_service` both need the same answer, the shape `classify_endpoint` has for the loopback rule | `fix-b1-census-value-samples` |
+| `ra2/services/readmodels.py` | + `CensusColumnView.top_values_withheld`. Not decoration: `top_values == ()` already meant *empty in every row* (h08), which is the opposite conclusion for feature selection | `fix-b1-census-value-samples` |
+| `ra2/api/schemas.py` | + `CensusColumnResponse.top_values_withheld`, so the distinction survives the wire. `tests/api/openapi_snapshot.json` regenerated — five lines, one optional boolean, additive | `fix-b1-census-value-samples` |
+| `ra2/services/export_service.py` | + `CLASSIFICATION_COMMENT`, written by `_write_csv` — the one place **all six** exports pass through, so the line is guaranteed rather than remembered. `_CENSUS_CSV_HEADER` gains `top_values_withheld` | `fix-b1-census-value-samples` |
 | `tests/test_m0_contract.py` | `test_claude_md_carries_the_do_not_list` counts the Do-NOT items **against `sw-design.md` §12** instead of against the literal `12`. Bumping the literal would have left the same trap: a magic number here is one that gets changed without anyone opening the other document, which is the drift the assertion exists to catch | `fix-c2-agent-data-access` |
 | `ra2/infra/ollama_client.py` | **not frozen** — the transport half of the loopback rule (`SD27`). Listed here because it is the other finding closed in this slice | — |
 | `.gitignore` | **unchanged, deliberately.** Adding `Unfall.csv` would be the name-shaped fix again, and it would block the hazard fixtures, which carry the same names | — |
@@ -426,9 +430,13 @@ and one §8 entry per finding closed. The register in §4 is left as written.
 | Path | What |
 |---|---|
 | `.gitignore` | `.claude/` -> `.claude/*` + `!.claude/settings.json`, so the deny rules ship with the repository. Nothing else about the directory changes |
+| `ra2/services/census_service.py` | `_to_view` applies the sample rule — **read time, never write time**. A corpus is immutable, so a write-time filter would leave every corpus frozen before the rule still carrying its values into every export; this covers those and needs no migration (the `SD19` shape) |
+| `ra2/ui/views/census_view.py`, `ra2/api/v1/census.py` | The third bar state and the wire field. The view branches on the **flag**, not on an empty tuple, so the property holds for any caller of the read model |
+| `tests/unit/census/test_sample_rule.py` *(new)*, `tests/backend/api/census/`, `tests/backend/services/census/`, `tests/ui/test_census_view.py` | The rule at four layers. Twenty-five existing tests moved by one line because every export's preamble grew |
 | `tests/backend/scripts/test_check_no_real_data.py` | The guard's tests. Built by asking `generate_hazards` for a **genuine** delivery file and putting delivered-entropy keys in it — a guard tested against the author's idea of a delivery is a guard tested against nothing. No real value appears |
 | `tests/backend/infra/test_ollama_client.py` | *The environment cannot move the socket* — eleven tests, with a positive control |
-| `sw-design.md` | `SD27`, and §15.5's transport paragraph; **§12 gains the thirteenth invariant** and the paragraph on why it is the only one addressed to people rather than to code |
+| `mvp-spec.md` | §6 — value samples are shown and exported only for coded columns, every aggregate survives, and every CSV opens with a classification line. A *what* change, so it lands here first (CLAUDE.md) |
+| `sw-design.md` | `SD27`, `SD28` and §7's sample-rule section; §15.5's transport paragraph; **§12 gains the thirteenth invariant** and the paragraph on why it is the only one addressed to people rather than to code |
 | `README.md` | The loopback rule now states both halves |
 | `risk-assesment.md` | The `Status` column, and §8 |
 

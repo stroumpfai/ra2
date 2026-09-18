@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.fixtures.scored_corpus import WEATHER, ScoredCorpus
 
 from ra2.persistence.models import Evaluation
-from ra2.services.export_service import CSV_BOM, CSV_DELIMITER
+from ra2.services.export_service import CLASSIFICATION_COMMENT, CSV_BOM, CSV_DELIMITER
 
 
 @pytest.mark.asyncio
@@ -117,8 +117,9 @@ async def test_the_csv_export_carries_the_bom_and_the_delimiter(
     assert response.status_code == 200
     assert response.content.startswith(CSV_BOM)
     text = response.content[len(CSV_BOM) :].decode("utf-8")
-    assert text.startswith("# evaluation ")
-    header = text.splitlines()[1]
+    assert text.startswith(CLASSIFICATION_COMMENT)
+    assert text.splitlines()[1].startswith("# evaluation ")
+    header = text.splitlines()[2]
     assert header.split(CSV_DELIMITER)[0] == "record_id"
     assert "anonymised" in header
 
@@ -140,7 +141,7 @@ async def test_the_csv_row_count_matches_the_rendered_total(
         params={"feature_key": WEATHER},
     )
     text = exported.content[len(CSV_BOM) :].decode("utf-8")
-    data_rows = [line for line in text.splitlines()[2:] if line.strip()]
+    data_rows = [line for line in text.splitlines()[3:] if line.strip()]
     assert len(data_rows) == listed.json()["total"]
 
 

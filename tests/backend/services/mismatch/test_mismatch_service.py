@@ -24,7 +24,7 @@ from ra2.domain.ids import EvaluationId, MismatchId
 from ra2.domain.mismatch import MismatchTag, TagState
 from ra2.persistence.models import Score
 from ra2.services.errors import NotFoundError
-from ra2.services.export_service import ExportService
+from ra2.services.export_service import CLASSIFICATION_COMMENT, ExportService
 from ra2.services.mismatch_service import MismatchService
 from ra2.services.readmodels import MismatchListView, SortDir
 from ra2.services.scoring_service import ScoringService
@@ -474,11 +474,13 @@ async def test_the_csv_honours_the_filter_and_the_sort_it_was_handed(
     lines = payload.decode("utf-8-sig").splitlines()
 
     assert len(filtered.rows.items) == 2
-    #: comment + header + two rows, and **not** the whole run.
-    assert len(lines) == 4
-    assert lines[0].startswith("# evaluation ")
-    assert "hallucination" in lines[0]
-    assert "2 mismatches, 2 reviewed" in lines[0]
+    #: classification line + comment + header + two rows, and **not** the whole
+    #: run. The first line is risk B1's, on every export there is.
+    assert len(lines) == 5
+    assert lines[0] == CLASSIFICATION_COMMENT
+    assert lines[1].startswith("# evaluation ")
+    assert "hallucination" in lines[1]
+    assert "2 mismatches, 2 reviewed" in lines[1]
 
 
 async def test_the_export_is_unpaged_where_the_list_is_paged(

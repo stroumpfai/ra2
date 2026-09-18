@@ -15,6 +15,7 @@ from tests.backend.api.lifecycle.conftest import ScoredApi
 
 from ra2.domain.extraction import RunStatus
 from ra2.persistence.models import Evaluation, Extraction, Mismatch, Run, Score
+from ra2.services.export_service import CLASSIFICATION_COMMENT
 
 pytestmark = pytest.mark.backend
 
@@ -156,8 +157,11 @@ async def test_the_exports_are_the_house_csv(
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/csv")
     assert response.content.startswith(b"\xef\xbb\xbf")
-    first_line = response.content.decode("utf-8-sig").splitlines()[0]
-    assert first_line.startswith(f"# run {scored_api.tagged_run_id}")
+    lines = response.content.decode("utf-8-sig").splitlines()
+    # The classification line comes first on every export there is (risk B1);
+    # the run comment is the one this test is about.
+    assert lines[0] == CLASSIFICATION_COMMENT
+    assert lines[1].startswith(f"# run {scored_api.tagged_run_id}")
 
 
 async def test_the_mismatch_export_carries_the_analyst_tag(
@@ -166,7 +170,7 @@ async def test_the_mismatch_export_carries_the_analyst_tag(
     response = await api_client.get(f"/api/v1/runs/{scored_api.tagged_run_id}/mismatches.csv")
 
     text = response.content.decode("utf-8-sig")
-    header = text.splitlines()[1]
+    header = text.splitlines()[2]
     assert "analyst_tag" in header.split(";")
     assert "structured_data_error" in text
 

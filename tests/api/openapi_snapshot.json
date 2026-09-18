@@ -321,6 +321,11 @@
             "title": "Top Values",
             "type": "array"
           },
+          "top_values_withheld": {
+            "default": false,
+            "title": "Top Values Withheld",
+            "type": "boolean"
+          },
           "type_hint": {
             "$ref": "#/components/schemas/TypeHint"
           }

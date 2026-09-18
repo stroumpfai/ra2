@@ -38,6 +38,7 @@ def _to_column_response(view: CensusColumnView) -> CensusColumnResponse:
             for v in view.top_values
         ],
         in_config=view.in_config,
+        top_values_withheld=view.top_values_withheld,
     )
 
 

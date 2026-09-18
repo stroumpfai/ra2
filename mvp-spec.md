@@ -351,13 +351,32 @@ Runs over a corpus, needs no model and no GPU. Per table, per column:
 
 - populated count and rate (populated = non-empty string)
 - distinct value count
-- top 20 values with frequencies
+- top 20 values with frequencies — **computed and stored for every column,
+  shown and exported only for a coded one** (see below)
 - inferred type hint (`Ausw`/`Feld` suffix in RADIS, `* UAP` in Astrana, plus
   value-shape inspection)
 
 Exportable as CSV. **This is the input to feature selection** — the vision's
 sparsity finding means features are chosen by populated rate, not by what sounds
 interesting. Deliverable in week one, before any extraction work.
+
+**Value samples leave the machine only for coded columns.** The census CSV is
+the week-one deliverable and is meant to be shown to other people; the top 20
+values of a coordinate column are 20 accidents at metre precision, and of a UID
+column are 20 record keys. So the sample is shown and exported only where the
+type hint is `enum` — the delivery's own `Ausw` / `* UAP` marking that a column
+holds codes. **Every other number stays**: populated count and rate, distinct
+count, top-value share and the long-tail flag are exactly what feature selection
+reads, and none of them is withheld. A column whose sample was withheld is
+marked as such, because "no values shown" and "empty in every row" are opposite
+findings about a column. Storage is unchanged — the values are computed and kept
+in `census_value`; the rule applies on the way out.
+
+Every CSV this app writes — census, findings, per-record lists, mismatch lists,
+a discarded run's rows — opens with a line saying the data is derived from
+non-anonymised records. N1 keeps data on the host; an export is the one artefact
+meant to travel, and it should say what it is once it is somewhere this app
+cannot see it.
 
 ---
 

@@ -26,7 +26,12 @@ from ra2.persistence.session import create_session_factory
 from ra2.services.census_materialiser import RelationalCensusMaterialiser
 from ra2.services.census_service import CensusService
 from ra2.services.errors import NotFoundError
-from ra2.services.export_service import CSV_BOM, CSV_DELIMITER, ExportService
+from ra2.services.export_service import (
+    CLASSIFICATION_COMMENT,
+    CSV_BOM,
+    CSV_DELIMITER,
+    ExportService,
+)
 from ra2.services.readmodels import DeliveryView
 
 pytestmark = pytest.mark.backend
@@ -98,8 +103,9 @@ async def test_census_csv_is_utf8_with_bom_and_semicolon_delimiter(
     assert csv_bytes.startswith(CSV_BOM)
     body = csv_bytes[len(CSV_BOM) :].decode("utf-8")
     lines = body.split("\r\n")
-    assert lines[0].startswith("# corpus corpus-1")
-    header = lines[1]
+    assert lines[0] == CLASSIFICATION_COMMENT
+    assert lines[1].startswith("# corpus corpus-1")
+    header = lines[2]
     assert header.split(CSV_DELIMITER)[0] == "table_name"
     assert CSV_DELIMITER in header
 
@@ -114,7 +120,7 @@ async def test_census_csv_comment_line_names_corpus_id_and_version(
     csv_bytes = await export_service.census_csv(CorpusId("corpus-2"))
 
     body = csv_bytes[len(CSV_BOM) :].decode("utf-8")
-    comment_line = body.split("\r\n")[0]
+    comment_line = body.split("\r\n")[1]
     assert comment_line == "# corpus corpus-2 v3"
 
 
@@ -128,11 +134,15 @@ async def test_census_csv_exact_bytes_unfiltered(
     csv_bytes = await export_service.census_csv(CorpusId("corpus-3"))
 
     expected = CSV_BOM + (
+        b"# SENSITIVE \xe2\x80\x94 derived from non-anonymised police accident records.\r\n"
         b"# corpus corpus-3 v1\r\n"
         b"table_name;column_name;type_hint;record_count;populated_count;"
-        b"populated_rate;distinct_count;top_value_share;long_tail;top_values\r\n"
-        b"unfall;High;text;10;9;0.9;1;1.0;False;x:9\r\n"
-        b"unfall;Low;text;10;1;0.1;1;1.0;False;y:1\r\n"
+        b"populated_rate;distinct_count;top_value_share;long_tail;top_values;"
+        b"top_values_withheld\r\n"
+        # `High` and `Low` are `text`, so their samples are withheld and the
+        # flag says so — the two values were `x` and `y` (risk B1).
+        b"unfall;High;text;10;9;0.9;1;1.0;False;;True\r\n"
+        b"unfall;Low;text;10;1;0.1;1;1.0;False;;True\r\n"
     )
     assert csv_bytes == expected
 
@@ -149,9 +159,11 @@ async def test_census_csv_filtered_and_sorted_differs_from_unfiltered_by_exactly
 
     def _data_rows(csv_bytes: bytes) -> list[str]:
         body = csv_bytes[len(CSV_BOM) :].decode("utf-8")
-        # drop the comment line and the header row, and the trailing blank
-        # line the final "\r\n" produces on split.
-        return [line for line in body.split("\r\n")[2:] if line]
+        # drop the classification line, the corpus comment and the header
+        # row, and the trailing blank line the final "\r\n" produces on
+        # split. The classification line is risk B1's, written by
+        # `_write_csv` for every export there is.
+        return [line for line in body.split("\r\n")[3:] if line]
 
     unfiltered_rows = _data_rows(unfiltered)
     filtered_rows = _data_rows(filtered)
@@ -188,7 +200,7 @@ async def test_census_csv_respects_table_name_filter(
     csv_bytes = await export_service.census_csv(CorpusId("corpus-5"), table_name="objekt")
 
     body = csv_bytes[len(CSV_BOM) :].decode("utf-8")
-    data_lines = [line for line in body.split("\r\n")[2:] if line]
+    data_lines = [line for line in body.split("\r\n")[3:] if line]
     assert len(data_lines) == 1
     assert data_lines[0].startswith("objekt;B;")
 
@@ -214,7 +226,7 @@ async def test_census_csv_gathers_every_page_when_the_corpus_has_many_columns(
     csv_bytes = await export_service.census_csv(CorpusId("corpus-6"))
 
     body = csv_bytes[len(CSV_BOM) :].decode("utf-8")
-    data_lines = [line for line in body.split("\r\n")[2:] if line]
+    data_lines = [line for line in body.split("\r\n")[3:] if line]
     assert len(data_lines) == 60
 
 
@@ -242,7 +254,7 @@ async def test_census_csv_walks_multiple_pages_when_the_page_size_is_small(
     csv_bytes = await export_service.census_csv(CorpusId("corpus-7"))
 
     body = csv_bytes[len(CSV_BOM) :].decode("utf-8")
-    data_lines = [line for line in body.split("\r\n")[2:] if line]
+    data_lines = [line for line in body.split("\r\n")[3:] if line]
     assert len(data_lines) == 5
     assert {line.split(";")[1] for line in data_lines} == set(columns)
 
@@ -269,10 +281,11 @@ async def test_findings_csv_is_utf8_with_bom_and_semicolon_delimiter(
     assert csv_bytes.startswith(CSV_BOM)
     body = csv_bytes[len(CSV_BOM) :].decode("utf-8")
     lines = body.split("\r\n")
-    assert lines[0] == "# delivery delivery-1 file file-1"
-    assert lines[1] == "code;severity;key;line_no;detail"
+    assert lines[0] == CLASSIFICATION_COMMENT
+    assert lines[1] == "# delivery delivery-1 file file-1"
+    assert lines[2] == "code;severity;key;line_no;detail"
     assert (
-        lines[2]
+        lines[3]
         == "ROW_REJECTED_FIELD_COUNT;REPORTED;abc123;42;actual_fields=68|expected_fields=67"
     )
 
@@ -293,6 +306,7 @@ async def test_findings_csv_exact_bytes_one_row_per_finding(
     csv_bytes = await export_service.findings_csv(DeliveryId("delivery-1"), FileId("file-1"))
 
     expected = CSV_BOM + (
+        b"# SENSITIVE \xe2\x80\x94 derived from non-anonymised police accident records.\r\n"
         b"# delivery delivery-1 file file-1\r\n"
         b"code;severity;key;line_no;detail\r\n"
         b"ROW_RECOVERED;REPORTED;k1;3;continuation_lines=2\r\n"
@@ -326,7 +340,7 @@ async def test_findings_csv_never_writes_a_preformatted_sentence(
     csv_bytes = await export_service.findings_csv(DeliveryId("delivery-1"), FileId("file-1"))
 
     body = csv_bytes[len(CSV_BOM) :].decode("utf-8")
-    data_row = body.split("\r\n")[2]
+    data_row = body.split("\r\n")[3]
     assert "canary_count=0" in data_row
     assert "languages=de,fr,it" in data_row
     assert "zero" not in data_row.lower().replace("cp1252_canary_zero", "")

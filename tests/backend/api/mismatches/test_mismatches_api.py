@@ -18,7 +18,7 @@ import pytest
 from httpx import AsyncClient
 from tests.fixtures.scored_corpus import WEATHER, ScoredCorpus
 
-from ra2.services.export_service import CSV_BOM
+from ra2.services.export_service import CLASSIFICATION_COMMENT, CSV_BOM
 
 pytestmark = pytest.mark.backend
 
@@ -371,12 +371,13 @@ async def test_the_csv_carries_the_review_and_honours_the_filter(
     )
     lines = response.content.decode("utf-8-sig").splitlines()
 
-    assert lines[0].startswith("# evaluation ")
-    assert "tag hallucination" in lines[0]
-    assert "1 mismatches, 1 reviewed" in lines[0]
-    assert lines[1].startswith("mismatch_id;record_id;anonymised;feature_key")
-    assert len(lines) == 3, "comment, header, and the one filtered row"
-    assert "invented" in lines[2]
+    assert lines[0] == CLASSIFICATION_COMMENT
+    assert lines[1].startswith("# evaluation ")
+    assert "tag hallucination" in lines[1]
+    assert "1 mismatches, 1 reviewed" in lines[1]
+    assert lines[2].startswith("mismatch_id;record_id;anonymised;feature_key")
+    assert len(lines) == 4, "classification, comment, header, and the one filtered row"
+    assert "invented" in lines[3]
 
 
 async def test_the_csv_of_an_unknown_evaluation_is_404(api_client: AsyncClient) -> None:
@@ -393,4 +394,6 @@ async def test_the_csv_is_unpaged(api_client: AsyncClient, scored: ScoredCorpus)
     lines = response.content.decode("utf-8-sig").splitlines()
 
     assert len(listed.json()["rows"]["items"]) == 1
-    assert len(lines) == listed.json()["rows"]["total"] + 2
+    # classification line, evaluation comment, header row (risk B1 added the
+    # first of the three).
+    assert len(lines) == listed.json()["rows"]["total"] + 3

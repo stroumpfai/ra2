@@ -300,13 +300,59 @@ a seeded row.
 - **Populated** = non-empty string (§6). Empty means *no value provided*, never
   "not applicable" (§8.6) — the Census view says so in the Reminder card.
 - **Top values**: 20 stored, top 3 shown in the legend, top 4 shown as stacked-bar
-  segments plus a remainder.
+  segments plus a remainder — **for a coded column only** (`SD28`).
 - **Long tail** is a stored boolean: `distinct > 20 and top_value_share < 0.01`.
   The design's "long tail · 1 461 distinct, no value over 1 %" is that rule rendered.
 - **Profile buckets**: 100–80 / 80–60 / 60–40 / 40–20 / 20–0 / empty, over all tables.
 - CSV export writes the **currently filtered, currently sorted** table, UTF-8 with
-  BOM (Excel on Windows, N3), `;` delimiter, and a header comment line naming the
-  corpus id and version.
+  BOM (Excel on Windows, N3), `;` delimiter, a classification line, and a header
+  comment line naming the corpus id and version.
+
+**Whose values may be shown** (**SD28**). The census stores the top 20 raw
+values of every column, and the census CSV is the week-one deliverable — the
+artefact most *meant* to be shown to other people. Over the working corpus that
+put verbatim LV95 coordinates at metre precision and verbatim record UIDs into
+that file, with 16 to 20 of each column's 20 stored values occurring exactly
+once. A value that occurs once is one accident.
+
+So `domain/census.py` states the rule once — `sample_is_shareable(type_hint)`,
+true only for `ENUM` — and two callers read it: `census_service` builds the read
+model the Census view and the API render, and `export_service` writes the CSV. A
+rule stated twice is a rule that drifts, and the half that drifts is the half
+nobody looks at.
+
+Three properties make it usable rather than merely safe:
+
+- **Only the raw values go.** Populated count and rate, distinct count,
+  top-value share, long-tail flag and type hint all survive, and those are what
+  feature selection actually reads (§6). A rule that took the aggregates too
+  would have made the deliverable useless instead of safe.
+- **Withheld is not the same as empty**, and the read model, the wire and the
+  CSV all carry `top_values_withheld` to say which. An all-empty column is a
+  real delivered state (h08) that says "do not pick this as a feature";
+  a withheld sample says nothing about the column at all. Collapsing them would
+  hand a reader the opposite conclusion.
+- **Read time, never write time.** The values stay in `census_value`. A corpus
+  is immutable, so a write-time filter would leave every corpus frozen before
+  the rule existed still carrying them into every export; suppressing on the way
+  out fixes the corpora that already exist and needs no migration. It is the
+  shape `SD19` settled for scoring cells, for the same reason.
+
+The known cost is stated rather than discovered: a code appearing in a single
+record is still exported, because the line is drawn at the **header** — the
+delivery's own `Ausw`/`` UAP`` marking — rather than at a frequency. A rare code
+is a far weaker identifier than a coordinate, and a header rule is one a reader
+can check against the data dictionary. The mirror of it is that Astrana's
+`Kanton Kürzel`, a two-letter canton code by any reading, loses its sample
+because its format does not use the suffix.
+
+**Every export carries a classification line**, written by `ExportService.
+_write_csv` — the one place all six exports pass through, so it is guaranteed
+rather than remembered. N1 governs the application; nothing governed its
+outputs, and an export is the one artefact of this project that is meant to
+travel. It states a fact about provenance rather than a classification level,
+because this project has agreed no classification scheme; when the governance
+page exists, a formal marking belongs in that one constant.
 
 ---
 
@@ -610,6 +656,7 @@ Each is additive and cheap to reverse; none should change silently.
 | SD25 | Review's staleness anchor is the run's **`finished_at`**; **no `scored_at` column is added**, and a re-score therefore goes undated (§17.7) | A re-score can delete a tagged row under an analyst, so the view owes a visible reason for a list that changed. `run.finished_at` is the closest honest thing that exists: scoring chains off the run's terminal `done` (`SD17`), so for a run scored once it *is* the moment it was scored. Recording a re-score would mean a `scored_at` column, which §16.1 F5 declined so that "how far did it get" has exactly one answer and which `tests/test_p4_contract.py` asserts the absence of by name. The gap is named rather than papered over, and the next step if it bites is a **count of tags lost, not a lock** |
 | SD26 | The Mismatches list is scoped to **one run at a time**, with no "all runs" option (§17.6) | `mvp-spec.md` §12 names `run` as part of the row, and a list mixing two models' mismatches for the same record and feature **is** cross-model agreement — one of the three things §16.9 defers by name. Refusing it is not a limitation of the view; it is the deferral, caught where it would otherwise have entered as a convenience. `ResultsService.presence_records` already resolves one run the same way |
 | SD27 | The adapter builds its own HTTP transport, with `trust_env=False` and `follow_redirects=False` (§15.5) | The loopback guard reasons about the URL; the transport decides which socket that URL is dialled over, and the `openai` SDK builds its own with `trust_env=True`. On a managed workstation with a machine-wide `HTTP_PROXY` and no `NO_PROXY` for localhost, a request for `http://127.0.0.1:11434/v1` therefore left for the proxy host with the guard satisfied — reproduced on the pinned versions. A redirect is the same hole read the other way: a `307` preserves the body, so the endpoint could hand the narrative to an off-host URL the guard never saw. Both are refused for the same reason the guard has no opt-out |
+| SD28 | **Census value samples are exported and rendered only for `ENUM` columns**, and every export carries a classification line (§7) | The census stores the top 20 raw values of *every* column and the census CSV is the week-one deliverable, the artefact most meant to be shared. Measured over the working corpus, the four `Koordinate` columns and the three UID columns held 20 stored values each with 16 to 20 occurring exactly once — a coordinate that occurs once is one accident, at metre precision. The rule is one line in `domain/census.py` read by both callers; only the raw values are withheld, every aggregate survives, and `top_values_withheld` keeps *withheld* distinguishable from *empty*, which are opposite conclusions for feature selection. Applied at read time (the `SD19` shape), so corpora frozen before the rule are covered without a migration |
 
 **Note on the design's fixture column names.** `UnfallTypAusw`, `WitterungAusw`,
 `LichtverhaeltnisAusw` and `UnfallDatumFeld` do not exist in the delivery; the real

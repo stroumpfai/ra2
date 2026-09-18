@@ -20,6 +20,7 @@ __all__ = [
     "BUCKET_ORDER",
     "LONG_TAIL_MAX_TOP_SHARE",
     "LONG_TAIL_MIN_DISTINCT",
+    "SHAREABLE_TYPE_HINTS",
     "TOP_VALUES_STORED",
     "CensusBucket",
     "CensusBucketLabel",
@@ -28,6 +29,7 @@ __all__ = [
     "ValueCount",
     "compute_buckets",
     "compute_census",
+    "sample_is_shareable",
 ]
 
 #: mvp-spec.md §6: "top 20 values with frequencies". 20 are stored; the Census
@@ -122,6 +124,57 @@ class CensusBucket:
 
     label: CensusBucketLabel
     column_count: int
+
+
+# ===========================================================================
+# Whose values may be shown — the census sample rule (risk B1)
+# ===========================================================================
+#
+# This lives here, beside the type hint it reads, because two callers need the
+# same answer: `census_service` builds the read model the Census view and the
+# API render, and `export_service` writes the CSV. A rule stated twice is a
+# rule that drifts, and the half that drifts is the half nobody looks at.
+
+#: The only type hints whose **values** may leave the corpus. Written as a set
+#: rather than as a comparison so the whole of what is permitted is one
+#: readable line, the same shape `LOOPBACK_HOSTS` has.
+#:
+#: `ENUM` is the delivery's own marking that a column holds codes rather than
+#: data: the suffix rule (`Ausw` in RADIS, `` UAP`` in Astrana) decides it
+#: before any value is inspected, so the judgement comes from the header, not
+#: from a guess about the values.
+SHAREABLE_TYPE_HINTS: Final = frozenset({TypeHint.ENUM})
+
+
+def sample_is_shareable(type_hint: TypeHint) -> bool:
+    """May this column's top values be rendered and exported?
+
+    The census stores the top 20 raw values of **every** column, and the census
+    CSV is the project's week-one deliverable — the artefact most meant to be
+    shown to other people. In the working corpus that combination put verbatim
+    LV95 coordinates at metre precision and verbatim record UIDs into a file
+    whose entire purpose is to be shared, with 16 to 20 of each column's 20
+    stored values occurring exactly once. A value that occurs once is one
+    accident (risk B1).
+
+    So a sample travels only for a column the delivery itself marks as coded.
+    Everything else — coordinates, dates, UIDs, free text, counts — keeps its
+    populated rate, distinct count, top-value share, long-tail flag and type
+    hint, which is what feature selection actually reads. **No aggregate is
+    withheld; only the raw values are**, and the caller reports that they were
+    rather than rendering an empty cell that reads as "this column is empty".
+
+    **The known cost, stated rather than discovered later.** A code that
+    appears in a single record is still exported, because it is an `ENUM`
+    value — a rare code is a much weaker identifier than a coordinate, and
+    drawing the line at the header rather than at a frequency keeps the rule
+    one sentence that a reader can check against the data dictionary. A column
+    a format does not mark with the suffix — Astrana's `Kanton Kürzel`, which
+    is a two-letter canton code by any reading — loses its sample for the same
+    reason. Both follow from deciding by header rather than by measurement,
+    which is the trade this rule makes on purpose.
+    """
+    return type_hint in SHAREABLE_TYPE_HINTS
 
 
 def _is_long_tail(distinct_count: int, top_value_share: float) -> bool:

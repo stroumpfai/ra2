@@ -64,6 +64,7 @@ from ra2.ui.views.census_view import (
     PAGE_SIZE,
     REMINDER_BODY,
     TOOLBAR_CAPTION,
+    WITHHELD_LEGEND,
     _census_columns,
     _row_class,
     _row_style,
@@ -89,9 +90,18 @@ DELIVERY: dict[str, str] = {
 #: The harness route for the tinting assertion. Underscored so it can never
 #: collide with a nav route, exactly as `tests/e2e/conftest.py`'s J4 page is.
 IN_CONFIG_PATH = "/_census/in-config"
+#: Risk B1 — one row per sample state: shown, withheld, genuinely empty.
+SAMPLE_PATH = "/_census/sample-rule"
+#: A column flagged withheld that still carries its values — a state the
+#: service never produces, used to prove the view does not rely on it.
+CONTRADICTORY_PATH = "/_census/withheld-with-values"
+SECRET_VALUE = "2601234.5"
 
 TINTED_COLUMN = "WitterungAusw"
 PLAIN_COLUMN = "UnfallTypAusw"
+CODED_COLUMN = "Witter0Ausw"
+WITHHELD_COLUMN = "Koordinate X"
+EMPTY_COLUMN = "StrasseName"
 
 #: The harness page renders the real `ColumnSpec`s, and the action column's
 #: link carries a corpus id — this one is never resolved, because the harness
@@ -130,6 +140,7 @@ async def seeded(
     with nicegui_reset_globals():
         os.environ["NICEGUI_USER_SIMULATION"] = "true"
         _register_in_config_harness()
+        _register_sample_rule_harness()
         try:
             app = app_factory(mount_ui=True)
             services: Services = app.state.services
@@ -205,22 +216,87 @@ def _register_in_config_harness() -> None:
         )
 
 
-def _column_view(column_name: str, *, in_config: bool) -> CensusColumnView:
+def _column_view(
+    column_name: str,
+    *,
+    in_config: bool,
+    type_hint: TypeHint = TypeHint.ENUM,
+    top_values: tuple[ValueCount, ...] = (ValueCount(value_raw="1", count=2752, share=0.68),),
+    top_values_withheld: bool = False,
+) -> CensusColumnView:
     """README §2b's own fixture row, as the read model the service returns."""
     return CensusColumnView(
         census_column_id=CensusColumnId(f"cc-{column_name}"),
         table_name="unfall",
         column_name=column_name,
-        type_hint=TypeHint.ENUM,
+        type_hint=type_hint,
         record_count=4978,
         populated_count=4047,
         populated_rate=0.813,
         distinct_count=8,
         top_value_share=0.68,
         long_tail=False,
-        top_values=(ValueCount(value_raw="1", count=2752, share=0.68),),
+        top_values=top_values,
         in_config=in_config,
+        top_values_withheld=top_values_withheld,
     )
+
+
+def _register_sample_rule_harness() -> None:
+    """One `DataTable` over the three states a sample can be in (risk B1).
+
+    Built here rather than seeded, for the same reason the in-config harness
+    is: the hazard fixtures contain no column that is both populated and
+    uncoded enough to produce all three rows side by side, and the thing under
+    test is the renderer's branch, not the pipeline that feeds it.
+    """
+
+    @ui.page(SAMPLE_PATH)
+    def _page() -> None:
+        data_table(
+            columns=_census_columns(HARNESS_CORPUS_ID),
+            rows=(
+                _column_view(CODED_COLUMN, in_config=False),
+                _column_view(
+                    WITHHELD_COLUMN,
+                    in_config=False,
+                    type_hint=TypeHint.DECIMAL,
+                    top_values=(),
+                    top_values_withheld=True,
+                ),
+                _column_view(
+                    EMPTY_COLUMN,
+                    in_config=False,
+                    type_hint=TypeHint.TEXT,
+                    top_values=(),
+                ),
+            ),
+            state=TableState("populated_rate", SortDir.DESC, 1, PAGE_SIZE),
+            row_class=_row_class,
+            row_style=_row_style,
+            wide=True,
+            testid="table-census",
+        )
+
+    @ui.page(CONTRADICTORY_PATH)
+    def _contradictory() -> None:
+        data_table(
+            columns=_census_columns(HARNESS_CORPUS_ID),
+            rows=(
+                _column_view(
+                    WITHHELD_COLUMN,
+                    in_config=False,
+                    type_hint=TypeHint.DECIMAL,
+                    top_values=(ValueCount(value_raw=SECRET_VALUE, count=1, share=0.25),),
+                    top_values_withheld=True,
+                ),
+            ),
+            state=TableState("populated_rate", SortDir.DESC, 1, PAGE_SIZE),
+            row_class=_row_class,
+            row_style=_row_style,
+            wide=True,
+            testid="table-census",
+        )
 
 
 async def _until_analysed(services: Services, delivery_id: str) -> None:
@@ -620,3 +696,64 @@ async def test_a_view_with_no_corpus_says_so(empty: User) -> None:
     # No corpus id, so no chip has anything to name and no census call was
     # made at all — the toolbar is the caption and the disabled button.
     assert _find(empty, "chip") == []
+
+
+# --- risk B1: the screen holds to the rule the export holds to ---------------
+
+
+async def test_a_withheld_sample_says_so_and_shows_no_values(seeded: Seeded) -> None:
+    """The Census view is the easier of the two places to copy a value out of
+    by hand, so it applies the same rule the CSV does — one statement of it in
+    `domain.census`, two callers.
+
+    The bar renders its empty track and the legend names the reason. It must
+    not read as "no values": an analyst who takes that as an empty column draws
+    the opposite conclusion about the column's usefulness as a feature.
+    """
+    user = seeded.user
+    await user.open(SAMPLE_PATH)
+
+    legends = [_own_text(e) for e in _table(user).descendants() if "legend" in e.classes]
+
+    assert WITHHELD_LEGEND in legends
+    assert "withheld" in WITHHELD_LEGEND
+    assert "no values" not in WITHHELD_LEGEND
+
+
+async def test_a_coded_column_still_renders_its_distribution(seeded: Seeded) -> None:
+    """The rule withholds; it does not blank the view. A coded column keeps its
+    segments, which is what the card is for."""
+    user = seeded.user
+    await user.open(SAMPLE_PATH)
+
+    bars = [e for e in _table(user).descendants() if "distbar" in e.classes]
+    segments = [[i for i in bar.descendants() if i.tag == "i"] for bar in bars]
+
+    assert len(bars) == 3, "one bar per row: coded, withheld, empty"
+    assert any(row for row in segments if row), "the coded column keeps its segments"
+    assert sum(1 for row in segments if not row) == 2, "withheld and empty draw no segments"
+
+
+async def test_the_view_withholds_on_the_flag_even_if_it_is_handed_values(
+    seeded: Seeded,
+) -> None:
+    """Defence in depth at the render site.
+
+    The read model empties `top_values` for a withheld column, so a harness row
+    that carries none proves nothing about the view — it would pass with the
+    branch deleted. This hands the renderer the contradictory state instead: a
+    column flagged withheld that still carries its values. Nothing of them may
+    reach the page, because the view branches on the flag before it looks at
+    the tuple, and a second reader of this read model should not have to
+    re-derive that.
+    """
+    user = seeded.user
+    await user.open(CONTRADICTORY_PATH)
+
+    rendered = " ".join(
+        text for e in _table(user).descendants() if (text := _own_text(e)) is not None
+    )
+
+    assert SECRET_VALUE not in rendered
+    assert WITHHELD_COLUMN in rendered, "the column itself is still listed"
+    assert WITHHELD_LEGEND in rendered

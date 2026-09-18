@@ -163,6 +163,11 @@ COLUMN_PARAM: Final = "column"
 NO_CORPUS_MESSAGE: Final = "No corpus yet — create one on Import."
 NO_COLUMNS_MESSAGE: Final = "No columns match this filter."
 NO_VALUES_LEGEND: Final = "no values"
+#: Risk B1. The wording says *withheld*, never "none" — an analyst who
+#: reads this as an empty column draws the opposite conclusion about the
+#: column's usefulness as a feature. The aggregates beside it are all still
+#: there, which is what the second half of the sentence is for.
+WITHHELD_LEGEND: Final = "values withheld · aggregates only"
 
 #: The distribution bar's width, from `theme.py`'s token — the legend under it
 #: is clipped to the same box (README §2b: "max-width:230px").
@@ -765,6 +770,16 @@ def _render_distribution(column: CensusColumnView) -> None:
                 legend=f"long tail · {format_count(column.distinct_count)} distinct, "
                 "no value over 1 %"
             )
+            return
+        if column.top_values_withheld:
+            # The same empty track a 100 % remainder draws, and deliberately so:
+            # nothing is claimed about the distribution, because nothing about
+            # it may be shown. The screen holds to the rule the export holds to
+            # — it is the easier of the two places to copy a value out of by
+            # hand (risk B1). Branching on the flag rather than on an empty
+            # tuple keeps this true of any caller of the read model, not only
+            # the one that empties it.
+            distribution_bar(segments=(), legend=WITHHELD_LEGEND)
             return
         top = column.top_values
         distribution_bar(

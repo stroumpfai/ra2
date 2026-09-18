@@ -72,22 +72,22 @@ async def test_list_columns_returns_a_census_page(
     assert unfall_uid["long_tail"] is False
     assert unfall_uid["type_hint"] == "text"
     assert unfall_uid["in_config"] is False
-    assert [(v["value_raw"], v["count"]) for v in unfall_uid["top_values"]] == [
-        ("u1", 1),
-        ("u2", 1),
-        ("u3", 1),
-        ("u4", 1),
-        ("u5", 1),
-    ]
+    # Five values, each occurring once. The sample does not cross the wire and
+    # the response says it was withheld rather than absent (risk B1).
+    assert unfall_uid["top_values"] == []
+    assert unfall_uid["top_values_withheld"] is True
 
     wetter = by_name["WetterAusw"]
     assert wetter["type_hint"] == "enum"
     assert wetter["populated_count"] == 4
     assert wetter["top_value_share"] == pytest.approx(0.75)
+    assert [(v["value_raw"], v["count"]) for v in wetter["top_values"]] == [("01", 3), ("02", 1)]
+    assert wetter["top_values_withheld"] is False
 
     strasse = by_name["StrasseName"]
     assert strasse["populated_count"] == 0
     assert strasse["top_values"] == []
+    assert strasse["top_values_withheld"] is False
 
 
 async def test_list_columns_filters_by_table_name(

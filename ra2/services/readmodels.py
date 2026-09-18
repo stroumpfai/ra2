@@ -231,7 +231,14 @@ class CensusColumnView:
     top_value_share: float
     long_tail: bool
     #: Top 20 stored; top 4 rendered as bar segments, top 3 in the legend.
+    #: **Empty for a column whose values may not be shown** (risk B1,
+    #: `domain.census.sample_is_shareable`) — read with `top_values_withheld`,
+    #: never on its own.
     top_values: tuple[ValueCount, ...] = ()
+    #: True when this column *has* stored values and the sample rule withheld
+    #: them. The distinction matters: an empty `top_values` otherwise reads as
+    #: "this column is empty in every row", which is a real and different state
+    #: (h08) and the opposite conclusion for feature selection.
     #: Phase 1 has no feature config, so this was always `False` (the "use as
     #: feature" action rendered disabled, plan-phase-1.md §1). Phase 2 (M9)
     #: turns this real: `True` once some feature's `source_column` names this
@@ -239,6 +246,7 @@ class CensusColumnView:
     #: computed from `feature.source_column`, never stored, since a feature
     #: carries no FK back to a census column.
     in_config: bool = False
+    top_values_withheld: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -28,11 +28,22 @@ from ra2.services.readmodels import (
     SortDir,
 )
 
-__all__ = ["CSV_BOM", "CSV_DELIMITER", "ExportService"]
+__all__ = ["CLASSIFICATION_COMMENT", "CSV_BOM", "CSV_DELIMITER", "ExportService"]
 
 #: N3 — Excel on Windows needs the BOM to read UTF-8 at all.
 CSV_BOM: Final = b"\xef\xbb\xbf"
 CSV_DELIMITER: Final = ";"
+
+#: The first line of every file this service writes (risk B1). An export is the
+#: one artefact of this project that is *meant* to travel, and N1 governs the
+#: application, not its outputs — so the file has to say what it is once it is
+#: somewhere the application cannot see.
+#:
+#: It states a fact about the data's provenance rather than a classification
+#: level, because this project has agreed no classification scheme and a label
+#: invented here would claim an authority it does not have. When the governance
+#: page exists (risk F1), a formal marking belongs in this constant.
+CLASSIFICATION_COMMENT: Final = "# SENSITIVE — derived from non-anonymised police accident records."
 
 #: Large enough that a real corpus's filtered column set fits on one page;
 #: exports have no paging (sw-design.md §7), so this only bounds how many
@@ -50,6 +61,11 @@ _CENSUS_CSV_HEADER: Final = (
     "top_value_share",
     "long_tail",
     "top_values",
+    #: Risk B1: empty `top_values` means "this column is empty in every row"
+    #: for a column that has no values, and "you may not have these" for one
+    #: whose sample the rule withheld. Those are opposite conclusions for
+    #: feature selection, so the file says which it is.
+    "top_values_withheld",
 )
 
 _FINDINGS_CSV_HEADER: Final = ("code", "severity", "key", "line_no", "detail")
@@ -162,6 +178,7 @@ class ExportService:
                 str(item.top_value_share),
                 str(item.long_tail),
                 "|".join(f"{value.value_raw}:{value.count}" for value in item.top_values),
+                str(item.top_values_withheld),
             )
             for item in items
         ]
@@ -416,10 +433,20 @@ class ExportService:
         header: Sequence[str],
         rows: Sequence[Sequence[str]],
     ) -> bytes:
-        """UTF-8 with BOM, `;`-delimited, comment line before the header row
+        """UTF-8 with BOM, `;`-delimited, comment lines before the header row
         (N3, sw-design.md §7). `\\r\\n` throughout so the file is one
-        consistent line ending, the way Excel writes its own CSVs."""
+        consistent line ending, the way Excel writes its own CSVs.
+
+        **Every export carries `CLASSIFICATION_COMMENT` first** — the census
+        columns, the findings, the per-record list, the mismatches with their
+        evidence spans, and a discarded run's two files. This is the one place
+        all six are written, so it is the one place the line can be guaranteed
+        rather than remembered (risk B1). It goes **above** the corpus comment
+        because the first line of a file is the one a reader sees before
+        deciding what to do with it.
+        """
         buffer = io.StringIO()
+        buffer.write(CLASSIFICATION_COMMENT + "\r\n")
         buffer.write(comment + "\r\n")
         writer = csv.writer(buffer, delimiter=CSV_DELIMITER, lineterminator="\r\n")
         writer.writerow(header)
