@@ -30,6 +30,7 @@ __all__ = [
     "DISCARD_IRREVERSIBLE",
     "DISCARD_KEEPS",
     "EXPORT_LEAVES_RA2",
+    "EXPORT_PER_RUN",
     "EXPORT_PROMPT",
     "discard_dialog",
     "loss_line",
@@ -65,6 +66,14 @@ EXPORT_LEAVES_RA2 = (
     "The file carries verbatim narrative and leaves RA2's control — "
     "nothing the app deletes can reach it again."
 )
+#: What Export produces when the target holds **more than one run** — the
+#: evaluation case (`SD35`). `lifecycle_service.run_export` is per run and
+#: there is no evaluation-wide export; merging several runs' rows into one
+#: file would need a `run_id` column and a decision about how two tables
+#: combine, which is a service's judgement and not this layer's (Do-NOT #7).
+#: So the honest answer is N pairs of files, and the dialog says so before the
+#: analyst presses rather than after N downloads have started.
+EXPORT_PER_RUN = "One pair of files per run — its scores and its mismatches, named by run id."
 
 
 def loss_line(preview: DiscardPreviewView) -> str:
@@ -171,6 +180,12 @@ def discard_dialog(
             ui.label(EXPORT_LEAVES_RA2).classes("ink2").props(
                 'data-testid="discard-export-warning"'
             ).mark("discard-export-warning").style("font-size:12px;")
+            if preview.runs > 1:
+                # Read off the view, like everything else here: `runs` is a
+                # count the service computed, not a judgement made in `ui/`.
+                ui.label(EXPORT_PER_RUN).classes("ink2").props(
+                    'data-testid="discard-export-per-run"'
+                ).mark("discard-export-per-run").style("font-size:12px;")
 
         ui.label(DISCARD_KEEPS).classes("ink2").props('data-testid="discard-keeps"').mark(
             "discard-keeps"

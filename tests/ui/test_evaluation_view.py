@@ -44,19 +44,29 @@ from nicegui.element import Element
 from nicegui.testing.general import nicegui_reset_globals
 from nicegui.testing.user import User
 from nicegui.testing.user_interaction import UserInteraction
-from sqlalchemy import delete, update
+from sqlalchemy import delete, select, update
 from tests.fixtures.fake_llm import DEFAULT_MODELS, StaticModelCatalog
 
 import ra2.ui.views.evaluation_view as evaluation_view
 from ra2.domain.extraction import EvaluationSize, RunStatus
 from ra2.domain.feature import Grain, Kind, MatchingRule, MatchingRuleKind, ValueType
-from ra2.domain.ids import CorpusId, EvaluationId, PromptTemplateId, RunId, TaskId
+from ra2.domain.ids import (
+    CorpusId,
+    EvaluationId,
+    FeatureId,
+    MismatchId,
+    PromptTemplateId,
+    RecordId,
+    RunId,
+    TaskId,
+)
 from ra2.domain.llm import EndpointStatus
 from ra2.infra.config import Settings
-from ra2.persistence.models import Corpus, Evaluation, Run
+from ra2.persistence.models import Corpus, Evaluation, Feature, Mismatch, Record, Run
 from ra2.services.container import Services
 from ra2.services.readmodels import EvaluationDraftView, FeatureSetSummary, PromptTemplateView
 from ra2.ui import theme
+from ra2.ui.components.discard_dialog import EXPORT_PER_RUN
 
 pytestmark = pytest.mark.ui
 
@@ -202,6 +212,53 @@ async def _seed_launch(
             update(Evaluation)
             .where(Evaluation.id == evaluation_id)
             .values(launched_at=FROZEN_NOW, selected_models_json=json.dumps(list(models)))
+        )
+        await session.commit()
+
+
+async def _seed_mismatch(
+    app: FastAPI,
+    *,
+    mismatch_id: str,
+    run_id: str,
+    corpus_id: CorpusId,
+    tag: str | None = None,
+) -> None:
+    """One `mismatch` row, and the `record` it needs to exist at all.
+
+    Straight through the session factory for `_seed_run`'s reason: a real
+    mismatch is the output of an extraction pass and a scoring pass, and what
+    these cases assert is what the **dialog** says about the counts a discard
+    would take. `analyst_tag` is the one column G2 is about, so it is a
+    parameter — a fixture that could not produce a tagged row would leave the
+    warn-and-allow path untested.
+    """
+    async with app.state.session_factory() as session:
+        feature_id = (await session.scalars(select(Feature.id).order_by(Feature.id))).first()
+        assert feature_id is not None, "the seeded feature set must hold a feature"
+        record_id = RecordId(f"record-{mismatch_id}")
+        session.add(
+            Record(
+                id=record_id,
+                corpus_id=corpus_id,
+                unfall_uid=f"uid-{mismatch_id}",
+                language="de",
+                language_confidence=1.0,
+                text_raw="Bei Regen von der Fahrbahn abgekommen.",
+            )
+        )
+        await session.flush()
+        session.add(
+            Mismatch(
+                id=MismatchId(mismatch_id),
+                run_id=RunId(run_id),
+                record_id=record_id,
+                feature_id=FeatureId(feature_id),
+                record_value="Regen",
+                extracted_value="Schnee",
+                analyst_tag=tag,
+                tagged_at=FROZEN_NOW if tag is not None else None,
+            )
         )
         await session.commit()
 
@@ -378,6 +435,45 @@ def _model_tick(user: User, tag: str) -> Element:
     return next(
         d for d in _model_row(user, tag).descendants() if d._props.get("data-testid") == "tick"
     )
+
+
+def _ancestor_testids(element: Element) -> list[str]:
+    """Every `data-testid` between `element` and the page root.
+
+    Placement is the decision this slice makes (`SD35`), so it is asserted as
+    containment rather than by eyeballing a screenshot: what the action is
+    *inside* is the whole claim.
+    """
+    found: list[str] = []
+    slot = element.parent_slot
+    while slot is not None:
+        parent = slot.parent
+        testid = parent._props.get("data-testid")
+        if testid:
+            found.append(str(testid))
+        slot = parent.parent_slot
+    return found
+
+
+def _record_downloads(user: User, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """The filenames `ui.download.content` was offered, in order.
+
+    **The instance method, not `nicegui.ui`.** `User.__getattribute__`
+    re-points `ui.download` at its own recorder on *every* attribute access,
+    so a patch on the module does not survive the next `user.find(...)`.
+    Patching `UserDownload.content` does, and the names are what has to be
+    asserted: `UserDownload` keeps the bytes and throws the filename away,
+    and the filename is the whole claim — one pair per run, named by run id.
+    """
+    names: list[str] = []
+    content = user.download.content
+
+    def _record(data: bytes | str, filename: str | None = None, media_type: str = "") -> None:
+        names.append(str(filename))
+        content(data, filename, media_type)
+
+    monkeypatch.setattr(user.download, "content", _record)
+    return names
 
 
 def _statuses(user: User) -> set[str]:
@@ -1135,6 +1231,201 @@ async def test_refresh_picks_up_a_model_that_appeared(
 
         assert len(_find(user, "model-row")) == len(DEFAULT_MODELS)
         assert "reachable" in _all_text(user, "endpoint-line")
+
+
+# --- discarding the evaluation (sw-design.md §18, `SD35`) ---------------------
+
+
+async def _seed_two_done_runs(seeded: Seeded) -> None:
+    """Two finished runs, the ordinary shape of a launched evaluation: one run
+    per selected model."""
+    for index, tag in enumerate((FITS_A, FITS_B), start=1):
+        await _seed_run(
+            seeded.app,
+            run_id=f"r-040{index}",
+            evaluation_id=seeded.draft.evaluation_id,
+            template_id=seeded.template.prompt_template_id,
+            model_tag=tag,
+            status=RunStatus.DONE,
+            started_at=FROZEN_NOW,
+        )
+
+
+async def _evaluation_ids(seeded: Seeded) -> set[EvaluationId]:
+    return {d.evaluation_id for d in await seeded.services.evaluation.list_evaluations()}
+
+
+async def test_the_evaluation_discard_sits_in_the_runs_card_and_not_in_the_toolbar(
+    seeded: Seeded,
+) -> None:
+    """Placement is the decision, so containment is the assertion (`SD35`).
+
+    The header of the card whose rows each carry a per-run `discard` is where
+    the scope reads off the screen: the header takes the list, a row takes its
+    own row. The toolbar is where it is **not** — `SD32` settled that the right
+    group holds exactly one secondary button in every state, and the one it
+    holds is the creation affordance an analyst presses routinely.
+    """
+    await _seed_two_done_runs(seeded)
+    await seeded.user.open("/evaluation")
+    await seeded.user.should_see(marker="evaluation-discard")
+
+    (action,) = _find(seeded.user, "evaluation-discard")
+    ancestors = _ancestor_testids(action)
+    assert "card-header" in ancestors
+    assert "evaluation-toolbar" not in ancestors
+    assert _element_text(action) == evaluation_view.DISCARD_EVALUATION_LABEL
+
+    # The toolbar still carries exactly one button, and it is not this one.
+    (toolbar,) = _find(seeded.user, "evaluation-toolbar")
+    buttons = [d for d in toolbar.descendants() if d.tag == "button"]
+    assert len(buttons) == 1
+    assert str(buttons[0]._props.get("data-testid")) == "save-draft"
+
+
+async def test_the_dialog_sums_the_evaluations_runs_and_says_export_is_per_run(
+    seeded: Seeded,
+) -> None:
+    """One preview over the whole evaluation, and the honest answer to "what
+    does Export give me when there are three runs" — N pairs, said before the
+    press rather than after N downloads have started (`SD35`)."""
+    await _seed_two_done_runs(seeded)
+    await _seed_mismatch(seeded.app, mismatch_id="m-1", run_id="r-0401", corpus_id=seeded.corpus_id)
+    await _seed_mismatch(seeded.app, mismatch_id="m-2", run_id="r-0402", corpus_id=seeded.corpus_id)
+    await seeded.user.open("/evaluation")
+    await seeded.user.should_see(marker="evaluation-discard")
+
+    seeded.user.find(marker="evaluation-discard").click()
+    await seeded.user.should_see(marker="discard-dialog")
+
+    assert _all_text(seeded.user, "discard-loss") == "2 runs · 2 mismatches"
+    await seeded.user.should_see(EXPORT_PER_RUN)
+    await seeded.user.should_see(marker="discard-export")
+    await seeded.user.should_not_see(marker="discard-blocked")
+
+
+async def test_exporting_before_discarding_writes_one_pair_of_files_per_run(
+    seeded: Seeded, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`run_export` is per run and nothing merges the runs here (Do-NOT #7).
+
+    A run that recorded neither a score nor a mismatch produces no file at
+    all, which is `loss_line`'s rule about zero counts applied to the bytes.
+    """
+    await _seed_two_done_runs(seeded)
+    await _seed_mismatch(seeded.app, mismatch_id="m-1", run_id="r-0401", corpus_id=seeded.corpus_id)
+
+    await seeded.user.open("/evaluation")
+    await seeded.user.should_see(marker="evaluation-discard")
+    names = _record_downloads(seeded.user, monkeypatch)
+    seeded.user.find(marker="evaluation-discard").click()
+    await seeded.user.should_see(marker="discard-export")
+
+    seeded.user.find(marker="discard-export").click()
+    await _until(lambda: len(names) == 2)
+    await asyncio.sleep(0.05)
+
+    # Two files, both r-0401's: r-0402 recorded nothing and so writes nothing.
+    assert names == ["r-0401.scores.csv", "r-0401.mismatches.csv"]
+    # Exporting decides nothing: the row is still there afterwards, and the
+    # server records nothing about the file having been written (§18.3).
+    assert seeded.draft.evaluation_id in await _evaluation_ids(seeded)
+
+
+async def test_discarding_an_evaluation_removes_it_and_leaves_the_view_usable(
+    seeded: Seeded,
+) -> None:
+    """The happy path: the row goes, and the screen behind it is the empty
+    state with the creation affordance — not a dead end (`SD32`)."""
+    await _seed_two_done_runs(seeded)
+    await seeded.user.open("/evaluation")
+    await seeded.user.should_see(marker="evaluation-discard")
+
+    seeded.user.find(marker="evaluation-discard").click()
+    await seeded.user.should_see(marker="discard-confirm")
+    seeded.user.find(marker="discard-confirm").click()
+
+    await _until(lambda: not _find(seeded.user, "evaluation-discard"))
+    assert await _evaluation_ids(seeded) == set()
+    assert evaluation_view.NO_SETUP_MESSAGE in _all_text(seeded.user, "pinned-inputs")
+    assert _find(seeded.user, "new-evaluation")
+
+
+async def test_an_active_run_blocks_the_evaluation_discard_and_the_dialog_says_which(
+    seeded: Seeded,
+) -> None:
+    """G1 as a **rendered state**, not a toast after a failed press (`SD23`).
+
+    This is the one place the evaluation action departs from the row action: an
+    active row hides its own `discard`, because that row *is* the obstacle and
+    there is nothing to explain. The evaluation's obstacle is somewhere else in
+    the table, so hiding the header action would remove the only route with no
+    reason given.
+
+    The active run is **`queued`**, not `running`: `RunService.list_runs`
+    relabels a `running` row this process is not executing as `interrupted`
+    (§15.4, F8), so a seeded `running` run is already `interrupted` by the time
+    the preview reads it — and an interrupted run is discardable debris, which
+    is the whole point of G1 naming only two statuses.
+    """
+    await _seed_run(
+        seeded.app,
+        run_id="r-0401",
+        evaluation_id=seeded.draft.evaluation_id,
+        template_id=seeded.template.prompt_template_id,
+        model_tag=FITS_A,
+        status=RunStatus.DONE,
+        started_at=FROZEN_NOW,
+    )
+    await _seed_run(
+        seeded.app,
+        run_id="r-0402",
+        evaluation_id=seeded.draft.evaluation_id,
+        template_id=seeded.template.prompt_template_id,
+        model_tag=FITS_B,
+        status=RunStatus.QUEUED,
+        started_at=None,
+    )
+    await seeded.user.open("/evaluation")
+    await seeded.user.should_see(marker="evaluation-discard")
+
+    # The queued row offers nothing; the header still does.
+    assert len(_find(seeded.user, "run-discard")) == 1
+
+    seeded.user.find(marker="evaluation-discard").click()
+    await seeded.user.should_see(marker="discard-blocked")
+    await seeded.user.should_see("r-0402 is queued")
+
+    (confirm,) = _find(seeded.user, "discard-confirm")
+    assert _is_disabled(confirm)
+    _one(seeded.user, confirm).click()
+    await asyncio.sleep(0.05)
+    assert seeded.draft.evaluation_id in await _evaluation_ids(seeded)
+
+
+async def test_tagged_work_is_named_and_discard_anyway_forces_it(seeded: Seeded) -> None:
+    """G2 — warn and allow (`R-D3`). The count is in the lead sentence and the
+    label carries the override, so pressing through it is a deliberate act and
+    not the same click."""
+    await _seed_two_done_runs(seeded)
+    await _seed_mismatch(
+        seeded.app,
+        mismatch_id="m-1",
+        run_id="r-0402",
+        corpus_id=seeded.corpus_id,
+        tag="hallucination",
+    )
+    await seeded.user.open("/evaluation")
+    await seeded.user.should_see(marker="evaluation-discard")
+
+    seeded.user.find(marker="evaluation-discard").click()
+    await seeded.user.should_see(marker="discard-tagged")
+    await seeded.user.should_see("1 tagged mismatch would be destroyed")
+    await seeded.user.should_see("Discard anyway")
+
+    seeded.user.find(marker="discard-confirm").click()
+    await _until(lambda: not _find(seeded.user, "evaluation-discard"))
+    assert await _evaluation_ids(seeded) == set()
 
 
 def test_every_endpoint_status_has_a_word() -> None:

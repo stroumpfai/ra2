@@ -95,6 +95,7 @@ from nicegui.element import Element
 from ra2.domain.extraction import EvaluationSize, RunStatus
 from ra2.domain.ids import (
     CorpusId,
+    EvaluationId,
     FeatureConfigId,
     PromptTemplateId,
     RecordId,
@@ -113,6 +114,7 @@ from ra2.services.readmodels import (
     Page,
     PromptTemplateView,
     ProvenanceView,
+    RunExportView,
     RunView,
     SortDir,
 )
@@ -155,6 +157,7 @@ __all__ = [
     "CONTENT_PADDING",
     "DETERMINISM_NOTE",
     "DEV_MARKER",
+    "DISCARD_EVALUATION_LABEL",
     "ENDPOINT_WORDS",
     "FEATURE_SET_NOTE",
     "LAUNCHED_MESSAGE",
@@ -286,6 +289,10 @@ SAVE_DRAFT_LABEL: Final = "Save draft"
 #: toolbar button in the two states where "Save draft" cannot honestly act:
 #: before any evaluation exists, and after one has been launched.
 NEW_EVALUATION_LABEL: Final = "New evaluation"
+#: The evaluation-level discard, in the runs card's header control slot rather
+#: than in the toolbar (`SD35`). It says "evaluation" out loud because the rows
+#: under it each carry a bare "discard" that takes one run.
+DISCARD_EVALUATION_LABEL: Final = "Discard evaluation"
 
 STEP_TITLES: Final[tuple[str, ...]] = (
     "Corpus",
@@ -394,6 +401,9 @@ UNSAVED_MESSAGE: Final = "“New evaluation” pins the prompt, the decoding set
 MODELS_UNSAVED_MESSAGE: Final = "“New evaluation” first — the ticks need a row to record into."
 DRAFT_SAVED_MESSAGE: Final = "Draft saved."
 EVALUATION_CREATED_MESSAGE: Final = "New evaluation created."
+#: After the row is gone. Named, because with no switcher the screen is about
+#: to show a *different* evaluation and the analyst is owed the reason.
+EVALUATION_DISCARDED_MESSAGE: Final = "Discarded evaluation {name}."
 #: Why the setup column is read-only, and the way out. Rendered **over the
 #: whole column**, not beside step 4: the lock is not step 4's, and three of
 #: its neighbours were equally silent about it (SD32).
@@ -1045,7 +1055,7 @@ class _EvaluationPage:
         )
         with card(extra="overflow:hidden;"):
             with card_header(title=RUNS_TITLE, count=self._runs_summary(), count_class="ink3"):
-                pass
+                self._discard_evaluation_action()
             with (
                 ui.element("div")
                 .props('data-testid="runs-well"')
@@ -1069,6 +1079,36 @@ class _EvaluationPage:
                 on_page_size=None,
                 page_sizes=(PAGE_SIZE,),
             )
+
+    def _discard_evaluation_action(self) -> None:
+        """ "Discard evaluation", in the header of the card whose rows each
+        carry the per-run "discard" (`SD35`).
+
+        **Not in the toolbar.** `SD32` settled that the right group holds
+        exactly one secondary button in every state, and the one it holds is
+        the creation affordance an analyst presses routinely; a destructive
+        verb one gap away from it is a mis-click with no undo. The scope is
+        also legible here and nowhere else: the header takes the whole list, a
+        row takes its own row.
+
+        **The action stays on screen while a run is active**, which is the one
+        place it departs from the row version. A row hides its `discard` while
+        it is `queued` or `running` because *that row is the obstacle* and
+        there is nothing to say. An evaluation's obstacle is somewhere else in
+        the table, so hiding the action would remove the only route with no
+        explanation; it opens, and the dialog renders G1's refusal naming the
+        run that caused it (§18.2, `DiscardPreviewView.active_detail`).
+        """
+        view = self._view
+        if view is None:
+            # No evaluation, no target. The toolbar's "New evaluation" is the
+            # only thing to offer in that state (`SD32`).
+            return
+        _text_button(
+            DISCARD_EVALUATION_LABEL,
+            testid="evaluation-discard",
+            on_click=_toggle(self._open_evaluation_discard, view.draft.evaluation_id),
+        )
 
     def _runs_summary(self) -> str:
         """The header's "14 · 2 dev · 1 failed".
@@ -1511,6 +1551,65 @@ class _EvaluationPage:
         ui.notify(f"Discarded run {run_id}.")
         await self.reload()
 
+    async def _open_evaluation_discard(self, evaluation_id: EvaluationId) -> None:
+        """The same read-then-ask as `_open_discard`, one scope up.
+
+        `evaluation_preview` sums the counts over the evaluation's runs and
+        carries G1 and G2 for all of them, so the dialog needs nothing this
+        view would have to work out: an evaluation with no runs previews as
+        all zeros and is discardable, and an evaluation holding an active run
+        previews as `active` with the run that is in the way named.
+        """
+        try:
+            preview = await self._services.lifecycle.evaluation_preview(evaluation_id)
+        except ServiceError as exc:
+            ui.notify(str(exc), type="negative")
+            await self.reload()
+            return
+        if self._root is None:
+            return
+        # The run ids are taken **now**, beside the counts the dialog is about
+        # to render, rather than re-read when Export is pressed: reading them
+        # twice is a second answer to the question the analyst was already
+        # shown one answer to (`_open_discard`'s note about a staler count).
+        run_ids = tuple(RunId(run.run_id) for run in self._all_runs)
+        with self._root:
+            dialog = cast(
+                "ui.dialog",
+                discard_dialog(
+                    preview=preview,
+                    on_discard=lambda force: self._discard_evaluation(evaluation_id, force=force),
+                    on_export=(
+                        None
+                        if not preview.has_exportable
+                        else lambda: self._export_evaluation(run_ids)
+                    ),
+                ),
+            )
+        dialog.value = True
+
+    async def _discard_evaluation(self, evaluation_id: EvaluationId, *, force: bool) -> None:
+        """`force` is G2 only, exactly as for a run — and the service re-checks
+        both, because the dialog's disabled button is a UI state.
+
+        Nothing here clears the remembered evaluation id: `_current_evaluation`
+        already falls back to the newest evaluation that resolves, and to the
+        empty state when none does. The runs table's **page** is reset, because
+        the next reload shows a different evaluation's runs and page 3 of the
+        discarded one names nothing in the new list.
+        """
+        name = UNKNOWN_VALUE if self._view is None else self._view.draft.name
+        try:
+            await self._services.lifecycle.discard_evaluation(evaluation_id, force=force)
+        except ServiceError as exc:
+            ui.notify(str(exc), type="negative")
+            await self.reload()
+            return
+        state = self._runs_state()
+        self._set_runs_state(TableState(state.sort_key, state.sort_dir, 1, state.page_size))
+        ui.notify(EVALUATION_DISCARDED_MESSAGE.format(name=name))
+        await self.reload()
+
     async def _export_run(self, run_id: RunId) -> None:
         """Both files, one press. They are two tables of one run, and asking
         an analyst which half of the evidence they want before a discard is a
@@ -1520,14 +1619,47 @@ class _EvaluationPage:
         except ServiceError as exc:
             ui.notify(str(exc), type="negative")
             return
+        self._download_run(view)
+
+    async def _export_evaluation(self, run_ids: Sequence[RunId]) -> None:
+        """Export before discarding an *evaluation*: the per-run pair, once per
+        run (`SD35`).
+
+        `LifecycleService.run_export` is the only export this slice has and it
+        is per run. **The merge is not made here.** One file across three runs
+        would need a `run_id` column, a rule for how two runs' score rows sit
+        beside each other, and a header comment naming an evaluation rather
+        than a run — three decisions about what the data means, which is
+        `export_service`'s business and not this layer's (Do-NOT #7). Writing
+        them in `ui/` would also make the evaluation's CSV a different shape
+        from the one the same analyst gets from a row, for no reason but which
+        button was pressed.
+
+        A run that recorded neither a score nor a mismatch is skipped rather
+        than written as two header-only files — the same rule `loss_line`
+        applies to its zero counts, and the same one `has_exportable` states.
+        """
+        for run_id in run_ids:
+            try:
+                view = await self._services.lifecycle.run_export(run_id)
+            except ServiceError as exc:
+                ui.notify(str(exc), type="negative")
+                return
+            if not view.scores and not view.mismatches:
+                continue
+            self._download_run(view)
+
+    def _download_run(self, view: RunExportView) -> None:
+        """The two files a run leaves behind, named by run id so a bundle from
+        an evaluation is still self-describing once it is on disk."""
         ui.download.content(
             self._services.export.run_scores_csv(view),
-            f"{run_id}.scores.csv",
+            f"{view.run_id}.scores.csv",
             media_type="text/csv",
         )
         ui.download.content(
             self._services.export.run_mismatches_csv(view),
-            f"{run_id}.mismatches.csv",
+            f"{view.run_id}.mismatches.csv",
             media_type="text/csv",
         )
 
