@@ -48,7 +48,7 @@ from ra2.domain.mismatch import MismatchTag
 from ra2.infra.config import Settings
 from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
 from ra2.persistence.session import create_engine
-from ra2.services.export_service import CSV_BOM, CSV_DELIMITER
+from ra2.services.export_service import CLASSIFICATION_COMMENT, CSV_BOM, CSV_DELIMITER
 from ra2.services.scoring_service import ScoringService
 from ra2.ui.views.mismatches_view import TAG_LABELS
 
@@ -201,7 +201,11 @@ def test_j14_review_a_run_from_results_to_an_exported_csv(
     # UTF-8 **with BOM** — Excel on Windows reads UTF-8 no other way (N3).
     assert raw.startswith(CSV_BOM)
     text = raw.decode("utf-8-sig")
-    comment, _, body = text.partition("\r\n")
+    # Line 1 says what the file is (B1), and this is the export that most needs
+    # it: the rows carry verbatim evidence spans.
+    classification, _, rest = text.partition("\r\n")
+    assert classification == CLASSIFICATION_COMMENT
+    comment, _, body = rest.partition("\r\n")
     assert comment.startswith("# evaluation ")
     assert "3 reviewed" in comment
 
