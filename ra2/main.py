@@ -13,6 +13,9 @@ because `ui.run_with` mounts NiceGUI at `/` and a Mount at `/` matches every
 path Starlette has not already matched.
 """
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from nicegui import ui
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -26,6 +29,7 @@ from ra2.infra.filestore import FileStore, HostPathFileStore, UploadedFileStore
 from ra2.infra.gpu import GpuProbe, probe_for
 from ra2.infra.idgen import IdFactory, Uuid7Factory
 from ra2.infra.lingua_detector import LinguaDetector
+from ra2.infra.logging import configure_logging
 from ra2.infra.ollama_client import (
     OllamaEndpointProber,
     OllamaLLMClient,
@@ -87,6 +91,11 @@ def create_app(
         of here can tell which value was used.
     """
     settings = settings or Settings()
+    # First, so anything below can report. Wiring, like everything else here:
+    # `infra/logging.py` owns what a log line may contain, and the answer is
+    # ids, counts and durations — never anything out of a delivery
+    # (`data-handling.md` §5).
+    configure_logging(settings.log_level)
     clock = clock or SystemClock()
     ids = ids or Uuid7Factory()
 
@@ -244,12 +253,35 @@ def create_app(
         lifecycle=lifecycle_service,
     )
 
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        """Restart detection, once — the **only** caller of `reclaim_orphans`.
+
+        A run left `running` by a process that died under it is relabelled
+        `interrupted` here, before anything in this process can submit work.
+        That ordering is what makes the relabel unconditional and correct: at
+        this moment this process is executing nothing, so every `running` row
+        belongs to a process that is gone. Asking on the read paths instead —
+        which is what this replaced — meant asking at moments when the answer
+        could be wrong, and the Evaluation view asks twice a tick for the
+        length of a run.
+
+        **Relabelled, never restarted** (§15 F8): Resume is a human act.
+
+        `ui.run_with` captures `app.router.lifespan_context` and calls it from
+        inside its own wrapper, so NiceGUI's startup and this one compose. It
+        is mounted below, after this.
+        """
+        await run_service.reclaim_orphans()
+        yield
+
     app = FastAPI(
         title="RA2",
         description="Road accident report analysis — import, census and evaluation.",
         version="0.1.0",
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
+        lifespan=lifespan,
     )
     app.state.settings = settings
     app.state.services = services

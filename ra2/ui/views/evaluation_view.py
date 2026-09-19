@@ -1536,16 +1536,17 @@ class _EvaluationPage:
         """Whether anything is still expected to move.
 
         Read from `_all_runs` — `RunService.list_runs` — rather than from
-        `EvaluationView.progress`, and the difference is not cosmetic.
-        `RunService` **reclaims** on its read paths: a run left `running` by a
-        process that died is relabelled `interrupted` there (`_reclaim`), and
-        it can only be done there, because `self._active` is the only record
-        of which runs *this* process is executing. `EvaluationService` builds
-        its progress cards straight from the rows and so has no way to know.
+        `EvaluationView.progress`. The two used to disagree: `RunService`
+        reclaimed on its read paths and `EvaluationService` built its progress
+        cards straight from the rows, so one screen gave two answers about the
+        same run and this property took the one that called a dead run live.
 
-        Off the unreclaimed statuses this property called a dead run live, and
-        polled a screen that could never change until a later tick reclaimed
-        it by a different route. Same rows, two answers, on one screen.
+        That split is gone. Restart detection happens once, at process start
+        (`RunService.reclaim_orphans`), so both services read rows that are
+        already reconciled and neither can reclaim under the other. The read
+        stays here because the runs table is where a run's status belongs;
+        there is no longer a correctness reason for it, which is worth saying
+        so nobody restores the old one by moving it back.
         """
         if self._view is None:
             return True

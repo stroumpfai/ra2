@@ -189,11 +189,56 @@ may contain narrative that has since been discarded from the live database.
 | **By whom** | The person who notices, or a single named owner |
 
 Note the constraint this project has deliberately accepted: **there is no
-logging and no audit trail anywhere in RA2** (`mvp-spec.md` §13). It is the
-right choice for keeping narrative text out of log files, and it means a
-suspected incident cannot be investigated from the application. The evidence
-available is the run provenance (`llm_endpoint`, `host_platform`, `gpu_name`,
-model digest) and whatever the operating system records.
+audit trail anywhere in RA2**, and a suspected incident cannot be investigated
+from the application. The evidence available is the run provenance
+(`llm_endpoint`, `host_platform`, `gpu_name`, model digest) and whatever the
+operating system records.
+
+*This paragraph previously read "no logging and no audit trail" and cited
+`mvp-spec.md` §13. That section is "UI surfaces" and says nothing about
+logging; the claim is corroborated nowhere else in the repository. What the
+sentence beside it gave as the reason — "keeping narrative text out of log
+files" — is sound, and it is a rule about **content**. It is now stated as
+one.*
+
+### 5.1 What a log line may contain
+
+RA2 writes an operational log to **stderr** and to nowhere else — no file, so
+nothing to retain, nothing for `just reset` to wipe, nothing under
+`RA2_DATA_DIR` and nothing a discard leaves behind. A closed terminal is the
+retention policy. `ra2/infra/logging.py` is the only place it is configured
+and `RA2_LOG_LEVEL` is the only control.
+
+| | |
+|---|---|
+| **May appear** | Generated ids (`run`, `record`, `evaluation`, `corpus`, `task`), counts, statuses, `EndpointStatus` codes, model tags, durations, attempt counts, and this application's own sentences about a run (`run.error`) |
+| **May never appear** | Narrative (`record.text_raw`), a resolved prompt, model output, a column value, a code label, a delivery file name, and **`unfall_uid`** or any other key that came out of a delivery |
+
+The level is **not** a switch on this. There is deliberately no level at which
+narrative reaches a log record — which is why the setting is `RA2_LOG_LEVEL`
+and not a `log_prompts` flag, and why `DEBUG` is the same rule, louder.
+
+Three reasons this is a rule with a test behind it rather than a habit:
+
+- The resolved prompt and the raw model output are both in scope at call sites
+  that log, so the pressure to add "just the narrative, for this one bug" is
+  real and will recur.
+- CLAUDE.md #13 forbids an agent opening `data/` or `RA2_DATA_DIR` at all,
+  because a transcript leaves this machine. A log that carries only ids and
+  counts is safe to paste into a bug report; one that carried content would
+  make following the rules the leak.
+- A run is minutes per record and tens of minutes end to end. Refusing it any
+  voice at all is what left a twenty-six-minute run with nothing to say for
+  itself but a row that read *"the process died while this run was
+  executing"*, and no way to tell whether that was true.
+
+`tests/backend/services/run/test_run_log_carries_no_data.py` drives a real run
+against a fixture whose narrative and keys it knows, and fails if either
+reaches a log record. It asserts lines *were* emitted first, so the guard
+cannot pass by the log having gone silent.
+
+**`OLLAMA_DEBUG` stays forbidden** (§5's table above). None of this touches it:
+the model server writes prompt content to its own log, outside all of this.
 
 ---
 

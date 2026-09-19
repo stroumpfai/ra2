@@ -619,3 +619,197 @@ unconditionally. It would also close the split item 8 had to work around, since
 the rows would be reconciled before either service reads them. It needs a
 startup hook in **frozen `ra2/main.py`**, which has none today, so it is
 proposed rather than taken here.
+
+## 14. An operational log — stderr only, ids and counts only
+
+The third thing the second reproduction showed: a run that takes twenty-six
+minutes said **nothing** for twenty-six minutes. Items 2a and 8 gave the screen
+an elapsed clock and a poll that does not hammer the endpoint, which is the
+analyst's answer. It is not the developer's: when the question is *why did that
+stop*, the row's one sentence is the whole of the evidence, and item 12's cause
+was legible only in uvicorn's own output.
+
+### The constraint that was in the way, and what it actually said
+
+`data-handling.md` §5 read, verbatim:
+
+> **there is no logging and no audit trail anywhere in RA2** (`mvp-spec.md`
+> §13). It is the right choice for keeping narrative text out of log files
+
+`mvp-spec.md` §13 is **"UI surfaces"** and says nothing about logging. The claim
+is corroborated nowhere else in the repository — `sw-design.md` mentions an
+audit trail twice, both times about `mismatch` tagging and `SD23`'s discard.
+
+So the citation does not support the sentence. But the *reason* given beside it
+does support something narrower and better, and it is the reason that was
+adopted: **it is a rule about content, not about the existence of a log.** §5
+now says so, with the citation removed rather than repaired, and §5.1 states
+the rule as a table of what may and may not appear. The audit-trail half is
+unchanged and still true.
+
+### The shape
+
+| File | Change | Contract |
+|---|---|---|
+| `ra2/infra/logging.py` | **new.** `configure_logging(level)` — a stderr handler on the `ra2` logger, idempotent, `propagate=False`. Nothing is persisted: no file, so nothing to retain, nothing for `just reset`, nothing under `RA2_DATA_DIR` | — |
+| `ra2/infra/config.py` | `+ log_level: str = "INFO"` | **amendment** |
+| `ra2/main.py` | `configure_logging(settings.log_level)` as the first line after `Settings`. Wiring, which is all this file does | **amendment — frozen** |
+| `ra2/services/run_service.py` | Lines at run start, before and after each record, on each endpoint failure, on each final status, on a stop, and on a reclaim | — |
+| `ra2/persistence/migrations/env.py` | `fileConfig(..., disable_existing_loggers=False)` | — |
+
+**stderr and not a file.** A file is a second artefact with a lifetime, and this
+repository has already spent real effort on what a discard erases (`SD29`,
+`fix-b3-deletion-path`) and on `just reset` clearing exactly what exists. A log
+file would join that list, and its whole value — *what is this run doing right
+now* — is served by the terminal the run was started from.
+
+**There is no level at which narrative is logged.** That is why the setting is
+`RA2_LOG_LEVEL` and not a `log_prompts` flag: a flag invites the one-off, and
+the one-off is the leak. `DEBUG` is the same rule, louder.
+
+**The line before each record, not only after it.** On the reporting host one
+record is over two minutes. A log that speaks only on the way out cannot tell
+"waiting on the model" from "wedged", which is the exact confusion this branch
+exists for.
+
+**`_reclaim` logs loudest.** It writes a verdict about a process that is not
+there to answer, and the two ways it is reached — a process that really died,
+and item 13's claim gaps — produce an identical row. A timestamped line is what
+lets a reader set it beside the terminal's own `Reloading` and know which.
+
+### The trap, which cost an hour
+
+`logging.config.fileConfig` **disables every logger that already exists** unless
+told otherwise, and `alembic.ini` names only alembic's own. Migrations run
+in-process in every backend and E2E fixture, so the default set `disabled=True`
+on `ra2` — no handler, no level, no error, just nothing emitted. The first
+version of the guard test failed with an empty list and no explanation.
+
+`disable_existing_loggers=False` is the fix. The guard is that each test in
+`test_run_log_carries_no_data.py` asserts lines **were** emitted before
+asserting what is not in them, so a return of that default fails there.
+
+### The guard
+
+`tests/backend/services/run/test_run_log_carries_no_data.py` drives a real run
+against the seeded fixture, captures every record on the `ra2` logger, and
+fails if the fixture's narrative (`Der Unfall … geschah bei Regen`) or any of
+its `unfall_uid` markers appears. Deliberately no allow-list of approved
+fields: a log line added next year is covered the day it is written, without
+anyone remembering to extend one.
+
+## 15. Restart detection moves to process start, and the claim sets go
+
+Item 13 closed two races in the claim discipline `_reclaim` depended on. This
+removes the discipline instead, and with it the class of defect. It supersedes
+item 13's mechanism; the two gaps it described are still the reason.
+
+```diff
+-    async def _reclaim(self, session: AsyncSession, runs: Sequence[Run]) -> None:
++    async def reclaim_orphans(self) -> int:
+-        stale = [run for run in runs if ... not in self._active | self._stopping]
++        stale = await RunRepository(session).list_running()
+```
+```diff
+-        self._active: set[RunId] = set()
+-        self._stopping: set[RunId] = set()
+```
+and the three read paths — `progress`, `get`, `list_runs` — no longer call it.
+
+**The finding underneath.** `RunRepository.list_running`'s docstring has said
+this since it was written:
+
+> a process dies mid-run: nothing updates that row's status on the way down, so
+> **on the next startup** it is still `running` in the database though nothing
+> is executing it. This is how a caller finds those and moves them to
+> `interrupted` (§15.4)
+
+It had **no caller**. A purpose-built query, with the design written on it, and
+the code did something else: it reclaimed on every read path, guarded by an
+in-memory set of what this process was executing. So the improvisation was the
+thing that needed a claim discipline, and the claim discipline was where item
+13's two races lived.
+
+**Why once, at startup, is not just tidier but a different kind of correct.**
+The unconditional relabel is sound at exactly one moment: at process start this
+process is executing nothing, so a row the database calls `running` is stale —
+no set to consult, no claim to hold, **no window to get wrong**. Every other
+moment requires knowing what this process is doing *right now*, in a value that
+changes on a different schedule from the row it is compared against. Item 13
+timed that comparison better. This removes the comparison.
+
+**What it closes that item 13 could not.** Item 8 recorded a split it had to
+work around: after a crash the progress cards said `running` and the runs table
+said `interrupted`, from one read of the same rows, because only `RunService`
+reclaimed and `EvaluationService` built its cards straight from the rows. With
+reconciliation done before either service reads, that inconsistency does not
+exist. `_settled`'s docstring says so, and says the read stays where it is for
+a reason that is now editorial rather than structural — so nobody restores the
+old behaviour by moving it back.
+
+**What it does not change.** Still relabelled, never restarted (§15 F8). Still
+no migration. Two apps sharing one `RA2_DATA_DIR` would still have the second
+declare the first's live runs dead — that was true of the read-path version
+too, continuously rather than once, so this is strictly the safer of the two.
+
+### The wiring, and why `lifespan`
+
+`ra2/main.py` is **frozen**; this is the amendment, and it is the second line
+of wiring this branch adds to it (item 14 was the first). The hook is a
+`lifespan=` on the `FastAPI` constructor rather than `add_event_handler`:
+Starlette's `on_startup` list is the deprecated path, and `pyproject.toml` sets
+`filterwarnings = ["error"]`, so a `DeprecationWarning` would be a test
+failure rather than a note.
+
+`ui.run_with` was checked rather than assumed. It captures
+`app.router.lifespan_context` into `main_app_lifespan` and calls it inside its
+own wrapper, after `_startup()` and before `_shutdown()` — so NiceGUI's
+lifecycle and this one compose, and the ordering in `create_app` (mount last)
+is what makes the capture see it.
+
+### Two gates, because the property is a location
+
+A behavioural test cannot assert *where* a method is called from, and that is
+the whole safety argument here: `reclaim_orphans` relabels every `running` row
+with no guard, which is a loaded gun anywhere but startup.
+
+`tests/test_reclaim_is_called_once.py`, in `test_p3_contract.py`'s `openai` /
+`pynvml` shape — read out of the AST, `.as_posix()` for `SD33`:
+
+| Assertion | |
+|---|---|
+| exactly one caller in `ra2/`, and it is `ra2/main.py` | a second caller added in good faith fails here, with the reason attached |
+| that caller is inside `lifespan` | being in `main.py` is not enough; it has to run before work can be submitted |
+| exactly one method in `RunService` mentions `_ERROR_INTERRUPTED_BY_RESTART` | the structural half of "no read path writes a status" |
+
+`tests/backend/services/run/test_reclaim.py` is the behavioural half, and
+replaces `test_reclaim_races.py` — whose subject, the claim discipline, no
+longer exists. The load-bearing one is `test_no_read_path_reclaims`: it forces
+a `running` row and asserts `progress`, `get` and `list_runs` all leave it
+alone. It fails on the previous implementation, where the first call flips the
+row, which is the only reason to trust the file is testing the change.
+
+The pair `test_reclaiming_a_run_it_then_resumes_finds_exactly_the_hole` is
+§15 F8 end to end: reclaim is a relabel, `interrupted` is what Resume acts on,
+and the committed rows survive both.
+
+### Three tests that had been leaning on the side effect
+
+Each failed on this change, and in each case the test was the thing that was
+wrong. Worth listing, because they are the same mistake three times: a test
+asserting on a state it had arranged a *service side effect* to produce, rather
+than on the state it was about.
+
+| | Was | Now |
+|---|---|---|
+| `tests/backend/services/run/conftest.py::build_app` | Built an app and called it a process. Its docstring named the empty in-memory claim set as "the one that decides the answer" | Enters the app's lifespan too. A process runs its startup; an app that never started reads a row left `running` and reports it live, which is not what a real second process does |
+| `tests/ui/test_evaluation_view.py::test_an_interrupted_run_offers_resume` | Seeded the run `running` and let the first read relabel it | Seeds it `interrupted`, carrying the reason a reclaim writes. A test about the **Resume affordance** should never have depended on restart-detection mechanics |
+| `test_run_log_carries_no_data.py::test_the_reclaim_verdict_is_logged_loudly` | Reached the log line through `get()` | Calls `reclaim_orphans()`, and asserts on the count line it now writes |
+
+`build_app` is the one worth the extra sentence. Entering the lifespan in the
+fixture rather than in each test is deliberate: a test that has to remember to
+start the app it just built is a test that will one day forget, and the failure
+would present as a resume bug. It also means `test_resume.py` now covers the
+**wiring** end to end — with `lifespan=` removed from `create_app`,
+`test_a_dead_process_leaves_the_run_interrupted_not_running` fails with
+`RUNNING is not INTERRUPTED`, which is checked rather than asserted.

@@ -303,3 +303,46 @@ The shortest path back to a working evaluation without waiting for any of it:
 **2a alone** — one line, no amendment — plus `RA2_LLM_TIMEOUT_S=600` in the
 environment. That gives a run that works and a screen that shows it working,
 while the rest lands properly.
+
+---
+
+## 6. The second reproduction — what all six stages did not fix
+
+All six stages shipped, and the next run on the seed still ended
+`interrupted` at `0 / 12`, carrying *"the process died while this run was
+executing"*. Three findings, none of them in the list above. The full account
+and the reasoning are items **12-14** of
+`contracts/amendments/fix-evaluation-timeout-and-progress.md`; in short:
+
+1. **The message was true, and the recipe was the defect.** `just dev` ran
+   uvicorn with `--reload`, which watches the whole working directory for
+   `*.py` — including every `.claude/worktrees/agent-*` copy of this project.
+   One file written anywhere in the tree killed the worker mid-record. The
+   watcher moves to `just dev-reload`, scoped to `ra2/`; `dev` and `dev-agent`
+   lose it.
+2. **`_reclaim` could write that same sentence about a live run.** Two gaps —
+   the worker claimed the run *after* `_start` committed `running`, and
+   `cancel` held no claim at all while the worker unwound — each a few
+   microseconds wide, each producing an identical row from a process that
+   never died. With them open there was no reading of that message as evidence
+   of anything.
+
+   Closed twice over. First by fixing the claim discipline (item 13), then by
+   **removing it**: `RunRepository.list_running`'s docstring had described
+   restart detection as a thing a caller does "on the next startup" since the
+   day it was written, and had no caller. Reclaiming on every read was the
+   improvisation. `reclaim_orphans` runs once, from `main.py`'s lifespan, where
+   the relabel needs no claim to be correct — at startup this process is
+   executing nothing. **A read never writes a status** (item 15). It closes
+   `evaluation_service.get`'s recorded split as a side effect.
+3. **The run had no voice at all.** §1.1's five gaps were all about the
+   *screen*; none of them helps when the question is *why did that stop* an
+   hour later. RA2 now writes an operational log to stderr, bounded by
+   `data-handling.md` §5.1 to ids, counts, statuses, model tags and durations —
+   never anything out of a delivery. §5 had forbidden logging outright, citing
+   `mvp-spec.md` §13, which is "UI surfaces" and says nothing about it.
+
+**The pattern worth keeping from this.** Every stage above made the *product*
+more honest and none of them made the *failure* legible to whoever has to fix
+it. The second reproduction cost as much as the first, and almost all of it
+went on establishing facts a single log line would have handed over.

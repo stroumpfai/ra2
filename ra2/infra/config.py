@@ -102,6 +102,18 @@ class Settings(BaseSettings):
     #: the app has no login and no auth (mvp-spec.md §13).
     storage_secret: str = Field(default="ra2-local-storage-secret")
 
+    #: The level of the `ra2` stderr logger (`infra/logging.py`). `INFO` is the
+    #: default because the thing it makes visible — a run's per-record
+    #: progress — is the one thing a half-hour job needs and had nowhere to
+    #: say. `WARNING` quiets that to the failures alone.
+    #:
+    #: **Not a switch on what may be logged.** `data-handling.md` §5 bounds the
+    #: *content*: ids, counts, statuses, model tags and durations, never
+    #: anything out of a delivery. `DEBUG` is the same rule, louder — there is
+    #: deliberately no level at which narrative reaches a log record, which is
+    #: why this is a level and not a `log_prompts` flag.
+    log_level: str = "INFO"
+
     @model_validator(mode="after")
     def _default_db_path(self) -> Self:
         """`RA2_DB_PATH` defaults to `{data_dir}/ra2.sqlite` (sw-design.md §10)."""

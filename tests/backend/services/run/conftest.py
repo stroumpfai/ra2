@@ -27,6 +27,7 @@ at run *start*).
 
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 
 import pytest
@@ -269,14 +270,23 @@ async def build_app(
     run_upgrade_head: Settings,
     resolver: StubPromptResolver,
     gpu: StaticGpuProbe,
-) -> AsyncIterator[Callable[..., FastAPI]]:
-    """Build a whole app over the migrated database — one per "process".
+) -> AsyncIterator[Callable[..., Awaitable[FastAPI]]]:
+    """Build a whole app over the migrated database — one per "process",
+    **including its startup**.
 
-    The resume criterion is about a **second process** reading the first's
-    database: a fresh `create_app()` gives a fresh engine, a fresh
-    `TaskRunner` and — the one that decides the answer — a `RunService` whose
-    in-memory "runs I am executing" set is empty, which is how a run left
-    `running` by a dead process is recognised as interrupted rather than live.
+    The resume criterion is about a second process reading the first's
+    database, so the fixture has to model a process rather than an object. A
+    fresh `create_app()` gives a fresh engine and a fresh `TaskRunner`; running
+    the lifespan is what gives it the other half, and it is the half that
+    decides the answer. `reclaim_orphans` lives there and nowhere else, so an
+    app built but never started would read a row left `running` by the dead
+    process and report it as live — which is not what a real second process
+    does, and would make these tests pass for a reason production does not
+    have.
+
+    Entering it here rather than in each test is deliberate: a test that has to
+    remember to start the app it just built is a test that will one day forget,
+    and the failure would look like a resume bug.
 
     The resolver goes in through `create_app()`'s `prompt_resolver` keyword,
     like every other adapter (§12.12). I3 originally had to set it on the
@@ -285,8 +295,9 @@ async def build_app(
     substitute through the composition root is a seam only production uses.
     """
     built: list[FastAPI] = []
+    lifespans = AsyncExitStack()
 
-    def _build(
+    async def _build(
         *, llm_client: LLMClient, settings: Settings | None = None, seed: int = 0
     ) -> FastAPI:
         app = create_app(
@@ -304,10 +315,12 @@ async def build_app(
             mount_ui=False,
         )
         built.append(app)
+        await lifespans.enter_async_context(app.router.lifespan_context(app))
         return app
 
     yield _build
 
+    await lifespans.aclose()
     for app in built:
         await app.state.engine.dispose()
 

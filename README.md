@@ -314,7 +314,7 @@ Every setting is an environment variable prefixed `RA2_`, readable from a
 | `RA2_DB_PATH` | `{data_dir}/ra2.sqlite` | The SQLite file. |
 | `RA2_HOST` / `RA2_PORT` | `127.0.0.1` / `8080` | Where the app listens. Loopback by default. |
 | `RA2_LLM_BASE_URL` | `http://127.0.0.1:11434/v1` | The LLM endpoint. **Must be loopback.** |
-| `RA2_LLM_TIMEOUT_S` | `120` | Per-call timeout. |
+| `RA2_LLM_TIMEOUT_S` | `600` | Per-call timeout. Measured, not chosen: a 9.7 B thinking model answered one record in 136 s on the reporting host, and almost all of it was the response's `reasoning` field. |
 | `RA2_LLM_MAX_RETRIES` | `2` | Retries per call — bounded, counted, and shown in the progress card. |
 | `RA2_RUN_CONCURRENCY` | `1` | Models run one at a time. Raising it is not implemented. |
 | `RA2_GPU_VRAM_GB` / `RA2_GPU_NAME` | unset | Declare the GPU instead of probing it. |
@@ -323,6 +323,7 @@ Every setting is an environment variable prefixed `RA2_`, readable from a
 | `RA2_MIN_CELL_COUNT` | `20` | Result cells below this are suppressed (used once scoring exists). |
 | `RA2_MAX_UPLOAD_MB` | `512` | Upload ceiling. |
 | `RA2_STORAGE_SECRET` | a fixed string | NiceGUI session storage. **Not** a security boundary: the app has no login. |
+| `RA2_LOG_LEVEL` | `INFO` | The `ra2` logger, on **stderr** — no log file, so nothing to retain and nothing for `just reset` to wipe. `INFO` is what makes a long run legible: a line per record before the model is called and one after it. **A level, not a content switch** — a log line may carry ids, counts, statuses, model tags and durations, and never narrative, a prompt, model output or `unfall_uid` ([`data-handling.md` §5.1](data-handling.md)). |
 
 ---
 

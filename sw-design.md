@@ -447,6 +447,8 @@ runs, which additionally persist to the `run` table and must be restart-safe.
 | `RA2_MAX_UPLOAD_MB` | `512` | |
 | `RA2_DEV_RECORD_MAX` / `RA2_EVAL_RECORD_MIN` | `50` / `200` | §9 |
 | `RA2_MIN_CELL_COUNT` | `20` | D3, unused until scoring |
+| `RA2_LLM_TIMEOUT_S` / `RA2_LLM_MAX_RETRIES` | `600` / `2` | §15.5. 600 is measured, not chosen — a thinking model answered one record in 136 s on the reporting host |
+| `RA2_LOG_LEVEL` | `INFO` | §5.1 of `data-handling.md` — the level of the `ra2` stderr logger. A level, **not** a switch on what may be logged: no level puts narrative in a log record |
 
 - **Every file operation specifies `encoding=`** (N4). Enforced by ruff `PLW1514`
   plus the rule that all file I/O goes through `infra/files.py`.
@@ -1027,6 +1029,17 @@ exactly as Import does. No streaming, no websocket push.
   resumable, which this is; it does not ask for automatic, and a run that
   restarts itself whenever the app starts burns GPU hours on work the user may
   have abandoned.
+- **Restart is detected once, at process start.** Nothing updates a `run` row
+  on the way down, so a process that dies mid-run leaves it saying `running`.
+  `RunService.reclaim_orphans` — the one caller of
+  `RunRepository.list_running`, called from `main.py`'s lifespan and nowhere
+  else — relabels those `interrupted` before anything in the new process can
+  submit work. **A read never writes a status.** The unconditional relabel is
+  only sound at that one moment: at startup this process is executing nothing,
+  so a `running` row is stale with no claim to check and no window to get
+  wrong. Asking on the read paths instead — which is what this replaced —
+  meant asking at moments when the answer could be wrong, and the Evaluation
+  view asks twice a tick for the length of a run.
 
 ### 15.5 The LLM adapter — the one place `openai` exists
 
@@ -1128,11 +1141,14 @@ second `reachable()`:
   directly: the adapter tests hand the prober a transport that fails the test
   if anything reaches it.
 
-The bound is `min(timeout_s, PROBE_TIMEOUT_S)`. `RA2_LLM_TIMEOUT_S` is 120 —
+The bound is `min(timeout_s, PROBE_TIMEOUT_S)`. `RA2_LLM_TIMEOUT_S` is 600 —
 right for a model that is thinking, wrong for a dialog waiting to learn whether
-anything is listening, which would otherwise hang for two minutes on a host
+anything is listening, which would otherwise hang for ten minutes on a host
 that accepts the connection and goes quiet. The bound actually used is reported
-back, so the timeout sentence can name it.
+back, so the timeout sentence can name it. (It was 120 when this paragraph was
+written, and the gap between the two numbers is the whole argument: a
+`PROBE_TIMEOUT_S` of 5 is what keeps the dialog answerable however far the
+generation bound moves.)
 
 `POST /api/v1/models/test` is the same call through the other adapter, and is
 **always 200** for the same reason `GET /models` is: a probe that found nothing

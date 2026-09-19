@@ -21,7 +21,15 @@ from ra2.persistence.session import create_engine, ensure_database_dir
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # `disable_existing_loggers` defaults to **True**, and that default is a
+    # trap here rather than a preference. `alembic.ini` names only alembic's
+    # own loggers, so applying it sets `disabled = True` on every logger
+    # already created — including `ra2`'s — and a disabled logger drops
+    # records silently, with no handler, no level and no error to notice.
+    # Migrations run in-process in every backend and E2E fixture, so the
+    # default would mean the run log worked when a developer watched it and
+    # vanished the moment a test looked (`infra/logging.py`).
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 #: What `alembic check` and `--autogenerate` compare the database against.
 target_metadata = Base.metadata

@@ -90,9 +90,9 @@ async def test_a_gated_call_holds_the_run_running_with_nothing_committed(
     assert view.status is RunStatus.RUNNING
     assert (view.done, view.total) == (0, 3)
     assert await extractions_of(seeded.run_id) == []
-    # And the run is **not** reclaimed while this process is executing it:
-    # `progress()` reclaims runs left `running` by a dead process, and a live
-    # one must survive that read (`run_service._reclaim`).
+    # And reading it changed nothing — `progress()` reports, it does not
+    # decide. Restart detection is `reclaim_orphans`, once at process start
+    # (`test_reclaim.py`).
     assert fake.call_count == 1
 
     gate.set()

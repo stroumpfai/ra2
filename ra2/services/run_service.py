@@ -7,7 +7,7 @@ everything that has to survive the process. `GET /api/v1/tasks/{id}` (§9) is
 unchanged; the UI polls it with `ui.timer` exactly as Import does. No
 streaming, no websocket push.
 
-Four properties this module exists to guarantee:
+Five properties this module exists to guarantee:
 
 - **One record, one transaction.** One `extraction` row, its
   `extraction_value` children and its `extraction_entity` children are
@@ -21,6 +21,14 @@ Four properties this module exists to guarantee:
   is carried back on the `Extraction` and rendered in the metrics line.
 - **Provenance written at run start**, not at completion — a run that dies
   mid-corpus is still a reproducible run (mvp-spec.md §19.8).
+- **A read never writes a status.** `progress`, `get` and `list_runs` report;
+  they do not decide. The one method that relabels a run it did not execute is
+  `reclaim_orphans`, and it is called once, from `main.py`'s lifespan, where a
+  `running` row is stale unconditionally because this process is executing
+  nothing yet. Reclaiming on the read paths instead — which this replaced —
+  meant deciding at moments when the answer could be wrong, against an
+  in-memory claim that moved on a different schedule from the row, and the
+  Evaluation view asks twice a tick for the length of a run.
 
 `PromptResolver` (`services/protocols.py`) is why this module never imports
 `prompt_service`, and the injected `LLMClient` is why it never imports
@@ -249,17 +257,6 @@ class RunService:
         self._clock = clock
         self._ids = ids
         self._settings = settings
-        #: The runs **this process** is executing right now. A `running` row
-        #: that is not in here belongs to a process that died under it, which
-        #: is the whole of how a restart is detected (see `_reclaim`).
-        #:
-        #: Claimed **before** the `running` status is written and released only
-        #: after the final one is, so the two are never observable in the order
-        #: that makes a live run look abandoned. `_reclaim` runs on every read
-        #: path and the Evaluation view polls those paths throughout a run, so
-        #: any moment where the row says `running` and this set does not say
-        #: "mine" is a moment a poll can land in.
-        self._active: set[RunId] = set()
         #: The `asyncio.Task` executing each run, so `cancel` can stop **one**
         #: of them. A job covers every run of an evaluation and executes them
         #: serially, so without a task per run "stop this run" could only be
@@ -270,24 +267,6 @@ class RunService:
         #: arrive as `CancelledError` at the same await — and it lets a run
         #: still queued behind another be skipped when the worker reaches it.
         self._cancel_requested: set[RunId] = set()
-        #: Runs whose **final status this process is in the middle of
-        #: writing** — `cancel`'s span, from before it cancels the task to
-        #: after `_finish_cancelled` has committed.
-        #:
-        #: Separate from `_active` because the two overlap and neither can
-        #: stand in for the other: `Task.cancel()` only schedules the
-        #: cancellation, so the worker unwinds through `execute_run`'s
-        #: `finally` — releasing its own `_active` claim — during `cancel`'s
-        #: await, while the row still says `running`. A poll landing in
-        #: exactly that gap would relabel the run "the process died while this
-        #: run was executing", and `_finish_cancelled` re-reads the status
-        #: before writing, so it would then decline to correct it: the stop an
-        #: analyst asked for, recorded as a crash that never happened.
-        #:
-        #: Separate from `_cancel_requested` because that set is consumed by
-        #: whoever acts on the intent — `_execute_cancellably` discards it the
-        #: moment it sees the `CancelledError` — which is inside the same gap.
-        self._stopping: set[RunId] = set()
 
     # -----------------------------------------------------------------------
     # Submitting work
@@ -438,23 +417,10 @@ class RunService:
             raise RunNotActiveError(str(run_id), status.value)
 
         self._cancel_requested.add(run_id)
-        # Held across the whole stop, because the worker releases its own
-        # `_active` claim before this method has written anything: it unwinds
-        # through `execute_run`'s `finally` during the await below, leaving the
-        # row saying `running` with nobody claiming it. A read landing there
-        # reclaims it as a process death, and `_finish_cancelled` re-reads the
-        # status before writing — so it would find `interrupted` and correctly
-        # decline to overwrite an outcome it did not produce, leaving a stop an
-        # analyst asked for recorded as a crash. `_stopping` is what says this
-        # process is still the one answering for the row.
-        self._stopping.add(run_id)
-        try:
-            task = self._tasks.get(run_id)
-            if task is not None:
-                task.cancel()
-            await self._finish_cancelled(run_id)
-        finally:
-            self._stopping.discard(run_id)
+        task = self._tasks.get(run_id)
+        if task is not None:
+            task.cancel()
+        await self._finish_cancelled(run_id)
 
     async def _finish_cancelled(self, run_id: RunId) -> None:
         """Record the stop — **unless the run finished on its own first**.
@@ -499,24 +465,16 @@ class RunService:
         verbatim, and the run continues (mvp-spec.md §10.4).
 
         Progress is reported from committed rows, never from a counter
-        (§15 F6). A process death here leaves the run `interrupted`.
+        (§15 F6). A process death here leaves the run `running` in the
+        database, and the **next** process start relabels it `interrupted`
+        (`reclaim_orphans`). Nothing in the meantime needs to notice: no read
+        path writes a status, which is what makes "this row says `running`" an
+        honest statement about this process rather than a guess about another.
 
         :raises NotFoundError: no such run.
         """
-        # **Claimed before `_start`, not after.** `_start` commits
-        # `queued -> running`, and `_reclaim` — which every read path runs, and
-        # which the Evaluation view's poll reaches twice a tick throughout a
-        # run — relabels any `running` row this set does not claim as "the
-        # process died while this run was executing". Claiming afterwards left
-        # a window between the commit and this line in which that sentence was
-        # written about a run that was about to extract its first record, and
-        # the worker went on extracting into a row marked `interrupted`,
-        # offering an analyst a **Resume** that would have put a second worker
-        # on it. Claiming first cannot be wrong in the other direction: a run
-        # in this set but still `queued` is not a row `_reclaim` looks at.
-        self._active.add(run_id)
+        await self._start(run_id)
         try:
-            await self._start(run_id)
             plan = await self._load_plan(run_id)
             await self._extract_all(plan, reporter)
         except Exception as exc:
@@ -533,8 +491,6 @@ class RunService:
             # the stop from the caller's task instead.
             await self._finish(run_id, RunStatus.FAILED, error=_error_text(exc))
             raise
-        finally:
-            self._active.discard(run_id)
 
     async def _extract_all(self, plan: _RunPlan, reporter: ProgressReporter) -> None:
         """The record loop. Every transaction in here is opened and closed
@@ -574,7 +530,14 @@ class RunService:
             # **Before** the call, not only after it. On the reporting host one
             # record is over two minutes, and a line that only ever appears on
             # the way out cannot tell "waiting on the model" from "wedged".
-            _log.info("run %s: record %d/%d (%s) → %s", plan.run_id, index, len(pending), record_id, plan.model_name)
+            _log.info(
+                "run %s: record %d/%d (%s) → %s",
+                plan.run_id,
+                index,
+                len(pending),
+                record_id,
+                plan.model_name,
+            )
             try:
                 response = await self._llm_client.extract(
                     prompt_text,
@@ -792,50 +755,58 @@ class RunService:
         level = logging.INFO if status is RunStatus.DONE else logging.WARNING
         _log.log(level, "run %s: %s%s", run_id, status.value, f" — {error}" if error else "")
 
-    async def _reclaim(self, session: AsyncSession, runs: Sequence[Run]) -> None:
-        """Relabel runs left `running` by a process that died under them.
+    async def reclaim_orphans(self) -> int:
+        """Relabel every run left `running` by a process that died under it.
 
-        `RunRepository.list_running` exists for exactly this (§15.4) and the
-        read paths are where it is cheap to ask: the Evaluation view is what
-        shows a run's state, and a run this process is not executing but the
-        database still calls `running` is a run whose process is gone.
+        Called **once, from the composition root's startup**, before anything
+        in this process can submit work — and from nowhere else, which
+        `tests/test_reclaim_is_called_once.py` is the gate on. That precondition
+        is not a detail, it is the whole design: at startup this process is
+        executing nothing, so a row the database still calls `running` is
+        stale **unconditionally**. There is no set to consult, no claim to hold
+        and no window to get wrong.
 
-        **Relabelled, never restarted** (§15 F8). Two sets tell the two apart,
-        and a run in **either** is one this process is still answering for:
-        `_active` is the worker's claim, held from before the `running` write
-        to after the final one; `_stopping` is `cancel`'s, which overlaps the
-        end of `_active` because the worker unwinds before the stop is
-        recorded. A run from a previous process can be in neither.
+        `RunRepository.list_running` has said so since it was written — *"on
+        the next startup it is still `running` in the database though nothing
+        is executing it"* — and had no caller. What existed instead reclaimed
+        on every read path, which is where the two races came from: the
+        Evaluation view polls those paths twice a tick for the length of a run,
+        so every instant in which the row said `running` and the in-memory
+        claim had not caught up was an instant a poll could land in and write
+        `_ERROR_INTERRUPTED_BY_RESTART` — a specific, false claim about a
+        process that was fine. Asking once, when the answer cannot be wrong,
+        removes the question rather than timing it better.
 
-        Both are read here rather than one, because this method runs on every
-        read path and the Evaluation view polls those paths twice a tick for
-        the whole length of a run. Any instant in which the row says `running`
-        and no set claims it is an instant a poll can land in — and what gets
-        written then is not a hedge, it is the sentence in
-        `_ERROR_INTERRUPTED_BY_RESTART`: a specific, false claim about a
-        process that is perfectly alive.
+        Two things it is deliberately not:
+
+        - **Not a restart.** Relabelled only (§15 F8). A run that restarted
+          itself on every app start would burn GPU hours on work the user may
+          have abandoned; Resume is an explicit human act.
+        - **Not aware of other processes.** Two apps sharing one
+          `RA2_DATA_DIR` would have the second declare the first's live runs
+          dead. That was true of the read-path version too, continuously
+          rather than once, so this is strictly the safer of the two — but it
+          is why `just dev` binds a fixed port and `dev-agent` mints its own
+          data directory.
+
+        :returns: how many runs were relabelled, so the caller can say so.
         """
-        live = self._active | self._stopping
-        stale = [
-            run
-            for run in runs
-            if RunStatus(run.status) is RunStatus.RUNNING and RunId(run.id) not in live
-        ]
-        if not stale:
-            return
-        for run in stale:
-            run.status = RunStatus.INTERRUPTED
-            run.error = _ERROR_INTERRUPTED_BY_RESTART
-            # The loudest thing this service says, because it is a verdict on a
-            # process that is not here to answer — and because the two ways it
-            # can be reached look identical on the row. Either a process really
-            # died under this run (`just dev` with `--reload` used to do that
-            # on any edit anywhere in the tree), or the claim discipline broke
-            # and this is a live run being declared dead. A timestamp on this
-            # line is what tells those apart against the terminal's own
-            # "Reloading" line.
-            _log.warning("run %s: found running with nobody executing it — marking interrupted", RunId(run.id))
-        await session.flush()
+        async with session_scope(self._session_factory) as session:
+            stale = await RunRepository(session).list_running()
+            for run in stale:
+                run.status = RunStatus.INTERRUPTED
+                run.error = _ERROR_INTERRUPTED_BY_RESTART
+            await session.flush()
+        if stale:
+            # The loudest thing this service says, because it is a verdict on
+            # processes that are not here to answer. A timestamp on it is what
+            # lets a reader set it beside whatever killed them — uvicorn's own
+            # "Reloading" line, for the one this was found from.
+            _log.warning(
+                "%d run(s) were left running by a process that died — marked interrupted",
+                len(stale),
+            )
+        return len(stale)
 
     # -----------------------------------------------------------------------
     # Reads
@@ -851,8 +822,9 @@ class RunService:
             run = await repo.get(run_id)
             if run is None:
                 raise NotFoundError("run", run_id)
-            await self._reclaim(session, [run])
-
+            # No reclaim. **A read never writes a status** — restart
+            # detection happens once, at process start
+            # (`reclaim_orphans`), where the answer cannot be wrong.
             evaluation = await EvaluationRepository(session).get(EvaluationId(run.evaluation_id))
             done = await repo.count_done(run_id)
             pending = (
@@ -899,7 +871,6 @@ class RunService:
         async with session_scope(self._session_factory) as session:
             repo = RunRepository(session)
             runs = await repo.list_by_evaluation(evaluation_id)
-            await self._reclaim(session, runs)
             evaluation = await EvaluationRepository(session).get(evaluation_id)
             is_dev = _is_dev(evaluation)
             ordinals = run_ordinals(runs)
@@ -934,7 +905,6 @@ class RunService:
             run = await repo.get(run_id)
             if run is None:
                 raise NotFoundError("run", run_id)
-            await self._reclaim(session, [run])
             evaluation = await EvaluationRepository(session).get(EvaluationId(run.evaluation_id))
             # The siblings are read for one number, because the ordinal is a
             # property of the set and there is no honest way to know a run's

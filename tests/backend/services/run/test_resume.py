@@ -56,7 +56,7 @@ async def test_a_hole_in_the_middle_is_found_and_filled_by_resume(
     )
 
     # --- process one: run until the endpoint refuses record three ----------
-    first_app = build_app(llm_client=first_client, seed=1)
+    first_app = await build_app(llm_client=first_client, seed=1)
     task_id = await _run_service(first_app).launch_runs(seeded.evaluation_id)
 
     assert first_app.state.task_runner.progress(task_id).status is TaskStatus.OK
@@ -74,7 +74,7 @@ async def test_a_hole_in_the_middle_is_found_and_filled_by_resume(
     second_client = FakeLLMClient(
         responses={marker: answer(note=marker) for marker in seeded.markers}
     )
-    second_app = build_app(llm_client=second_client, seed=500)
+    second_app = await build_app(llm_client=second_client, seed=500)
     resume_task = await _run_service(second_app).resume(seeded.run_id)
 
     assert second_app.state.task_runner.progress(resume_task).status is TaskStatus.OK
@@ -110,14 +110,14 @@ async def test_a_dead_process_leaves_the_run_interrupted_not_running(
         responses={marker: answer(note=marker) for marker in seeded.markers},
         fail_from=2,
     )
-    first_app = build_app(llm_client=first_client, seed=1)
+    first_app = await build_app(llm_client=first_client, seed=1)
     await _run_service(first_app).launch_runs(seeded.evaluation_id)
     # The status the worker itself wrote is replaced by the one a killed
     # process leaves behind: the last thing that happened was a commit, and
     # then the process was gone.
     await set_run_status(seeded.run_id, RunStatus.RUNNING)
 
-    second_app = build_app(llm_client=FakeLLMClient(), seed=500)
+    second_app = await build_app(llm_client=FakeLLMClient(), seed=500)
     view = await _run_service(second_app).get(seeded.run_id)
 
     assert view.status is RunStatus.INTERRUPTED
@@ -135,14 +135,14 @@ async def test_resume_after_a_dead_process_extracts_every_missing_record_once(
         responses={marker: answer(note=marker) for marker in seeded.markers},
         fail_from=2,
     )
-    first_app = build_app(llm_client=first_client, seed=1)
+    first_app = await build_app(llm_client=first_client, seed=1)
     await _run_service(first_app).launch_runs(seeded.evaluation_id)
     await set_run_status(seeded.run_id, RunStatus.RUNNING)
 
     second_client = FakeLLMClient(
         responses={marker: answer(note=marker) for marker in seeded.markers}
     )
-    second_app = build_app(llm_client=second_client, seed=500)
+    second_app = await build_app(llm_client=second_client, seed=500)
     await _run_service(second_app).resume(seeded.run_id)
 
     rows = await extractions_of(seeded.run_id)

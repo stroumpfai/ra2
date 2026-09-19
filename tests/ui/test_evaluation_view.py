@@ -721,9 +721,15 @@ async def test_an_interrupted_run_offers_resume(
     `interrupted` and the view offers **Resume** — explicitly, because nothing
     auto-restarts at app start.
 
-    The row is seeded `running`: `RunService`'s read paths relabel a `running`
-    run this process is not executing, which is precisely what "the process
-    died under it" looks like from here.
+    The row is seeded `interrupted`, with the reason a reclaim writes on it —
+    which is the state a process death leaves *after* the next start has
+    relabelled it, and the state this view is being tested on. It used to be
+    seeded `running` and converted by a side effect of the first read, back
+    when `RunService` reclaimed on its read paths. That made a test about the
+    Resume affordance depend on restart-detection mechanics, and restart
+    detection now happens once at startup instead (`reclaim_orphans`), where
+    this fixture's rows do not yet exist. Seeding the state under test is what
+    it should always have done.
 
     The assertion is that the click **reaches `RunService.resume`** with this
     run's id, not that the resumed run reaches some later status: what happens
@@ -738,8 +744,9 @@ async def test_an_interrupted_run_offers_resume(
         evaluation_id=seeded.draft.evaluation_id,
         template_id=seeded.template.prompt_template_id,
         model_tag=FITS_A,
-        status=RunStatus.RUNNING,
+        status=RunStatus.INTERRUPTED,
         started_at=datetime(2026, 9, 3, 11, 5, 33, tzinfo=UTC),
+        error="interrupted: the process died while this run was executing",
     )
 
     await user.open("/evaluation")
@@ -1237,11 +1244,14 @@ async def polling(
     """A launched evaluation with a **queued** run, and a handle on the
     catalogue behind the endpoint.
 
-    Queued rather than running on purpose: `RunService._reclaim` relabels a
-    run this process is not executing, so a seeded `running` row becomes
-    `interrupted` on the first read and the view settles before it can tick.
-    `queued` is the honest shape of "launched, the worker has not reached it
-    yet" and it is what keeps `_settled` false.
+    Queued rather than running on purpose. It originally had to be: reads
+    reclaimed, so a seeded `running` row became `interrupted` on the first one
+    and the view settled before it could tick. That is no longer true — nothing
+    but `reclaim_orphans` writes a status, and it runs once at startup, before
+    this seeds anything — but `queued` is kept because it is the honest shape
+    of "launched, the worker has not reached it yet", which is the state this
+    fixture is about. `running` with no worker would be a lie the test told
+    itself.
 
     The catalogue is handed in rather than defaulted because "never on a
     timer" (plan-phase-3.md C3) is a claim about **how many times**
