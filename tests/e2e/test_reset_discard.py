@@ -120,7 +120,12 @@ def test_discarding_a_run_removes_its_row_and_leaves_the_rest(
 
     rows = page.locator('[data-testid="run-link"]')
     expect(rows).to_have_count(len(discardable_evaluation.run_ids), timeout=TIMEOUT_MS)
-    before = rows.all_text_contents()
+    # The link's **title**, not its text. The text is the run's ordinal within
+    # the evaluation ("run 2"), which is what a person needs and what fits the
+    # column; the id is what identifies a run to the API, and it rides the
+    # title for exactly this. Reading the text here would not fail loudly — it
+    # would make the 404 below pass because "run 1" is not a run id either.
+    before = [str(rows.nth(i).get_attribute("title")) for i in range(rows.count())]
     doomed = before[0]
 
     # --- the row action, in the status cell (no sixth column) ---------------
@@ -144,7 +149,7 @@ def test_discarding_a_run_removes_its_row_and_leaves_the_rest(
 
     # --- the row is gone, the other run is not ------------------------------
     expect(rows).to_have_count(len(before) - 1, timeout=TIMEOUT_MS)
-    remaining = rows.all_text_contents()
+    remaining = [str(rows.nth(i).get_attribute("title")) for i in range(rows.count())]
     assert doomed not in remaining
     assert set(remaining) == set(before) - {doomed}
 

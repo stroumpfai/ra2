@@ -489,3 +489,57 @@ and not what the schema promises.
 `run.status` is `sa.String(length=16)` with no `CHECK` constraint, and nothing
 here adds a `RunStatus` member in any case. CLAUDE.md names one migration
 author per phase and phase 5 expects no revision; this branch needs none.
+
+---
+
+## 12. `justfile` — `just dev` loses `--reload`, and `just dev-reload` appears
+
+Frozen (`CONTRACTS.md`: *"Final has been amended three times; it means by
+amendment only, not never"*), so this is the amendment. `scripts/dev_agent.py`
+loses it too and is not frozen.
+
+```diff
+ dev:
+-    uv run uvicorn ra2.main:create_app --factory --reload --host 127.0.0.1 --port 8080
++    uv run uvicorn ra2.main:create_app --factory --host 127.0.0.1 --port 8080
++
++dev-reload:
++    uv run uvicorn ra2.main:create_app --factory --reload --reload-dir ra2 --host 127.0.0.1 --port 8080
+```
+
+**Why, from a second reproduction.** After all eleven items above shipped, the
+first evaluation on the development seed still ended `interrupted`, at
+`0 / 12`, carrying `_ERROR_INTERRUPTED_BY_RESTART` — *"the process died while
+this run was executing"*. The terminal said why, in uvicorn's own words:
+`WatchFiles detected changes in '…'. Reloading…`. The message was **true**.
+The process did die. Nothing in `ra2/` was wrong; the recipe that started it
+was.
+
+`--reload` watches the entire working directory for `*.py`, recursively. Under
+this repository that includes `tests/`, `scripts/`, and — the part nobody
+budgets for — every `.claude/worktrees/agent-*`, each a full copy of the
+project. So *any* `.py` written anywhere in the tree, by the developer or by
+an agent working in a worktree, restarts the server and kills the worker
+mid-record.
+
+**Why this is the recipe's defect and not the app's.** The app behaved exactly
+as designed: the row is `interrupted`, whatever committed is kept, Resume
+finds the hole, nothing auto-restarted (§15 F8). N6's restart-safety is what
+turned a killed process into a recoverable run rather than a lost one. But
+restart-*safe* is a guarantee about consequences, not a licence to restart —
+and a half-hour job and a file watcher cannot share a process. The watcher's
+premise is that a restart costs a second.
+
+**Why `dev-reload` rather than nothing.** Removing the watcher outright would
+trade one real cost for another: the Evaluation, Import and Census views are
+worked on in seconds-long iterations where a manual restart per edit is the
+dominant cost. Scoping it to `--reload-dir ra2` is the part that was always
+missing — an unscoped watcher on a repository that contains copies of itself
+was never what anyone wanted — and keeping it on a separate verb is what makes
+"not while a run is in flight" a choice the operator makes rather than one the
+recipe makes for them.
+
+**`scripts/dev_agent.py` drops it with no replacement.** An agent is by
+definition writing `*.py` in this tree, so for `dev-agent` the watcher's only
+reachable outcome is an agent killing the run it launched to look at — and
+then reporting the app's message, which cannot name the cause.

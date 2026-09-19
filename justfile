@@ -12,14 +12,42 @@ default:
 # Run
 # ---------------------------------------------------------------------------
 
-# Run the app: FastAPI + NiceGUI in one process, on one port.
-dev:
-    uv run uvicorn ra2.main:create_app --factory --reload --host 127.0.0.1 --port 8080
+# `just` renders only the **last** comment line of a contiguous block beside a
+# recipe in `just --list`, so each recipe's reasoning sits above a blank line
+# and its one-line summary sits directly on top of it.
+#
+# **No `--reload` on `dev`.** An evaluation run is minutes per record and tens
+# of minutes end to end; uvicorn's reloader watches the whole working directory
+# for `*.py`, recursively, which here includes `tests/`, `scripts/` and every
+# `.claude/worktrees/agent-*` full copy of this project. One file written
+# anywhere in that tree kills the worker mid-record, and the run is left
+# `interrupted` with "the process died while this run was executing" — true,
+# and useless. N6's restart-safety is what makes that recoverable rather than
+# lost; it is a guarantee about consequences, not a licence to restart. A file
+# watcher and a half-hour job cannot share a process.
 
-# Same as `dev`, but on a random free port against a throwaway RA2_DATA_DIR.
+# Run the app on 8080 against ./var: FastAPI + NiceGUI, one process, no watcher.
+dev:
+    uv run uvicorn ra2.main:create_app --factory --host 127.0.0.1 --port 8080
+
+# For UI and view work, where an iteration is seconds and nothing long-running
+# is in flight. **Never with a run executing** — see the note above `dev`.
+#
+# `--reload-dir ra2` is the part that was always missing: an unscoped watcher
+# on a repository that contains copies of itself restarts on a test file, a
+# script, or an agent working in a worktree under this directory.
+
+# `dev` with the file watcher on, scoped to `ra2/` alone.
+dev-reload:
+    uv run uvicorn ra2.main:create_app --factory --reload --reload-dir ra2 --host 127.0.0.1 --port 8080
+
 # Agents verifying a change run this, never bare `dev` — sharing port 8080 or
 # `./var` with a developer's own manual testing session has clobbered their
-# live test data before.
+# live test data before. No watcher either, and for a sharper reason: an agent
+# is by definition writing `*.py` in this tree, so the only thing a watcher
+# could achieve here is an agent killing the run it launched to look at.
+
+# `dev` on a random free port against a throwaway RA2_DATA_DIR.
 dev-agent:
     uv run python scripts/dev_agent.py
 

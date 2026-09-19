@@ -275,10 +275,14 @@ def test_j10_launch_an_evaluation_and_watch_it_finish(
     # A run is named by its ordinal and links to Results — a placeholder route
     # this phase. The id is a 36-character uuid7 that does not fit the column
     # and does not distinguish two runs launched together; it rides the title.
-    first_link = page.locator('[data-testid="run-link"]').first
-    expect(first_link).to_have_attribute("href", RESULTS_HREF_RE)
-    expect(first_link).to_have_text("run 1")
-    assert first_link.get_attribute("title"), "the full id stays reachable"
+    links = page.locator('[data-testid="run-link"]')
+    expect(links.first).to_have_attribute("href", RESULTS_HREF_RE)
+    # Both ordinals, as a set: the table sorts `started_at DESC`, so the row
+    # order is newest first and `.first` is run 2, not run 1.
+    assert set(links.all_text_contents()) == {"run 1", "run 2"}
+    assert all(links.nth(i).get_attribute("title") for i in range(links.count())), (
+        "the full id stays reachable on every row"
+    )
     expect(page.locator('[data-testid="pagination-range"]')).to_have_text("1–2 of 2")
     # One progress card per run (the card's own body is L3's).
     expect(page.locator('[data-testid="progress-card"]')).to_have_count(2)

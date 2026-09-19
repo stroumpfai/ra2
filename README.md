@@ -113,6 +113,15 @@ Then open **http://127.0.0.1:8080**.
 This binds the fixed port 8080 and uses `./var` as its data directory — your
 real local database.
 
+**There is no file watcher on `just dev`, on purpose.** An evaluation run is
+minutes per record and tens of minutes end to end, and uvicorn's `--reload`
+watches the whole working directory: one `.py` written anywhere under it —
+including in a `.claude/worktrees/agent-*` copy of this project — restarts the
+server and kills the worker mid-record. The run survives as `interrupted` and
+Resume picks it up, but the twenty minutes do not come back. Use
+`just dev-reload` for UI work, where the watcher earns its keep and nothing
+long-running is in flight.
+
 > **If you are an AI agent, or running an automated check, use `just dev-agent`
 > instead.** It picks a random free port and a throwaway temporary data
 > directory, so it cannot collide with a developer's live test data. Sharing
@@ -325,7 +334,8 @@ Everything goes through `just`. Never bare `pip`, never `python -m venv`.
 
 | Command | What it does |
 |---|---|
-| `just dev` | Run the app on 8080 against `./var`. |
+| `just dev` | Run the app on 8080 against `./var`. No file watcher. |
+| `just dev-reload` | `dev` with `--reload` scoped to `ra2/`. UI work only — never with a run in flight. |
 | `just dev-agent` | Run it on a random port against a throwaway data dir. |
 | `just test` | The commit gate: unit + backend + UI, with coverage. |
 | `just e2e` | The PR gate: the Playwright journeys. |
