@@ -33,6 +33,7 @@ from nicegui import ui
 
 from ra2.domain.stats import TieMark
 from ra2.services.readmodels import ExtractionTabView, FeatureScoreRow
+from ra2.ui.components.primitives import data_props
 from ra2.ui.components.stat_cells import insufficient_cell, metric_cell, tie_marker
 from ra2.ui.views.results.chrome import run_descriptor
 
@@ -207,14 +208,14 @@ def _row(
     view: ExtractionTabView,
     on_toggle_feature: Callable[[str], Awaitable[None]] | None,
 ) -> None:
-    tr = (
+    tr = data_props(
         ui.element("tr")
-        .props(
-            f'data-testid="feature-row" data-feature="{row.feature_id}" '
-            f'data-suppressed="{str(row.suppressed).lower()}"'
-        )
+        .props(f'data-testid="feature-row" data-suppressed="{str(row.suppressed).lower()}"')
         .mark("feature-row")
-        .style("cursor:pointer;" + ("background:oklch(0.985 0.002 260);" if row.suppressed else ""))
+        .style(
+            "cursor:pointer;" + ("background:oklch(0.985 0.002 260);" if row.suppressed else "")
+        ),
+        {"data-feature": row.feature_id},
     )
     if on_toggle_feature is not None:
         tr.on("click", lambda _e, fid=str(row.feature_id): on_toggle_feature(fid))

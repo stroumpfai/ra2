@@ -31,6 +31,22 @@ builds the session server with `FakeLLMClient`, `StaticModelCatalog` and a
 `StaticGpuProbe` (RTX 4090, 24 GB) injected through `create_app()`'s ordinary
 keyword arguments (plan-phase-3.md §11).
 
+**The journey runs past the launch.** A launched evaluation is where this view
+used to stop: every setup control read-only, nothing on screen saying why, and
+no way back to an editable one — while the step-2 copy this journey already
+asserts tells the analyst to "clone into a new evaluation". So the last leg
+presses **"New evaluation"** and asserts the exit is real in a browser: the
+lock sentence goes, the selects come back, and the models are tickable again
+(`sw-design.md` §13 `SD32`).
+
+That leg leaves **one extra draft** on the session-scoped server, deliberately
+and inertly. It is this journey's own second evaluation, it cites this
+journey's corpus and feature set, and it has no runs. The one query that could
+notice it is `_current_evaluation`'s "newest", and the only two rows sharing
+the frozen clock's instant there are J10's draft and J10's clone — the journey
+that does depend on being newest (`test_reset_discard.py`) stamps its own
+`created_at` far past both, for exactly this reason.
+
 **The second test is the dialog-clipping check.** L3's own suite proves
 `ollama_settings_dialog` uses `dialog_card`'s 96vw wrapper *structurally*; only
 a real viewport can prove the box that results actually fits, and the gear
@@ -281,9 +297,65 @@ def test_j10_launch_an_evaluation_and_watch_it_finish(
         evaluation_view.PROVENANCE_EXPLAINER
     )
 
-    # --- launched is locked ---------------------------------------------------
+    # --- launched is locked, and now says why ---------------------------------
     expect(page.locator('[data-testid="launch"]')).to_be_disabled()
     expect(page.locator('[data-testid="corpus-select"]')).to_be_disabled()
+    # The column states the reason instead of simply going dead (SD32).
+    expect(page.locator('[data-testid="launched-note"]')).to_have_text(
+        evaluation_view.LAUNCHED_MESSAGE
+    )
+    # Nothing on a launched evaluation is left to save, so the toolbar offers
+    # the only thing that can still act.
+    expect(page.locator('[data-testid="save-draft"]')).to_have_count(0)
+    expect(page.locator('[data-testid="new-evaluation"]')).to_have_text(
+        evaluation_view.NEW_EVALUATION_LABEL
+    )
+
+    # --- and it is not a dead end ---------------------------------------------
+    page.click('[data-testid="new-evaluation"]')
+    # The toolbar swapping is the redraw landing on the new draft.
+    expect(page.locator('[data-testid="save-draft"]')).to_have_count(1, timeout=TIMEOUT_MS)
+    expect(page.locator('[data-testid="launched-note"]')).to_have_count(0)
+    expect(page.locator('[data-testid="corpus-select"]')).to_be_enabled()
+    expect(page.locator('[data-testid="launch"]')).to_have_text("Launch 0 runs")
+    expect(page.locator('[data-testid="new-evaluation"]')).to_have_count(0)
+
+    # The clone cites the same corpus and the same frozen feature set — the
+    # "clone into a new evaluation" step 2 asks for, not a blank one. Read
+    # back through the API, so this is about the row and not about the screen
+    # that just redrew.
+    clone = _clone_of(page, server_url, corpus_id=corpus_id, besides=evaluation_id)
+    assert clone["feature_config_id"] == config_id, clone
+    assert clone["launched_at"] is None, clone
+
+    # Step 4's ticks are live again, which is the point of the exit. The clone
+    # is deliberately **not** launched: a second worker pass buys this journey
+    # nothing and the launch itself is already asserted above.
+    _select_model(page, MODEL_A)
+    expect(page.locator('[data-testid="launch"]')).to_have_text("Launch 1 run")
+    expect(page.locator('[data-testid="launch"]')).to_be_enabled()
+    # The launched evaluation is untouched — a clone adds a row (Do-NOT #2).
+    original = _get(page, server_url, f"/api/v1/evaluations/{evaluation_id}")
+    draft = cast("dict[str, object]", original["draft"])
+    assert draft["launched_at"] is not None, original
+
+
+def _clone_of(page: Page, server_url: str, *, corpus_id: str, besides: str) -> dict[str, object]:
+    """The one evaluation citing this journey's corpus that is not `besides`.
+
+    Scoped by corpus rather than taken as "the newest", because the server is
+    shared and `created_at` is the frozen clock's for every row on it.
+    """
+    response = page.request.get(f"{server_url}/api/v1/evaluations")
+    assert response.ok, f"GET /api/v1/evaluations: {response.status} {response.text()}"
+    rows = cast("list[dict[str, object]]", response.json())
+    matching = [
+        row
+        for row in rows
+        if row["corpus_id"] == corpus_id and str(row["evaluation_id"]) != besides
+    ]
+    assert len(matching) == 1, matching
+    return matching[0]
 
 
 def _select_model(page: Page, tag: str) -> None:

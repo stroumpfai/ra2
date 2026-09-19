@@ -14,7 +14,7 @@ from a service (§8.1.1).
 """
 
 import re
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Final
 
@@ -31,6 +31,7 @@ __all__ = [
     "card",
     "card_header",
     "chip",
+    "data_props",
     "dialog_card",
     "distribution_bar",
     "field_select",
@@ -74,6 +75,37 @@ def format_count(value: int) -> str:
     Presentation only — the number itself is always a service's.
     """
     return f"{value:,}".replace(",", " ")
+
+
+def data_props[E: Element](element: E, values: Mapping[str, object]) -> E:
+    """Assign props whose values did **not** come from this source file (SD31).
+
+    `element.props("k=v")` is a *parser*, not a formatter: `Props.parse` hands
+    every quoted value to `ast.literal_eval`, so an interpolated value is read
+    as **Python source**. A filename `Unfall\\next.csv` arrives with a literal
+    newline in it; a feature set named `draft\\` ends the quoted run early and
+    the prop **disappears entirely**, silently. `html.escape` is no defence —
+    it handles `&`, `<`, `>` and quotes, and the parser it feeds cares about
+    backslashes.
+
+    Writing into `element.props` — an `ObservableDict`, so the write still
+    fires `element.update()` — bypasses that parser. It is also the *last*
+    escaping hop: the mapping is serialised as JSON and handed to `Vue.h` as
+    the props of a native tag, which sets attributes through the DOM API. No
+    HTML parsing happens anywhere on that path, so **do not** `html.escape` a
+    value on its way in here; that would put a literal `&amp;` on screen.
+
+    Returns the element, so it composes with the chained builders around it.
+
+    Only values that are literals in the calling source file — a `data-testid`,
+    a `type="button"`, an `int`, an enum member's `.value`, a `"true"`/`"false"`
+    chosen from a `bool` — may stay in a props *string*. Everything a person
+    typed, a delivery supplied or the environment set comes through here.
+    `tests/ui/test_props_provenance.py` holds the floor of that rule.
+    """
+    for key, value in values.items():
+        element.props[key] = value
+    return element
 
 
 def card(*, flex: str = "none", extra: str = "") -> Element:
@@ -166,12 +198,13 @@ def icon_button(
     """A bordered icon-only button. A real `<button>`, so Tab reaches it and
     the `--focus` ring shows (README: focus is undesigned; add one)."""
     css_size = "iconbtn-md" if size == 24 else "iconbtn-sm"
-    button = (
+    button = data_props(
         ui.element("button")
         .classes(f"iconbtn {css_size} {extra_class}".strip())
-        .props(f'type="button" aria-label="{label}" title="{label}"')
+        .props('type="button"')
         .mark(label.lower().replace(" ", "-"))
-        .style(f"width:{size}px;height:{size}px;")
+        .style(f"width:{size}px;height:{size}px;"),
+        {"aria-label": label, "title": label},
     )
     if disabled:
         button.props("disabled")
@@ -219,15 +252,15 @@ def tick(
         classes += " on"
     if disabled:
         classes += " disabled"
-    box = (
+    box = data_props(
         ui.element("button")
         .classes(classes)
         .props(
-            f'type="button" role="checkbox" aria-checked="{state}" '
-            f'aria-label="{label}" title="{label}" data-testid="tick"'
+            f'type="button" role="checkbox" aria-checked="{state}" data-testid="tick"'
             + (' disabled aria-disabled="true"' if disabled else "")
         )
-        .mark("tick")
+        .mark("tick"),
+        {"aria-label": label, "title": label},
     )
     if on_change is not None and not disabled:
         box.on("click", lambda _: on_change())
@@ -261,7 +294,8 @@ def chip(
     tag = "button" if on_click is not None else "span"
     element = ui.element(tag).classes("chip").props('data-testid="chip"').mark("chip")
     if on_click is not None:
-        element.props(f'type="button" aria-label="{label or text}"')
+        element.props('type="button"')
+        data_props(element, {"aria-label": label or text})
         element.on("click", lambda _: on_click())
     with element:
         ui.label(text)
@@ -382,7 +416,7 @@ def _page_size_select(
         )
     with select:
         for size in page_sizes:
-            option = ui.element("option").props(f'value="{size}"')
+            option = data_props(ui.element("option"), {"value": str(size)})
             if size == state.page_size:
                 option.props("selected")
             with option:
@@ -398,11 +432,12 @@ def _arrow(
     on_page: Callable[[int], None] | None,
     testid: str,
 ) -> None:
-    button = (
+    button = data_props(
         ui.element("button")
         .classes("iconbtn iconbtn-md")
-        .props(f'type="button" aria-label="{label}" title="{label}" data-testid="{testid}"')
-        .mark(testid)
+        .props(f'type="button" data-testid="{testid}"')
+        .mark(testid),
+        {"aria-label": label, "title": label},
     )
     if disabled or on_page is None:
         button.props("disabled")
@@ -483,11 +518,9 @@ def segmented_control(
     rather than hidden — the same rule `pagination_row` follows, so the
     control does not change width as an analyst tags rows (`Q4`).
     """
-    group = (
-        ui.element("div")
-        .classes("seg")
-        .props(f'role="group" aria-label="{label}" data-testid="seg"')
-        .mark("seg")
+    group = data_props(
+        ui.element("div").classes("seg").props('role="group" data-testid="seg"').mark("seg"),
+        {"aria-label": label},
     )
     with group:
         for option in options:
@@ -518,16 +551,12 @@ def _clear_segment(*, label: str, enabled: bool, on_clear: Callable[[], None]) -
     its own `data-testid`, so a test counting the control's values counts
     three and not four.
     """
-    button = (
+    button = data_props(
         ui.element("button")
         .classes("seg-btn seg-clear" if enabled else "seg-btn seg-clear disabled")
-        .props(
-            'type="button" '
-            f'aria-label="{label}" '
-            f"{'' if enabled else 'disabled '}"
-            'data-testid="seg-clear"'
-        )
-        .mark("seg-clear")
+        .props('type="button" data-testid="seg-clear"' + ("" if enabled else " disabled"))
+        .mark("seg-clear"),
+        {"aria-label": label},
     )
     if enabled:
         button.on("click", lambda _: on_clear())
@@ -561,7 +590,8 @@ def field_select(
     element = ui.element(tag).classes(classes).props('data-testid="rof"').mark("rof")
     if interactive:
         assert on_click is not None
-        element.props(f'type="button" aria-label="{label or text}"')
+        element.props('type="button"')
+        data_props(element, {"aria-label": label or text})
         element.on("click", lambda _: on_click())
     with element:
         ui.label(text)
@@ -719,15 +749,16 @@ def radio_option(
     is the caller's fact, never decided here.
     """
     skin = "flex:1;border-color:var(--ink);" if selected else "flex:1;color:var(--ink3);"
-    element = (
+    element = data_props(
         ui.element("button")
         .props(
             'type="button" role="radio" '
             f'aria-checked="{"true" if selected else "false"}" '
-            f'aria-label="{text}" data-testid="sel-radio"'
+            'data-testid="sel-radio"'
         )
         .mark("sel-radio")
-        .style(f"{_SEL_BASE}{skin}width:100%;cursor:pointer;")
+        .style(f"{_SEL_BASE}{skin}width:100%;cursor:pointer;"),
+        {"aria-label": text},
     )
     if on_click is not None:
         element.on("click", lambda _: on_click())

@@ -447,6 +447,117 @@ and one §8 entry per finding closed. The register in §4 is left as written.
 | `README.md` | The loopback rule now states both halves. Then: exports do **not** live under the data directory (two claims corrected), and the documentation map and *Real data never enters the repository* point at `data-handling.md` (`fix-b3-deletion-path`) |
 | `tests/backend/services/lifecycle/test_discard_erasure.py` *(new)* | After `discard_run`, a planted evidence span is absent from the database **and its WAL** — through the real service, against the real temp-file database. A positive control before the discard, and a control with `secure_delete` off showing the bytes survive without the pragma, so neither assertion can pass vacuously (`fix-b3-deletion-path`) |
 | `risk-assesment.md` | The `Status` column, and §8 |
+| `ra2/ui/shell.py` | `_data_dir_chip` only — `title` moves from the props *string* to the props *mapping* (`SD31`), and `html.escape` goes with it. **Not a register finding**: a defect found while working this slice, landed the same way because it is a fix to a control that already exists (`fix-ui-windows-data-dir`) |
+| `tests/ui/test_data_dir_chip.py` | Two cases the POSIX `_DATA_DIR = "/srv/ra2/var"` could never have caught — a `tempfile.mkdtemp()`-shaped Windows path (the crash) and a path of *valid* escapes (the silent rewrite). The fixture had no backslash in it, which is what CLAUDE.md's *fixtures must contain the real hazards* is about, read one hazard wider than encodings (`fix-ui-windows-data-dir`) |
+| `sw-design.md` *(second entry, later branch)* | `SD31` — a prop whose value did not come from the source file is assigned through the props mapping, never through the props string (`fix-ui-windows-data-dir`) |
+
+---
+
+## Evaluation — the exit from a launched one, a slice
+
+`feat-evaluation-not-a-dead-end`, landed on top of `fix-ui-windows-data-dir`.
+**No Wave 0, no new frozen baseline, no migration and no amendment**: one view,
+its per-client state, its two test layers, and the two documents that record
+why. `ra2/services/readmodels.py` stayed byte-unchanged **deliberately** — a UI
+that needs a new read-model field to answer "why is this locked" is usually a
+UI about to derive something it should be reading, and
+`EvaluationDraftView.is_launched` already answered it.
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/ui/views/evaluation_view.py` | + `NEW_EVALUATION_LABEL`, `LAUNCHED_MESSAGE`, `EVALUATION_CREATED_MESSAGE`; `_new_evaluation`, `_new_name`, `_can_create`, `_launched_note`, `_toolbar_button`. `_save_draft` loses its create branch and `_can_save_draft` becomes the toolbar's either/or. `NO_SETUP_MESSAGE`, `UNSAVED_MESSAGE` and `MODELS_UNSAVED_MESSAGE` name the affordance that actually unblocks them (`SD32`) |
+| `ra2/ui/state.py` | `EvaluationSetup`'s docstring only — **no field added**. The sentinel that `_current_evaluation`'s fallback appears to demand is unnecessary once the row is created before the redraw, and the docstring now says so rather than leaving the next reader to re-derive it (`SD32`) |
+| `tests/ui/test_evaluation_view.py` | + `_seed_launch` and the `launched` fixture — the file had **no** launched-state fixture at all, which is how a permanently frozen view survived 17 cases. + three: the lock sentence and every read-only control it describes, the clone, and the toolbar's mutual exclusion. `test_with_no_evaluation_the_view_offers_save_draft_rather_than_crashing` is renamed and **re-pointed, not deleted** — it asserts the replacement affordance and that the four inert steps name it |
+| `tests/e2e/test_j10_evaluation.py` | The journey runs past the launch: the lock sentence, "New evaluation", the unlocked clone read back through `GET /api/v1/evaluations`, and a tick that takes again. It leaves one inert extra draft on the session-scoped server and the docstring says why that is safe — `test_reset_discard.py` is the only later journey that depends on being newest, and it stamps its own `created_at` past every frozen-clock row for exactly this reason |
+| `sw-design.md` | `SD32`, and §15.2's closing paragraph — "every edit path raises" is a rule about the row, and the view owes the other half of it |
+
+---
+
+## The Windows CI leg — making a permanently red gate readable, a slice
+
+`fix-windows-ci-gate`, landed on top of `feat-evaluation-not-a-dead-end`.
+**No Wave 0, no new frozen baseline, no migration and no amendment.** CI runs
+layers 1–3 on Linux **and** Windows (N3) with `fail-fast: false`; the Windows
+leg carried six failures, the oldest from `0461aea`, and had essentially never
+been green. The six are worth less than the leg being readable again — an
+always-red gate is why `SD31`'s every-page-500 under `just dev-agent` on
+Windows survived until a human found it by hand. `sw-design.md` `SD33` records
+the reasoning, including why the scope is four paths and not `* text=auto`.
+
+**No fixture byte changed.** The committed blobs were always right — the
+delivery hazards CRLF, the codelist, prompt and golden fixtures LF, exactly
+what each generator writes. Only the *checkout* was wrong, so `.gitattributes`
+states what the bytes already are; no `git add --renormalize` was needed and
+none was run.
+
+**`.github/workflows/ci.yml` and `pyproject.toml` are unchanged.** Nothing in
+the workflow was wrong: it was already running the leg, already refusing to
+`fail-fast`, and already uploading the JUnit XML. The failures were in the
+repository, not in the gate.
+
+### New files
+
+| File | Contents |
+|---|---|
+| `.gitattributes` | Four rules, for the four paths a test compares byte-for-byte. `tests/fixtures/deliveries/hazards/** -text diff` — CRLF by construction, and `h13`'s doubled CRLF (`\r\r\n`) is destroyed by *any* text conversion, `eol=crlf` included, so `-text` is the only correct answer and `diff` keeps it reviewable. `eol=lf` for the codelist, prompt and golden fixtures. **Not** `* text=auto eol=lf`: that rewrites every tracked file and conflicts with every pending branch |
+| `tests/test_fixture_line_endings.py` | The recurrence guard. Asks **git** (`git check-attr`), not the filesystem, whether every file under `tests/fixtures/*/hazards/` is pinned at all — so it answers identically on both platforms and a new hazard family added on Linux fails *there*. It does not dictate which of the two attributes a family picks; that is its generator's business |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `tests/test_p3_contract.py` | `.as_posix()` in place of `str()` at the three `relative_to` sites. Two of them — the `openai` and `pynvml` single-seam guards — compare against a POSIX literal and so could never pass on Windows. They failed **closed**, so Do-NOT #1 was never unguarded; but CLAUDE.md names them as what makes the loopback rule a gate rather than a promise |
+| `sw-design.md` | `SD33`, and §11.4's paragraph saying that "byte-exactly" includes the line endings |
+
+The rest of `tests/` was swept for the same shape. Four sites build a
+`str(path.relative_to(...))`, all of them into an *offenders* list compared
+against `[]` — `test_files_chokepoint.py`, `test_migrations.py`,
+`test_m0_contract.py` and `test_no_lenient_decoding.py`. A separator there
+changes a failure *message*, never a verdict, so they are left alone.
+`test_check_no_real_data.py` passes one into `guard.inspect`, which normalises
+with `Path(path).as_posix()` before it matches anything — that one is already
+correct, and deliberately so.
+
+---
+
+## Props provenance — the rest of the class `SD31` opened, a slice
+
+`fix-props-provenance`, landed on top of `fix-windows-ci-gate`. **No Wave 0,
+no new frozen baseline, no migration and no amendment** — nothing this slice
+touches is on the frozen list. `SD31` fixed one call site, the header's
+data-directory chip; this is the other forty-eight, across seventeen files.
+
+**It is a data bug, not an accessibility one.** Reproduced against the pinned
+NiceGUI, `value="{name}"` with a feature set named `draft\` parses to
+`{'type': 'text', 'data-testid': 'rename-input'}` — no exception, no warning,
+and **no `value` prop**. The rename box opens empty over a name the analyst
+cannot see. `sw-design.md` `SD34` records the helper, the `html.escape`
+question and why the recurrence guard is only a floor.
+
+### New files
+
+| File | Contents |
+|---|---|
+| `tests/ui/test_props_provenance.py` | The hazards and the floor. Four names a person can legally type — a trailing `\` (the prop that vanishes), `Unfall\next.csv\tv2` (a newline and a tab), `C:\Users\dev\sets` (the `SD31` crash), `Weather & conditions <v3>` (what `html.escape` would corrupt on its own) — each asserted to **round-trip**, `_props[key] == value`, through `feature_sets_table`'s input and its two `icon_button`s and through `data_table`'s sort header. Plus the static floor: an `ast` walk of `ra2/ui/**` refusing an interpolation inside a text-carrying prop's value, and a case proving the floor catches the pre-`SD34` line it was written for |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/ui/components/primitives.py` | + `data_props(element, {...})`, the one way a data-derived prop is assigned, returning the element so it composes with the kit's chained builders. Nine of its own helpers went through it — `icon_button`, `tick`, `chip`, `field_select`, `radio_option`, `segmented_control`, its clear segment, the pagination arrows and the page-size options — which is why every view inherited the bug (`SD34`) |
+| `ra2/ui/components/__init__.py` | Re-exports `data_props` |
+| `ra2/ui/components/data_table.py` · `derivation_builder.py` · `feature_sets_table.py` · `ollama_settings.py` · `stat_cells.py` | Column keys and labels, codes and code labels, the analyst-typed set name and `RA2_LLM_BASE_URL` move to the mapping. `import html` **goes** from three of them: it prevented none of the four parser failures and would have put `&amp;` on screen (`SD34`) |
+| `ra2/ui/views/census_view.py` · `codelists_view.py` · `evaluation_view.py` · `features_view.py` · `file_report_modal.py` · `import_view.py` · `mismatches_view.py` · `prompts_view.py` · `results/extraction_tab.py` · `results/presence_tab.py` · `results/ranking_tab.py` | Filenames, corpus names, column names, codes, feature keys, model tags and option values move to the mapping. `evaluation_view._attr` — `html.escape(quote=True)` under another name, one caller — is **deleted**; `features_view`'s `from html import escape` goes the same way. `SD32` is untouched: the toolbar's either/or, `LAUNCHED_MESSAGE` and the clone are not on this slice's path |
+| `sw-design.md` | `SD34`, and a pointer from `SD31` to it |
+
+**What deliberately stays a props string.** About sixty interpolations remain
+and every one is source-decided: an `int` (`colspan`, `data-rank`,
+`data-max-height-px`), an enum's `.value`, a `"true"`/`"false"` chosen from a
+`bool`, and the `data-testid` slots whose callers all pass literals. Provenance
+is the test, not the character set — and a props string that reads like the
+design's own HTML is worth keeping where nothing data-shaped can reach it.
 
 ---
 
@@ -668,7 +779,7 @@ flips the flag §6.1 declared it would. It now asserts the stronger thing:
 | **P3-D8** | `tests/conftest.py`'s `app_factory` substitutes `llm_client`, `model_catalog` and `gpu_probe` by **default** | plan-phase-3.md §11: "everything inside `just test` and `just e2e` must pass on a machine with no GPU and nothing listening on 11434". Leaving the real adapters as the default would make that a per-test discipline instead of a property of the suite. The real ones are still reachable — H4's adapter tests construct them directly against a local stub. |
 | **P3-D9** | `ra2/infra/gpu.py` exposes `probe_for(name, vram_gb)` beyond the three names plan-phase-3.md §5.1 lists | "The override wins, else NVML" is one rule and belongs in one place. Putting the conditional in `create_app()` instead would have put logic in a composition root that is meant to be wiring only (sw-design.md §3). |
 | **P3-D22** | Re-parse and delete are **row actions** in the Import file tables; the action column widens from the design's 46px to 92px, and "Remove file" leaves the report modal | Both tables' rows had exactly one affordance — a clipboard opening a modal — and both of the things an analyst actually does to a bad file lived two clicks inside it. README §1a put them there on the reasoning that a row is for *reading*; what that misses is that deciding to re-run or drop a file is a judgement made **while scanning the State column**, not after opening a report. Deleting twelve unwanted files was twelve modal round trips. Three consequences, each deliberate. **(1)** The column is 92px (3×22 + 2×4 gap + the design's own 14px right padding). The File column absorbs it, which is what being the flexible column means — at 1024px filenames ellipsize ~46px earlier, and `table-layout:fixed` guarantees nothing overflows. J4's `widths["action"]` assertion moves 46 → 92, and `tests/e2e/conftest.py`'s demo table moves with it, because J4 measures that table and a demo that no longer mirrors the real column is measuring fiction. **(2)** Re-parse exists in *both* places and they are not duplicates: the modal's applies the encoding/delimiter/quote selectors — it is the only thing that does, and removing it would leave three dead controls and break J1 — while the row's passes no overrides at all, which `reparse_file` reads as "keep what is effective now". They are relabelled accordingly: "Apply & re-parse" in the modal, "Re-parse <file>" on the row. **(3)** Delete is row-**only**, so it has one home. It is guarded by an inline two-step ("Sure?" in `--danger`, disarmed by any other action, cleared in `reload()`) rather than the one-click the corpora table uses: a corpus delete is guarded by `is_locked`, a file delete has no equivalent guard, and for an `UPLOAD` delivery `remove_file` deletes the stored bytes. Cost: like P3-D19, this settles part of README's open question 1 in code ahead of a design round. An overflow menu would return the column to 46px if a later round wants that. |
-| **P3-D21** | The Models card renders the endpoint's catalogue **without an evaluation**, and `ui/components/primitives.py`'s `tick` gains a `disabled` state | Bug fix, recorded because it changes what the design's step 4 shows before step 1 is complete. `_step_models` read `() if view is None else view.models`, so on any database with no `evaluation` row the card said "0 available" and "the endpoint returned an empty catalogue" — while the endpoint was reachable and offering models. "Refresh model list" could not help: `reload()` re-asked `connection_status()` but the list came from `EvaluationView`, which does not exist yet. The card mixes two owners: *which models the endpoint has* is the endpoint's fact, *which are ticked* is the evaluation's, and reaching the first through the second made the first unreachable exactly when someone is trying to find out whether Ollama is set up. `catalogue()` serves the card before an evaluation exists (one `reachable()`, one `models()` — `connection_status()` + `list_models()` would be three round trips for two facts, and `GET /api/v1/models` was paying that too). Selection stays withheld until "Save draft", the design's own step order — hence `tick(disabled=...)`, because omitting `on_change` only made a tick *inert*, looking live while swallowing the click. The empty-state message also split in two: "could not be asked" is not "returned an empty catalogue", and conflating them is what made this read as a broken refresh. |
+| **P3-D21** | The Models card renders the endpoint's catalogue **without an evaluation**, and `ui/components/primitives.py`'s `tick` gains a `disabled` state | Bug fix, recorded because it changes what the design's step 4 shows before step 1 is complete. `_step_models` read `() if view is None else view.models`, so on any database with no `evaluation` row the card said "0 available" and "the endpoint returned an empty catalogue" — while the endpoint was reachable and offering models. "Refresh model list" could not help: `reload()` re-asked `connection_status()` but the list came from `EvaluationView`, which does not exist yet. The card mixes two owners: *which models the endpoint has* is the endpoint's fact, *which are ticked* is the evaluation's, and reaching the first through the second made the first unreachable exactly when someone is trying to find out whether Ollama is set up. `catalogue()` serves the card before an evaluation exists (one `reachable()`, one `models()` — `connection_status()` + `list_models()` would be three round trips for two facts, and `GET /api/v1/models` was paying that too). Selection stays withheld until the evaluation row exists, the design's own step order — hence `tick(disabled=...)`, because omitting `on_change` only made a tick *inert*, looking live while swallowing the click. The empty-state message also split in two: "could not be asked" is not "returned an empty catalogue", and conflating them is what made this read as a broken refresh. **Post-phase, `SD32`:** the gate recorded here is unchanged and still asserted — nothing is selectable before the evaluation row exists — but the affordance that opens it is no longer "Save draft". It is **"New evaluation"**, and step 4's withheld-selection message names that instead. A reader arriving here for *why the ticks are dead* has the same answer as before; a reader arriving for *what to press* wants `SD32`. |
 | **P3-D20** | `LlmEndpointError`'s `REFUSED_NOT_LOOPBACK` is now **reached without raising**, by `EndpointProber` | `ra2/domain/llm.py` said the refusal "is not caught anywhere — an app configured this way does not start, which is the point". That stays true of the **configured** endpoint: `require_loopback` still fails `create_app()` outright and there is still no opt-out. What changed is that the settings dialog can now ask about an endpoint the analyst has merely *typed*, and the same verdict has to reach it as a `ProbeResult` rather than as an exception — a dialog that took the app down to tell you a host is not local would be useless. `classify_endpoint` is the shared decision; `require_loopback` is the raising face of it and `EndpointProber` the reporting one, so the two can never disagree. |
 | **P3-D19** | The Ollama settings dialog has **five** controls, not the three M17 specified, and one of them duplicates reachability *inside* the dialog | M17's reasoning was that endpoint, timeout and refresh are exactly the three settings the adapter takes, and that reachability belongs beside the Models card (design README §2 step 4) rather than duplicated in here. Two of the three still hold; the assumption that did not survive contact is that a dialog which only *displays* settings is enough to get Ollama configured. The endpoint field accepted any string with no feedback — including a LAN address, which `require_loopback` would then refuse at the next **startup**, long after the analyst could act on it — and the one bit rendered outside cannot distinguish "Ollama is not running" from "that is the wrong port", which is the question someone setting it up actually has. So the dialog gains a loopback check on the typed value (Save disabled, reason inline) and a "Test connection" that probes the value **in the field** and names the cause. The reachability line outside is unchanged and still describes the configured endpoint: the two answer different questions about different URLs, which is also why "Refresh model list" and "Test connection" are deliberately **not** merged — refresh applies, test diagnoses. Cost: the design README's open question 1 is now settled in code ahead of a design round, and a later round may want this drawn differently. |
 | **P3-D18** | J6's served-HTML scan compares loopback on **hostname**, not netloc | Applied from L2's amendment. `_host()` returns netloc, but the loopback allowlist held bare host names, so `127.0.0.1:11434` could never match `127.0.0.1` — and the Evaluation view legitimately names that URL, because the design's reproducibility card prints the configured endpoint. Confined to the **naming** scan: the request scans still pin every URL the browser actually asks for to the server under test exactly. A loopback URL cannot leave this host whatever port it carries, which is the property N1 asks about, so the gate is not weakened. |

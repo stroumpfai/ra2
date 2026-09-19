@@ -17,7 +17,6 @@ that absorbs the rest (the same `table-layout:fixed` trick `tests/e2e/
 test_j4_layout.py` asserts for the Import cards' own flexible column).
 """
 
-import html
 from collections.abc import Callable, Sequence
 from typing import Final
 
@@ -26,7 +25,13 @@ from nicegui.element import Element
 
 from ra2.services.readmodels import FeatureSetSummary
 from ra2.ui.components.data_table import ColumnSpec, data_table
-from ra2.ui.components.primitives import footnote, format_count, icon_button, pill
+from ra2.ui.components.primitives import (
+    data_props,
+    footnote,
+    format_count,
+    icon_button,
+    pill,
+)
 from ra2.ui.state import TableState
 
 __all__ = ["feature_sets_table"]
@@ -110,15 +115,20 @@ def _actions_cell(
         # **absent**, not merely disabled (README, "Feature sets table").
         return
     with ui.element("div").style("display:flex;justify-content:flex-end;gap:4px;"):
-        escaped_name = html.escape(row.name)
-        rename_input = (
+        # The set's name is analyst-typed, so it goes through the props
+        # *mapping* (SD31, `data_props`). It used to be `html.escape`d into the
+        # props string, which was wrong twice over: the string is parsed with
+        # `ast.literal_eval`, so a set named `draft\\` closed the quoted run
+        # early and the `value` prop **vanished** — the rename box pre-filled
+        # empty, over a name the analyst could not see. And `html.escape` was
+        # never the tool: the mapping is bound by Vue, so escaping here would
+        # have rendered `A &amp; B` in the input.
+        rename_input = data_props(
             ui.element("input")
-            .props(
-                f'type="text" value="{escaped_name}" aria-label="Rename {escaped_name}" '
-                'data-testid="rename-input"'
-            )
+            .props('type="text" data-testid="rename-input"')
             .mark("rename-input")
-            .style("display:none;width:1px;height:1px;")
+            .style("display:none;width:1px;height:1px;"),
+            {"value": row.name, "aria-label": f"Rename {row.name}"},
         )
         rename_input.on(
             "change",

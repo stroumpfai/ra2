@@ -98,6 +98,7 @@ from ra2.services.readmodels import (
 from ra2.ui.components import card, format_count, icon_button, pagination_row
 from ra2.ui.components.icons import INFO, PLUS, svg
 from ra2.ui.components.primitives import (
+    data_props,
     fingerprint_badge,
     master_detail_split,
     pill,
@@ -706,11 +707,12 @@ class _PromptsPage:
     def _source_readout(self, source: str) -> None:
         """The design's Source body: mono, `pre-wrap`, every `{{slot}}` picked
         out inline. Clicking it opens the editor (see the module docstring)."""
-        body = (
+        body = data_props(
             ui.element("div")
-            .props(f'data-testid="source-body" role="button" tabindex="0" title="{EDIT_HINT}"')
+            .props('data-testid="source-body" role="button" tabindex="0"')
             .mark("source-body")
-            .style(SOURCE_BODY_STYLE + "cursor:text;")
+            .style(SOURCE_BODY_STYLE + "cursor:text;"),
+            {"title": EDIT_HINT},
         )
         body.on("click", lambda _: self._start_editing(source))
         with body:

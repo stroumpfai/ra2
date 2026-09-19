@@ -14,7 +14,6 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from html import escape
 from typing import Final
 
 from nicegui import ui
@@ -333,13 +332,26 @@ def _data_dir_chip(data_dir: str) -> None:
     It ellipsises rather than wrapping: a long path must not push the header's
     two rows apart, and the full value is in the `title` attribute for anyone
     who needs to read it whole.
+
+    `title` is assigned through the props *mapping*, never through the props
+    *string* (SD31). `.props("k=v")` hands every quoted value to
+    `ast.literal_eval`, so a path is read as a Python string literal: `\\U` in
+    `C:\\Users\\...` raises `SyntaxError`, and `\\t`/`\\n` are silently swallowed.
+    This is the one prop on this page whose value comes from the environment,
+    so it is the one that must not go through that parser.
     """
     with ui.element("div").style(
         "flex:none;max-width:380px;padding:14px 28px 14px 0;"
         "display:flex;align-items:center;justify-content:flex-end;"
     ):
-        ui.label(data_dir).classes("mono ink3").props(
-            f'data-testid="data-dir" title="{escape(data_dir, quote=True)}"'
-        ).mark("data-dir").style(
-            "font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+        chip = (
+            ui.label(data_dir)
+            .classes("mono ink3")
+            .props('data-testid="data-dir"')
+            .mark("data-dir")
+            .style("font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;")
         )
+        # No `html.escape`: the mapping is serialised as JSON and bound as an
+        # attribute by Vue, which escapes it. Escaping here would put a literal
+        # `&amp;` in the tooltip of a path containing `&`.
+        chip.props["title"] = data_dir

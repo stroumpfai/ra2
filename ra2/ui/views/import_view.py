@@ -42,6 +42,7 @@ from ra2.ui.components import (
     add_button,
     card,
     card_header,
+    data_props,
     data_table,
     dialog_card,
     footnote,
@@ -474,35 +475,35 @@ class _ImportPage:
         sort arrows and pagination chevrons. The cancel is what keeps the
         two-step escapable without clicking something unrelated.
         """
-        confirm = (
+        # The filename is whatever the delivery arrived with, so it goes
+        # through the props *mapping* (SD31, `data_props`). A Linux-legal
+        # `Unfall\\next.csv` in the props string reached the accessibility
+        # tree with a literal newline in it.
+        confirm = data_props(
             ui.element("button")
             .classes("mono danger")
-            .props(
-                f'type="button" aria-label="Confirm delete {row.filename}" '
-                f'data-testid="confirm-delete-file"'
-            )
+            .props('type="button" data-testid="confirm-delete-file"')
             .mark("confirm-delete-file")
             .style(
                 "font-size:11px;background:none;border:none;padding:0;"
                 "cursor:pointer;color:var(--danger);"
-            )
+            ),
+            {"aria-label": f"Confirm delete {row.filename}"},
         )
         confirm.on("click", lambda _: self._delete_file(row))
         with confirm:
             ui.label("Sure?")
 
-        cancel = (
+        cancel = data_props(
             ui.element("button")
             .classes("mono ink3")
-            .props(
-                f'type="button" aria-label="Cancel delete {row.filename}" '
-                f'data-testid="cancel-delete-file"'
-            )
+            .props('type="button" data-testid="cancel-delete-file"')
             .mark("cancel-delete-file")
             .style(
                 "font-size:12px;background:none;border:none;padding:0 2px;"
                 "cursor:pointer;color:var(--ink3);line-height:1;"
-            )
+            ),
+            {"aria-label": f"Cancel delete {row.filename}"},
         )
         cancel.on("click", lambda _: self._cancel_delete())
         with cancel:
@@ -645,15 +646,16 @@ class _ImportPage:
                 ui.spinner(size="12px", color="var(--danger)")
                 ui.label("Deleting…").classes("mono danger").style("font-size:11px;")
             return
-        button = (
+        button = data_props(
             ui.element("button")
             .classes("mono danger")
-            .props(f'type="button" aria-label="Delete {row.name}" data-testid="delete-corpus"')
+            .props('type="button" data-testid="delete-corpus"')
             .mark("delete-corpus")
             .style(
                 "font-size:11px;background:none;border:none;padding:0;cursor:pointer;"
                 "color:var(--danger);"
-            )
+            ),
+            {"aria-label": f"Delete {row.name}"},
         )
         button.on("click", cast("Callable[[], None]", lambda: self._delete_corpus(row.corpus_id)))
         with button:

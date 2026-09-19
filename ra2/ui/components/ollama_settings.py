@@ -34,7 +34,6 @@ Built on the existing `dialog_card` pattern, with phase 2's dialog-clipping fix
 respected (it must open without clipping at 1024px).
 """
 
-import html
 from collections.abc import Awaitable, Callable
 from typing import Final
 
@@ -43,7 +42,7 @@ from nicegui.element import Element
 
 from ra2.domain.llm import ProbeCode, is_loopback_url
 from ra2.services.readmodels import ConnectionProbeView, ConnectionView
-from ra2.ui.components.primitives import dialog_card, labeled_field
+from ra2.ui.components.primitives import data_props, dialog_card, labeled_field
 
 __all__ = ["ENDPOINT_INVALID_MESSAGE", "PROBE_WORDS", "ollama_settings_dialog", "probe_sentence"]
 
@@ -225,15 +224,19 @@ def ollama_settings_dialog(
             "and a way to re-ask it for its current model list."
         ).style("font-size:12px;color:var(--ink2);")
         with labeled_field("Endpoint"):
-            endpoint_input = (
+            # `RA2_LLM_BASE_URL` is the environment, which is precisely the
+            # provenance that broke the header's data-directory chip (SD31):
+            # through the props *string* a Windows-shaped value would have been
+            # read as Python source. Through the mapping it is not parsed at
+            # all, and it is not `html.escape`d either — Vue binds the
+            # attribute, so escaping here would show `&amp;` in the field.
+            endpoint_input = data_props(
                 ui.element("input")
                 .classes("chip")
-                .props(
-                    f'type="text" value="{html.escape(settings.endpoint)}" '
-                    'aria-label="Endpoint" data-testid="ollama-endpoint"'
-                )
+                .props('type="text" data-testid="ollama-endpoint"')
                 .mark("ollama-endpoint")
-                .style("width:100%;")
+                .style("width:100%;"),
+                {"value": settings.endpoint, "aria-label": "Endpoint"},
             )
             # `change` (not `input`): the value is read on blur/Enter, exactly
             # like `derivation_builder._text_chip`. The loopback check is
@@ -252,15 +255,13 @@ def ollama_settings_dialog(
                 .mark("ollama-endpoint-error")
             )
         with labeled_field("Timeout (seconds)"):
-            timeout_input = (
+            timeout_input = data_props(
                 ui.element("input")
                 .classes("chip")
-                .props(
-                    f'type="number" min="1" step="1" value="{settings.timeout_s}" '
-                    'aria-label="Timeout in seconds" data-testid="ollama-timeout"'
-                )
+                .props('type="number" min="1" step="1" data-testid="ollama-timeout"')
                 .mark("ollama-timeout")
-                .style("width:100%;")
+                .style("width:100%;"),
+                {"value": str(settings.timeout_s), "aria-label": "Timeout in seconds"},
             )
             timeout_input.on(
                 "change",

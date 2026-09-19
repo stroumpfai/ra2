@@ -69,7 +69,12 @@ from ra2.services.errors import CodelistImportError, ServiceError
 from ra2.services.readmodels import CodeAttributeView, ColumnMappingView, CorpusView, SortDir
 from ra2.ui.components import bar, card, dialog_card, format_count
 from ra2.ui.components.icons import ALERT_TRIANGLE, DOWNLOAD, INFO, svg
-from ra2.ui.components.primitives import field_select, master_detail_split, pill
+from ra2.ui.components.primitives import (
+    data_props,
+    field_select,
+    master_detail_split,
+    pill,
+)
 from ra2.ui.shell import item_for_key, shell
 
 __all__ = [
@@ -573,16 +578,18 @@ class _CodelistsPage:
             style += ROW_DANGER_STYLE
         if selected:
             style += ROW_SELECTED_STYLE
-        button = (
+        # The column name comes out of the delivery, so both the label and
+        # the `data-column` hook go through the props *mapping* (SD31).
+        button = data_props(
             ui.element("button")
             .props(
                 'type="button" data-testid="codelist-row" '
-                f'data-status="{status.value}" data-column="{column.column_name}" '
-                f'aria-pressed="{"true" if selected else "false"}" '
-                f'aria-label="{_row_name(column)}"'
+                f'data-status="{status.value}" '
+                f'aria-pressed="{"true" if selected else "false"}"'
             )
             .mark("codelist-row", f"row-{column.column_name}")
-            .style(style)
+            .style(style),
+            {"data-column": column.column_name, "aria-label": _row_name(column)},
         )
         button.on("click", lambda _: self._select(column.column_name))
         with button:
@@ -669,11 +676,11 @@ class _CodelistsPage:
         chosen = codelists_state().language
         for code in PROMPT_LANGUAGES:
             active = code == chosen
-            element = (
+            element = data_props(
                 ui.element("button")
                 .classes("chip")
                 .props(
-                    f'type="button" aria-label="Labels in {code}" '
+                    'type="button" '
                     f'aria-pressed="{"true" if active else "false"}" '
                     f'data-testid="language-chip" data-language="{code}"'
                 )
@@ -685,7 +692,8 @@ class _CodelistsPage:
                         if active
                         else "color:var(--ink2);"
                     )
-                )
+                ),
+                {"aria-label": f"Labels in {code}"},
             )
             element.on("click", cast("Callable[[], None]", lambda c=code: self._pick_language(c)))
             with element:
@@ -875,16 +883,17 @@ class _CodelistsPage:
         """
         expanded = self._open_menu == name
         with ui.element("div").style("position:relative;display:inline-flex;"):
-            chip = (
+            chip = data_props(
                 ui.element("button")
                 .classes("chip")
                 .props(
-                    f'type="button" aria-label="{aria_label}" data-chip="{name}" '
+                    f'type="button" data-chip="{name}" '
                     'aria-haspopup="listbox" '
                     f'aria-expanded="{"true" if expanded else "false"}" '
                     'data-testid="chip"'
                 )
-                .mark("chip", f"chip-{name}")
+                .mark("chip", f"chip-{name}"),
+                {"aria-label": aria_label},
             )
             chip.on("click", lambda _: self._toggle_menu(name))
             with chip:
@@ -892,10 +901,11 @@ class _CodelistsPage:
                 ui.label("▼").classes("caret")
             if not expanded:
                 return
-            with (
+            with data_props(
                 ui.element("div")
-                .props(f'role="listbox" aria-label="{aria_label}" data-testid="menu-{name}"')
-                .style(_MENU_STYLE)
+                .props(f'role="listbox" data-testid="menu-{name}"')
+                .style(_MENU_STYLE),
+                {"aria-label": aria_label},
             ):
                 for value, option_text, selected in options:
                     self._menu_item(
@@ -915,15 +925,16 @@ class _CodelistsPage:
         selected: bool,
         on_pick: Callable[[str], Awaitable[None]],
     ) -> None:
-        button = (
+        button = data_props(
             ui.element("button")
             .classes("mono")
             .props(
                 f'type="button" role="option" aria-selected="{"true" if selected else "false"}" '
-                f'aria-label="{text}" data-testid="option-{name}"'
+                f'data-testid="option-{name}"'
             )
             .mark(f"option-{name}")
-            .style(_MENU_ITEM_STYLE + (_MENU_ITEM_ON_STYLE if selected else ""))
+            .style(_MENU_ITEM_STYLE + (_MENU_ITEM_ON_STYLE if selected else "")),
+            {"aria-label": text},
         )
         button.on("click", cast("Callable[[], None]", lambda: on_pick(value)))
         with button:
@@ -1137,13 +1148,11 @@ def _code_row(usage: CodeUsage) -> None:
     """One `CodeUsage`. The orphan row is the design's danger row: the code has
     **no row at all** in the mapped attribute, in any language (§14.2)."""
     orphan = not usage.in_codelist
-    row = (
+    row = data_props(
         ui.element("tr")
-        .props(
-            f'data-testid="code-row" data-code="{usage.code}" '
-            f'data-orphan="{"true" if orphan else "false"}"'
-        )
-        .mark("code-row", f"code-{usage.code}")
+        .props(f'data-testid="code-row" data-orphan="{"true" if orphan else "false"}"')
+        .mark("code-row", f"code-{usage.code}"),
+        {"data-code": usage.code},
     )
     if orphan:
         row.style(ROW_DANGER_STYLE)

@@ -35,6 +35,7 @@ from nicegui import ui
 from ra2.domain.scoring import ALL_LANGUAGES
 from ra2.services.readmodels import PresenceTabView
 from ra2.ui.components.contingency_table import contingency_table
+from ra2.ui.components.primitives import data_props
 from ra2.ui.components.stat_cells import metric_cell
 from ra2.ui.views.results.chrome import run_descriptor
 
@@ -114,18 +115,18 @@ def _model_row(
     with ui.element("div").style("display:flex;align-items:center;gap:8px;"):
         for model in view.models:
             active = model.model_id == view.model_id
-            chip = (
+            chip = data_props(
                 ui.element("button")
                 .classes("chip")
                 .props(
-                    f'type="button" data-testid="model-chip" data-model="{model.model_id}" '
-                    f'aria-pressed="{str(active).lower()}"'
+                    f'type="button" data-testid="model-chip" aria-pressed="{str(active).lower()}"'
                 )
                 .mark(f"model-chip-{model.model_id}")
                 .style(
                     "cursor:pointer;"
                     + ("border-color:var(--ink);color:var(--ink);" if active else "")
-                )
+                ),
+                {"data-model": model.model_id},
             )
             if on_select_model is not None:
                 chip.on("click", lambda _e, mid=model.model_id: on_select_model(mid))
@@ -165,10 +166,9 @@ def _rate_table(view: PresenceTabView) -> None:
             _th(GOAL1_NEVER_APART, "230px")
         with ui.element("tbody"):
             for row in view.rows:
-                with (
-                    ui.element("tr")
-                    .props(f'data-testid="presence-row" data-feature="{row.feature_key}"')
-                    .mark("presence-row")
+                with data_props(
+                    ui.element("tr").props('data-testid="presence-row"').mark("presence-row"),
+                    {"data-feature": row.feature_key},
                 ):
                     with ui.element("td").classes("td mono").style("padding:8px 12px;"):
                         ui.label(row.feature_key)
@@ -249,11 +249,12 @@ def _cards(view: PresenceTabView) -> None:
                 "countable — a genuine quality signal on the flag itself."
             ).style("font-size:11.5px;color:var(--ink2);margin-bottom:8px;")
             for row in view.flag_inconsistency:
-                with (
+                with data_props(
                     ui.element("div")
-                    .props(f'data-testid="flag-row" data-model="{row.model_id}"')
+                    .props('data-testid="flag-row"')
                     .mark("flag-row")
-                    .style("display:flex;align-items:center;gap:10px;padding:4px 0;")
+                    .style("display:flex;align-items:center;gap:10px;padding:4px 0;"),
+                    {"data-model": row.model_id},
                 ):
                     ui.label(row.model_id).classes("mono").style(
                         "font-size:11px;color:var(--ink2);"

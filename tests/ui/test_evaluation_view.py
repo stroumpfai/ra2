@@ -18,9 +18,18 @@ service can be asked to produce the state under test: a `failed` run needs a
 worker that failed, and an `interrupted` one needs a process that died. The
 mirror image of `test_features_view.py`'s `frozen` fixture, and for the same
 reason — the row is the precondition, not the thing being asserted.
+
+`launched_at` is seeded the same way, for the same reason (`_seed_launch`).
+The launch *transaction* (sw-design.md §15.2) snapshots `evaluation_feature`,
+resolves every fingerprint **and submits one worker per selected model**; none
+of that is what the setup column reads, and a background worker writing rows
+under the assertions below is exactly the flakiness
+`test_an_interrupted_run_offers_resume` already documents paying for. What
+locks the column is one timestamp, so one timestamp is what these cases seed.
 """
 
 import asyncio
+import json
 import os
 from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass
@@ -35,7 +44,7 @@ from nicegui.element import Element
 from nicegui.testing.general import nicegui_reset_globals
 from nicegui.testing.user import User
 from nicegui.testing.user_interaction import UserInteraction
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from tests.fixtures.fake_llm import DEFAULT_MODELS, StaticModelCatalog
 
 import ra2.ui.views.evaluation_view as evaluation_view
@@ -183,6 +192,20 @@ async def _seed_run(
         await session.commit()
 
 
+async def _seed_launch(
+    app: FastAPI, evaluation_id: EvaluationId, *, models: tuple[str, ...] = (FITS_A,)
+) -> None:
+    """Stamp `launched_at` — the whole of what makes the setup column
+    read-only (`EvaluationDraftView.is_launched`, module docstring)."""
+    async with app.state.session_factory() as session:
+        await session.execute(
+            update(Evaluation)
+            .where(Evaluation.id == evaluation_id)
+            .values(launched_at=FROZEN_NOW, selected_models_json=json.dumps(list(models)))
+        )
+        await session.commit()
+
+
 async def _mounted_bare(
     app_factory: Callable[..., FastAPI], **overrides: object
 ) -> AsyncIterator[User]:
@@ -257,6 +280,17 @@ async def unsaved_and_unreachable(
     async for value in _mounted_bare(
         app_factory, model_catalog=StaticModelCatalog(status=EndpointStatus.UNREACHABLE)
     ):
+        yield value
+
+
+@pytest.fixture
+async def launched(
+    app_factory: Callable[..., FastAPI], migrated_db: Settings
+) -> AsyncIterator[Seeded]:
+    """The state the view had no way out of: an evaluation with `launched_at`
+    set, so every setup control is read-only."""
+    async for value in _mounted(app_factory, name="launched"):
+        await _seed_launch(value.app, value.draft.evaluation_id)
         yield value
 
 
@@ -774,12 +808,20 @@ async def test_the_models_footer_gear_opens_the_connection_settings(seeded: Seed
 # --- the empty state ----------------------------------------------------------
 
 
-async def test_with_no_evaluation_the_view_offers_save_draft_rather_than_crashing(
+async def test_with_no_evaluation_the_view_offers_new_evaluation_rather_than_crashing(
     app_factory: Callable[..., FastAPI], migrated_db: Settings
 ) -> None:
     """plan-phase-3.md C3: the standard empty card, no new pattern. Steps 1
-    and 2 are the two picks "Save draft" needs; the rest wait for the row,
-    because their defaults are `EvaluationService.save_draft`'s to supply."""
+    and 2 are the two picks the creation affordance needs; the rest wait for
+    the row, because their defaults are `EvaluationService.save_draft`'s to
+    supply.
+
+    **This case used to assert "Save draft" here** — a label describing an
+    update to a row that does not exist, sitting in the toolbar while four of
+    the six steps named it as the thing that would wake them up. The gate it
+    tested is unchanged (P3-D21: nothing is selectable before the row exists);
+    the affordance that opens the gate is what it asserts now (SD32).
+    """
     async for seeded in _mounted(app_factory, name="empty"):
         await _assert_empty_state(seeded)
 
@@ -799,18 +841,150 @@ async def _assert_empty_state(seeded: Seeded) -> None:
     assert _find(user, "corpus-select")
     assert _find(user, "feature-set-select")
     assert not _find(user, "prompt-select")
-    assert evaluation_view.UNSAVED_MESSAGE in _all_text(user, "empty-note")
     (launch,) = _find(user, "launch")
     assert _is_disabled(launch)
 
-    (save,) = _find(user, "save-draft")
-    assert not _is_disabled(save)
+    # The one toolbar button reads as creation, and the four inert steps name
+    # it by that label rather than pointing at a save.
+    assert not _find(user, "save-draft")
+    (create,) = _find(user, "new-evaluation")
+    assert _element_text(create) == evaluation_view.NEW_EVALUATION_LABEL
+    assert not _is_disabled(create)
+    notes = _all_text(user, "empty-note")
+    assert evaluation_view.UNSAVED_MESSAGE in notes
+    assert evaluation_view.MODELS_UNSAVED_MESSAGE in notes
+    for message in (
+        evaluation_view.NO_SETUP_MESSAGE,
+        evaluation_view.UNSAVED_MESSAGE,
+        evaluation_view.MODELS_UNSAVED_MESSAGE,
+    ):
+        assert evaluation_view.NEW_EVALUATION_LABEL in message, message
+
     _pick_select(user, "corpus-select", str(seeded.corpus_id))
-    await _until(lambda: bool(_find(user, "save-draft")))
-    (save,) = _find(user, "save-draft")
-    _one(user, save).click()
+    await _until(lambda: bool(_find(user, "new-evaluation")))
+    (create,) = _find(user, "new-evaluation")
+    _one(user, create).click()
     await _until(lambda: bool(_find(user, "prompt-select")))
+    evaluations = await seeded.services.evaluation.list_evaluations()
+    assert len(evaluations) == 1
+    assert evaluations[0].corpus_id == seeded.corpus_id
+    # And the toolbar swaps: an editable draft is a thing "Save draft" can act
+    # on, and a second draft beside it would be debris (SD32).
+    assert _find(user, "save-draft")
+    assert not _find(user, "new-evaluation")
+
+
+async def test_an_unlaunched_draft_offers_save_draft_and_no_second_create(
+    seeded: Seeded,
+) -> None:
+    """The two toolbar buttons are **mutually exclusive**, and this is the
+    state that decides it (SD32).
+
+    A repeated press cannot pile up rows, because after the first one the view
+    is on an editable draft and the creation affordance is gone. That is the
+    deliberate answer to `evaluation.name` having no unique constraint and
+    `save_draft` not deduping: nothing here needs to dedupe, because nothing
+    offers the second press.
+    """
+    user = seeded.user
+    await user.open("/evaluation")
+    await user.should_see("Evaluation")
+
+    (save,) = _find(user, "save-draft")
+    assert _element_text(save) == evaluation_view.SAVE_DRAFT_LABEL
+    assert not _is_disabled(save)
+    assert not _find(user, "new-evaluation")
+    assert not _find(user, "launched-note")
+
+    _one(user, save).click()
+    await asyncio.sleep(0.05)
     assert len(await seeded.services.evaluation.list_evaluations()) == 1
+
+
+# --- the launched state: locked, and no longer a dead end ---------------------
+#
+# Before this branch a launched evaluation froze the view permanently. Every
+# setup control was read-only and nothing on screen said why; "Save draft" was
+# disabled by `not view.draft.is_launched`; and `_current_evaluation` falls
+# back to the newest evaluation, so there was no switcher and nothing to clone
+# into — while both the design's step-2 copy and `FEATURE_SET_NOTE` instructed
+# the analyst to "clone into a new evaluation".
+
+
+async def test_a_launched_evaluation_says_why_the_setup_column_is_locked(
+    launched: Seeded,
+) -> None:
+    """sw-design.md §15.2 locks the column; SD32 makes it say so.
+
+    The sentence covers the **column**, not step 4: five other controls are
+    locked by the same fact, and it is not step 4's fact to state.
+    """
+    user = launched.user
+    await user.open("/evaluation")
+    await user.should_see("Evaluation")
+
+    (note,) = _find(user, "launched-note")
+    assert _element_text(note) == evaluation_view.LAUNCHED_MESSAGE
+    assert "warn" in note._classes
+    # It precedes step 1 — the whole column is what it is about.
+    (step_one,) = _find(user, "step-1")
+    assert note.id < step_one.id
+
+    # And it is telling the truth: every control in the column is read-only.
+    for testid in ("corpus-select", "feature-set-select", "prompt-select", "temperature-select"):
+        (element,) = _find(user, testid)
+        assert _is_disabled(element), testid
+    (seed_input,) = _find(user, "seed-input")
+    assert _is_disabled(seed_input)
+    assert all("disabled" in t._props for t in _find(user, "tick"))
+
+
+async def test_new_evaluation_clones_a_launched_one_into_an_editable_draft(
+    launched: Seeded,
+) -> None:
+    """Exit from the dead end: the same corpus and the same frozen feature
+    set, in a row that can be edited again.
+
+    "Save draft" is absent here on purpose — there is nothing on a launched
+    evaluation left to save, and a button disabled without a word about why is
+    what the old toolbar offered instead.
+    """
+    user = launched.user
+    services = launched.services
+    await user.open("/evaluation")
+    await user.should_see("Evaluation")
+
+    assert not _find(user, "save-draft")
+    (create,) = _find(user, "new-evaluation")
+    assert _element_text(create) == evaluation_view.NEW_EVALUATION_LABEL
+    assert not _is_disabled(create)
+
+    _one(user, create).click()
+    await _until(lambda: bool(_find(user, "save-draft")))
+
+    evaluations = await services.evaluation.list_evaluations()
+    assert len(evaluations) == 2
+    clone = next(e for e in evaluations if e.evaluation_id != launched.draft.evaluation_id)
+    # Cites the same two things — the "clone into a new evaluation" the design
+    # asks for, not a blank one.
+    assert clone.corpus_id == launched.draft.corpus_id
+    assert clone.feature_config_id == launched.draft.feature_config_id
+    assert clone.launched_at is None
+
+    # The view is on the clone, and the clone is editable.
+    assert not _find(user, "launched-note")
+    (corpus_select,) = _find(user, "corpus-select")
+    assert not _is_disabled(corpus_select)
+    assert _all_text(user, "launch") == "Launch 0 runs"
+
+    # Step 4's ticks are live again — the point of the exit.
+    _one(user, _model_tick(user, FITS_A)).click()
+    await _until(lambda: _all_text(user, "launch") == "Launch 1 run")
+    current = await services.evaluation.get(clone.evaluation_id)
+    assert current.draft.selected_models == (FITS_A,)
+    # The launched evaluation is untouched — a clone adds a row (Do-NOT #2).
+    original = await services.evaluation.get(launched.draft.evaluation_id)
+    assert original.draft.is_launched
 
 
 # --- the Models card without an evaluation ------------------------------------
