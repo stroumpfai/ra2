@@ -51,7 +51,7 @@ def populated(tmp_path: Path) -> Settings:
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     settings.database_path.write_bytes(b"not really sqlite")
     settings.database_path.with_name(settings.database_path.name + "-wal").write_bytes(b"wal")
-    for directory in (settings.deliveries_dir, settings.codelists_dir, settings.exports_dir):
+    for directory in (settings.deliveries_dir, settings.codelists_dir):
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "something.txt").write_text("seed", encoding="utf-8")
     return settings
@@ -79,7 +79,19 @@ def test_the_token_removes_every_target_including_the_sidecars(
     assert not wal.exists()
     assert not populated.deliveries_dir.exists()
     assert not populated.codelists_dir.exists()
-    assert not populated.exports_dir.exists()
+
+
+def test_a_reset_has_no_exports_target(reset_data: ModuleType, populated: Settings) -> None:
+    """The absence is the contract (`SD30`, risk-assesment.md B3 §8.6).
+
+    `Settings.exports_dir` existed, was documented as "where CSV exports are
+    written", and was read by nothing but this script — so a reset cleared a
+    directory the app never filled while the exports that matter sat in
+    Downloads. Both halves are asserted here because either one coming back
+    alone re-creates the same false reassurance.
+    """
+    assert not hasattr(populated, "exports_dir")
+    assert all("exports" not in path.name for path in reset_data.targets(populated))
 
 
 def test_the_schema_comes_back_at_head(

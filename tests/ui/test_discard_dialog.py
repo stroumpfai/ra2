@@ -27,6 +27,7 @@ from ra2.services.readmodels import DiscardPreviewView
 from ra2.ui.components.discard_dialog import (
     DISCARD_IRREVERSIBLE,
     DISCARD_KEEPS,
+    EXPORT_LEAVES_RA2,
     EXPORT_PROMPT,
     discard_dialog,
     loss_line,
@@ -102,6 +103,23 @@ async def test_nothing_to_export_offers_no_export_button(user: User) -> None:
     await user.should_see(marker="discard-confirm")
     await user.should_not_see(marker="discard-export")
     await user.should_not_see(marker="discard-export-prompt")
+    await user.should_not_see(marker="discard-export-warning")
+
+
+async def test_the_export_offer_says_the_file_leaves_ra2(user: User) -> None:
+    """Offering the export and saying what it costs are one affordance, not
+    two (risk-assesment.md B3 §8.6, P4).
+
+    The mismatch file carries verbatim narrative into Downloads, where nothing
+    the app deletes can reach it. The sentence is asserted because it is
+    load-bearing copy — the same reason `DISCARD_KEEPS` and
+    `DISCARD_IRREVERSIBLE` are.
+    """
+    _page("/d/leaves", _preview())
+    await user.open("/d/leaves")
+
+    await user.should_see(EXPORT_LEAVES_RA2)
+    await user.should_see(marker="discard-export-warning")
 
 
 async def test_something_to_export_shows_the_counts_and_both_buttons(user: User) -> None:

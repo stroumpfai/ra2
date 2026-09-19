@@ -185,8 +185,11 @@ census_bucket(corpus_id, bucket_label, column_count)            -- the profile c
 
 ### 4.4 Storage rules
 
-- SQLite, WAL, `foreign_keys=ON`, `busy_timeout=5000`, set as connect-time PRAGMAs
-  in `session.py` — nowhere else.
+- SQLite, WAL, `foreign_keys=ON`, `busy_timeout=5000`, `secure_delete=ON`, set as
+  connect-time PRAGMAs in `session.py` — nowhere else. The fourth is §18's:
+  SQLite frees a deleted row's page **with its bytes intact**, so without it a
+  discarded run's `mismatch.evidence_span` — verbatim narrative — stays readable
+  in the file until some later write reuses that page (`SD29`).
 - **Alembic from the first commit.** `metadata.create_all()` appears nowhere, not
   even in tests (§11.3).
 - EAV for the 67/77/18 wide columns (D10). Index `(record_id, column_name)` and
@@ -437,7 +440,7 @@ runs, which additionally persist to the `run` table and must be restart-safe.
 
 | Setting | Default | Note |
 |---|---|---|
-| `RA2_DATA_DIR` | `./var` | N7 — DB, uploads, exports all under it |
+| `RA2_DATA_DIR` | `./var` | N7 — DB, uploads and codelists under it. **Not exports**: they are streamed to the browser and never written here (`SD30`) |
 | `RA2_DB_PATH` | `{data_dir}/ra2.sqlite` | |
 | `RA2_LLM_BASE_URL` | `http://localhost:11434/v1` | N2 — present from commit 1, unused in phase 1 |
 | `RA2_HOST` / `RA2_PORT` | `127.0.0.1` / `8080` | bind to loopback by default |
@@ -657,6 +660,8 @@ Each is additive and cheap to reverse; none should change silently.
 | SD26 | The Mismatches list is scoped to **one run at a time**, with no "all runs" option (§17.6) | `mvp-spec.md` §12 names `run` as part of the row, and a list mixing two models' mismatches for the same record and feature **is** cross-model agreement — one of the three things §16.9 defers by name. Refusing it is not a limitation of the view; it is the deferral, caught where it would otherwise have entered as a convenience. `ResultsService.presence_records` already resolves one run the same way |
 | SD27 | The adapter builds its own HTTP transport, with `trust_env=False` and `follow_redirects=False` (§15.5) | The loopback guard reasons about the URL; the transport decides which socket that URL is dialled over, and the `openai` SDK builds its own with `trust_env=True`. On a managed workstation with a machine-wide `HTTP_PROXY` and no `NO_PROXY` for localhost, a request for `http://127.0.0.1:11434/v1` therefore left for the proxy host with the guard satisfied — reproduced on the pinned versions. A redirect is the same hole read the other way: a `307` preserves the body, so the endpoint could hand the narrative to an off-host URL the guard never saw. Both are refused for the same reason the guard has no opt-out |
 | SD28 | **Census value samples are exported and rendered only for `ENUM` columns**, and every export carries a classification line (§7) | The census stores the top 20 raw values of *every* column and the census CSV is the week-one deliverable, the artefact most meant to be shared. Measured over the working corpus, the four `Koordinate` columns and the three UID columns held 20 stored values each with 16 to 20 occurring exactly once — a coordinate that occurs once is one accident, at metre precision. The rule is one line in `domain/census.py` read by both callers; only the raw values are withheld, every aggregate survives, and `top_values_withheld` keeps *withheld* distinguishable from *empty*, which are opposite conclusions for feature selection. Applied at read time (the `SD19` shape), so corpora frozen before the rule are covered without a migration |
+| SD29 | A **fourth** connect-time PRAGMA, `secure_delete=ON` (§4.4, §18.7) | §18 gave an append-only system one destructive verb, and `mismatch.evidence_span` is verbatim narrative. SQLite's `DELETE` moves the page to the freelist without clearing it, so *discarded* meant *unreachable through SQL*, not *gone* — reproduced at 572 readable occurrences of a deleted span. Chosen over a `VACUUM` after each discard, which is a second thing to remember, means nothing in WAL mode until a checkpoint, and cannot run inside the transaction the discard holds. The default is a compile-time property of the bundled SQLite and reads back `0` here, so it is set rather than assumed |
+| SD30 | **`Settings.exports_dir` is removed; no export is ever written to disk** (§7, §10) | It was documented as "where CSV exports are written" and read by nothing but `scripts/reset_data.py` — so `just reset` cleared an empty directory while the exports that matter sat in the analyst's Downloads folder. Building it out was the other option and is worse: a server-side copy does not *replace* the downloaded one, it adds a second copy at rest, of the artefact `B2` says nothing governs. All six exports stay in memory, and where the copies actually are is a sentence in `data-handling.md`, not a directory |
 
 **Note on the design's fixture column names.** `UnfallTypAusw`, `WitterungAusw`,
 `LichtverhaeltnisAusw` and `UnfallDatumFeld` do not exist in the delivery; the real
@@ -2107,3 +2112,35 @@ copy to drift.
   half this feature exists to *keep*.
 - **Corpus discard.** It already exists, with its 409-when-cited guard and its
   `LOCKED · N eval` pill (§6.3, J3). Unchanged.
+
+### 18.7 What a discard erases
+
+§18.1 says a discard removes whole objects. This says what *removed* means,
+because the two are not the same thing and the difference is the whole of the
+risk.
+
+**In the database: the bytes, not just the rows.** `secure_delete=ON` (§4.4,
+`SD29`) zeroes a freed page as it is freed. Without it, a discarded run's
+`mismatch.evidence_span` — verbatim narrative, mandatory by design — stays
+readable in the SQLite file until an unrelated write happens to reuse that
+page. Asserted through the real service against the real file in
+`tests/backend/services/lifecycle/test_discard_erasure.py`, which searches the
+database **and its WAL** for a span it planted, with a positive control before
+the discard and a control showing the bytes survive with the pragma off.
+
+**On the filesystem: an upload's bytes, and nothing else.** A host-path
+delivery's files are the analyst's own and are never touched (§18.2); the
+empty `{data_dir}/deliveries/{id}/` directory is left behind; `just reset`
+removes the tree.
+
+**Outside the machine: nothing, and the dialog says so.** Export-before-discard
+(`SD23`) is the trace a discard leaves, and it is a CSV carrying `evidence_span`
+into a Downloads folder that no RA2 verb reaches. `EXPORT_LEAVES_RA2` is
+rendered beside the Export button for that reason and is asserted like every
+other piece of load-bearing copy. What happens to that file afterwards is
+`data-handling.md` §3, and it is a rule about people, not a predicate.
+
+**What none of this reaches.** The blocks the filesystem freed, and every
+earlier copy of the database. Destruction at that level is the disk, not the
+application — which is why full-disk encryption is a deployment condition and
+not a nice-to-have.

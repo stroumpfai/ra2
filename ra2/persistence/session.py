@@ -1,8 +1,8 @@
 # FROZEN — see CONTRACTS.md
 """Async engine, the connect-time PRAGMAs, and the session factory (§4.4).
 
-    SQLite, WAL, `foreign_keys=ON`, `busy_timeout=5000`, set as connect-time
-    PRAGMAs in `session.py` — **nowhere else**.
+    SQLite, WAL, `foreign_keys=ON`, `busy_timeout=5000`, `secure_delete=ON`,
+    set as connect-time PRAGMAs in `session.py` — **nowhere else**.
 
 They are connect-time because SQLAlchemy pools connections and `foreign_keys`
 is per-connection: setting it once at startup silently leaves later connections
@@ -55,20 +55,30 @@ _SQLITE_CONNECTION_TYPES: Final = (SQLite3Connection, AsyncAdapt_aiosqlite_conne
 
 
 def _apply_pragmas(dbapi_connection: Any, _record: Any) -> None:
-    """The three connect-time PRAGMAs, on **every** pooled connection.
+    """The four connect-time PRAGMAs, on **every** pooled connection.
 
     - `journal_mode=WAL` — concurrent readers during a long freeze.
     - `foreign_keys=ON` — SQLite disables FK enforcement by default, so the
       orphan-FK checks would pass vacuously without this.
     - `busy_timeout` — wait rather than raise "database is locked".
+    - `secure_delete=ON` — SQLite frees a deleted row's page onto the freelist
+      **with its bytes intact**, so a discarded run's `mismatch.evidence_span`
+      (verbatim narrative, §18) stays readable in the file until some later
+      write happens to reuse that page. This zeroes it at delete time. It is
+      a connect-time pragma and not a `VACUUM` after each discard because a
+      `VACUUM` is a second thing to remember, means nothing in WAL mode until
+      a checkpoint, and cannot run inside the transaction a discard holds.
+      The default is a **compile-time** property of whatever SQLite the
+      interpreter bundles and reads back `0` on this one, so it is set rather
+      than assumed (risk-assesment.md B3 §8.6).
 
     The isinstance check originally only matched `sqlite3.Connection`. Every
     real connection this app's async engine creates is actually an
     `AsyncAdapt_aiosqlite_connection`, which is not a subclass of
     `sqlite3.Connection` — so the check returned early on **every** real
-    connection, and none of the three pragmas were ever applied. Caught at the
-    M2 review gate (contracts/amendments/feat-m2-persistence.md) via a
-    real-file-database test showing `foreign_keys` reading back `0`.
+    connection, and none of the pragmas (three, at the time) were ever applied.
+    Caught at the M2 review gate (contracts/amendments/feat-m2-persistence.md)
+    via a real-file-database test showing `foreign_keys` reading back `0`.
     """
     if not isinstance(dbapi_connection, _SQLITE_CONNECTION_TYPES):  # pragma: no cover
         return
@@ -77,6 +87,7 @@ def _apply_pragmas(dbapi_connection: Any, _record: Any) -> None:
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+        cursor.execute("PRAGMA secure_delete=ON")
     finally:
         cursor.close()
 

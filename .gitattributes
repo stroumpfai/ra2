@@ -1,0 +1,28 @@
+# Byte-exactness is a project rule, not a preference.
+#
+# `CLAUDE.md`: fixtures must contain the real hazards — mixed encodings, a
+# stray `|`, an embedded newline, French already lossy — synthesised
+# byte-exactly and committed. `mvp-spec.md` §4.2 and `sw-design.md` §4.2 then
+# require the parser to be judged against those exact bytes, and four tests
+# compare committed files with generator output or a golden report byte for
+# byte.
+#
+# A line-ending conversion breaks all of that, and it breaks it *per machine*:
+# with `core.autocrlf=true` — Git for Windows' installer default — every file
+# stored with LF is checked out with CRLF, and the byte-exact comparisons fail
+# on Windows and pass everywhere else. That is the worst possible shape for a
+# test: green on CI, red on the target platform, and nothing in the repository
+# explaining why.
+#
+# So: no conversion, in either direction, for anything.
+#
+# This is **not** the usual `* text=auto eol=lf`. That one normalises on
+# commit, which would rewrite the delivery hazards — twenty fixtures are
+# stored *with* CRLF on purpose, because a real delivery uses CRLF and
+# `FindingCode.DOUBLED_CRLF` exists to describe what some Astrana exports do
+# with it. Under `-text` each file is checked out exactly as it was committed:
+# LF where LF was committed, CRLF where CRLF was, bytes where bytes were.
+* -text
+
+# Fonts are vendored (N1, SD3) and are never text.
+*.woff2 binary

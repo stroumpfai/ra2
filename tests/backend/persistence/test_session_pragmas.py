@@ -40,6 +40,22 @@ async def test_busy_timeout_is_set(migrated_engine: AsyncEngine) -> None:
     assert value == BUSY_TIMEOUT_MS
 
 
+async def test_secure_delete_pragma_is_on(migrated_engine: AsyncEngine) -> None:
+    """The fourth pragma (sw-design.md §4.4, `SD29`). Its default is a
+    compile-time property of the bundled SQLite — `0` on this build — so
+    reading it back is the only way to know it was set rather than inherited.
+
+    What it is *for* is asserted in
+    `tests/backend/services/lifecycle/test_discard_erasure.py`: this test
+    would still pass if the pragma were set on a connection nothing deletes
+    through.
+    """
+    async with migrated_engine.connect() as conn:
+        result = await conn.exec_driver_sql("PRAGMA secure_delete")
+        (value,) = result.one()
+    assert value == 1
+
+
 async def test_foreign_keys_pragma_is_on(migrated_engine: AsyncEngine) -> None:
     async with migrated_engine.connect() as conn:
         result = await conn.exec_driver_sql("PRAGMA foreign_keys")

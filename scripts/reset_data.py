@@ -62,6 +62,12 @@ def targets(settings: Settings) -> list[Path]:
     The SQLite sidecars are named explicitly rather than globbed: WAL mode
     means `-wal` and `-shm` hold committed data, and leaving them beside a
     deleted database is how a "wiped" directory comes back with rows in it.
+
+    **There is no `exports/` target**, because the app writes no export to
+    disk: all six are streamed to the browser and land in Downloads, where no
+    RA2 verb reaches them. A reset that cleared an empty directory would read
+    as though it had (risk-assesment.md B3 §8.6, `SD30`); `data-handling.md`
+    §4 is where the analyst is told to go and delete them by hand.
     """
     database = settings.database_path
     return [
@@ -70,7 +76,6 @@ def targets(settings: Settings) -> list[Path]:
         database.with_name(database.name + "-shm"),
         settings.deliveries_dir,
         settings.codelists_dir,
-        settings.exports_dir,
     ]
 
 

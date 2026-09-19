@@ -29,6 +29,7 @@ from ra2.ui.components.primitives import dialog_card
 __all__ = [
     "DISCARD_IRREVERSIBLE",
     "DISCARD_KEEPS",
+    "EXPORT_LEAVES_RA2",
     "EXPORT_PROMPT",
     "discard_dialog",
     "loss_line",
@@ -50,6 +51,20 @@ DISCARD_KEEPS = "The corpus, the feature set and the prompt versions are kept."
 
 #: Why the Export button is there at all.
 EXPORT_PROMPT = "Export first if you want to keep the numbers — nothing else records them."
+
+#: And what the export **costs**, said at the moment it is offered.
+#:
+#: The mismatch file carries `evidence_span` — verbatim narrative — and lands
+#: in the analyst's Downloads folder, outside `RA2_DATA_DIR`, outside
+#: `just reset`, and outside every rule this application enforces. The one
+#: destructive verb in the product is also the one place it invites a person
+#: to make a copy of the most sensitive artefact it produces, and saying so
+#: costs a string (risk-assesment.md B2, B3 §8.6; the pattern `D6` asks for on
+#: Results — load-bearing copy, asserted in a test).
+EXPORT_LEAVES_RA2 = (
+    "The file carries verbatim narrative and leaves RA2's control — "
+    "nothing the app deletes can reach it again."
+)
 
 
 def loss_line(preview: DiscardPreviewView) -> str:
@@ -153,6 +168,9 @@ def discard_dialog(
             ui.label(EXPORT_PROMPT).classes("ink2").props(
                 'data-testid="discard-export-prompt"'
             ).mark("discard-export-prompt").style("font-size:12px;")
+            ui.label(EXPORT_LEAVES_RA2).classes("ink2").props(
+                'data-testid="discard-export-warning"'
+            ).mark("discard-export-warning").style("font-size:12px;")
 
         ui.label(DISCARD_KEEPS).classes("ink2").props('data-testid="discard-keeps"').mark(
             "discard-keeps"

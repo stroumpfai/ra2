@@ -39,7 +39,11 @@ from ra2.persistence.models import Evaluation
 from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
 from ra2.persistence.session import create_engine
 from ra2.services.scoring_service import ScoringService
-from ra2.ui.components.discard_dialog import DISCARD_IRREVERSIBLE, DISCARD_KEEPS
+from ra2.ui.components.discard_dialog import (
+    DISCARD_IRREVERSIBLE,
+    DISCARD_KEEPS,
+    EXPORT_LEAVES_RA2,
+)
 
 pytestmark = pytest.mark.e2e
 
@@ -131,8 +135,10 @@ def test_discarding_a_run_removes_its_row_and_leaves_the_rest(
     expect(page.locator('[data-testid="discard-loss"]')).to_contain_text("scores")
     expect(page.locator('[data-testid="discard-keeps"]')).to_have_text(DISCARD_KEEPS)
     expect(page.locator('[data-testid="discard-irreversible"]')).to_have_text(DISCARD_IRREVERSIBLE)
-    # Something to export, so both buttons are offered (§18.5).
+    # Something to export, so both buttons are offered (§18.5) — and the
+    # sentence saying what leaving with it costs (§18.7).
     expect(page.locator('[data-testid="discard-export"]')).to_be_visible()
+    expect(page.locator('[data-testid="discard-export-warning"]')).to_have_text(EXPORT_LEAVES_RA2)
 
     page.locator('[data-testid="discard-confirm"]').click()
 

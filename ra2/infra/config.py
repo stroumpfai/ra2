@@ -27,7 +27,11 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    #: N7 — the DB, uploads and exports all live under one configurable dir.
+    #: N7 — the database, uploads and codelists all live under one
+    #: configurable dir. **Exports do not**: every one of the six is built in
+    #: memory and streamed to the browser, so it exists once, in the
+    #: analyst's Downloads folder, and never as a second copy at rest here
+    #: (risk-assesment.md B3 §8.6, `SD30`).
     data_dir: Path = Path("./var")
 
     #: Defaults to `{data_dir}/ra2.sqlite`; see `_default_db_path` below.
@@ -100,11 +104,6 @@ class Settings(BaseSettings):
     def deliveries_dir(self) -> Path:
         """Where `UploadedFileStore` streams uploads (sw-design.md §6.1)."""
         return self.data_dir / "deliveries"
-
-    @property
-    def exports_dir(self) -> Path:
-        """Where CSV exports are written."""
-        return self.data_dir / "exports"
 
     @property
     def codelists_dir(self) -> Path:

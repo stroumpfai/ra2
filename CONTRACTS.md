@@ -46,7 +46,7 @@ and rebases the branches that have not merged yet.
 | `ra2/infra/tasks.py` | `TaskStatus TaskProgress ProgressReporter TaskWork`, the `TaskRunner` protocol |
 | `ra2/infra/filestore.py` | `StoredFile`, the `FileStore` protocol, `FileStoreError` / `ReadOnlyFileStoreError` |
 | `ra2/persistence/models.py` | **the whole phase-1 schema** — mvp-spec.md §5 tables in scope plus SD1, SD2, SD4 |
-| `ra2/persistence/session.py` | async engine, the three connect-time PRAGMAs, session factory, `session_scope` |
+| `ra2/persistence/session.py` | async engine, the **four** connect-time PRAGMAs (`secure_delete=ON` added by `fix-b3-deletion-path`), session factory, `session_scope` |
 | `ra2/persistence/migrations/env.py` | async Alembic env reading `RA2_DB_PATH` through `Settings` |
 | `ra2/services/errors.py` | `ServiceError NotFoundError BlockingFindingsError CorpusLockedError DeliveryNotAnalysedError` |
 | `ra2/services/readmodels.py` | `SortDir Page[T] DeliveryFileView DeliveryView CorpusView CensusColumnView CensusSummary` |
@@ -415,6 +415,11 @@ and one §8 entry per finding closed. The register in §4 is left as written.
 | `ra2/api/schemas.py` | + `CensusColumnResponse.top_values_withheld`, so the distinction survives the wire. `tests/api/openapi_snapshot.json` regenerated — five lines, one optional boolean, additive | `fix-b1-census-value-samples` |
 | `ra2/services/export_service.py` | + `CLASSIFICATION_COMMENT`, written by `_write_csv` — the one place **all six** exports pass through, so the line is guaranteed rather than remembered. `_CENSUS_CSV_HEADER` gains `top_values_withheld` | `fix-b1-census-value-samples` |
 | `tests/test_m0_contract.py` | `test_claude_md_carries_the_do_not_list` counts the Do-NOT items **against `sw-design.md` §12** instead of against the literal `12`. Bumping the literal would have left the same trap: a magic number here is one that gets changed without anyone opening the other document, which is the drift the assertion exists to catch | `fix-c2-agent-data-access` |
+| `ra2/persistence/session.py` | + a **fourth** connect-time PRAGMA, `secure_delete=ON`. SQLite frees a deleted row's page with its bytes intact, so a discarded run's `mismatch.evidence_span` — verbatim narrative — stayed readable in the file. Chosen over the `VACUUM`-after-discard B3 asked for: a `VACUUM` is a second thing to remember, means nothing in WAL until a checkpoint, and cannot run inside the transaction the discard holds (`SD29`) | `fix-b3-deletion-path` |
+| `ra2/infra/config.py` | **− `Settings.exports_dir`.** Documented as "where CSV exports are written" and written by nothing: all six exports stream to the browser. `just reset` was clearing an empty directory while the copies that matter sat in Downloads — `Settings.host` from A4, the same shape (`SD30`) | `fix-b3-deletion-path` |
+| `ra2/ui/components/discard_dialog.py` | + `EXPORT_LEAVES_RA2`, beside `EXPORT_PROMPT`. `SD23` pays for the destructive verb with an export carrying `evidence_span`, so the one place the app says *this cannot be undone* is also the one place it offers to make a copy nothing here can delete. Asserted, like the other two sentences | `fix-b3-deletion-path` |
+| `scripts/reset_data.py` | − the `exports_dir` target, and a docstring saying why there is no longer one | `fix-b3-deletion-path` |
+| `tests/test_p3_contract.py` | `path.relative_to(REPO_ROOT).as_posix()` in the `openai` and `pynvml` seam gates, which compared against `ra2/infra/…` and so were **permanently red on Windows with the seam intact**. The idiom already existed in `test_gpu_probe.py` and `test_ollama_client.py` | `fix-windows-paths-and-eol` |
 | `ra2/infra/ollama_client.py` | **not frozen** — the transport half of the loopback rule (`SD27`). Listed here because it is the other finding closed in this slice | — |
 | `.gitignore` | **unchanged, deliberately.** Adding `Unfall.csv` would be the name-shaped fix again, and it would block the hazard fixtures, which carry the same names | — |
 | `pyproject.toml`, `.importlinter`, `tests/conftest.py` | **unchanged.** No dependency, no new contract, no new root fixture | — |
@@ -423,6 +428,8 @@ and one §8 entry per finding closed. The register in §4 is left as written.
 
 | File | Contents |
 |---|---|
+| `.gitattributes` | **`* -text`** — no line-ending conversion, in either direction. `CLAUDE.md` requires byte-exact fixtures and four tests compare committed bytes; with `core.autocrlf=true` and no attributes they fail on Windows and pass everywhere else. **Not** `text=auto eol=lf`, which would rewrite the twenty delivery hazards stored *with* CRLF on purpose (`fix-windows-paths-and-eol`) |
+| `data-handling.md` | **Outputs, retention, destruction, incident path, decommission condition** — recommendations 11, 14 and 20 of the review, and the page F1 says turns an accepted risk into a managed one. Every project decision in it is marked **DECISION REQUIRED** and left blank: the procedures are verifiable from the code and belong to an implementing agent, the retention period and the named owner are not (`fix-b3-deletion-path`) |
 | `.claude/settings.json` | The Do-NOT #13 deny rules — `Read(./data/**)`, `Read(./var/**)`, `Bash(sqlite3 *)`, and the matching `sandbox.filesystem.denyRead`. **Committed, not ignored**: a control in an ignored directory protects the one machine it was written on (`fix-c2-agent-data-access`) |
 
 ### Not frozen, and changed
@@ -436,8 +443,9 @@ and one §8 entry per finding closed. The register in §4 is left as written.
 | `tests/backend/scripts/test_check_no_real_data.py` | The guard's tests. Built by asking `generate_hazards` for a **genuine** delivery file and putting delivered-entropy keys in it — a guard tested against the author's idea of a delivery is a guard tested against nothing. No real value appears |
 | `tests/backend/infra/test_ollama_client.py` | *The environment cannot move the socket* — eleven tests, with a positive control |
 | `mvp-spec.md` | §6 — value samples are shown and exported only for coded columns, every aggregate survives, and every CSV opens with a classification line. A *what* change, so it lands here first (CLAUDE.md) |
-| `sw-design.md` | `SD27`, `SD28` and §7's sample-rule section; §15.5's transport paragraph; **§12 gains the thirteenth invariant** and the paragraph on why it is the only one addressed to people rather than to code |
-| `README.md` | The loopback rule now states both halves |
+| `sw-design.md` | `SD27`, `SD28` and §7's sample-rule section; §15.5's transport paragraph; **§12 gains the thirteenth invariant** and the paragraph on why it is the only one addressed to people rather than to code. Then `SD29`, `SD30`, §4.4's fourth pragma, §10's `RA2_DATA_DIR` gloss, and **§18.7 — *What a discard erases***, the section §18 was missing: §18.1 said *whole objects* and nothing said what *removed* meant (`fix-b3-deletion-path`) |
+| `README.md` | The loopback rule now states both halves. Then: exports do **not** live under the data directory (two claims corrected), and the documentation map and *Real data never enters the repository* point at `data-handling.md` (`fix-b3-deletion-path`) |
+| `tests/backend/services/lifecycle/test_discard_erasure.py` *(new)* | After `discard_run`, a planted evidence span is absent from the database **and its WAL** — through the real service, against the real temp-file database. A positive control before the discard, and a control with `secure_delete` off showing the bytes survive without the pragma, so neither assertion can pass vacuously (`fix-b3-deletion-path`) |
 | `risk-assesment.md` | The `Status` column, and §8 |
 
 ---

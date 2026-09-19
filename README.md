@@ -65,7 +65,7 @@ Import → Census → Codelists → Features → Prompts → Evaluation → Resu
 | **Python** | 3.14 — **provisioned by `uv`**, so your system Python does not matter. |
 | **`uv`** | The only thing you install by hand. https://docs.astral.sh/uv/ |
 | **`just`** | The command surface. Every command below is a `just` recipe. https://github.com/casey/just |
-| **Disk** | The database, uploaded deliveries and CSV exports live under one directory (`./var` by default). |
+| **Disk** | The database, uploaded deliveries and imported codelists live under one directory (`./var` by default). CSV exports do not: they are streamed to the browser and land wherever it saves downloads. |
 | **GPU** | Only for actually running models. Import, Census, Codelists, Features and Prompts need no GPU and no LLM. |
 
 You do **not** need Docker, a database server, Redis, or a network connection
@@ -270,6 +270,12 @@ gitignored, and a pre-commit hook (`scripts/check_no_real_data.py`) blocks
 delivery-shaped files anywhere in the tree. Test fixtures synthesise the real
 hazards byte-exactly instead.
 
+Two rules point outward from here rather than inward, and both are in
+[`data-handling.md`](data-handling.md): what may leave the machine, and how the
+data is destroyed when the PoC ends. A discard inside the app erases the bytes
+as well as the rows (`sw-design.md` §18.7); an export that already left does
+not come back.
+
 ---
 
 ## Configuration
@@ -279,7 +285,7 @@ Every setting is an environment variable prefixed `RA2_`, readable from a
 
 | Variable | Default | What it does |
 |---|---|---|
-| `RA2_DATA_DIR` | `./var` | The database, uploads and exports all live here. |
+| `RA2_DATA_DIR` | `./var` | The database, uploads and codelists live here. **Exports do not** — they go to the browser, and `just reset` cannot reach them. |
 | `RA2_DB_PATH` | `{data_dir}/ra2.sqlite` | The SQLite file. |
 | `RA2_HOST` / `RA2_PORT` | `127.0.0.1` / `8080` | Where the app listens. Loopback by default. |
 | `RA2_LLM_BASE_URL` | `http://127.0.0.1:11434/v1` | The LLM endpoint. **Must be loopback.** |
@@ -404,6 +410,15 @@ all-empty column, and French that is already lossy. Real data is gitignored and
 must never reach a test, so the hazards are synthesised byte-exactly and
 committed. A clean fixture proves nothing about this input.
 
+**Byte-exactly is meant literally, and `.gitattributes` is what keeps it
+true.** `* -text` disables line-ending conversion in both directions. Without
+it, Git for Windows' default (`core.autocrlf=true`) checks every LF file out
+as CRLF and the byte-exact comparisons fail on Windows while passing
+everywhere else. Do not replace it with the usual `* text=auto eol=lf`:
+twenty delivery fixtures are stored **with** CRLF on purpose, because a real
+delivery uses CRLF and `FindingCode.DOUBLED_CRLF` exists to describe what some
+Astrana exports do with it.
+
 ---
 
 ## Not built yet
@@ -439,6 +454,8 @@ question `sw-design.md` wins:
 | [`sw-design.md`](sw-design.md) | **How** it is built — architecture, seams, invariants. |
 | [`CLAUDE.md`](CLAUDE.md) | The Do-NOT list, the layer rule, the ownership rule. |
 | [`CONTRACTS.md`](CONTRACTS.md) | What is frozen, and every documented deviation with its reason. |
+| [`data-handling.md`](data-handling.md) | Outputs, retention, destruction and the incident path. **Decisions still open** are marked as such. |
+| [`risk-assesment.md`](risk-assesment.md) | External review of the use cases and the implementation, with a remediation log. |
 | `plan-phase-*.md` | Who built what, wave by wave. |
 | `design/*/README.md` | The UI handoff packages. Layout and copy are load-bearing. |
 

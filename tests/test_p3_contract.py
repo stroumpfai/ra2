@@ -225,7 +225,7 @@ def test_openai_is_imported_in_exactly_one_module():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 names = [node.module]
             if any(n == "openai" or n.startswith("openai.") for n in names):
-                offenders.append(str(path.relative_to(REPO_ROOT)))
+                offenders.append(path.relative_to(REPO_ROOT).as_posix())
     assert offenders in ([], ["ra2/infra/ollama_client.py"]), (
         f"openai must be imported only in ra2/infra/ollama_client.py; found {offenders}"
     )
@@ -244,7 +244,7 @@ def test_pynvml_is_imported_in_exactly_one_module():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 names = [node.module]
             if any(n == "pynvml" or n.startswith("pynvml.") for n in names):
-                offenders.append(str(path.relative_to(REPO_ROOT)))
+                offenders.append(path.relative_to(REPO_ROOT).as_posix())
     assert offenders in ([], ["ra2/infra/gpu.py"]), (
         f"pynvml must be imported only in ra2/infra/gpu.py; found {offenders}"
     )
@@ -267,7 +267,7 @@ def test_nothing_shells_out(app_factory):
     banned_calls = {"system", "popen", "spawn", "execv", "execvp"}
     offenders = []
     for path in sorted((REPO_ROOT / "ra2").rglob("*.py")):
-        relative = str(path.relative_to(REPO_ROOT))
+        relative = path.relative_to(REPO_ROOT).as_posix()
         tree = ast.parse(path.read_text(encoding="utf-8"))
         docstrings = {
             ast.get_docstring(n, clean=False)
