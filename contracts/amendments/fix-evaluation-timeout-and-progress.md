@@ -543,3 +543,79 @@ recipe makes for them.
 definition writing `*.py` in this tree, so for `dev-agent` the watcher's only
 reachable outcome is an agent killing the run it launched to look at — and
 then reporting the app's message, which cannot name the cause.
+
+## 13. `ra2/services/run_service.py` — `_reclaim` stops calling live runs dead
+
+*Not frozen.* Found while reading for item 12 and closed with it, because they
+produce the **same sentence** on the row and an analyst cannot tell them apart.
+
+```diff
+-        await self._start(run_id)
+         self._active.add(run_id)
+         try:
++            await self._start(run_id)
+             plan = await self._load_plan(run_id)
+```
+```diff
++        self._stopping: set[RunId] = set()
+...
+-        live = self._active
++        live = self._active | self._stopping
+```
+
+**The shape of both.** `_reclaim` runs on every read path — `progress`, `get`,
+`list_runs` — and its whole test is *the row says `running` and this process
+does not claim it*. The Evaluation view's poll reaches those paths twice a tick
+for the length of a run. So **any instant in which the row says `running` and
+no claim is held is an instant a poll lands in**, and what it writes there is
+not a hedge: it is `_ERROR_INTERRUPTED_BY_RESTART`, a specific claim about a
+process that is fine.
+
+**Gap one: the claim was taken after the status write.** `execute_run` called
+`_start` — which commits `queued -> running` — and claimed the run on the next
+line. Between the commit and that line the row was `running` and unclaimed. The
+worker then went on extracting into a row marked `interrupted`, and the runs
+table offered the analyst a **Resume** that would have put a second worker on
+the same run. Claiming first cannot be wrong the other way: a run in `_active`
+but still `queued` is not a row `_reclaim` looks at. `_start` moves inside the
+`try` so a claim cannot leak if it raises.
+
+**Gap two: the worker lets go before the stop is recorded.** `Task.cancel()`
+only schedules, so the worker unwinds through `execute_run`'s `finally` —
+dropping its own `_active` claim — while `cancel` is still awaiting
+`_finish_cancelled`, and the row says `running` throughout. A read there
+reclaims it; `_finish_cancelled` then re-reads the status, finds `interrupted`,
+and **correctly** declines to overwrite an outcome it did not produce (item 10
+put that re-read there on purpose). Net result: the analyst pressed Stop and
+the run says the process died.
+
+`_cancel_requested` could not double as the claim — `_execute_cancellably`
+discards it the moment it sees the `CancelledError`, which is *inside* the gap.
+`_stopping` is `cancel`'s own span, `try`/`finally`, and nothing else touches
+it.
+
+**Neither of these was what item 12 was diagnosing**, and that is the point of
+recording them together. The reported run really was killed by the reloader.
+These two produce the identical row from a process that never died, so with
+them open there was no way to read that message as evidence of anything.
+
+**`tests/backend/services/run/test_reclaim_races.py`.** Both gaps are a few
+microseconds wide, between one `await` and the next, so the tests do not wait
+for the interleaving — they **construct** it. `make_run_service` already takes
+a `session_factory=` override; a delegating session fires a callback after a
+commit (gap one: the instant the `running` write becomes visible) or as a
+transaction opens (gap two: where `_finish_cancelled` begins, with the hook
+yielding first so the cancelled worker finishes unwinding). Checked against the
+old code, where both fail on
+`'interrupted: the process died while this run was executing' not in [...]`.
+
+**What this does not fix, and the proposal that would.**
+`RunRepository.list_running`'s docstring says a caller finds these runs "on the
+next startup" — and it has **no caller at all**; reclaiming on every read is
+the improvisation, and it is the entire race surface. Reclaiming once, at
+process start, needs no `_active`, no `_stopping` and no claim discipline: at
+startup this process executes nothing, so every `running` row is stale
+unconditionally. It would also close the split item 8 had to work around, since
+the rows would be reconciled before either service reads them. It needs a
+startup hook in **frozen `ra2/main.py`**, which has none today, so it is
+proposed rather than taken here.

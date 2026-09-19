@@ -44,6 +44,7 @@ H4's adapter draws the line and this module keeps it (sw-design.md §15.3):
 
 import asyncio
 import json
+import logging
 import platform
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -99,6 +100,15 @@ from ra2.services.protocols import PromptResolver
 from ra2.services.readmodels import Page, RunProgressView, RunView, SortDir
 
 __all__ = ["RunService", "run_ordinals"]
+
+#: A run is the one thing this app does that takes longer than a screen can
+#: hold attention — minutes per record, tens of minutes end to end — and until
+#: `infra/logging.py` it reported nothing at all while it worked. Every line
+#: below is bounded by that module's rule: **ids, counts, statuses, model tags
+#: and durations, never anything that came out of a delivery.** The resolved
+#: prompt and `response.raw_output_text` are in scope at several of these call
+#: sites; neither is ever an argument to one.
+_log = logging.getLogger(__name__)
 
 #: `sort_key` -> the `RunView` attribute it sorts on. An unknown key falls
 #: back to `started_at`, the runs table's own default (sw-design.md §8.1.4).
@@ -242,6 +252,13 @@ class RunService:
         #: The runs **this process** is executing right now. A `running` row
         #: that is not in here belongs to a process that died under it, which
         #: is the whole of how a restart is detected (see `_reclaim`).
+        #:
+        #: Claimed **before** the `running` status is written and released only
+        #: after the final one is, so the two are never observable in the order
+        #: that makes a live run look abandoned. `_reclaim` runs on every read
+        #: path and the Evaluation view polls those paths throughout a run, so
+        #: any moment where the row says `running` and this set does not say
+        #: "mine" is a moment a poll can land in.
         self._active: set[RunId] = set()
         #: The `asyncio.Task` executing each run, so `cancel` can stop **one**
         #: of them. A job covers every run of an evaluation and executes them
@@ -253,6 +270,24 @@ class RunService:
         #: arrive as `CancelledError` at the same await — and it lets a run
         #: still queued behind another be skipped when the worker reaches it.
         self._cancel_requested: set[RunId] = set()
+        #: Runs whose **final status this process is in the middle of
+        #: writing** — `cancel`'s span, from before it cancels the task to
+        #: after `_finish_cancelled` has committed.
+        #:
+        #: Separate from `_active` because the two overlap and neither can
+        #: stand in for the other: `Task.cancel()` only schedules the
+        #: cancellation, so the worker unwinds through `execute_run`'s
+        #: `finally` — releasing its own `_active` claim — during `cancel`'s
+        #: await, while the row still says `running`. A poll landing in
+        #: exactly that gap would relabel the run "the process died while this
+        #: run was executing", and `_finish_cancelled` re-reads the status
+        #: before writing, so it would then decline to correct it: the stop an
+        #: analyst asked for, recorded as a crash that never happened.
+        #:
+        #: Separate from `_cancel_requested` because that set is consumed by
+        #: whoever acts on the intent — `_execute_cancellably` discards it the
+        #: moment it sees the `CancelledError` — which is inside the same gap.
+        self._stopping: set[RunId] = set()
 
     # -----------------------------------------------------------------------
     # Submitting work
@@ -403,10 +438,23 @@ class RunService:
             raise RunNotActiveError(str(run_id), status.value)
 
         self._cancel_requested.add(run_id)
-        task = self._tasks.get(run_id)
-        if task is not None:
-            task.cancel()
-        await self._finish_cancelled(run_id)
+        # Held across the whole stop, because the worker releases its own
+        # `_active` claim before this method has written anything: it unwinds
+        # through `execute_run`'s `finally` during the await below, leaving the
+        # row saying `running` with nobody claiming it. A read landing there
+        # reclaims it as a process death, and `_finish_cancelled` re-reads the
+        # status before writing — so it would find `interrupted` and correctly
+        # decline to overwrite an outcome it did not produce, leaving a stop an
+        # analyst asked for recorded as a crash. `_stopping` is what says this
+        # process is still the one answering for the row.
+        self._stopping.add(run_id)
+        try:
+            task = self._tasks.get(run_id)
+            if task is not None:
+                task.cancel()
+            await self._finish_cancelled(run_id)
+        finally:
+            self._stopping.discard(run_id)
 
     async def _finish_cancelled(self, run_id: RunId) -> None:
         """Record the stop — **unless the run finished on its own first**.
@@ -421,7 +469,16 @@ class RunService:
             repo = RunRepository(session)
             run = await repo.get(run_id)
             if run is None or RunStatus(run.status) not in _CANCELLABLE_STATUSES:
+                # The stop lost a race with the run's own ending. Worth a line:
+                # the analyst pressed Stop and the row will not say so, and
+                # without this the only account of that is silence.
+                _log.info(
+                    "run %s: stop ignored, the run had already reached %s",
+                    run_id,
+                    "no row" if run is None else RunStatus(run.status).value,
+                )
                 return
+            _log.info("run %s: stopped by request", run_id)
             run.error = _ERROR_CANCELLED
             # No `finished_at`: `interrupted` is the one state a human moves
             # out of, and a stopped run has not finished anything (`_finish`).
@@ -446,9 +503,20 @@ class RunService:
 
         :raises NotFoundError: no such run.
         """
-        await self._start(run_id)
+        # **Claimed before `_start`, not after.** `_start` commits
+        # `queued -> running`, and `_reclaim` — which every read path runs, and
+        # which the Evaluation view's poll reaches twice a tick throughout a
+        # run — relabels any `running` row this set does not claim as "the
+        # process died while this run was executing". Claiming afterwards left
+        # a window between the commit and this line in which that sentence was
+        # written about a run that was about to extract its first record, and
+        # the worker went on extracting into a row marked `interrupted`,
+        # offering an analyst a **Resume** that would have put a second worker
+        # on it. Claiming first cannot be wrong in the other direction: a run
+        # in this set but still `queued` is not a row `_reclaim` looks at.
         self._active.add(run_id)
         try:
+            await self._start(run_id)
             plan = await self._load_plan(run_id)
             await self._extract_all(plan, reporter)
         except Exception as exc:
@@ -475,6 +543,19 @@ class RunService:
         done = await self._count_done(plan.run_id)
         total = done + len(pending)
         reporter.report(done, total, plan.model_name)
+        # Ids, counts, a model tag and a bound. Nothing out of the delivery —
+        # not the narrative, not `unfall_uid`, not the resolved prompt
+        # (`infra/logging.py` states the rule, and a test drives a real run at
+        # it). The bound is here because it is the number that decides how long
+        # the next line can take to arrive.
+        _log.info(
+            "run %s: %d pending, %d already done, model=%s, timeout=%ds",
+            plan.run_id,
+            len(pending),
+            done,
+            plan.model_name,
+            self._settings.llm_timeout_s,
+        )
 
         consecutive_endpoint_errors = 0
         last_endpoint_error: str | None = None
@@ -488,8 +569,12 @@ class RunService:
         endpoint_failures = 0
         endpoint_attempts: int | None = 0
 
-        for record_id in pending:
+        for index, record_id in enumerate(pending, start=1):
             prompt_text = await self._resolve_prompt(plan, record_id)
+            # **Before** the call, not only after it. On the reporting host one
+            # record is over two minutes, and a line that only ever appears on
+            # the way out cannot tell "waiting on the model" from "wedged".
+            _log.info("run %s: record %d/%d (%s) → %s", plan.run_id, index, len(pending), record_id, plan.model_name)
             try:
                 response = await self._llm_client.extract(
                     prompt_text,
@@ -505,6 +590,19 @@ class RunService:
                 last_endpoint_error = str(exc)
                 consecutive_endpoint_errors += 1
                 endpoint_failures += 1
+                # `exc.status` is the `EndpointStatus` code, not prose: the
+                # distinction between "nothing is listening" and "answered and
+                # did not finish in time" is the whole of item 1's reasoning,
+                # and it is the first thing a reader of this log wants.
+                _log.warning(
+                    "run %s: record %d/%d (%s) failed at the endpoint (%s) after %s attempt(s)",
+                    plan.run_id,
+                    index,
+                    len(pending),
+                    record_id,
+                    exc.status.value,
+                    "an unknown number of" if exc.attempts is None else exc.attempts,
+                )
                 # `None` the moment one failure cannot say what it cost, and
                 # `None` from then on: a total that silently omits an unknown
                 # is worse than no total, because it reads as complete.
@@ -523,6 +621,20 @@ class RunService:
             await self._commit_record(plan, record_id, response)
             done = await self._count_done(plan.run_id)
             reporter.report(done, total, plan.model_name)
+            # `parse_ok` is a **datum**, not an error (§15.3), so this is INFO
+            # whichever way it went. What the model actually said is the
+            # `extraction` row's business and never this one's.
+            _log.info(
+                "run %s: record %d/%d answered in %s ms, parse_ok=%s, retries=%d (%d/%d done)",
+                plan.run_id,
+                index,
+                len(pending),
+                response.latency_ms,
+                response.parse_ok,
+                response.retry_count,
+                done,
+                total,
+            )
 
         remaining = await self._pending(plan.run_id, plan.corpus_id, plan.limit)
         if remaining:
@@ -672,6 +784,13 @@ class RunService:
             await repo.set_status(
                 run_id, status, finished_at=self._clock.now() if terminal else None
             )
+        # `error` is this module's own sentence about the run — a count of
+        # records and an endpoint status — and never the model's words, so it
+        # is safe to repeat here. It is also the one thing worth having in the
+        # terminal: the same text the "log" action shows, at the moment it was
+        # decided rather than whenever somebody thinks to look.
+        level = logging.INFO if status is RunStatus.DONE else logging.WARNING
+        _log.log(level, "run %s: %s%s", run_id, status.value, f" — {error}" if error else "")
 
     async def _reclaim(self, session: AsyncSession, runs: Sequence[Run]) -> None:
         """Relabel runs left `running` by a process that died under them.
@@ -681,20 +800,41 @@ class RunService:
         shows a run's state, and a run this process is not executing but the
         database still calls `running` is a run whose process is gone.
 
-        **Relabelled, never restarted** (§15 F8). `self._active` is what tells
-        the two apart: a run being executed right now, in this process, is in
-        it — a run from a previous process cannot be.
+        **Relabelled, never restarted** (§15 F8). Two sets tell the two apart,
+        and a run in **either** is one this process is still answering for:
+        `_active` is the worker's claim, held from before the `running` write
+        to after the final one; `_stopping` is `cancel`'s, which overlaps the
+        end of `_active` because the worker unwinds before the stop is
+        recorded. A run from a previous process can be in neither.
+
+        Both are read here rather than one, because this method runs on every
+        read path and the Evaluation view polls those paths twice a tick for
+        the whole length of a run. Any instant in which the row says `running`
+        and no set claims it is an instant a poll can land in — and what gets
+        written then is not a hedge, it is the sentence in
+        `_ERROR_INTERRUPTED_BY_RESTART`: a specific, false claim about a
+        process that is perfectly alive.
         """
+        live = self._active | self._stopping
         stale = [
             run
             for run in runs
-            if RunStatus(run.status) is RunStatus.RUNNING and RunId(run.id) not in self._active
+            if RunStatus(run.status) is RunStatus.RUNNING and RunId(run.id) not in live
         ]
         if not stale:
             return
         for run in stale:
             run.status = RunStatus.INTERRUPTED
             run.error = _ERROR_INTERRUPTED_BY_RESTART
+            # The loudest thing this service says, because it is a verdict on a
+            # process that is not here to answer — and because the two ways it
+            # can be reached look identical on the row. Either a process really
+            # died under this run (`just dev` with `--reload` used to do that
+            # on any edit anywhere in the tree), or the claim discipline broke
+            # and this is a live run being declared dead. A timestamp on this
+            # line is what tells those apart against the terminal's own
+            # "Reloading" line.
+            _log.warning("run %s: found running with nobody executing it — marking interrupted", RunId(run.id))
         await session.flush()
 
     # -----------------------------------------------------------------------
