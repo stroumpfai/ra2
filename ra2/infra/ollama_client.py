@@ -272,12 +272,43 @@ def _build_client(
 
 
 def _is_retryable(error: Exception) -> bool:
-    """A transport failure or a busy/temporary status. Never a 4xx."""
-    if isinstance(error, openai.APIConnectionError):  # APITimeoutError subclasses this
+    """A transport failure or a busy/temporary status. Never a 4xx, and
+    **never a timeout**.
+
+    `APITimeoutError` subclasses `APIConnectionError`, so it is tested first
+    or it is never tested at all — the ordering `OllamaEndpointProber` already
+    depends on, for the same reason.
+
+    A timeout is not retried because the call it would repeat is
+    deterministic: `temperature` and `seed` are fixed, the prompt is
+    unchanged, so a generation that did not finish inside the bound will not
+    finish inside it the second time either. This is `run_service`'s own
+    argument for never retrying a parse failure, and it holds here for the
+    same reason. Retrying spends `max_retries` more intervals to reach the
+    conclusion already in hand, which on a slow model is the difference
+    between one bound and three.
+    """
+    if isinstance(error, openai.APITimeoutError):
+        return False
+    if isinstance(error, openai.APIConnectionError):
         return True
     if isinstance(error, openai.APIStatusError):
         return error.status_code in RETRYABLE_STATUS_CODES
     return False
+
+
+def _status_for(error: Exception) -> EndpointStatus:
+    """Which endpoint state a failure that has run out of attempts means.
+
+    `TIMED_OUT` says the endpoint accepted the call and did not finish it;
+    `UNREACHABLE` says nothing useful answered at all. Two different repairs —
+    one is "the model is slower than `RA2_LLM_TIMEOUT_S`", the other is "start
+    Ollama" — and a single value for both sends the analyst to the wrong one.
+    Ordered like `_is_retryable`, and for the same subclassing reason.
+    """
+    if isinstance(error, openai.APITimeoutError):
+        return EndpointStatus.TIMED_OUT
+    return EndpointStatus.UNREACHABLE
 
 
 def _response_format(schema: type[object]) -> openai.types.shared_params.ResponseFormatJSONSchema:
@@ -361,11 +392,16 @@ class OllamaLLMClient:
         `parse_ok=False` and `raw_output_text` verbatim — the caller records
         it and the run continues.
 
-        Raises `LlmEndpointError(base_url, EndpointStatus.UNREACHABLE)` when
-        the endpoint will not answer within the bound. That is the one
-        outcome that must *not* become a row: a record whose retries were
-        exhausted leaves the hole in the middle of a run that the resume query
-        exists to find (sw-design.md §15.3).
+        Raises `LlmEndpointError` when the endpoint will not answer within the
+        bound — `TIMED_OUT` if it accepted the call and did not finish it,
+        `UNREACHABLE` otherwise. That is the one outcome that must *not*
+        become a row: a record whose attempts were exhausted leaves the hole
+        in the middle of a run that the resume query exists to find
+        (sw-design.md §15.3).
+
+        A timeout exhausts its attempts **immediately**: see `_is_retryable`
+        for why repeating a fixed-seed call that already overran is spending
+        the bound to re-learn what is known.
         """
         response_format = _response_format(schema)
         started = time.perf_counter()
@@ -383,7 +419,13 @@ class OllamaLLMClient:
                 )
             except (openai.APIConnectionError, openai.APIStatusError) as exc:
                 if retries >= self._max_retries or not _is_retryable(exc):
-                    raise LlmEndpointError(self._base_url, EndpointStatus.UNREACHABLE) from exc
+                    # `retries + 1`: the bound counts *retries*, so the calls
+                    # actually made are one more. A non-retryable failure gives
+                    # up on the first, and reporting `max_retries + 1` for it
+                    # would overstate what it cost.
+                    raise LlmEndpointError(
+                        self._base_url, _status_for(exc), attempts=retries + 1
+                    ) from exc
                 retries += 1
                 continue
             break

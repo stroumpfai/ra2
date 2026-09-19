@@ -573,9 +573,18 @@ async def test_an_unreachable_endpoint_disables_launch_and_says_why_beside_the_l
 async def test_the_runs_table_renders_its_five_columns_and_three_row_states(
     seeded: Seeded,
 ) -> None:
-    """README §2, "Runs table": the five columns at their exact widths,
-    `dd.mm.yy - hh:mm:ss` timestamps, `—` for a queued run's records, the
-    `failed` row state with its muted "log" action, and 10-row pagination."""
+    """README §2, "Runs table": four columns at the design's exact widths and
+    Status at the width its contents need, `dd.mm.yy - hh:mm:ss` timestamps,
+    `—` for a queued run's records, the `failed` row state with its muted
+    "log" action, and 10-row pagination.
+
+    Status is 200px rather than the drawn 84 (`STATUS_COLUMN_PX` has the
+    reasoning): the cell holds a state word, a `DEV` chip and up to three
+    actions, `table-layout:fixed` does not clip, and three of those five are
+    buttons — so the 84px that was kept was being paid for in controls drawn
+    over the column beside them. The other four are clipped with `.td-clip`
+    instead, because all four hold text.
+    """
     user = seeded.user
     evaluation_id = seeded.draft.evaluation_id
     template_id = seeded.template.prompt_template_id
@@ -620,7 +629,14 @@ async def test_the_runs_table_renders_its_five_columns_and_three_row_states(
     assert "width:132px" in widths["model_tag"]
     assert "width:66px" in widths["records_done"]
     assert "width:152px" in widths["started_at"]
-    assert "width:84px" in widths["status"]
+    assert f"width:{evaluation_view.STATUS_COLUMN_PX}" in widths["status"]
+    # The four text columns clip rather than overflow. `table-layout:fixed`
+    # does not clip on its own, which is how a 36-character uuid ran through
+    # the Model column beside it. Counted over the body cells, because
+    # `.td-clip` is a cell class: four of the five columns, three rows.
+    body_cells = [e for e in user.find(kind=ui.element).elements if e.tag == "td"]
+    assert len(body_cells) == 5 * 3
+    assert sum(1 for cell in body_cells if "td-clip" in cell._classes) == 4 * 3
 
     assert _statuses(user) == {"done", "failed", "queued"}
     assert "04.09.26 - 08:12:04" in _all_text(user, "run-started")
@@ -636,9 +652,14 @@ async def test_the_runs_table_renders_its_five_columns_and_three_row_states(
     assert len(failed_rows) == 1
     assert len(_find(user, "run-log")) == 1
     assert "3 · 0 dev · 1 failed" in _all_text(user, "card-header")
-    # A run id is a real link to Results — a placeholder route this phase.
-    hrefs = {str(e._props.get("href", "")) for e in _find(user, "run-link")}
-    assert "/results?run=r-0412" in hrefs
+    # A run is named by its ordinal, not by its id: the design's fixtures use
+    # ids like `r-0403`, real ids are 36-character uuid7s, and the ordinal is
+    # what the discard dialog and the mismatch toolbar already call a run.
+    # The link still targets the id, and carries it as its title.
+    links = {_element_text(e): e for e in _find(user, "run-link")}
+    assert set(links) == {"run 1", "run 2", "run 3"}
+    assert str(links["run 1"]._props.get("href", "")) == "/results?run=r-0412"
+    assert str(links["run 1"]._props.get("title", "")) == "r-0412"
     # Paginated at 10 (README §2), not at the component kit's default ladder.
     (pagination,) = _find(user, "pagination")
     assert "1–3 of 3" in _element_text(pagination)
@@ -649,7 +670,16 @@ async def test_a_dev_sized_run_paints_the_row_and_carries_the_dev_marker(
     seeded: Seeded,
 ) -> None:
     """README §2: "dev-sized runs get `background:--warn-soft`", with `DEV` in
-    `--warn` — the third row state."""
+    `--warn` — the third row state.
+
+    The marker is a chip **beside** the status word rather than in place of
+    it. The design draws the replacement, which is sound where a dev run is
+    the exception; here `RA2_DEV_RECORD_MAX` is 50 and the development seed is
+    12 records, so every run an analyst makes while learning the product is
+    dev-sized, and the column rendered one constant string for `running`,
+    `done` and `interrupted` alike. The assertion below is what that costs:
+    the word and the marker are now two elements, and both are asserted.
+    """
     user = seeded.user
     evaluation_id = seeded.draft.evaluation_id
     await seeded.services.evaluation.update_draft(evaluation_id, size=EvaluationSize.DEV)
@@ -667,11 +697,14 @@ async def test_a_dev_sized_run_paints_the_row_and_carries_the_dev_marker(
     await user.should_see("Runs in this evaluation")
 
     (status,) = _find(user, "run-status")
-    # The drawn marker replaces the word; the run's real state stays readable.
     assert status._props["data-status"] == "done"
     assert status._props["data-dev"] == "true"
-    assert _own_text(status) == "DEV"
-    assert "warn" in status._classes
+    # The word says what the run did; the chip says the sample was dev-sized.
+    # Both, because either alone leaves a question the other answers.
+    assert _own_text(status) == "done"
+    (dev,) = _find(user, "run-dev")
+    assert _own_text(dev) == evaluation_view.DEV_MARKER
+    assert "warn" in dev._classes
     dev_rows = [
         e
         for e in user.find(kind=ui.element).elements
@@ -1095,3 +1128,295 @@ async def test_refresh_picks_up_a_model_that_appeared(
 
         assert len(_find(user, "model-row")) == len(DEFAULT_MODELS)
         assert "reachable" in _all_text(user, "endpoint-line")
+
+
+def test_every_endpoint_status_has_a_word() -> None:
+    """`ENDPOINT_WORDS` is read with `[]` on this view's load path, so a
+    status added without an entry is a `KeyError` on the screen and nowhere
+    else — the check `PROBE_WORDS` already gets in `test_components.py`, and
+    the one that would have caught `TIMED_OUT` arriving.
+    """
+    assert set(evaluation_view.ENDPOINT_WORDS) == set(EndpointStatus)
+
+
+async def test_an_interrupted_run_offers_the_reason_it_stopped_for(seeded: Seeded) -> None:
+    """Resume alone is not enough to act on.
+
+    "The endpoint did not finish in time" and "nothing is listening" produce
+    the same row, the same status word and the same Resume button, and only
+    the stored reason says which — so pressing Resume is a guess until it can
+    be read. The reason was written by `_finish` the whole time; `_run_view`
+    nulled it for anything but `FAILED` and the action was offered only to a
+    failed run, so two layers had to change for one sentence to arrive.
+    """
+    user = seeded.user
+    await _seed_run(
+        seeded.app,
+        run_id="r-0420",
+        evaluation_id=seeded.draft.evaluation_id,
+        template_id=seeded.template.prompt_template_id,
+        model_tag=FITS_A,
+        status=RunStatus.INTERRUPTED,
+        started_at=datetime(2026, 9, 4, 10, 1, 2, tzinfo=UTC),
+        error="llm endpoint http://127.0.0.1:11434/v1: timed_out",
+    )
+
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+
+    (log,) = _find(user, "run-log")
+    assert _element_text(log) == "log"
+    # Both, not either: the reason explains the row, Resume acts on it.
+    assert len(_find(user, "run-resume")) == 1
+
+
+async def test_a_run_that_finished_cleanly_offers_no_log(seeded: Seeded) -> None:
+    """The other half: the action is keyed on there being a reason, not on the
+    status, so a `done` run must not grow an affordance that opens an empty
+    dialog."""
+    user = seeded.user
+    await _seed_run(
+        seeded.app,
+        run_id="r-0421",
+        evaluation_id=seeded.draft.evaluation_id,
+        template_id=seeded.template.prompt_template_id,
+        model_tag=FITS_A,
+        status=RunStatus.DONE,
+        started_at=datetime(2026, 9, 4, 10, 4, 5, tzinfo=UTC),
+    )
+
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+
+    assert _find(user, "run-log") == []
+
+
+async def test_two_dev_runs_in_different_states_render_different_status_cells(
+    seeded: Seeded,
+) -> None:
+    """The assertion the runs table never had.
+
+    Every run off the development seed is dev-sized — `RA2_DEV_RECORD_MAX` is
+    50 and the seed is 12 records — and the drawn cell replaces the status
+    word with `DEV`, so a done run and an interrupted one rendered the same
+    string. The suite did not catch it because the two facts were both
+    present in `data-status` and `data-dev`, which is where a test looks and
+    an analyst cannot.
+    """
+    user = seeded.user
+    evaluation_id = seeded.draft.evaluation_id
+    await seeded.services.evaluation.update_draft(evaluation_id, size=EvaluationSize.DEV)
+    for run_id, status in (("r-0430", RunStatus.DONE), ("r-0431", RunStatus.INTERRUPTED)):
+        await _seed_run(
+            seeded.app,
+            run_id=run_id,
+            evaluation_id=evaluation_id,
+            template_id=seeded.template.prompt_template_id,
+            model_tag=FITS_A,
+            status=status,
+            started_at=datetime(2026, 9, 5, 9, 0, 0, tzinfo=UTC),
+        )
+
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+
+    words = sorted(_own_text(e) for e in _find(user, "run-status"))
+    assert words == ["done", "interrupted"]
+    # Both are still marked dev-sized: the word gained a state, it did not
+    # cost the marker (mvp-spec.md §9 — "smoke test, not a result").
+    assert len(_find(user, "run-dev")) == 2
+
+
+# --- the progress poll (plan-fix-evaluation-runs.md Stage 3) -------------------
+
+
+@pytest.fixture
+async def polling(
+    app_factory: Callable[..., FastAPI], migrated_db: Settings
+) -> AsyncIterator[tuple[Seeded, StaticModelCatalog]]:
+    """A launched evaluation with a **queued** run, and a handle on the
+    catalogue behind the endpoint.
+
+    Queued rather than running on purpose: `RunService._reclaim` relabels a
+    run this process is not executing, so a seeded `running` row becomes
+    `interrupted` on the first read and the view settles before it can tick.
+    `queued` is the honest shape of "launched, the worker has not reached it
+    yet" and it is what keeps `_settled` false.
+
+    The catalogue is handed in rather than defaulted because "never on a
+    timer" (plan-phase-3.md C3) is a claim about **how many times**
+    `reachable()` is called, and `StaticModelCatalog` counts.
+    """
+    catalog = StaticModelCatalog()
+    async for value in _mounted(app_factory, name="polling", model_catalog=catalog):
+        await _seed_launch(value.app, value.draft.evaluation_id)
+        await _seed_run(
+            value.app,
+            run_id="r-0440",
+            evaluation_id=value.draft.evaluation_id,
+            template_id=value.template.prompt_template_id,
+            model_tag=FITS_A,
+            status=RunStatus.QUEUED,
+            started_at=None,
+        )
+        yield value, catalog
+        # A queued run never settles, so a test that leaves it queued leaves
+        # the page polling. Settling it here lets the timer deactivate before
+        # the app is torn down: a tick in flight at teardown holds a session
+        # the engine's dispose never sees, and `filterwarnings = ["error"]`
+        # turns that into a failure in whichever test runs next.
+        async with value.app.state.session_factory() as session:
+            await session.execute(
+                update(Run).where(Run.id == "r-0440").values(status=RunStatus.DONE)
+            )
+            await session.commit()
+        await _poll_stops(value.user)
+
+
+def _timers(user: User) -> list[ui.timer]:
+    return [e for e in user.find(kind=ui.element).elements if isinstance(e, ui.timer)]
+
+
+async def _poll_stops(user: User) -> None:
+    """Wait until nothing is still polling.
+
+    Asserts the thing the poll promises — it deactivates itself once there is
+    nothing left to watch — and it is also what keeps these tests from
+    leaking: a tick in flight when the app is torn down holds a session the
+    engine's dispose never sees, and `filterwarnings = ["error"]` turns that
+    into a failure in whichever test runs next.
+    """
+    await _until(lambda: not any(timer.active for timer in _timers(user)))
+
+
+async def test_the_progress_poll_never_re_probes_the_endpoint(
+    polling: tuple[Seeded, StaticModelCatalog],
+) -> None:
+    """plan-phase-3.md C3, made into a gate.
+
+    `connection_status`' own docstring says reachability is re-checked "on
+    view load and when the settings dialog's refresh is pressed — **never on a
+    timer**". The poll called `reload()`, which calls `evaluation.get()`,
+    which calls `connection_status()` **and** `_model_choices()` — both of
+    which reach `/api/tags`. At a 0.2 s interval that was ten HTTP requests a
+    second aimed at the endpoint the worker was waiting on, plus a `pynvml`
+    probe five times a second, for the whole length of a run.
+
+    No test caught it at any layer. The service-level assertion counts calls
+    into a service that was being called legitimately; it is the *timer* that
+    was wrong, and nothing counted at this layer.
+
+    The run's status is changed underneath the page to prove the timer is
+    genuinely running: this cannot pass by never ticking.
+    """
+    seeded, catalog = polling
+    user = seeded.user
+
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+
+    # A view load *does* probe — that half of C3 is the permitted half.
+    after_load = (catalog.reachable_calls, catalog.models_calls)
+    assert after_load > (0, 0), "a view load re-checks reachability"
+
+    async with seeded.app.state.session_factory() as session:
+        await session.execute(update(Run).where(Run.id == "r-0440").values(status=RunStatus.DONE))
+        await session.commit()
+
+    await _until(lambda: _statuses(user) == {RunStatus.DONE.value})
+    await _poll_stops(user)
+
+    assert (catalog.reachable_calls, catalog.models_calls) == after_load
+
+
+async def test_a_page_opened_while_a_run_is_in_flight_polls(
+    polling: tuple[Seeded, StaticModelCatalog],
+) -> None:
+    """Polling used to start only from Launch and Resume.
+
+    So the tab that submitted the work updated and every other view of it did
+    not: reload the browser mid-run, or open the page in a second tab, and the
+    screen froze at whatever it read once — which is indistinguishable from a
+    worker that has died, and is the confusion this branch exists for.
+    """
+    seeded, _ = polling
+    user = seeded.user
+
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+
+    assert _timers(user), "an unsettled view polls without anyone pressing anything"
+
+
+async def test_the_poll_backs_off_once_the_handshake_is_over(
+    polling: tuple[Seeded, StaticModelCatalog],
+) -> None:
+    """0.2 s is right for the seconds after a submit and absurd for the hours
+    after that: a model answering one record every two minutes would get six
+    hundred full redraws between two numbers changing."""
+    seeded, _ = polling
+    user = seeded.user
+
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+
+    (timer,) = _timers(user)
+    assert timer.interval == evaluation_view.POLL_FAST_S
+    await _until(lambda: timer.interval == evaluation_view.POLL_SETTLED_S)
+
+
+async def test_an_active_run_offers_stop_and_an_inactive_one_offers_discard(
+    polling: tuple[Seeded, StaticModelCatalog],
+) -> None:
+    """The one cell that had no action at all.
+
+    G1's reasoning — "there is nothing to offer while a worker is writing to
+    the row" (sw-design.md §18.5) — is right about *discard*, which destroys
+    rows the worker is still producing. It left a launch against a model
+    answering a record in minutes with no way out but the endpoint bound or
+    killing the process. Stop destroys nothing, so it belongs exactly where
+    discard cannot go.
+    """
+    seeded, _ = polling
+    user = seeded.user
+
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+
+    assert len(_find(user, "run-stop")) == 1
+    assert _find(user, "run-discard") == [], "a worker may be writing to this row"
+
+    async with seeded.app.state.session_factory() as session:
+        await session.execute(update(Run).where(Run.id == "r-0440").values(status=RunStatus.DONE))
+        await session.commit()
+    await _until(lambda: _statuses(user) == {RunStatus.DONE.value})
+    await _poll_stops(user)
+
+    assert _find(user, "run-stop") == [], "nothing is executing it any more"
+    assert len(_find(user, "run-discard")) == 1
+
+
+async def test_pressing_stop_reaches_the_service_with_this_runs_id(
+    polling: tuple[Seeded, StaticModelCatalog], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Asserted at the seam, as `test_an_interrupted_run_offers_resume` is and
+    for its reason: what the run becomes afterwards is the service's, and
+    timing it out of a UI test is what made that assertion flaky."""
+    seeded, _ = polling
+    user = seeded.user
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+
+    stopped: list[str] = []
+    real_cancel = seeded.services.run.cancel
+
+    async def _recording_cancel(run_id: RunId) -> None:
+        stopped.append(str(run_id))
+        await real_cancel(run_id)
+
+    monkeypatch.setattr(seeded.services.run, "cancel", _recording_cancel)
+
+    _one(user, _find(user, "run-stop")[0]).click()
+    await _until(lambda: stopped == ["r-0440"])
+    await _until(lambda: _statuses(user) == {RunStatus.INTERRUPTED.value})
+    await _poll_stops(user)

@@ -1590,6 +1590,7 @@
         "enum": [
           "reachable",
           "unreachable",
+          "timed_out",
           "refused_not_loopback"
         ],
         "title": "EndpointStatus",
@@ -7825,6 +7826,59 @@
           }
         },
         "summary": "Get Run",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/cancel": {
+      "post": {
+        "description": "Stop a `queued` or `running` run, keeping whatever it committed.\n\n`Resume`'s mirror, and it answers with the run rather than a task id:\n`resume` *starts* work and hands back something to poll, this one ends it,\nand the useful reply is the state the run is now in.\n\n409 when the run is neither `queued` nor `running` \u2014 `RunActiveError`'s\nguard from the other side. Succeeding there would rewrite a finished run's\noutcome as an interruption that never happened.",
+        "operationId": "cancel_api_v1_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel",
         "tags": [
           "runs"
         ]

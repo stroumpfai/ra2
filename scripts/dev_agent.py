@@ -46,7 +46,14 @@ def main() -> int:
             "uvicorn",
             "ra2.main:create_app",
             "--factory",
-            "--reload",
+            # **No `--reload`**, for `just dev`'s reason and one more. The
+            # reloader watches the whole working directory for `*.py`, and an
+            # agent is by definition writing `*.py` in it — including in the
+            # `.claude/worktrees/agent-*` copies of this project that sit
+            # under it. An agent eyeballing a run it just launched would be
+            # killing that run with its own next edit, and the app would
+            # report "the process died while this run was executing" without
+            # being able to say who did it.
             "--host",
             "127.0.0.1",
             "--port",

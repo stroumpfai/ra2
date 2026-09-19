@@ -660,6 +660,104 @@ async def test_a_refused_connection_is_retried_then_raised() -> None:
     assert excinfo.value.status is EndpointStatus.UNREACHABLE
 
 
+async def test_a_timeout_is_raised_on_the_first_attempt_and_never_retried() -> None:
+    """`temperature` and `seed` are fixed, so a generation that overran the
+    bound overruns it again. Retrying spends `max_retries` more whole
+    intervals to reach the conclusion already in hand.
+
+    This was measured, not reasoned into: at the old 120 s default a 9.7 B
+    thinking model took 126-136 s for two features over one sentence, so every
+    call timed out — three times per record, three records deep, before a run
+    gave up twenty minutes later.
+    """
+    stub = StubOllama(chat=[httpx2.ReadTimeout("timed out", request=httpx2.Request("POST", "/"))])
+    client = OllamaLLMClient(base_url=LOOPBACK_URL, max_retries=3, http_client=stub.http_client())
+
+    with pytest.raises(LlmEndpointError) as excinfo:
+        await client.extract("prompt", Output, "m", temperature=0.0, seed=1)
+
+    assert len(stub.chat_requests) == 1
+    assert excinfo.value.status is EndpointStatus.TIMED_OUT
+
+
+async def test_a_timeout_and_a_refusal_are_different_answers() -> None:
+    """One means the model is slower than `RA2_LLM_TIMEOUT_S`; the other means
+    start Ollama. Collapsing them is what sent an analyst to look at the port
+    and the firewall while the endpoint was answering fine.
+
+    `OllamaEndpointProber` has told the two apart since P3-D19
+    (`ProbeCode.TIMEOUT`); the generation path had no value to say it with.
+    The positive control is in the same assertion: the refusal must still be
+    retried to its bound, so this cannot pass by making everything terminal.
+    """
+    timing_out = StubOllama(
+        chat=[httpx2.ReadTimeout("timed out", request=httpx2.Request("POST", "/"))]
+    )
+    refusing = StubOllama(
+        chat=[httpx2.ConnectError("connection refused", request=httpx2.Request("POST", "/"))]
+    )
+
+    statuses = []
+    for stub in (timing_out, refusing):
+        client = OllamaLLMClient(
+            base_url=LOOPBACK_URL, max_retries=2, http_client=stub.http_client()
+        )
+        with pytest.raises(LlmEndpointError) as excinfo:
+            await client.extract("prompt", Output, "m", temperature=0.0, seed=1)
+        statuses.append(excinfo.value.status)
+
+    assert statuses == [EndpointStatus.TIMED_OUT, EndpointStatus.UNREACHABLE]
+    assert len(timing_out.chat_requests) == 1
+    assert len(refusing.chat_requests) == 3
+
+
+@pytest.mark.parametrize(
+    ("max_retries", "expected_attempts"),
+    [(0, 1), (1, 2), (3, 4)],
+)
+async def test_an_exhausted_call_reports_how_many_attempts_it_cost(
+    max_retries: int, expected_attempts: int
+) -> None:
+    """The attempts a record spent before giving up are otherwise counted
+    nowhere.
+
+    `Extraction.retry_count` carries them for a call that answered. A call
+    that exhausted its attempts writes no `extraction` row — by design, since
+    the hole is what the resume query finds — so §10.4's "bounded, counted and
+    visible" held only for the records that succeeded, and the most expensive
+    ones in a run were the invisible ones.
+
+    `retries + 1`, because the bound counts *retries* and the calls made are
+    one more.
+    """
+    stub = StubOllama(chat=[(503, {"error": "busy"})])
+    client = OllamaLLMClient(
+        base_url=LOOPBACK_URL, max_retries=max_retries, http_client=stub.http_client()
+    )
+
+    with pytest.raises(LlmEndpointError) as excinfo:
+        await client.extract("prompt", Output, "m", temperature=0.0, seed=1)
+
+    assert excinfo.value.attempts == expected_attempts
+    assert len(stub.chat_requests) == expected_attempts
+
+
+async def test_a_call_that_gives_up_at_once_reports_one_attempt() -> None:
+    """A non-retryable failure costs exactly one call, and must say so.
+
+    Reporting `max_retries + 1` here would overstate it — which matters most
+    for the timeout, since that is now the non-retryable case an analyst is
+    most likely to meet.
+    """
+    stub = StubOllama(chat=[httpx2.ReadTimeout("timed out", request=httpx2.Request("POST", "/"))])
+    client = OllamaLLMClient(base_url=LOOPBACK_URL, max_retries=3, http_client=stub.http_client())
+
+    with pytest.raises(LlmEndpointError) as excinfo:
+        await client.extract("prompt", Output, "m", temperature=0.0, seed=1)
+
+    assert excinfo.value.attempts == 1
+
+
 async def test_a_4xx_is_not_retried() -> None:
     """A wrong model name does not become right on the second attempt, and
     retrying it burns the bound a genuinely busy endpoint needs."""

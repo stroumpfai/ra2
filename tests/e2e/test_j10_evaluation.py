@@ -261,16 +261,27 @@ def test_j10_launch_an_evaluation_and_watch_it_finish(
     # Three records is far below `RA2_EVAL_RECORD_MIN`, so the launch stamped
     # `is_dev` and every row carries the marker — "smoke test, not a result".
     expect(page.locator('[data-testid="run-status"][data-dev="true"]')).to_have_count(2)
-    expect(page.locator('[data-testid="run-status"]').first).to_have_text("DEV")
+    # The marker is a chip **beside** the status word, not in place of it: the
+    # design draws the replacement, and on a board where every run is dev-sized
+    # that leaves a Status column showing one constant string.
+    expect(page.locator('[data-testid="run-status"]').first).to_have_text("done")
+    expect(page.locator('[data-testid="run-dev"]')).to_have_count(2)
     tags = page.locator('[data-testid="run-model"]')
     expect(tags).to_have_count(2)
     assert {MODEL_A, MODEL_B} == set(tags.all_text_contents())
     # `dd.mm.yy - hh:mm:ss`, on one line, for a started run.
     started = page.locator('[data-testid="run-started"]').first
     expect(started).to_have_text(TIMESTAMP_RE)
-    # A run id is a real link to Results — a placeholder route this phase.
-    expect(page.locator('[data-testid="run-link"]').first).to_have_attribute(
-        "href", RESULTS_HREF_RE
+    # A run is named by its ordinal and links to Results — a placeholder route
+    # this phase. The id is a 36-character uuid7 that does not fit the column
+    # and does not distinguish two runs launched together; it rides the title.
+    links = page.locator('[data-testid="run-link"]')
+    expect(links.first).to_have_attribute("href", RESULTS_HREF_RE)
+    # Both ordinals, as a set: the table sorts `started_at DESC`, so the row
+    # order is newest first and `.first` is run 2, not run 1.
+    assert set(links.all_text_contents()) == {"run 1", "run 2"}
+    assert all(links.nth(i).get_attribute("title") for i in range(links.count())), (
+        "the full id stays reachable on every row"
     )
     expect(page.locator('[data-testid="pagination-range"]')).to_have_text("1–2 of 2")
     # One progress card per run (the card's own body is L3's).

@@ -98,9 +98,11 @@ from ra2.services.readmodels import (
     RunView,
     SortDir,
 )
+from ra2.services.run_service import run_ordinals
 
 __all__ = [
     "CONNECTION_REASON_NOT_LOOPBACK",
+    "CONNECTION_REASON_TIMED_OUT",
     "CONNECTION_REASON_UNREACHABLE",
     "EVAL_ERROR_CONFIG_NOT_FROZEN",
     "EVAL_ERROR_ENDPOINT_UNREACHABLE",
@@ -184,9 +186,18 @@ CONNECTION_REASON_NOT_LOOPBACK: Final = (
     "This endpoint is not on the local machine, so it is refused: "
     "no data leaves this host, and there is no opt-out."
 )
+CONNECTION_REASON_TIMED_OUT: Final = (
+    "This endpoint answered but did not finish in time. "
+    "Raise RA2_LLM_TIMEOUT_S, or pick a model that answers faster."
+)
 
+#: Every `EndpointStatus` but `REACHABLE`, which has no reason to give.
+#: Exhaustive by test rather than by convention: this is a dict keyed on an
+#: enum and read with `[]`, so a member added without an entry here is a
+#: `KeyError` on the Evaluation view's load path and nowhere else.
 _CONNECTION_REASONS: Final[dict[EndpointStatus, str]] = {
     EndpointStatus.UNREACHABLE: CONNECTION_REASON_UNREACHABLE,
+    EndpointStatus.TIMED_OUT: CONNECTION_REASON_TIMED_OUT,
     EndpointStatus.REFUSED_NOT_LOOPBACK: CONNECTION_REASON_NOT_LOOPBACK,
 }
 
@@ -260,14 +271,32 @@ class EvaluationService:
             rows = await EvaluationRepository(session).list_all()
             return [_draft_view(row) for row in rows]
 
-    async def get(self, evaluation_id: EvaluationId) -> EvaluationView:
+    async def get(
+        self,
+        evaluation_id: EvaluationId,
+        *,
+        connection: ConnectionView | None = None,
+        models: Sequence[ModelChoiceView] | None = None,
+    ) -> EvaluationView:
         """One whole Evaluation screen: setup, models, connection, progress,
         runs and provenance.
 
+        `connection` and `models` let a caller that **already holds** the
+        endpoint's state hand it back instead of having it re-probed. That is
+        not an optimisation, it is plan-phase-3.md C3 expressed at the seam:
+        reachability is re-checked on view load and when the settings dialog's
+        refresh is pressed, *never on a timer* — and the progress poll is a
+        timer. Left out, both are read, which is what a view load does.
+
+        `models is not None` rather than a truthiness test: an unreachable
+        endpoint's catalogue is legitimately `()`, and treating that as
+        "nothing supplied" would put the probe back on the timer for exactly
+        the endpoint least able to answer it.
+
         :raises NotFoundError: no such evaluation.
         """
-        connection = await self.connection_status()
-        models = await self._model_choices(connection)
+        connection = connection if connection is not None else await self.connection_status()
+        models = models if models is not None else await self._model_choices(connection)
         async with self._session_factory() as session:
             evaluation = await self._require(session, evaluation_id)
             return await self._view(session, evaluation, connection, models)
@@ -857,9 +886,11 @@ class EvaluationService:
         runs = await RunRepository(session).list_by_evaluation(EvaluationId(evaluation.id))
         total = self._scope_size(corpus, EvaluationSize(evaluation.size))
         progress = [await self._progress(session, run, total) for run in runs]
+        ordinals = run_ordinals(runs)
         run_views = [
             RunView(
                 run_id=RunId(run.id),
+                ordinal=ordinals[run.id],
                 evaluation_id=EvaluationId(evaluation.id),
                 model_tag=run.model_name,
                 model_digest=run.model_digest,

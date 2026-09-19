@@ -42,6 +42,7 @@ H4's adapter draws the line and this module keeps it (sw-design.md §15.3):
   would destroy resume, so nothing here does.
 """
 
+import asyncio
 import json
 import platform
 from collections.abc import Mapping, Sequence
@@ -92,26 +93,47 @@ from ra2.persistence.repositories.evaluation_repo import EvaluationRepository
 from ra2.persistence.repositories.extraction_repo import ExtractionRepository
 from ra2.persistence.repositories.run_repo import RunRepository
 from ra2.persistence.session import session_scope
-from ra2.services.errors import FeatureValidationError, NotFoundError
+from ra2.services.errors import FeatureValidationError, NotFoundError, RunNotActiveError
 from ra2.services.feature_service import matching_rule_from_json
 from ra2.services.protocols import PromptResolver
 from ra2.services.readmodels import Page, RunProgressView, RunView, SortDir
 
-__all__ = ["RunService"]
+__all__ = ["RunService", "run_ordinals"]
 
 #: `sort_key` -> the `RunView` attribute it sorts on. An unknown key falls
 #: back to `started_at`, the runs table's own default (sw-design.md §8.1.4).
 _SORT_KEYS: Final[frozenset[str]] = frozenset({"started_at", "model_tag", "status", "records_done"})
 
 #: How many records in a row may fail at the endpoint before the worker stops
-#: asking. One failure is a **record**'s problem and leaves a hole the resume
-#: query finds; three in a row is the **endpoint**'s problem, and grinding a
-#: 5 000-record corpus through `RA2_LLM_TIMEOUT_S` × `RA2_LLM_MAX_RETRIES`
-#: apiece to discover that would be neither honest nor bounded. The run is
-#: left `interrupted` either way, which is the state Resume acts on (§15 F8).
-#: Deliberately not a setting: it is a property of "the endpoint is down", not
-#: a knob an analyst has any basis to turn.
+#: asking, **once this run has committed at least one row**. One failure is a
+#: **record**'s problem and leaves a hole the resume query finds; three in a
+#: row is the **endpoint**'s problem, and grinding a 5 000-record corpus
+#: through `RA2_LLM_TIMEOUT_S` apiece to discover that would be neither honest
+#: nor bounded. The run is left `interrupted` either way, which is the state
+#: Resume acts on (§15 F8). Deliberately not a setting: it is a property of
+#: "the endpoint is down", not a knob an analyst has any basis to turn.
 _MAX_CONSECUTIVE_ENDPOINT_ERRORS: Final = 3
+
+#: The same bound **before** this run has committed anything — one failure,
+#: and stop.
+#:
+#: Three in a row is the right tolerance for an endpoint that has demonstrably
+#: worked: it has answered for this run, with this model, this prompt and this
+#: schema, so a failure now is plausibly transient and worth another ask.
+#: Nothing supports that reading on a run that has never produced a row. There
+#: the first failure is the *only* evidence there is, and it says the
+#: configuration does not work — a verdict, not a flake.
+#:
+#: The arithmetic is why it matters. An `LlmEndpointError` reaching this
+#: module means the adapter already exhausted its own bounded retries, so each
+#: of these records has cost up to `RA2_LLM_TIMEOUT_S` — 600 s since the bound
+#: was measured against a reasoning model (`Settings.llm_timeout_s`). Three of
+#: them is half an hour to be told something the first one already said.
+#:
+#: Counted over the run, not over this execution: a resume of a run that has
+#: rows gets the full tolerance, because those rows are the evidence. A resume
+#: of a run that has none does not, because it has none.
+_MAX_ENDPOINT_ERRORS_BEFORE_FIRST_ROW: Final = 1
 
 #: `extraction.parse_error` when the *adapter* already judged the response
 #: unreadable (`Extraction.parse_ok is False`) but named no reason. A stable
@@ -123,6 +145,21 @@ _REASON_ADAPTER_PARSE_FAILED: Final = "adapter_parse_failed"
 #: nothing is executing it — the process died under it (§15.4). Relabelling is
 #: all that happens: **nothing auto-restarts** (§15 F8).
 _ERROR_INTERRUPTED_BY_RESTART: Final = "interrupted: the process died while this run was executing"
+
+#: `run.error` on a run a person stopped. `interrupted` and not a status of
+#: its own: the state is already exactly right — partial work kept, nothing
+#: auto-restarted, Resume the one way out — and `run.status` is an
+#: unconstrained `String(16)`, so a new member would have been free and still
+#: wrong. What differs is *why*, and `run.error` is where this codebase
+#: already keeps that (`_ERROR_INTERRUPTED_BY_RESTART`, beside it).
+_ERROR_CANCELLED: Final = "interrupted: stopped before it finished"
+
+#: The two statuses a run can be stopped **out of**. The same pair
+#: `lifecycle_service.ACTIVE_STATUSES` refuses a discard for, from the other
+#: side: a worker is writing to these and to no others.
+_CANCELLABLE_STATUSES: Final[frozenset[RunStatus]] = frozenset(
+    {RunStatus.QUEUED, RunStatus.RUNNING}
+)
 
 #: M0-D8's serialisation convention, key-sorted like every other JSON this
 #: codebase writes.
@@ -206,6 +243,16 @@ class RunService:
         #: that is not in here belongs to a process that died under it, which
         #: is the whole of how a restart is detected (see `_reclaim`).
         self._active: set[RunId] = set()
+        #: The `asyncio.Task` executing each run, so `cancel` can stop **one**
+        #: of them. A job covers every run of an evaluation and executes them
+        #: serially, so without a task per run "stop this run" could only be
+        #: spelled "abandon the evaluation".
+        self._tasks: dict[RunId, asyncio.Task[None]] = {}
+        #: Runs somebody has asked to stop. Two jobs: it tells a cancellation
+        #: *we* asked for apart from the whole job being torn down — both
+        #: arrive as `CancelledError` at the same await — and it lets a run
+        #: still queued behind another be skipped when the worker reaches it.
+        self._cancel_requested: set[RunId] = set()
 
     # -----------------------------------------------------------------------
     # Submitting work
@@ -278,11 +325,107 @@ class RunService:
 
         base = 0
         for run_id in run_ids:
-            await self.execute_run(run_id, _OffsetReporter(reporter, base=base, total=grand_total))
+            if run_id in self._cancel_requested:
+                # Stopped while still queued behind another model. `cancel`
+                # has already written the row; there is nothing to execute and
+                # nothing to record.
+                self._cancel_requested.discard(run_id)
+                continue
+            await self._execute_cancellably(
+                run_id, _OffsetReporter(reporter, base=base, total=grand_total)
+            )
             # Advanced by what actually committed, not by the scope size: a
             # run that ends `interrupted` leaves the job's bar short of 100 %,
             # which is the honest picture of it.
             base += await self._count_done(run_id)
+
+    async def _execute_cancellably(self, run_id: RunId, reporter: ProgressReporter) -> None:
+        """One model's pass, as its own `asyncio.Task`.
+
+        The task exists so `cancel` has something to cancel that is **this
+        run** and not the job around it. A job covers every run of an
+        evaluation, so cancelling at job level would make "stop this run" mean
+        "abandon the evaluation" — and the runs after it are exactly the ones
+        an analyst is still waiting on when they give up on this one.
+
+        `self._cancel_requested` is what tells the two cancellations apart.
+        Stopping this run and tearing down the whole job both arrive here as a
+        `CancelledError` from the same await, and `task.cancelled()` is true in
+        both: cancelling the outer task cancels the future it is waiting on,
+        which is this task. Only the recorded *intent* distinguishes them, so
+        an unasked-for cancellation propagates and ends the job.
+        """
+        task = asyncio.create_task(self.execute_run(run_id, reporter))
+        self._tasks[run_id] = task
+        try:
+            await task
+        except asyncio.CancelledError:
+            if run_id not in self._cancel_requested:
+                raise
+            self._cancel_requested.discard(run_id)
+        finally:
+            self._tasks.pop(run_id, None)
+
+    async def cancel(self, run_id: RunId) -> None:
+        """Stop a run somebody has decided not to wait for.
+
+        Real task cancellation, not a flag the record loop checks: the worker
+        spends almost all of its time inside one `LLMClient.extract` call, and
+        on a model answering a record in minutes a cooperative stop would take
+        until the end of the current record to take effect. Escaping exactly
+        that wait is the point of the verb.
+
+        **The status is written here, in the caller's task**, rather than in
+        the worker's own `except CancelledError` handler, and that is the whole
+        trick. A cancelled task can have `CancelledError` re-raised at any
+        later await inside it — including the write that records why it
+        stopped — so a handler that finishes the row there needs
+        `asyncio.shield` and still cannot promise the write landed before this
+        call returns. This task was never cancelled, so its write is ordinary.
+        It is also ordered: `Task.cancel()` only *schedules* the cancellation,
+        so the worker unwinds during the await below and cannot commit
+        anything after it.
+
+        The run stays `interrupted` — see `_ERROR_CANCELLED`. Whatever it
+        managed to extract is kept and Resume picks it up from the hole, which
+        is the behaviour an analyst stopping a slow model wants rather than
+        losing the hour it already spent.
+
+        :raises NotFoundError: no such run.
+        :raises RunNotActiveError: the run is not `queued` or `running`.
+        """
+        async with self._session_factory() as session:
+            run = await RunRepository(session).get(run_id)
+            if run is None:
+                raise NotFoundError("run", run_id)
+            status = RunStatus(run.status)
+        if status not in _CANCELLABLE_STATUSES:
+            raise RunNotActiveError(str(run_id), status.value)
+
+        self._cancel_requested.add(run_id)
+        task = self._tasks.get(run_id)
+        if task is not None:
+            task.cancel()
+        await self._finish_cancelled(run_id)
+
+    async def _finish_cancelled(self, run_id: RunId) -> None:
+        """Record the stop — **unless the run finished on its own first**.
+
+        The status is re-read inside the write's own transaction because the
+        two are not one atomic step: a run can reach `done` between `cancel`'s
+        check and this write, and overwriting that with an interruption would
+        be the app inventing an outcome. A stop that lost the race did not
+        happen, and the run's own result is the true one.
+        """
+        async with session_scope(self._session_factory) as session:
+            repo = RunRepository(session)
+            run = await repo.get(run_id)
+            if run is None or RunStatus(run.status) not in _CANCELLABLE_STATUSES:
+                return
+            run.error = _ERROR_CANCELLED
+            # No `finished_at`: `interrupted` is the one state a human moves
+            # out of, and a stopped run has not finished anything (`_finish`).
+            await repo.set_status(run_id, RunStatus.INTERRUPTED, finished_at=None)
 
     # -----------------------------------------------------------------------
     # The worker body
@@ -313,6 +456,13 @@ class RunService:
             # carries why before the exception reaches the task runner. An
             # endpoint that will not answer never lands here — that leaves the
             # run `interrupted` and resumable, not `failed`.
+            #
+            # `Exception`, and therefore **not `asyncio.CancelledError`**,
+            # which is a `BaseException`. That is load-bearing rather than
+            # incidental: a run somebody stopped is not a run that failed, and
+            # catching it here would both mislabel it and try to write the row
+            # from inside a task that is already unwinding. `cancel` records
+            # the stop from the caller's task instead.
             await self._finish(run_id, RunStatus.FAILED, error=_error_text(exc))
             raise
         finally:
@@ -328,6 +478,15 @@ class RunService:
 
         consecutive_endpoint_errors = 0
         last_endpoint_error: str | None = None
+        #: Records that exhausted their attempts at the endpoint, and what
+        #: those attempts cost. Neither is derivable from anything committed:
+        #: a record that never answered writes **no** `extraction` row, so its
+        #: attempts are the one part of §10.4's "bounded, counted and visible"
+        #: that had nowhere to be counted (`plan-fix-evaluation-runs.md` §1.1
+        #: b). They ride out on `run.error`, which is durable and — since the
+        #: "log" action was opened to any run carrying a reason — reachable.
+        endpoint_failures = 0
+        endpoint_attempts: int | None = 0
 
         for record_id in pending:
             prompt_text = await self._resolve_prompt(plan, record_id)
@@ -345,7 +504,19 @@ class RunService:
                 # here would destroy resume (sw-design.md §15.3).
                 last_endpoint_error = str(exc)
                 consecutive_endpoint_errors += 1
-                if consecutive_endpoint_errors >= _MAX_CONSECUTIVE_ENDPOINT_ERRORS:
+                endpoint_failures += 1
+                # `None` the moment one failure cannot say what it cost, and
+                # `None` from then on: a total that silently omits an unknown
+                # is worse than no total, because it reads as complete.
+                if exc.attempts is None or endpoint_attempts is None:
+                    endpoint_attempts = None
+                else:
+                    endpoint_attempts += exc.attempts
+                # `done` is the count of **committed rows for this run**, from
+                # this execution or any earlier one, so this reads "has this
+                # configuration ever worked" rather than "is this the first
+                # record I tried".
+                if consecutive_endpoint_errors >= _endpoint_error_budget(done):
                     break
                 continue
             consecutive_endpoint_errors = 0
@@ -360,10 +531,13 @@ class RunService:
             # missing records are named by count, never silently dropped
             # (Do-NOT #6) — `pending_record_ids` re-derives exactly which.
             reason = last_endpoint_error or "the endpoint stopped answering"
+            cost = _endpoint_cost(endpoint_failures, endpoint_attempts)
             await self._finish(
                 plan.run_id,
                 RunStatus.INTERRUPTED,
-                error=f"interrupted with {len(remaining)} record(s) not extracted: {reason}",
+                error=(
+                    f"interrupted with {len(remaining)} record(s) not extracted{cost}: {reason}"
+                ),
             )
         else:
             await self._finish(plan.run_id, RunStatus.DONE, error=None)
@@ -588,8 +762,14 @@ class RunService:
             await self._reclaim(session, runs)
             evaluation = await EvaluationRepository(session).get(evaluation_id)
             is_dev = _is_dev(evaluation)
+            ordinals = run_ordinals(runs)
             views = [
-                _run_view(run, records_done=await repo.count_done(RunId(run.id)), is_dev=is_dev)
+                _run_view(
+                    run,
+                    records_done=await repo.count_done(RunId(run.id)),
+                    is_dev=is_dev,
+                    ordinal=ordinals[run.id],
+                )
                 for run in runs
             ]
 
@@ -616,10 +796,15 @@ class RunService:
                 raise NotFoundError("run", run_id)
             await self._reclaim(session, [run])
             evaluation = await EvaluationRepository(session).get(EvaluationId(run.evaluation_id))
+            # The siblings are read for one number, because the ordinal is a
+            # property of the set and there is no honest way to know a run's
+            # place from the run alone. An evaluation holds a handful of runs.
+            siblings = await repo.list_by_evaluation(EvaluationId(run.evaluation_id))
             return _run_view(
                 run,
                 records_done=await repo.count_done(run_id),
                 is_dev=_is_dev(evaluation),
+                ordinal=run_ordinals(siblings)[run.id],
             )
 
     # -----------------------------------------------------------------------
@@ -756,10 +941,63 @@ def _is_dev(evaluation: Evaluation | None) -> bool:
     return evaluation.is_dev or EvaluationSize(evaluation.size) is EvaluationSize.DEV
 
 
-def _run_view(run: Run, *, records_done: int, is_dev: bool) -> RunView:
+def _endpoint_cost(failures: int, attempts: int | None) -> str:
+    """What the records that never answered cost, as a clause or nothing.
+
+    Separate from the records *not extracted*, which is the larger number: the
+    worker stops after `_endpoint_error_budget` failures, so most of what is
+    missing was never attempted at all. Conflating "12 records have no
+    extraction" with "12 records were tried and refused" would overstate the
+    evidence by an order of magnitude.
+
+    Empty when there were no endpoint failures, so a run interrupted for some
+    other reason does not grow a clause about a thing that did not happen.
+    """
+    if failures <= 0:
+        return ""
+    records = "record" if failures == 1 else "records"
+    if attempts is None:
+        return f"; {failures} {records} failed at the endpoint"
+    calls = "attempt" if attempts == 1 else "attempts"
+    return f"; {failures} {records} failed at the endpoint after {attempts} {calls}"
+
+
+def _endpoint_error_budget(done: int) -> int:
+    """How many consecutive endpoint failures this run tolerates.
+
+    The two constants have the reasoning; this is the one line that chooses
+    between them, kept separate so the choice is testable without driving a
+    whole run at it.
+    """
+    if done > 0:
+        return _MAX_CONSECUTIVE_ENDPOINT_ERRORS
+    return _MAX_ENDPOINT_ERRORS_BEFORE_FIRST_ROW
+
+
+def run_ordinals(runs: Sequence[Run]) -> dict[str, int]:
+    """`run.id -> its 1-based place in the evaluation`, by **creation order**.
+
+    Sorted by id here rather than taken in the caller's own order, which is
+    `started_at DESC` (`RunRepository.list_by_evaluation`) — the *display*
+    order, where a run's number would change as its siblings start, and change
+    again under every other sort the table offers. A number that moves is not
+    an identifier.
+
+    Id order is creation order because the ids are uuid7, which is time-
+    ordered by construction. `launch_runs` already sorts runs by id on that
+    reasoning, and `mismatch_service._run_label` counts positions in a query
+    that is explicitly `ORDER BY run.id`. This is that same count, stated once
+    so the runs table and the discard dialog cannot disagree about which run
+    is "run 2".
+    """
+    return {run.id: i for i, run in enumerate(sorted(runs, key=lambda r: r.id), start=1)}
+
+
+def _run_view(run: Run, *, records_done: int, is_dev: bool, ordinal: int) -> RunView:
     status = RunStatus(run.status)
     return RunView(
         run_id=RunId(run.id),
+        ordinal=ordinal,
         evaluation_id=EvaluationId(run.evaluation_id),
         model_tag=run.model_name,
         model_digest=run.model_digest,
@@ -767,10 +1005,15 @@ def _run_view(run: Run, *, records_done: int, is_dev: bool) -> RunView:
         started_at=run.started_at,
         status=status,
         is_dev=is_dev,
-        # "`None` unless `FAILED`" (readmodels.py). An interrupted run's own
-        # reason is on the row either way; the table's "log" action is the
-        # failure's.
-        error=run.error if status is RunStatus.FAILED else None,
+        # Whatever the row carries, whatever the status. This used to be
+        # `run.error if status is RunStatus.FAILED else None`, on the reading
+        # that "log" was the failure's action — which meant an `interrupted`
+        # run's reason was written by `_finish` and then dropped here, one
+        # layer before the only screen that could have shown it. An endpoint
+        # that timed out and one that was never there leave the same row and
+        # the same Resume button, and the sentence telling them apart existed
+        # the whole time (plan-fix-evaluation-runs.md §1.1 e).
+        error=run.error,
     )
 
 

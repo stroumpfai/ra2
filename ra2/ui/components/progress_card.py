@@ -65,6 +65,17 @@ def _status_text(progress: RunProgressView) -> str:
     counts = f"{format_count(progress.done)} / {format_count(progress.total)}"
     if progress.status is RunStatus.RUNNING:
         text = f"{counts} · running"
+        # Elapsed **before** the ETA, and shown whether or not there is one.
+        # `_eta_ms` is `None` until a record has committed, and on a model that
+        # takes minutes per record that is most of the first quarter of an
+        # hour — during which this line read `0 / 12 · running` over a bar at
+        # zero and did not change. There was nothing on the screen separating a
+        # worker that was extracting from one whose process had died, which is
+        # what mvp-spec.md N6's "progress is visible" has to mean when the
+        # first record is still in flight. The number was in the read model the
+        # whole time; only the `done`/`failed` branch below ever rendered it.
+        if progress.elapsed_ms is not None:
+            text += f" · {_format_duration_ms(progress.elapsed_ms)}"
         if progress.eta_ms is not None:
             text += f" · ETA {_format_duration_ms(progress.eta_ms)}"
         return text

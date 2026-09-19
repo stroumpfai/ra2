@@ -642,6 +642,15 @@ class RunView:
     """
 
     run_id: RunId
+    #: This run's place within its own evaluation, **by creation order**,
+    #: counted from 1 — the "run 2" the discard dialog and the mismatch
+    #: toolbar already name a run by (`mismatch_service._run_label`).
+    #:
+    #: Carried rather than derived in `ui/`, because it is a property of the
+    #: *set*: the runs table sorts by four different keys and pages at ten, so
+    #: a number worked out from the rows on screen would be a different number
+    #: per sort. `run_ordinals` is the one place it is computed.
+    ordinal: int
     evaluation_id: EvaluationId
     model_tag: str
     model_digest: str
@@ -649,7 +658,10 @@ class RunView:
     started_at: datetime | None
     status: RunStatus
     is_dev: bool = False
-    #: Why it failed — the "log" action's content. `None` unless `FAILED`.
+    #: Why the run stopped — the "log" action's content, and `None` only when
+    #: the row itself carries no reason. **Not restricted to `FAILED`**: an
+    #: `interrupted` run's reason is the one an analyst needs most, because it
+    #: is what decides whether pressing Resume will do any good.
     error: str | None = None
 
     @property

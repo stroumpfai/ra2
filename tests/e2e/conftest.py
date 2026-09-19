@@ -19,6 +19,7 @@ demo branch inside production code.
 """
 
 import socket
+import sys
 import threading
 import time
 from argparse import Namespace
@@ -59,6 +60,45 @@ from ra2.ui.components import (
 from ra2.ui.components.icons import CLIPBOARD, REFRESH, TRASH
 from ra2.ui.shell import shell
 from ra2.ui.state import TableState
+
+# --- the Windows unraisable-warning filter -----------------------------------
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """On Windows, ignore `PytestUnraisableExceptionWarning` for layer 4 only.
+
+    `pyproject.toml` turns every warning into an error, and this layer is the
+    one place that trips it for a reason that is not a defect. The server runs
+    on a thread **inside the test process** (`start_server`), so its sockets
+    are this process's to collect; on Windows the proactor loop closes a
+    transport in two steps, and a NiceGUI websocket dropped by a page
+    navigation is routinely still mid-close when pytest's own `gc.collect()`
+    reaches it. `__del__` then reports it unclosed, the unraisable plugin
+    raises that as a warning **after the journey's last assertion has already
+    passed**, and a green test is recorded as a failure.
+
+    It is not one test, and not the same tests twice: two consecutive full runs
+    failed eight journeys between them with only the genuinely broken two in
+    common. The cost of leaving it was not the noise — it was that `just e2e`
+    on the machine this project is developed on became unreadable, and a real
+    one-line export regression sat in `main` behind the wall for a day.
+
+    Narrow on both axes deliberately. **This layer**, because the warning is
+    doing real work everywhere else — an unclosed file in `domain` or
+    `services` is exactly what N4 wants caught. **Windows**, because the Linux
+    leg is the one CI gates on (`.github/workflows/ci.yml`), and a suppression
+    that travelled there would retire the check rather than scope it.
+
+    The alternative was relaxing `filterwarnings` in `pyproject.toml`, which is
+    frozen (CONTRACTS.md) and would have blunted layers 1-3 to fix layer 4.
+    """
+    if sys.platform != "win32":
+        return
+    for item in items:
+        item.add_marker(
+            pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
+        )
+
 
 #: The J4 harness route. Underscored so it can never collide with a nav route.
 DEMO_PATH = "/_demo/tables"
