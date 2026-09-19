@@ -84,7 +84,6 @@ repeated in the branch's final report:**
 
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from html import escape
 from typing import Final, cast
 from urllib.parse import urlencode
 
@@ -125,6 +124,7 @@ from ra2.ui.components.derivation_builder import derivation_builder
 from ra2.ui.components.feature_sets_table import feature_sets_table
 from ra2.ui.components.icons import ALERT_TRIANGLE, PLUS, svg
 from ra2.ui.components.primitives import (
+    data_props,
     fingerprint_badge,
     frozen_readout,
     master_detail_split,
@@ -827,14 +827,15 @@ class _FeaturesPage:
 
     def _render_feature_name(self, feature: FeatureView) -> None:
         selected = self._selected_feature_key() == str(feature.feature_id)
-        button = (
+        button = data_props(
             ui.element("button")
-            .props(f'type="button" aria-label="Edit {feature.key}" data-testid="feature-row"')
+            .props('type="button" data-testid="feature-row"')
             .mark("feature-row")
             .style(
                 "background:none;border:none;padding:0;text-align:left;width:100%;"
                 "cursor:pointer;overflow:hidden;"
-            )
+            ),
+            {"aria-label": f"Edit {feature.key}"},
         )
         button.on(
             "click",
@@ -1745,12 +1746,13 @@ def _select(
     style: str = "",
     testid: str = "select",
 ) -> Element:
-    element = (
+    element = data_props(
         ui.element("select")
         .classes(classes)
-        .props(f'aria-label="{label}" data-testid="{testid}"')
+        .props(f'data-testid="{testid}"')
         .mark(testid)
-        .style(style)
+        .style(style),
+        {"aria-label": label},
     )
     element.on(
         "change",
@@ -1759,7 +1761,7 @@ def _select(
     )
     with element:
         for option_value, text in options:
-            option = ui.element("option").props(f'value="{escape(option_value, quote=True)}"')
+            option = data_props(ui.element("option"), {"value": option_value})
             if option_value == value:
                 option.props("selected")
             with option:

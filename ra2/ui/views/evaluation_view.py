@@ -87,7 +87,6 @@ view keeps only the handle it needs to close it on "refresh".
 
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
-from html import escape
 from typing import Final, cast
 
 from nicegui import ui
@@ -131,6 +130,7 @@ from ra2.ui.components import (
 from ra2.ui.components.discard_dialog import discard_dialog
 from ra2.ui.components.ollama_settings import ollama_settings_dialog
 from ra2.ui.components.primitives import (
+    data_props,
     labeled_field,
     master_detail_split,
     pill,
@@ -727,18 +727,18 @@ class _EvaluationPage:
         # early without one; this is what stops the tick looking live while
         # silently swallowing the click.
         disabled = choice.disabled or self._locked or self._view is None
-        with (
+        with data_props(
             ui.element("div")
             .props(
-                f'data-testid="model-row" data-model="{choice.tag}" '
-                f'data-disabled="{"true" if choice.disabled else "false"}"'
+                f'data-testid="model-row" data-disabled="{"true" if choice.disabled else "false"}"'
             )
             .mark("model-row", f"model-{choice.tag}")
             .style(
                 "display:flex;align-items:center;gap:10px;padding:8px 12px;"
                 "border-bottom:1px solid var(--rule2);min-width:0;"
                 + ("opacity:.55;" if choice.disabled else "")
-            )
+            ),
+            {"data-model": choice.tag},
         ):
             tick(
                 checked=choice.selected,
@@ -1700,12 +1700,13 @@ def _select(
     `features_view._select` uses one — the fidelity note asks for
     high-fidelity *layout*, medium-fidelity styling, and a native select is
     keyboard-reachable for free."""
-    element = (
+    element = data_props(
         ui.element("select")
         .classes("rof")
-        .props(f'aria-label="{label}" data-testid="{testid}"')
+        .props(f'data-testid="{testid}"')
         .mark(testid)
-        .style(SEL_STYLE)
+        .style(SEL_STYLE),
+        {"aria-label": label},
     )
     if disabled:
         element.props("disabled").style("color:var(--ink3);background:var(--field-tint);")
@@ -1717,7 +1718,11 @@ def _select(
         )
     with element:
         for option_value, text in options:
-            option = ui.element("option").props(f'value="{_attr(option_value)}"')
+            # Through the mapping, not `html.escape` into the props string:
+            # an option value is a corpus id, a feature-set id or a model tag,
+            # and the string is parsed as Python before anything HTML-shaped
+            # gets a chance to matter (SD31/SD34).
+            option = data_props(ui.element("option"), {"value": option_value})
             if option_value == value:
                 option.props("selected")
             with option:
@@ -1749,10 +1754,6 @@ def _seed_input(*, value: int, on_change: Callable[[str], None], disabled: bool)
             )
         ui.label("edit").classes("mono ink3").style("font-size:10px;flex:none;")
     return element
-
-
-def _attr(value: str) -> str:
-    return escape(value, quote=True)
 
 
 def _save_settings(endpoint: str, timeout_s: int) -> None:

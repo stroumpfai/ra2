@@ -38,6 +38,7 @@ from typing import Final
 from nicegui import ui
 
 from ra2.services.readmodels import RankingTabView
+from ra2.ui.components.primitives import data_props
 from ra2.ui.views.results.chrome import run_descriptor
 
 __all__ = ["COMPUTATION_RULES", "VALIDITY_FOOTER", "render_ranking_tab"]
@@ -138,14 +139,12 @@ def _table(view: RankingTabView) -> None:
             with ui.element("tbody"):
                 for row in view.rows:
                     tinted = "background:var(--accent-soft);" if row.rank == 1 else ""
-                    with (
+                    with data_props(
                         ui.element("tr")
-                        .props(
-                            f'data-testid="ranking-row" data-model="{row.model_id}" '
-                            f'data-rank="{row.rank}"'
-                        )
+                        .props(f'data-testid="ranking-row" data-rank="{row.rank}"')
                         .mark("ranking-row")
-                        .style(tinted)
+                        .style(tinted),
+                        {"data-model": row.model_id},
                     ):
                         # **Tied models repeat the number** — `1, 1, 3`, never
                         # `1, 2, 3` (§11.5).

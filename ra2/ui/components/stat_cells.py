@@ -30,6 +30,7 @@ from nicegui.element import Element
 
 from ra2.domain.stats import TieMark
 from ra2.services.readmodels import Cell, SuppressedCell
+from ra2.ui.components.primitives import data_props
 
 __all__ = ["INSUFFICIENT_TEXT", "insufficient_cell", "metric_cell", "tie_marker"]
 
@@ -59,11 +60,12 @@ def tie_marker(mark: TieMark) -> Element:
     distinguishing a best cell from a tied one, and a screen reader that saw
     just the number would read a table with no winner.
     """
-    return (
+    return data_props(
         ui.element("span")
         .classes(f"mk mk-{mark.value}")
-        .props(f'data-testid="tie-marker" data-mark="{mark.value}" aria-label="{_LABELS[mark]}"')
-        .mark("tie-marker")
+        .props(f'data-testid="tie-marker" data-mark="{mark.value}"')
+        .mark("tie-marker"),
+        {"aria-label": _LABELS[mark]},
     )
 
 

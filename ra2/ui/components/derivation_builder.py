@@ -23,7 +23,6 @@ page-size selector already uses, because NiceGUI's automatic argument
 extraction does not serialise `event.target.value` on its own.
 """
 
-import html
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from typing import Final
@@ -44,6 +43,7 @@ from ra2.domain.feature import (
     MinOrdinal,
     Operator,
 )
+from ra2.ui.components.primitives import data_props
 
 __all__ = ["derivation_builder"]
 
@@ -245,12 +245,13 @@ def _tok_chip(
 
 
 def _add_chip(*, label: str, on_click: Callable[[], None], testid: str) -> Element:
-    element = (
+    element = data_props(
         ui.element("button")
         .classes("tok tok-add")
-        .props(f'type="button" aria-label="{label}" data-testid="{testid}"')
+        .props(f'type="button" data-testid="{testid}"')
         .mark(testid)
-        .style(_TOK_STYLE + _TOK_DASHED_STYLE)
+        .style(_TOK_STYLE + _TOK_DASHED_STYLE),
+        {"aria-label": label},
     )
     element.on("click", lambda _: on_click())
     with element:
@@ -262,15 +263,15 @@ def _text_chip(value: str, *, label: str, on_change: Callable[[str], None], test
     """An editable `.tok`-styled `<input>` — column names and codes are open
     strings, not part of the closed catalogue (design, "Derivation — closed
     catalogue": the *types* and *operators* are closed, values are not)."""
-    element = (
+    # Both the value and the label are a column name or a code out of the
+    # delivery, so both go through the props *mapping* (SD31, `data_props`).
+    element = data_props(
         ui.element("input")
         .classes("tok tok-input")
-        .props(
-            f'type="text" value="{html.escape(value)}" aria-label="{html.escape(label)}" '
-            f'data-testid="{testid}"'
-        )
+        .props(f'type="text" data-testid="{testid}"')
         .mark(testid)
-        .style(_TOK_STYLE + "min-width:64px;")
+        .style(_TOK_STYLE + "min-width:64px;"),
+        {"value": value, "aria-label": label},
     )
     element.on(
         "change",
@@ -293,31 +294,30 @@ def _removable_value_chip(
         .style(_TOK_STYLE)
     )
     with element:
-        input_element = (
+        input_element = data_props(
             ui.element("input")
-            .props(
-                f'type="text" value="{html.escape(value)}" aria-label="Code value" '
-                f'data-testid="{testid}-input"'
-            )
+            .props(f'type="text" data-testid="{testid}-input"')
             .mark(f"{testid}-input")
             .style(
                 "border:none;background:transparent;font-family:var(--mono);"
                 "font-size:12px;width:44px;padding:0;color:var(--ink);"
-            )
+            ),
+            {"value": value, "aria-label": "Code value"},
         )
         input_element.on(
             "change",
             lambda event: on_change(str(event.args)),
             js_handler="(e) => emit(e.target.value)",
         )
-        remove_button = (
+        remove_button = data_props(
             ui.element("button")
-            .props(f'type="button" aria-label="Remove {html.escape(value)}"')
+            .props('type="button"')
             .mark(f"{testid}-remove")
             .style(
                 "border:none;background:transparent;color:var(--ink3);cursor:pointer;"
                 "font-size:12px;line-height:1;padding:0;"
-            )
+            ),
+            {"aria-label": f"Remove {value}"},
         )
         remove_button.on("click", lambda _: on_remove())
         with remove_button:

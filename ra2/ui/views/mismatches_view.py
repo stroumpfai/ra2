@@ -60,7 +60,7 @@ from ra2.services.readmodels import (
     SortDir,
 )
 from ra2.ui.components import ColumnSpec, card, card_header, chip, data_table, pagination_row
-from ra2.ui.components.primitives import segmented_control
+from ra2.ui.components.primitives import data_props, segmented_control
 from ra2.ui.shell import item_for_key, shell
 from ra2.ui.state import (
     MismatchesState,
@@ -471,26 +471,27 @@ class _MismatchesPage:
             ).mark("chip", f"chip-{name}")
             if not expanded:
                 return
-            with (
+            with data_props(
                 ui.element("div")
-                .props(f'role="listbox" aria-label="{aria_label}" data-testid="menu-{name}"')
-                .style(_MENU_STYLE)
+                .props(f'role="listbox" data-testid="menu-{name}"')
+                .style(_MENU_STYLE),
+                {"aria-label": aria_label},
             ):
                 for value, option_text, selected in options:
-                    button = (
+                    button = data_props(
                         ui.element("button")
                         .classes("mono")
                         .props(
                             'type="button" role="option" '
                             f'aria-selected="{"true" if selected else "false"}" '
-                            f'aria-label="{option_text}" data-testid="option-{name}" '
-                            #: The value as well as the menu, so a test — and
-                            #: a deep link a person pastes — can name the
-                            #: option it means rather than the first one drawn.
-                            f'data-option="{value}"'
+                            f'data-testid="option-{name}"'
                         )
                         .mark(f"option-{name}")
-                        .style(_MENU_ITEM_STYLE + (_MENU_ITEM_ON_STYLE if selected else ""))
+                        .style(_MENU_ITEM_STYLE + (_MENU_ITEM_ON_STYLE if selected else "")),
+                        #: The value as well as the menu, so a test — and a
+                        #: deep link a person pastes — can name the option it
+                        #: means rather than the first one drawn.
+                        {"aria-label": option_text, "data-option": value},
                     )
                     button.on("click", cast("Callable[[], None]", lambda v=value: on_pick(v)))
                     with button:
@@ -661,16 +662,21 @@ class _MismatchesPage:
         """
         for entry in tallies:
             with (
-                card(flex="1", extra="padding:0;min-width:220px;").props(
-                    f'data-card="tally" data-feature="{entry.feature_id}"'
+                data_props(
+                    card(flex="1", extra="padding:0;min-width:220px;").props('data-card="tally"'),
+                    {"data-feature": entry.feature_id},
                 ),
                 card_header(title=entry.feature_key, count=f"{entry.tally.total} mismatches"),
             ):
                 pass
             with ui.element("div").style("padding:10px 14px;"):
-                ui.label(tally_sentence(entry.tally)).props(
-                    f'data-testid="tally-sentence" data-feature="{entry.feature_id}"'
-                ).mark("tally-sentence").style("font-size:12.5px;color:var(--ink2);")
+                data_props(
+                    ui.label(tally_sentence(entry.tally))
+                    .props('data-testid="tally-sentence"')
+                    .mark("tally-sentence")
+                    .style("font-size:12.5px;color:var(--ink2);"),
+                    {"data-feature": entry.feature_id},
+                )
 
     # --- handlers -----------------------------------------------------------
     #

@@ -27,6 +27,7 @@ from nicegui import ui
 from nicegui.element import Element
 
 from ra2.services.readmodels import SortDir
+from ra2.ui.components.primitives import data_props
 from ra2.ui.state import TableState
 
 __all__ = ["ASC_GLYPH", "DESC_GLYPH", "UNSORTED_GLYPH", "Align", "ColumnSpec", "data_table"]
@@ -123,8 +124,9 @@ def _header_cell[T](
         style += f"width:{column.width};"
     if column.align != "left":
         style += f"text-align:{column.align};"
-    with (
-        ui.element("th").classes("th").props(f'scope="col" data-column="{column.key}"').style(style)
+    with data_props(
+        ui.element("th").classes("th").props('scope="col"').style(style),
+        {"data-column": column.key},
     ):
         if column.header_render is not None:
             column.header_render()
@@ -144,18 +146,16 @@ def _sort_header[T](
     direction = "none"
     if active:
         direction = "ascending" if state.sort_dir is SortDir.ASC else "descending"
-    button = (
+    button = data_props(
         ui.element("button")
         .classes("sorth")
-        .props(
-            f'type="button" aria-sort="{direction}" '
-            f'aria-label="Sort by {column.label}" data-testid="sort-{column.key}"'
-        )
+        .props(f'type="button" aria-sort="{direction}"')
         .mark(f"sort-{column.key}")
         .style(
             "background:none;border:none;padding:0;font:inherit;color:inherit;"
             "letter-spacing:inherit;text-transform:inherit;"
-        )
+        ),
+        {"aria-label": f"Sort by {column.label}", "data-testid": f"sort-{column.key}"},
     )
     if on_sort is not None:
         button.on("click", lambda _: on_sort(column.key))

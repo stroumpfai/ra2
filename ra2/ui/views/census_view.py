@@ -43,6 +43,7 @@ from ra2.ui.components import (
     bar,
     card,
     chip,
+    data_props,
     data_table,
     distribution_bar,
     format_count,
@@ -453,10 +454,11 @@ class _CensusPage:
             ).mark("chip", f"chip-{name}")
             if not expanded:
                 return
-            with (
+            with data_props(
                 ui.element("div")
-                .props(f'role="listbox" aria-label="{aria_label}" data-testid="menu-{name}"')
-                .style(_MENU_STYLE)
+                .props(f'role="listbox" data-testid="menu-{name}"')
+                .style(_MENU_STYLE),
+                {"aria-label": aria_label},
             ):
                 for value, option_text, selected in options:
                     self._menu_item(
@@ -476,15 +478,16 @@ class _CensusPage:
         selected: bool,
         on_pick: Callable[[str], Awaitable[None]],
     ) -> None:
-        button = (
+        button = data_props(
             ui.element("button")
             .classes("mono")
             .props(
                 f'type="button" role="option" aria-selected="{"true" if selected else "false"}" '
-                f'aria-label="{text}" data-testid="option-{name}"'
+                f'data-testid="option-{name}"'
             )
             .mark(f"option-{name}")
-            .style(_MENU_ITEM_STYLE + (_MENU_ITEM_ON_STYLE if selected else ""))
+            .style(_MENU_ITEM_STYLE + (_MENU_ITEM_ON_STYLE if selected else "")),
+            {"aria-label": text},
         )
         button.on("click", cast("Callable[[], None]", lambda: on_pick(value)))
         with button:

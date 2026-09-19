@@ -514,6 +514,45 @@ correct, and deliberately so.
 
 ---
 
+## Props provenance — the rest of the class `SD31` opened, a slice
+
+`fix-props-provenance`, landed on top of `fix-windows-ci-gate`. **No Wave 0,
+no new frozen baseline, no migration and no amendment** — nothing this slice
+touches is on the frozen list. `SD31` fixed one call site, the header's
+data-directory chip; this is the other forty-eight, across seventeen files.
+
+**It is a data bug, not an accessibility one.** Reproduced against the pinned
+NiceGUI, `value="{name}"` with a feature set named `draft\` parses to
+`{'type': 'text', 'data-testid': 'rename-input'}` — no exception, no warning,
+and **no `value` prop**. The rename box opens empty over a name the analyst
+cannot see. `sw-design.md` `SD34` records the helper, the `html.escape`
+question and why the recurrence guard is only a floor.
+
+### New files
+
+| File | Contents |
+|---|---|
+| `tests/ui/test_props_provenance.py` | The hazards and the floor. Four names a person can legally type — a trailing `\` (the prop that vanishes), `Unfall\next.csv\tv2` (a newline and a tab), `C:\Users\dev\sets` (the `SD31` crash), `Weather & conditions <v3>` (what `html.escape` would corrupt on its own) — each asserted to **round-trip**, `_props[key] == value`, through `feature_sets_table`'s input and its two `icon_button`s and through `data_table`'s sort header. Plus the static floor: an `ast` walk of `ra2/ui/**` refusing an interpolation inside a text-carrying prop's value, and a case proving the floor catches the pre-`SD34` line it was written for |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/ui/components/primitives.py` | + `data_props(element, {...})`, the one way a data-derived prop is assigned, returning the element so it composes with the kit's chained builders. Nine of its own helpers went through it — `icon_button`, `tick`, `chip`, `field_select`, `radio_option`, `segmented_control`, its clear segment, the pagination arrows and the page-size options — which is why every view inherited the bug (`SD34`) |
+| `ra2/ui/components/__init__.py` | Re-exports `data_props` |
+| `ra2/ui/components/data_table.py` · `derivation_builder.py` · `feature_sets_table.py` · `ollama_settings.py` · `stat_cells.py` | Column keys and labels, codes and code labels, the analyst-typed set name and `RA2_LLM_BASE_URL` move to the mapping. `import html` **goes** from three of them: it prevented none of the four parser failures and would have put `&amp;` on screen (`SD34`) |
+| `ra2/ui/views/census_view.py` · `codelists_view.py` · `evaluation_view.py` · `features_view.py` · `file_report_modal.py` · `import_view.py` · `mismatches_view.py` · `prompts_view.py` · `results/extraction_tab.py` · `results/presence_tab.py` · `results/ranking_tab.py` | Filenames, corpus names, column names, codes, feature keys, model tags and option values move to the mapping. `evaluation_view._attr` — `html.escape(quote=True)` under another name, one caller — is **deleted**; `features_view`'s `from html import escape` goes the same way. `SD32` is untouched: the toolbar's either/or, `LAUNCHED_MESSAGE` and the clone are not on this slice's path |
+| `sw-design.md` | `SD34`, and a pointer from `SD31` to it |
+
+**What deliberately stays a props string.** About sixty interpolations remain
+and every one is source-decided: an `int` (`colspan`, `data-rank`,
+`data-max-height-px`), an enum's `.value`, a `"true"`/`"false"` chosen from a
+`bool`, and the `data-testid` slots whose callers all pass literals. Provenance
+is the test, not the character set — and a props string that reads like the
+design's own HTML is worth keeping where nothing data-shaped can reach it.
+
+---
+
 ## Phase 5 — owner: M35 (Wave 0), amendment only
 
 Re-established at tag `p5-frozen`, the same way M27 established the phase-4

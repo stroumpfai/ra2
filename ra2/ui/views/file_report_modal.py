@@ -46,7 +46,7 @@ from ra2.domain.ids import FileId
 from ra2.services.container import Services
 from ra2.services.errors import ServiceError
 from ra2.services.readmodels import DeliveryFileView, DeliveryView
-from ra2.ui.components import dialog_card, format_count
+from ra2.ui.components import data_props, dialog_card, format_count
 
 __all__ = ["FINDING_LABELS", "PREVIEW_LINES", "open_file_report"]
 
@@ -302,19 +302,24 @@ class _FileReport:
         )
         with select:
             for encoding in Encoding:
-                option = ui.element("option").props(f'value="{encoding.value}"')
+                option = data_props(ui.element("option"), {"value": encoding.value})
                 if encoding.value == self._encoding:
                     option.props("selected")
                 with option:
                     ui.label(encoding.value)
 
     def _text_override(self, field: str, *, value: str, testid: str) -> None:
-        entry = (
+        # The override's current value is a field out of the file report —
+        # a delimiter, a header row, a value the analyst typed. Through the
+        # props *mapping* (SD31): the props string is parsed as Python, and a
+        # `\\` in a value there takes the whole prop with it.
+        entry = data_props(
             ui.element("input")
             .classes("chip")
-            .props(f'type="text" value="{value}" aria-label="{testid}" data-testid="{testid}"')
+            .props(f'type="text" data-testid="{testid}"')
             .mark(testid)
-            .style("padding:3px 8px;font-size:11px;")
+            .style("padding:3px 8px;font-size:11px;"),
+            {"value": value, "aria-label": testid},
         )
         entry.on(
             "input",
