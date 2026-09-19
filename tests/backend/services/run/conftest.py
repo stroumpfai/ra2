@@ -53,7 +53,7 @@ from ra2.infra.clock import FrozenClock
 from ra2.infra.config import Settings
 from ra2.infra.gpu import GpuInfo, StaticGpuProbe
 from ra2.infra.idgen import SeededFactory
-from ra2.infra.tasks import InlineTaskRunner
+from ra2.infra.tasks import AsyncioTaskRunner, InlineTaskRunner, TaskRunner
 from ra2.main import create_app
 from ra2.persistence.models import (
     Corpus,
@@ -189,6 +189,30 @@ def task_runner(ids: SeededFactory) -> InlineTaskRunner:
 
 
 @pytest.fixture
+def async_task_runner(ids: SeededFactory) -> AsyncioTaskRunner:
+    """The production runner, for the tests that need work still **in
+    flight**.
+
+    `InlineTaskRunner` is the right default and stays it: it drives the
+    coroutine to completion on a throwaway thread and joins before `submit()`
+    returns, so a test asserting on the finished state needs no polling. That
+    is also precisely why it cannot express the two states this suite was
+    missing — a run observed *while* a record is being extracted, and a run
+    cancelled out of one. There is never anything in flight to observe.
+
+    Pass it through `make_run_service(..., task_runner=async_task_runner)`
+    and pair it with `FakeLLMClient(gate=…)`: the gate holds the worker inside
+    `extract`, `wait_until_called` says when it got there, and the task is a
+    real `asyncio.Task` that can be cancelled. It takes the **same** `ids`
+    instance `task_runner` does, deliberately: a `SeededFactory` is
+    deterministic, so giving this one a factory of its own at the same seed
+    would have the two runners mint identical task ids in any test that
+    touched both. One shared sequence interleaves instead of colliding.
+    """
+    return AsyncioTaskRunner(ids)
+
+
+@pytest.fixture
 def make_run_service(
     db_session_factory: async_sessionmaker[AsyncSession],
     resolver: StubPromptResolver,
@@ -198,7 +222,12 @@ def make_run_service(
     task_runner: InlineTaskRunner,
     backend_settings: Settings,
 ) -> Callable[..., RunService]:
-    """Build a `RunService` over the migrated temp-file database."""
+    """Build a `RunService` over the migrated temp-file database.
+
+    `task_runner=` overrides the default `InlineTaskRunner` — pass
+    `async_task_runner` for a test that needs the work still in flight.
+    """
+    default_runner = task_runner
 
     def _make(
         llm_client: LLMClient,
@@ -206,13 +235,14 @@ def make_run_service(
         settings: Settings | None = None,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
         id_factory: SeededFactory | None = None,
+        task_runner: TaskRunner | None = None,
     ) -> RunService:
         return RunService(
             session_factory=session_factory or db_session_factory,
             llm_client=llm_client,
             prompt_resolver=resolver,
             gpu_probe=gpu,
-            task_runner=task_runner,
+            task_runner=task_runner or default_runner,
             clock=clock,
             ids=id_factory or ids,
             settings=settings or backend_settings,

@@ -41,9 +41,48 @@ reproduces the M17 behaviour exactly. Nothing here changes what
 "refresh" and have the endpoint come back) and two call counters, because
 "never on a timer" (plan-phase-3.md C3) is a claim about *how many times*
 `reachable()` is called.
+
+---
+
+## What `fix/evaluation-timeout-and-progress` added (plan-fix-evaluation-runs.md, Stage 0)
+
+Everything above can make a call **fail**. Nothing above can make a call
+**take time**, and the two states this suite could not previously describe are
+the two that matter most on a real endpoint: a run that is working, and a run
+that is stuck. A 9.7 B thinking model answers the seeded corpus in ~130 s per
+record, so "running, nothing committed yet" is where a run spends most of its
+life — and it is exactly the state the Evaluation screen rendered as
+indistinguishable from a dead one.
+
+`FakeLLMClient` therefore gains:
+
+- **`delays={i: seconds}`** — a call that takes measurable time, so an elapsed
+  line and a `running` status have something real to be read against. Indexed
+  like `failures`, and for the same reason: which call is slow is usually the
+  point.
+- **`gate` / `gate_from`** — a call that blocks until the test releases it.
+  This is the only way to hold a run in flight long enough to cancel it, and a
+  gate that is never released is the honest model of an endpoint that has
+  stopped answering without closing the socket.
+- **`wait_until_called(n)`** — synchronise on a call having *started*. The
+  call is recorded on `calls` **before** it delays or waits, so this is a
+  statement about entry, not about completion, which is what a test that wants
+  to interrupt work in progress needs.
+
+`tests/conftest.py` is frozen and constructs `FakeLLMClient()` with no
+arguments, so all three are keywords whose defaults reproduce the existing
+behaviour byte for byte — the same rule the H4 additions above follow.
+
+One thing these cannot reach on their own: `InlineTaskRunner` drives submitted
+work to completion *before* `submit()` returns, so nothing is ever in flight
+to gate. `tests/backend/services/run/conftest.py` offers `AsyncioTaskRunner`
+beside it for the tests that need a live task.
 """
 
+import asyncio
+import time
 from collections.abc import Mapping, Sequence
+from typing import Final
 
 from ra2.domain.llm import EndpointStatus, Extraction, ModelInfo, ProbeCode, ProbeResult
 from ra2.infra.ollama_client import LlmEndpointError
@@ -68,6 +107,13 @@ DEFAULT_MODELS: tuple[ModelInfo, ...] = (
 #: carries a plausible endpoint without the double importing `Settings`.
 DEFAULT_ENDPOINT = "http://127.0.0.1:11434/v1"
 
+#: `wait_until_called`'s poll interval and its patience. A test that waits for
+#: a call which never arrives has a real defect, and failing it in five seconds
+#: with the call count in the message beats hanging the suite until pytest is
+#: killed — which is what an unbounded wait on a gated call would do.
+_POLL_INTERVAL_S: Final = 0.01
+_WAIT_TIMEOUT_S: Final = 5.0
+
 
 class FakeLLMClient:
     """A `domain.llm.LLMClient` that returns a canned response.
@@ -88,6 +134,20 @@ class FakeLLMClient:
             without having to know the order records are visited in.
         latencies: reported latencies, cycled. A one-element sequence is a
             constant; a longer one makes the progress card's numbers move.
+            **Reported, not spent** — this is the number on the returned
+            `Extraction`, and no test waits for it. `delays` is the one that
+            takes real time.
+        delays: `call index -> seconds actually slept` before answering,
+            zero-based. The wall-clock counterpart to `latencies`: this is
+            what makes a run observably *in progress* rather than already
+            over. Keep the values small — a tenth of a second is long enough
+            for a status to be read and short enough not to slow the suite.
+        gate: an `asyncio.Event` that calls from `gate_from` onward wait on
+            before answering. A gate that is never set models an endpoint
+            that has stopped answering without closing the socket, which is
+            the state a run has to be *in* to be cancelled out of it.
+        gate_from: the first call index the gate applies to. Defaults to 0,
+            so a bare `gate=` blocks the whole run from its first call.
         failures: `call index -> exception`, zero-based, raised **instead of**
             answering. This is how a run is killed mid-corpus.
         fail_from: the call index from which every call raises `failure`.
@@ -109,6 +169,9 @@ class FakeLLMClient:
         script: Sequence[str] | None = None,
         responses: Mapping[str, str] | None = None,
         latencies: Sequence[int] | None = None,
+        delays: Mapping[int, float] | None = None,
+        gate: asyncio.Event | None = None,
+        gate_from: int = 0,
         failures: Mapping[int, BaseException] | None = None,
         fail_from: int | None = None,
         failure: BaseException | None = None,
@@ -121,6 +184,9 @@ class FakeLLMClient:
         self._script = tuple(script or ())
         self._responses = dict(responses or {})
         self._latencies = tuple(latencies or ())
+        self._delays = dict(delays or {})
+        self._gate = gate
+        self._gate_from = gate_from
         self._failures = dict(failures or {})
         self._fail_from = fail_from
         self._failure = failure or LlmEndpointError(DEFAULT_ENDPOINT, EndpointStatus.UNREACHABLE)
@@ -162,6 +228,29 @@ class FakeLLMClient:
             return self._failure
         return None
 
+    async def wait_until_called(
+        self, count: int = 1, *, timeout_s: float = _WAIT_TIMEOUT_S
+    ) -> None:
+        """Wait until `count` calls have **begun**.
+
+        Entry, not completion: `extract` appends to `calls` before it delays
+        or waits on the gate, so a test that wants to act on work in progress
+        — read a `running` status, cancel a run — can synchronise here without
+        racing the worker, and without the `sleep(…)` guesses that make a
+        suite flaky on a loaded machine.
+
+        Raises `AssertionError` rather than hanging. A gated call that never
+        arrives is a defect in the code under test, and the count in the
+        message says how far it got.
+        """
+        deadline = time.monotonic() + timeout_s
+        while len(self.calls) < count:
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f"waited {timeout_s}s for call {count}; only {len(self.calls)} began"
+                )
+            await asyncio.sleep(_POLL_INTERVAL_S)
+
     async def extract[T](
         self,
         text: str,
@@ -172,7 +261,15 @@ class FakeLLMClient:
         seed: int,
     ) -> Extraction[T]:
         index = len(self.calls)
+        # Recorded **before** the call blocks: `wait_until_called` is a claim
+        # about entry, and a gated call that is never released still has to be
+        # visible to the test that is about to cancel it.
         self.calls.append((text, model, temperature, seed))
+        delay_s = self._delays.get(index)
+        if delay_s is not None:
+            await asyncio.sleep(delay_s)
+        if self._gate is not None and index >= self._gate_from:
+            await self._gate.wait()
         failure = self._failure_for(index)
         if failure is not None:
             # Raised, not returned: an endpoint that will not answer must
