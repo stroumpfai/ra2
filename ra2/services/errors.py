@@ -26,6 +26,7 @@ __all__ = [
     "PromptTemplateCitedError",
     "PromptTemplateInvalidError",
     "RunActiveError",
+    "RunNotActiveError",
     "RunNotScoreableError",
     "RunNotScoredError",
     "ServiceError",
@@ -242,6 +243,24 @@ class RunActiveError(ServiceError):
 
     def __init__(self, run_id: str, status: str) -> None:
         super().__init__(f"run {run_id} is {status}")
+        self.run_id = run_id
+        self.status = status
+
+
+class RunNotActiveError(ServiceError):
+    """`RunActiveError`'s mirror — a run that is **not** `queued` or `running`
+    has nothing to stop. -> HTTP 409.
+
+    Two verbs guard on the same two statuses from opposite sides, which is why
+    both errors exist. Discard refuses an active run, because a worker is
+    writing to it (G1). Stop refuses an inactive one, because there is nothing
+    executing it — and a Stop that silently "succeeded" on a run that had
+    already finished would be the interesting case: it would rewrite a `done`
+    run's outcome as an interruption that never happened.
+    """
+
+    def __init__(self, run_id: str, status: str) -> None:
+        super().__init__(f"run {run_id} is {status}, not running")
         self.run_id = run_id
         self.status = status
 

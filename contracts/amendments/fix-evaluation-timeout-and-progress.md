@@ -18,9 +18,8 @@ sentence of narrative:
 `Settings.llm_timeout_s` was **120**. Almost all of the time is inside the
 response's `reasoning` field. Every call on that host timed out, always.
 
-Stages 1-4 of the plan are in this amendment. Stages 5-6 touch
-`ra2/infra/tasks.py` and `ra2/services/readmodels.py` further; those items will
-be added to this file as they land, per the one-file-per-branch rule.
+Stages 1-5 of the plan are in this amendment. Stage 6 is optional and not
+started; if it lands it is added here, per the one-file-per-branch rule.
 
 ---
 
@@ -313,6 +312,94 @@ a row, the worker's own bound" to produce an interrupted run with nothing
 committed. It now fails call 0. The fixture was built around the old bound and
 says so; leaving it and loosening the assertion would have been the reverse of
 what it is for.
+
+## 10. Stopping a run *(Stage 5)*
+
+`+ RunNotActiveError` in `ra2/services/errors.py` — frozen since M2, so this
+is the amendment; everything else in this item is in unfrozen files and is
+recorded for the reasoning.
+
+```diff
++class RunNotActiveError(ServiceError):
++    """`RunActiveError`'s mirror — a run that is **not** `queued` or
++    `running` has nothing to stop. -> HTTP 409."""
+```
+
+Two verbs guard on the same two statuses from opposite sides. Discard refuses
+an **active** run because a worker is writing to it (G1). Stop refuses an
+**inactive** one because nothing is executing it — and a Stop that quietly
+succeeded on a finished run would rewrite a `done` run's outcome as an
+interruption that never happened.
+
+**Why the verb exists.** A model answering one record in minutes spends
+essentially all of its time inside one `LLMClient.extract`. Until now the only
+ways out of a launch against a misconfigured endpoint were to wait out
+`_MAX_CONSECUTIVE_ENDPOINT_ERRORS` × `RA2_LLM_TIMEOUT_S` or to kill the
+process. `_render_status` offered `discard` only to an inactive run, on G1's
+reasoning that "there is nothing to offer while a worker is writing to the
+row" (§18.5) — right about *discard*, which destroys rows the worker is still
+producing, and it left the active case with no action at all. Stop destroys
+nothing, so it goes exactly where discard cannot.
+
+**No new `RunStatus`.** A stopped run is `interrupted`: partial work kept,
+nothing auto-restarted, Resume the one way out — the state is already exactly
+right. `run.status` is an unconstrained `String(16)` so a member would have
+been free, and still wrong. What differs is *why*, and `run.error` is where
+this codebase already keeps that (`_ERROR_CANCELLED` beside
+`_ERROR_INTERRUPTED_BY_RESTART`). **Still no Alembic revision.**
+
+### Two design decisions worth the reader's time
+
+**The status is written in `cancel`, not in the worker.** The plan flagged the
+trap and prescribed `asyncio.shield` around a `_finish` inside the worker's
+own `except CancelledError`. Writing it turned out to show a better answer: a
+shielded write is one this call cannot wait for, so `cancel` could still
+return before the row was correct. Writing from the **caller's** task — which
+was never cancelled — makes the write ordinary and ordered. `Task.cancel()`
+only *schedules* the cancellation, so the worker unwinds during `cancel`'s own
+await and cannot commit after it, and the row is right the moment `cancel`
+returns, with no poll and no settling. `_finish_cancelled` re-reads the status
+inside the write's transaction, because a run can reach `done` in between and
+a stop that lost that race did not happen.
+
+**`TaskRunner.cancel` was not added.** The plan proposed it as item 5a, and it
+is not needed: the affordance is per-run, and a job covers every run of an
+evaluation, so cancelling at job level would make "stop this run" mean
+"abandon the evaluation" — the runs behind it are exactly the ones still being
+waited on. `RunService` keeps an `asyncio.Task` per run instead and cancels
+that. `ra2/infra/tasks.py` is a **frozen protocol** with two implementations,
+and adding to it for a capability nothing needs is the cost CLAUDE.md's
+amendment procedure exists to make people weigh. So: not amended.
+
+`self._cancel_requested` is what distinguishes the two cancellations. Stopping
+one run and tearing the whole job down both arrive at the same await as
+`CancelledError`, and `task.cancelled()` is true in both — cancelling the
+outer task cancels the future it is waiting on, which is the inner one. Only
+recorded intent tells them apart, so an unasked-for cancellation propagates
+and ends the job. It also lets a run still queued behind another be skipped
+when the worker reaches it, which is how a `queued` run — one with no task at
+all — is stoppable.
+
+### Elsewhere
+
+| File | Change |
+|---|---|
+| `ra2/api/v1/runs.py` | `+ POST /{run_id}/cancel` → 409 on an inactive run, 404 on an unknown one. Answers with the **run**, not a task id: `resume` starts work and hands back something to poll, this ends it and the useful reply is the state the run is now in. One additive path in the OpenAPI snapshot |
+| `ra2/ui/views/evaluation_view.py` | `+ Stop` in the status cell for `queued`/`running`, where `discard` cannot go. **No confirmation dialog**, deliberately: `discard` asks because it destroys rows irreversibly, and a dialog guarding a reversible act is one people learn to click through |
+
+### One contract test re-pointed, not bumped
+
+`tests/test_p5_contract.py::test_this_phase_added_no_service_error` pins
+`errors.__all__` as a literal set, on plan-phase-5.md §5.1's claim that *phase
+5* added no error. That claim is still true; the assertion was simply written
+as a lock on the file rather than on the phase.
+
+It now subtracts a named `POST_PHASE_5_ERRORS`. That follows `fix-c2`, which
+re-pointed `test_m0_contract`'s Do-NOT count at sw-design.md §12 instead of at
+the literal `12`, and gave the reason: an assertion kept green by editing a
+literal is one that gets edited without anyone asking whether the change was
+wanted. Adding a line to that set is a visible claim that a new failure mode is
+real.
 
 ---
 

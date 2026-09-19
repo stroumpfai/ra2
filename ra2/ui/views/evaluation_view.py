@@ -1159,12 +1159,22 @@ class _EvaluationPage:
             # this sentence tells them apart.
             if run.error is not None:
                 _text_button("log", testid="run-log", on_click=lambda: self._open_log(run))
-            # Discard lives **in this cell**, not in a sixth column: the runs
-            # table's five widths are the design's own (README §2), and this
-            # cell already carries the row's secondary actions. G1 is why an
-            # active run has none — there is nothing to offer while a worker
-            # is writing to the row (sw-design.md §18.5).
-            if run.status not in (RunStatus.QUEUED, RunStatus.RUNNING):
+            # Discard lives **in this cell**, not in a sixth column: this cell
+            # already carries the row's secondary actions (README §2, and
+            # `STATUS_COLUMN_PX` on what that has cost the drawn width).
+            #
+            # An active run gets **Stop** instead. G1's reasoning — "there is
+            # nothing to offer while a worker is writing to the row"
+            # (sw-design.md §18.5) — is right about *discard*, which destroys
+            # rows the worker is still producing, and it left the one case
+            # with no action at all: a launch against a model that answers a
+            # record in minutes could only be escaped by waiting out the
+            # endpoint bound or killing the process. Stop destroys nothing. It
+            # ends the run and keeps every row it committed, which is the
+            # `interrupted` state Resume already acts on.
+            if run.status in (RunStatus.QUEUED, RunStatus.RUNNING):
+                _text_button("Stop", testid="run-stop", on_click=_toggle(self._cancel, run))
+            else:
                 _text_button(
                     "discard",
                     testid="run-discard",
@@ -1435,6 +1445,22 @@ class _EvaluationPage:
             return
         await self.reload()
         self._start_polling()
+
+    async def _cancel(self, run: RunView) -> None:
+        """Stop a run, keeping what it committed.
+
+        No confirmation dialog, deliberately, and the contrast with `discard`
+        two methods below is the reason: that one asks because it destroys
+        rows and cannot be undone. This one destroys nothing — the run becomes
+        `interrupted` with every extraction it managed still in place, and
+        Resume picks it up from the hole. A dialog guarding a reversible act
+        is a dialog people learn to click through.
+        """
+        try:
+            await self._services.run.cancel(RunId(run.run_id))
+        except ServiceError as exc:
+            ui.notify(str(exc), type="negative")
+        await self.reload()
 
     # --- discard (sw-design.md §18) -----------------------------------------
 

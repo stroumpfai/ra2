@@ -170,6 +170,23 @@ def test_importlinter_gained_no_contract_this_phase():
     assert text.count("[importlinter:contract:") == 7
 
 
+#: Service errors added **after** `p5w4-green`, by the risk and fix slices,
+#: each named so the assertion below stays a claim about *phase 5* rather than
+#: a lock on `errors.py` for the rest of the project's life.
+#:
+#: Subtracting a named set rather than bumping the literal is `fix-c2`'s
+#: lesson, which re-pointed `test_m0_contract`'s Do-NOT count at §12 instead of
+#: at the number 12: an assertion that is kept green by editing a literal is
+#: one that gets edited without anyone asking whether the change was wanted.
+#: Adding a line here is a visible claim that a new failure mode is real.
+POST_PHASE_5_ERRORS = {
+    # `fix/evaluation-timeout-and-progress` — `RunActiveError`'s mirror. Stop
+    # refuses a run that is not `queued` or `running`, as discard refuses one
+    # that is; succeeding would rewrite a finished run's outcome.
+    "RunNotActiveError",
+}
+
+
 def test_this_phase_added_no_service_error():
     """plan-phase-5.md §5.1: `errors.py` is **expected to add nothing**.
 
@@ -178,10 +195,13 @@ def test_this_phase_added_no_service_error():
     like every other unknown id, an unknown tag never reaches the service
     because the wire is closed (`SD24`), and a tag that changes nothing
     downstream cannot conflict with anything.
+
+    Still true, and still asserted, with the post-phase slices' own additions
+    subtracted by name — see `POST_PHASE_5_ERRORS`.
     """
     from ra2.services import errors
 
-    assert set(errors.__all__) == {
+    assert set(errors.__all__) - POST_PHASE_5_ERRORS == {
         "BlockingFindingsError",
         "CodelistImportError",
         "CorpusLockedError",

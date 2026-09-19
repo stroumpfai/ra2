@@ -23,7 +23,12 @@ from ra2.api.schemas import (
 from ra2.api.v1.discard import conflict, discard_response
 from ra2.api.v1.discard import discard_preview as to_preview
 from ra2.domain.ids import EvaluationId, RunId
-from ra2.services.errors import NotFoundError, RunActiveError, TaggedWorkPresentError
+from ra2.services.errors import (
+    NotFoundError,
+    RunActiveError,
+    RunNotActiveError,
+    TaggedWorkPresentError,
+)
 from ra2.services.readmodels import Page, RunProgressView, RunView, SortDir
 
 __all__ = ["router"]
@@ -136,6 +141,33 @@ async def resume(run_id: str, service: RunServiceDep) -> TaskAcceptedResponse:
     except NotFoundError as exc:
         raise _not_found(exc) from exc
     return TaskAcceptedResponse(task_id=str(task_id))
+
+
+@router.post(
+    "/{run_id}/cancel",
+    response_model=RunResponse,
+    responses={409: {"model": ErrorResponse}},
+)
+async def cancel(run_id: str, service: RunServiceDep) -> RunResponse:
+    """Stop a `queued` or `running` run, keeping whatever it committed.
+
+    `Resume`'s mirror, and it answers with the run rather than a task id:
+    `resume` *starts* work and hands back something to poll, this one ends it,
+    and the useful reply is the state the run is now in.
+
+    409 when the run is neither `queued` nor `running` — `RunActiveError`'s
+    guard from the other side. Succeeding there would rewrite a finished run's
+    outcome as an interruption that never happened.
+    """
+    key = RunId(run_id)
+    try:
+        await service.cancel(key)
+        view = await service.get(key)
+    except NotFoundError as exc:
+        raise _not_found(exc) from exc
+    except RunNotActiveError as exc:
+        raise conflict(exc) from exc
+    return _run_response(view)
 
 
 # ---------------------------------------------------------------------------

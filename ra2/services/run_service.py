@@ -42,6 +42,7 @@ H4's adapter draws the line and this module keeps it (sw-design.md §15.3):
   would destroy resume, so nothing here does.
 """
 
+import asyncio
 import json
 import platform
 from collections.abc import Mapping, Sequence
@@ -92,7 +93,7 @@ from ra2.persistence.repositories.evaluation_repo import EvaluationRepository
 from ra2.persistence.repositories.extraction_repo import ExtractionRepository
 from ra2.persistence.repositories.run_repo import RunRepository
 from ra2.persistence.session import session_scope
-from ra2.services.errors import FeatureValidationError, NotFoundError
+from ra2.services.errors import FeatureValidationError, NotFoundError, RunNotActiveError
 from ra2.services.feature_service import matching_rule_from_json
 from ra2.services.protocols import PromptResolver
 from ra2.services.readmodels import Page, RunProgressView, RunView, SortDir
@@ -144,6 +145,21 @@ _REASON_ADAPTER_PARSE_FAILED: Final = "adapter_parse_failed"
 #: nothing is executing it — the process died under it (§15.4). Relabelling is
 #: all that happens: **nothing auto-restarts** (§15 F8).
 _ERROR_INTERRUPTED_BY_RESTART: Final = "interrupted: the process died while this run was executing"
+
+#: `run.error` on a run a person stopped. `interrupted` and not a status of
+#: its own: the state is already exactly right — partial work kept, nothing
+#: auto-restarted, Resume the one way out — and `run.status` is an
+#: unconstrained `String(16)`, so a new member would have been free and still
+#: wrong. What differs is *why*, and `run.error` is where this codebase
+#: already keeps that (`_ERROR_INTERRUPTED_BY_RESTART`, beside it).
+_ERROR_CANCELLED: Final = "interrupted: stopped before it finished"
+
+#: The two statuses a run can be stopped **out of**. The same pair
+#: `lifecycle_service.ACTIVE_STATUSES` refuses a discard for, from the other
+#: side: a worker is writing to these and to no others.
+_CANCELLABLE_STATUSES: Final[frozenset[RunStatus]] = frozenset(
+    {RunStatus.QUEUED, RunStatus.RUNNING}
+)
 
 #: M0-D8's serialisation convention, key-sorted like every other JSON this
 #: codebase writes.
@@ -227,6 +243,16 @@ class RunService:
         #: that is not in here belongs to a process that died under it, which
         #: is the whole of how a restart is detected (see `_reclaim`).
         self._active: set[RunId] = set()
+        #: The `asyncio.Task` executing each run, so `cancel` can stop **one**
+        #: of them. A job covers every run of an evaluation and executes them
+        #: serially, so without a task per run "stop this run" could only be
+        #: spelled "abandon the evaluation".
+        self._tasks: dict[RunId, asyncio.Task[None]] = {}
+        #: Runs somebody has asked to stop. Two jobs: it tells a cancellation
+        #: *we* asked for apart from the whole job being torn down — both
+        #: arrive as `CancelledError` at the same await — and it lets a run
+        #: still queued behind another be skipped when the worker reaches it.
+        self._cancel_requested: set[RunId] = set()
 
     # -----------------------------------------------------------------------
     # Submitting work
@@ -299,11 +325,107 @@ class RunService:
 
         base = 0
         for run_id in run_ids:
-            await self.execute_run(run_id, _OffsetReporter(reporter, base=base, total=grand_total))
+            if run_id in self._cancel_requested:
+                # Stopped while still queued behind another model. `cancel`
+                # has already written the row; there is nothing to execute and
+                # nothing to record.
+                self._cancel_requested.discard(run_id)
+                continue
+            await self._execute_cancellably(
+                run_id, _OffsetReporter(reporter, base=base, total=grand_total)
+            )
             # Advanced by what actually committed, not by the scope size: a
             # run that ends `interrupted` leaves the job's bar short of 100 %,
             # which is the honest picture of it.
             base += await self._count_done(run_id)
+
+    async def _execute_cancellably(self, run_id: RunId, reporter: ProgressReporter) -> None:
+        """One model's pass, as its own `asyncio.Task`.
+
+        The task exists so `cancel` has something to cancel that is **this
+        run** and not the job around it. A job covers every run of an
+        evaluation, so cancelling at job level would make "stop this run" mean
+        "abandon the evaluation" — and the runs after it are exactly the ones
+        an analyst is still waiting on when they give up on this one.
+
+        `self._cancel_requested` is what tells the two cancellations apart.
+        Stopping this run and tearing down the whole job both arrive here as a
+        `CancelledError` from the same await, and `task.cancelled()` is true in
+        both: cancelling the outer task cancels the future it is waiting on,
+        which is this task. Only the recorded *intent* distinguishes them, so
+        an unasked-for cancellation propagates and ends the job.
+        """
+        task = asyncio.create_task(self.execute_run(run_id, reporter))
+        self._tasks[run_id] = task
+        try:
+            await task
+        except asyncio.CancelledError:
+            if run_id not in self._cancel_requested:
+                raise
+            self._cancel_requested.discard(run_id)
+        finally:
+            self._tasks.pop(run_id, None)
+
+    async def cancel(self, run_id: RunId) -> None:
+        """Stop a run somebody has decided not to wait for.
+
+        Real task cancellation, not a flag the record loop checks: the worker
+        spends almost all of its time inside one `LLMClient.extract` call, and
+        on a model answering a record in minutes a cooperative stop would take
+        until the end of the current record to take effect. Escaping exactly
+        that wait is the point of the verb.
+
+        **The status is written here, in the caller's task**, rather than in
+        the worker's own `except CancelledError` handler, and that is the whole
+        trick. A cancelled task can have `CancelledError` re-raised at any
+        later await inside it — including the write that records why it
+        stopped — so a handler that finishes the row there needs
+        `asyncio.shield` and still cannot promise the write landed before this
+        call returns. This task was never cancelled, so its write is ordinary.
+        It is also ordered: `Task.cancel()` only *schedules* the cancellation,
+        so the worker unwinds during the await below and cannot commit
+        anything after it.
+
+        The run stays `interrupted` — see `_ERROR_CANCELLED`. Whatever it
+        managed to extract is kept and Resume picks it up from the hole, which
+        is the behaviour an analyst stopping a slow model wants rather than
+        losing the hour it already spent.
+
+        :raises NotFoundError: no such run.
+        :raises RunNotActiveError: the run is not `queued` or `running`.
+        """
+        async with self._session_factory() as session:
+            run = await RunRepository(session).get(run_id)
+            if run is None:
+                raise NotFoundError("run", run_id)
+            status = RunStatus(run.status)
+        if status not in _CANCELLABLE_STATUSES:
+            raise RunNotActiveError(str(run_id), status.value)
+
+        self._cancel_requested.add(run_id)
+        task = self._tasks.get(run_id)
+        if task is not None:
+            task.cancel()
+        await self._finish_cancelled(run_id)
+
+    async def _finish_cancelled(self, run_id: RunId) -> None:
+        """Record the stop — **unless the run finished on its own first**.
+
+        The status is re-read inside the write's own transaction because the
+        two are not one atomic step: a run can reach `done` between `cancel`'s
+        check and this write, and overwriting that with an interruption would
+        be the app inventing an outcome. A stop that lost the race did not
+        happen, and the run's own result is the true one.
+        """
+        async with session_scope(self._session_factory) as session:
+            repo = RunRepository(session)
+            run = await repo.get(run_id)
+            if run is None or RunStatus(run.status) not in _CANCELLABLE_STATUSES:
+                return
+            run.error = _ERROR_CANCELLED
+            # No `finished_at`: `interrupted` is the one state a human moves
+            # out of, and a stopped run has not finished anything (`_finish`).
+            await repo.set_status(run_id, RunStatus.INTERRUPTED, finished_at=None)
 
     # -----------------------------------------------------------------------
     # The worker body
@@ -334,6 +456,13 @@ class RunService:
             # carries why before the exception reaches the task runner. An
             # endpoint that will not answer never lands here — that leaves the
             # run `interrupted` and resumable, not `failed`.
+            #
+            # `Exception`, and therefore **not `asyncio.CancelledError`**,
+            # which is a `BaseException`. That is load-bearing rather than
+            # incidental: a run somebody stopped is not a run that failed, and
+            # catching it here would both mislabel it and try to write the row
+            # from inside a task that is already unwinding. `cancel` records
+            # the stop from the caller's task instead.
             await self._finish(run_id, RunStatus.FAILED, error=_error_text(exc))
             raise
         finally:

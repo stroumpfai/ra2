@@ -1260,10 +1260,33 @@ async def polling(
             started_at=None,
         )
         yield value, catalog
+        # A queued run never settles, so a test that leaves it queued leaves
+        # the page polling. Settling it here lets the timer deactivate before
+        # the app is torn down: a tick in flight at teardown holds a session
+        # the engine's dispose never sees, and `filterwarnings = ["error"]`
+        # turns that into a failure in whichever test runs next.
+        async with value.app.state.session_factory() as session:
+            await session.execute(
+                update(Run).where(Run.id == "r-0440").values(status=RunStatus.DONE)
+            )
+            await session.commit()
+        await _poll_stops(value.user)
 
 
 def _timers(user: User) -> list[ui.timer]:
     return [e for e in user.find(kind=ui.element).elements if isinstance(e, ui.timer)]
+
+
+async def _poll_stops(user: User) -> None:
+    """Wait until nothing is still polling.
+
+    Asserts the thing the poll promises — it deactivates itself once there is
+    nothing left to watch — and it is also what keeps these tests from
+    leaking: a tick in flight when the app is torn down holds a session the
+    engine's dispose never sees, and `filterwarnings = ["error"]` turns that
+    into a failure in whichever test runs next.
+    """
+    await _until(lambda: not any(timer.active for timer in _timers(user)))
 
 
 async def test_the_progress_poll_never_re_probes_the_endpoint(
@@ -1301,6 +1324,7 @@ async def test_the_progress_poll_never_re_probes_the_endpoint(
         await session.commit()
 
     await _until(lambda: _statuses(user) == {RunStatus.DONE.value})
+    await _poll_stops(user)
 
     assert (catalog.reachable_calls, catalog.models_calls) == after_load
 
@@ -1339,3 +1363,60 @@ async def test_the_poll_backs_off_once_the_handshake_is_over(
     (timer,) = _timers(user)
     assert timer.interval == evaluation_view.POLL_FAST_S
     await _until(lambda: timer.interval == evaluation_view.POLL_SETTLED_S)
+
+
+async def test_an_active_run_offers_stop_and_an_inactive_one_offers_discard(
+    polling: tuple[Seeded, StaticModelCatalog],
+) -> None:
+    """The one cell that had no action at all.
+
+    G1's reasoning — "there is nothing to offer while a worker is writing to
+    the row" (sw-design.md §18.5) — is right about *discard*, which destroys
+    rows the worker is still producing. It left a launch against a model
+    answering a record in minutes with no way out but the endpoint bound or
+    killing the process. Stop destroys nothing, so it belongs exactly where
+    discard cannot go.
+    """
+    seeded, _ = polling
+    user = seeded.user
+
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+
+    assert len(_find(user, "run-stop")) == 1
+    assert _find(user, "run-discard") == [], "a worker may be writing to this row"
+
+    async with seeded.app.state.session_factory() as session:
+        await session.execute(update(Run).where(Run.id == "r-0440").values(status=RunStatus.DONE))
+        await session.commit()
+    await _until(lambda: _statuses(user) == {RunStatus.DONE.value})
+    await _poll_stops(user)
+
+    assert _find(user, "run-stop") == [], "nothing is executing it any more"
+    assert len(_find(user, "run-discard")) == 1
+
+
+async def test_pressing_stop_reaches_the_service_with_this_runs_id(
+    polling: tuple[Seeded, StaticModelCatalog], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Asserted at the seam, as `test_an_interrupted_run_offers_resume` is and
+    for its reason: what the run becomes afterwards is the service's, and
+    timing it out of a UI test is what made that assertion flaky."""
+    seeded, _ = polling
+    user = seeded.user
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+
+    stopped: list[str] = []
+    real_cancel = seeded.services.run.cancel
+
+    async def _recording_cancel(run_id: RunId) -> None:
+        stopped.append(str(run_id))
+        await real_cancel(run_id)
+
+    monkeypatch.setattr(seeded.services.run, "cancel", _recording_cancel)
+
+    _one(user, _find(user, "run-stop")[0]).click()
+    await _until(lambda: stopped == ["r-0440"])
+    await _until(lambda: _statuses(user) == {RunStatus.INTERRUPTED.value})
+    await _poll_stops(user)

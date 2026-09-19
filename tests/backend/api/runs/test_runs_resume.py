@@ -1,9 +1,12 @@
 """`POST /api/v1/runs/{id}/resume` against a genuinely interrupted run.
 
-A dedicated file: `api_llm_client` is overridden here to fail its first three
-calls, which is `run_service.py`'s own `_MAX_CONSECUTIVE_ENDPOINT_ERRORS`
-bound — an override that must not leak into `test_runs_api.py`'s other tests,
-which all assume the default never-fails double.
+A dedicated file: `api_llm_client` is overridden here to fail its first call,
+which is `run_service.py`'s own `_MAX_ENDPOINT_ERRORS_BEFORE_FIRST_ROW` bound
+— an override that must not leak into `test_runs_api.py`'s other tests, which
+all assume the default never-fails double.
+
+`POST /{id}/cancel` lives here too, since its 409 needs a run in a state the
+never-fails double cannot produce.
 """
 
 from collections.abc import Awaitable, Callable
@@ -56,3 +59,34 @@ async def test_resume_an_interrupted_run_finishes_it(
     body = resp.json()
     assert body["status"] == "done"
     assert body["records_done"] == 4
+
+
+async def test_cancelling_a_finished_run_is_a_conflict(
+    api_client: AsyncClient, seed_ready: Callable[..., Awaitable[dict[str, str]]]
+) -> None:
+    """`RunActiveError`'s guard from the other side.
+
+    Discard refuses an **active** run because a worker is writing to it; Stop
+    refuses an **inactive** one because nothing is executing it. Answering 200
+    here would rewrite a finished run's outcome as an interruption that never
+    happened, which is the app inventing a result.
+    """
+    seeded = await seed_ready(models=(FITTING_MODEL,), record_count=4)
+    await api_client.post(f"/api/v1/evaluations/{seeded['evaluation_id']}/launch")
+    listed = await api_client.get("/api/v1/runs", params={"evaluation_id": seeded["evaluation_id"]})
+    run = listed.json()["items"][0]
+    await api_client.post(f"/api/v1/runs/{run['run_id']}/resume")
+
+    resp = await api_client.get(f"/api/v1/runs/{run['run_id']}")
+    assert resp.json()["status"] == "done"
+
+    resp = await api_client.post(f"/api/v1/runs/{run['run_id']}/cancel")
+
+    assert resp.status_code == 409, resp.text
+    assert (await api_client.get(f"/api/v1/runs/{run['run_id']}")).json()["status"] == "done"
+
+
+async def test_cancelling_an_unknown_run_is_a_not_found(api_client: AsyncClient) -> None:
+    resp = await api_client.post("/api/v1/runs/no-such-run/cancel")
+
+    assert resp.status_code == 404, resp.text
