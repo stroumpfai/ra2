@@ -18,8 +18,8 @@ sentence of narrative:
 `Settings.llm_timeout_s` was **120**. Almost all of the time is inside the
 response's `reasoning` field. Every call on that host timed out, always.
 
-Stage 1 of the plan is this amendment. Stages 2-6 touch
-`ra2/services/readmodels.py` and `ra2/infra/tasks.py` further; those items will
+Stages 1 and 2 of the plan are in this amendment. Stages 3-6 touch
+`ra2/infra/tasks.py` and `ra2/services/readmodels.py` further; those items will
 be added to this file as they land, per the one-file-per-branch rule.
 
 ---
@@ -139,6 +139,71 @@ the design allots it (README §2). That cell already overflowed with two — it 
 `plan-fix-evaluation-runs.md` §1.1 d, and **Stage 2c owns it**. This item makes
 the crowding one item worse in exchange for the reason being reachable at all;
 it does not create the class of defect.
+
+## 5. `ra2/services/readmodels.py` — `RunView.ordinal` *(Stage 2)*
+
+```diff
+     run_id: RunId
++    #: This run's place within its own evaluation, by creation order, from 1.
++    ordinal: int
+     evaluation_id: EvaluationId
+```
+
+**Why the read model and not `ui/`.** The ordinal is a property of the *set*.
+The runs table sorts on four keys and pages at ten, so a number worked out
+from the rows on screen would be a different number per sort — and the
+discard dialog and the mismatch toolbar already name runs "run 2", from a
+query that is explicitly `ORDER BY run.id`. `run_service.run_ordinals` is now
+the one place that count is made, so the table and the dialog cannot disagree
+about which run is run 2.
+
+**Why by id.** uuid7 is time-ordered, so id order is creation order.
+`RunRepository.list_by_evaluation` returns `started_at DESC` — the display
+order, in which a run's number would change as its siblings start.
+`launch_runs` already sorted by id on this reasoning.
+
+**What it fixes.** `_render_run_id` put the 36-character id into the 74px the
+design allots (README §2), where `table-layout:fixed` does not clip, so it
+drew over the Model column. Clipping alone would not have been enough: uuid7
+opens with a millisecond timestamp, so runs launched together share their
+first eleven characters and a truncated id distinguishes nothing. The full id
+stays on the link's `title`.
+
+## 6. Two UI changes that need no amendment, recorded because they deviate
+
+Neither file is frozen; both depart from `design/prompt-evaluation/README.md`
+§2, so they belong in CONTRACTS.md as design deviations.
+
+**The `DEV` marker becomes a chip beside the status word, not a replacement
+for it.** The design's reading is sound where a dev-sized run is the
+exception. `RA2_DEV_RECORD_MAX` is 50 and the development seed is 12 records,
+so *every* run an analyst makes while learning the product is dev-sized, and
+the Status column rendered one constant string: `running`, `done` and
+`interrupted` were the same cell. The `--warn-soft` row tint is unchanged and
+nothing about a dev run is quieter than it was.
+
+The suite did not catch this, and the reason is worth keeping: the cell
+already carried `data-status` and `data-dev`, so both facts were legible to a
+test and to nobody else. `test_two_dev_runs_in_different_states_render_different_status_cells`
+is the assertion that was missing.
+
+**The Status column widens from 84px to 200px.** 84 is the right width for
+what the design draws there — one state word. It is not what the cell holds:
+phase 5 put `discard` in it rather than in a sixth column *precisely* to keep
+the five drawn widths, `interrupted` runs already carried `Resume`, item 4
+above added `log`, and the chip makes five things in a cell sized for one.
+
+Keeping 84 never made them fit; it made them draw over the column beside
+them. That trade preserved the number in the README and spent the thing the
+number was for. Clipping is not the answer here either — three of the five
+are buttons, and a control under `overflow:hidden` is one nobody can press,
+which is the defect `theme.py`'s own `.td-clip` note was written about. The
+other four columns keep the design's widths exactly *and* gain `.td-clip`,
+because all four hold text.
+
+The well is `overflow:auto` and the README's stated purpose for it is that the
+table "scrolls horizontally rather than collapsing a column below the design
+width". That is what makes the widening affordable.
 
 ---
 

@@ -98,6 +98,7 @@ from ra2.services.readmodels import (
     RunView,
     SortDir,
 )
+from ra2.services.run_service import run_ordinals
 
 __all__ = [
     "CONNECTION_REASON_NOT_LOOPBACK",
@@ -867,9 +868,11 @@ class EvaluationService:
         runs = await RunRepository(session).list_by_evaluation(EvaluationId(evaluation.id))
         total = self._scope_size(corpus, EvaluationSize(evaluation.size))
         progress = [await self._progress(session, run, total) for run in runs]
+        ordinals = run_ordinals(runs)
         run_views = [
             RunView(
                 run_id=RunId(run.id),
+                ordinal=ordinals[run.id],
                 evaluation_id=EvaluationId(evaluation.id),
                 model_tag=run.model_name,
                 model_digest=run.model_digest,

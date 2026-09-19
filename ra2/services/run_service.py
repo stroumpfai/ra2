@@ -97,7 +97,7 @@ from ra2.services.feature_service import matching_rule_from_json
 from ra2.services.protocols import PromptResolver
 from ra2.services.readmodels import Page, RunProgressView, RunView, SortDir
 
-__all__ = ["RunService"]
+__all__ = ["RunService", "run_ordinals"]
 
 #: `sort_key` -> the `RunView` attribute it sorts on. An unknown key falls
 #: back to `started_at`, the runs table's own default (sw-design.md §8.1.4).
@@ -588,8 +588,14 @@ class RunService:
             await self._reclaim(session, runs)
             evaluation = await EvaluationRepository(session).get(evaluation_id)
             is_dev = _is_dev(evaluation)
+            ordinals = run_ordinals(runs)
             views = [
-                _run_view(run, records_done=await repo.count_done(RunId(run.id)), is_dev=is_dev)
+                _run_view(
+                    run,
+                    records_done=await repo.count_done(RunId(run.id)),
+                    is_dev=is_dev,
+                    ordinal=ordinals[run.id],
+                )
                 for run in runs
             ]
 
@@ -616,10 +622,15 @@ class RunService:
                 raise NotFoundError("run", run_id)
             await self._reclaim(session, [run])
             evaluation = await EvaluationRepository(session).get(EvaluationId(run.evaluation_id))
+            # The siblings are read for one number, because the ordinal is a
+            # property of the set and there is no honest way to know a run's
+            # place from the run alone. An evaluation holds a handful of runs.
+            siblings = await repo.list_by_evaluation(EvaluationId(run.evaluation_id))
             return _run_view(
                 run,
                 records_done=await repo.count_done(run_id),
                 is_dev=_is_dev(evaluation),
+                ordinal=run_ordinals(siblings)[run.id],
             )
 
     # -----------------------------------------------------------------------
@@ -756,10 +767,30 @@ def _is_dev(evaluation: Evaluation | None) -> bool:
     return evaluation.is_dev or EvaluationSize(evaluation.size) is EvaluationSize.DEV
 
 
-def _run_view(run: Run, *, records_done: int, is_dev: bool) -> RunView:
+def run_ordinals(runs: Sequence[Run]) -> dict[str, int]:
+    """`run.id -> its 1-based place in the evaluation`, by **creation order**.
+
+    Sorted by id here rather than taken in the caller's own order, which is
+    `started_at DESC` (`RunRepository.list_by_evaluation`) — the *display*
+    order, where a run's number would change as its siblings start, and change
+    again under every other sort the table offers. A number that moves is not
+    an identifier.
+
+    Id order is creation order because the ids are uuid7, which is time-
+    ordered by construction. `launch_runs` already sorts runs by id on that
+    reasoning, and `mismatch_service._run_label` counts positions in a query
+    that is explicitly `ORDER BY run.id`. This is that same count, stated once
+    so the runs table and the discard dialog cannot disagree about which run
+    is "run 2".
+    """
+    return {run.id: i for i, run in enumerate(sorted(runs, key=lambda r: r.id), start=1)}
+
+
+def _run_view(run: Run, *, records_done: int, is_dev: bool, ordinal: int) -> RunView:
     status = RunStatus(run.status)
     return RunView(
         run_id=RunId(run.id),
+        ordinal=ordinal,
         evaluation_id=EvaluationId(run.evaluation_id),
         model_tag=run.model_name,
         model_digest=run.model_digest,

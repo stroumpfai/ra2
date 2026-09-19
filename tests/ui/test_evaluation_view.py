@@ -573,9 +573,18 @@ async def test_an_unreachable_endpoint_disables_launch_and_says_why_beside_the_l
 async def test_the_runs_table_renders_its_five_columns_and_three_row_states(
     seeded: Seeded,
 ) -> None:
-    """README §2, "Runs table": the five columns at their exact widths,
-    `dd.mm.yy - hh:mm:ss` timestamps, `—` for a queued run's records, the
-    `failed` row state with its muted "log" action, and 10-row pagination."""
+    """README §2, "Runs table": four columns at the design's exact widths and
+    Status at the width its contents need, `dd.mm.yy - hh:mm:ss` timestamps,
+    `—` for a queued run's records, the `failed` row state with its muted
+    "log" action, and 10-row pagination.
+
+    Status is 200px rather than the drawn 84 (`STATUS_COLUMN_PX` has the
+    reasoning): the cell holds a state word, a `DEV` chip and up to three
+    actions, `table-layout:fixed` does not clip, and three of those five are
+    buttons — so the 84px that was kept was being paid for in controls drawn
+    over the column beside them. The other four are clipped with `.td-clip`
+    instead, because all four hold text.
+    """
     user = seeded.user
     evaluation_id = seeded.draft.evaluation_id
     template_id = seeded.template.prompt_template_id
@@ -620,7 +629,14 @@ async def test_the_runs_table_renders_its_five_columns_and_three_row_states(
     assert "width:132px" in widths["model_tag"]
     assert "width:66px" in widths["records_done"]
     assert "width:152px" in widths["started_at"]
-    assert "width:84px" in widths["status"]
+    assert f"width:{evaluation_view.STATUS_COLUMN_PX}" in widths["status"]
+    # The four text columns clip rather than overflow. `table-layout:fixed`
+    # does not clip on its own, which is how a 36-character uuid ran through
+    # the Model column beside it. Counted over the body cells, because
+    # `.td-clip` is a cell class: four of the five columns, three rows.
+    body_cells = [e for e in user.find(kind=ui.element).elements if e.tag == "td"]
+    assert len(body_cells) == 5 * 3
+    assert sum(1 for cell in body_cells if "td-clip" in cell._classes) == 4 * 3
 
     assert _statuses(user) == {"done", "failed", "queued"}
     assert "04.09.26 - 08:12:04" in _all_text(user, "run-started")
@@ -636,9 +652,14 @@ async def test_the_runs_table_renders_its_five_columns_and_three_row_states(
     assert len(failed_rows) == 1
     assert len(_find(user, "run-log")) == 1
     assert "3 · 0 dev · 1 failed" in _all_text(user, "card-header")
-    # A run id is a real link to Results — a placeholder route this phase.
-    hrefs = {str(e._props.get("href", "")) for e in _find(user, "run-link")}
-    assert "/results?run=r-0412" in hrefs
+    # A run is named by its ordinal, not by its id: the design's fixtures use
+    # ids like `r-0403`, real ids are 36-character uuid7s, and the ordinal is
+    # what the discard dialog and the mismatch toolbar already call a run.
+    # The link still targets the id, and carries it as its title.
+    links = {_element_text(e): e for e in _find(user, "run-link")}
+    assert set(links) == {"run 1", "run 2", "run 3"}
+    assert str(links["run 1"]._props.get("href", "")) == "/results?run=r-0412"
+    assert str(links["run 1"]._props.get("title", "")) == "r-0412"
     # Paginated at 10 (README §2), not at the component kit's default ladder.
     (pagination,) = _find(user, "pagination")
     assert "1–3 of 3" in _element_text(pagination)
@@ -649,7 +670,16 @@ async def test_a_dev_sized_run_paints_the_row_and_carries_the_dev_marker(
     seeded: Seeded,
 ) -> None:
     """README §2: "dev-sized runs get `background:--warn-soft`", with `DEV` in
-    `--warn` — the third row state."""
+    `--warn` — the third row state.
+
+    The marker is a chip **beside** the status word rather than in place of
+    it. The design draws the replacement, which is sound where a dev run is
+    the exception; here `RA2_DEV_RECORD_MAX` is 50 and the development seed is
+    12 records, so every run an analyst makes while learning the product is
+    dev-sized, and the column rendered one constant string for `running`,
+    `done` and `interrupted` alike. The assertion below is what that costs:
+    the word and the marker are now two elements, and both are asserted.
+    """
     user = seeded.user
     evaluation_id = seeded.draft.evaluation_id
     await seeded.services.evaluation.update_draft(evaluation_id, size=EvaluationSize.DEV)
@@ -667,11 +697,14 @@ async def test_a_dev_sized_run_paints_the_row_and_carries_the_dev_marker(
     await user.should_see("Runs in this evaluation")
 
     (status,) = _find(user, "run-status")
-    # The drawn marker replaces the word; the run's real state stays readable.
     assert status._props["data-status"] == "done"
     assert status._props["data-dev"] == "true"
-    assert _own_text(status) == "DEV"
-    assert "warn" in status._classes
+    # The word says what the run did; the chip says the sample was dev-sized.
+    # Both, because either alone leaves a question the other answers.
+    assert _own_text(status) == "done"
+    (dev,) = _find(user, "run-dev")
+    assert _own_text(dev) == evaluation_view.DEV_MARKER
+    assert "warn" in dev._classes
     dev_rows = [
         e
         for e in user.find(kind=ui.element).elements
@@ -1156,3 +1189,39 @@ async def test_a_run_that_finished_cleanly_offers_no_log(seeded: Seeded) -> None
     await user.should_see("Runs in this evaluation")
 
     assert _find(user, "run-log") == []
+
+
+async def test_two_dev_runs_in_different_states_render_different_status_cells(
+    seeded: Seeded,
+) -> None:
+    """The assertion the runs table never had.
+
+    Every run off the development seed is dev-sized — `RA2_DEV_RECORD_MAX` is
+    50 and the seed is 12 records — and the drawn cell replaces the status
+    word with `DEV`, so a done run and an interrupted one rendered the same
+    string. The suite did not catch it because the two facts were both
+    present in `data-status` and `data-dev`, which is where a test looks and
+    an analyst cannot.
+    """
+    user = seeded.user
+    evaluation_id = seeded.draft.evaluation_id
+    await seeded.services.evaluation.update_draft(evaluation_id, size=EvaluationSize.DEV)
+    for run_id, status in (("r-0430", RunStatus.DONE), ("r-0431", RunStatus.INTERRUPTED)):
+        await _seed_run(
+            seeded.app,
+            run_id=run_id,
+            evaluation_id=evaluation_id,
+            template_id=seeded.template.prompt_template_id,
+            model_tag=FITS_A,
+            status=status,
+            started_at=datetime(2026, 9, 5, 9, 0, 0, tzinfo=UTC),
+        )
+
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+
+    words = sorted(_own_text(e) for e in _find(user, "run-status"))
+    assert words == ["done", "interrupted"]
+    # Both are still marked dev-sized: the word gained a state, it did not
+    # cost the marker (mvp-spec.md §9 — "smoke test, not a result").
+    assert len(_find(user, "run-dev")) == 2

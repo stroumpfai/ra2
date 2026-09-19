@@ -154,6 +154,7 @@ __all__ = [
     "CONTENT_GAP",
     "CONTENT_PADDING",
     "DETERMINISM_NOTE",
+    "DEV_MARKER",
     "ENDPOINT_WORDS",
     "FEATURE_SET_NOTE",
     "LAUNCHED_MESSAGE",
@@ -172,6 +173,7 @@ __all__ = [
     "RUNS_TITLE",
     "SETUP_LIST_EXTRA",
     "SIZE_NOTE",
+    "STATUS_COLUMN_PX",
     "STEP_TITLES",
     "TEMPERATURE_CHOICES",
     "TIMESTAMP_FORMAT",
@@ -198,10 +200,34 @@ RUNS_SUMMARY_CAP: Final = 500
 
 #: README §2, "Fixed sizes that matter here": models well 196px = 4 rows.
 MODELS_WELL_PX: Final = 196
-#: README §2, "Runs table": `min-width:508px` in an `overflow:auto` well, so
-#: it scrolls horizontally rather than collapsing a column below the design
-#: width.
-RUNS_TABLE_MIN_WIDTH_PX: Final = 508
+#: README §2, "Runs table": four columns at the design's widths, plus a Status
+#: column this implementation widens — `STATUS_COLUMN_PX` says why. The well is
+#: `overflow:auto`, so the table scrolls horizontally rather than collapsing a
+#: column below the width its contents need; that is the README's own stated
+#: purpose for the well, and it is what makes the widening affordable.
+RUNS_TABLE_MIN_WIDTH_PX: Final = 74 + 132 + 66 + 152 + 200
+
+#: The Status column. **200px, against the design's 84.**
+#:
+#: 84px is the right width for what the design draws in this cell: one state
+#: word. It is not what the cell holds. Phase 5 put `discard` here rather than
+#: in a sixth column precisely to keep the five drawn widths (CONTRACTS.md,
+#: `feat-reset-discard-*`), and `interrupted` runs already carried `Resume`
+#: beside it; Stage 1 of `plan-fix-evaluation-runs.md` added `log`, and Stage 2
+#: adds the `DEV` chip. Five things in a cell sized for one.
+#:
+#: Keeping 84px did not make them fit — `table-layout:fixed` does not clip, so
+#: they simply drew over the neighbouring column. That trade preserved the
+#: number in the README and sacrificed the thing the number was for. Clipping
+#: is not available here either: three of the five are buttons, and a control
+#: hidden under `overflow:hidden` is one nobody can press — the defect
+#: `theme.py`'s own `.td-clip` note was written about.
+#:
+#: So the width follows the contents: "interrupted" + `DEV` + Resume + log +
+#: discard, at this cell's 11px/10.5px mono and 6px gaps, is a little under
+#: 200px. The other four columns keep the design's widths exactly and are
+#: clipped with `.td-clip`, because all four hold text.
+STATUS_COLUMN_PX: Final = "200px"
 
 #: README §2, "Layout". Both numbers were regressions at some point and both
 #: are asserted: `align-self:flex-start` (without it the `margin-top:auto`
@@ -308,6 +334,10 @@ TIMESTAMP_FORMAT: Final = "%d.%m.%y - %H:%M:%S"
 
 #: This view's own ladder for an underspecified control (module docstring).
 TEMPERATURE_CHOICES: Final[tuple[float, ...]] = (0.0, 0.2, 0.5, 0.7, 1.0)
+
+#: The design's dev-sized marker (README §2), now a chip **beside** the status
+#: word rather than in place of it — `_status_marker` has the reasoning.
+DEV_MARKER: Final = "DEV"
 
 #: One rendering table for the endpoint line's state word, keyed on the
 #: service's enum — the `FindingCode` discipline (CLAUDE.md, "Findings, not
@@ -979,12 +1009,19 @@ class _EvaluationPage:
     def _run_columns(self) -> tuple[ColumnSpec[RunView], ...]:
         """README §2, "Runs table" — the five columns at their exact widths."""
         return (
-            ColumnSpec(key="run_id", label="Run", width="74px", render=_render_run_id),
+            ColumnSpec(
+                key="run_id",
+                label="Run",
+                width="74px",
+                cell_class="td-clip",
+                render=_render_run_id,
+            ),
             ColumnSpec(
                 key="model_tag",
                 label="Model",
                 width="132px",
                 sortable=True,
+                cell_class="td-clip",
                 render=_render_model,
             ),
             ColumnSpec(
@@ -993,7 +1030,7 @@ class _EvaluationPage:
                 width="66px",
                 align="right",
                 sortable=True,
-                cell_class="mono",
+                cell_class="mono td-clip",
                 render=_render_records,
             ),
             ColumnSpec(
@@ -1001,28 +1038,30 @@ class _EvaluationPage:
                 label="Start time",
                 width="152px",
                 sortable=True,
+                cell_class="td-clip",
                 render=_render_started,
             ),
             ColumnSpec(
                 key="status",
                 label="Status",
-                width="84px",
+                width=STATUS_COLUMN_PX,
                 sortable=True,
                 render=self._render_status,
             ),
         )
 
     def _render_status(self, run: RunView) -> None:
-        """ "done" / "running" / "queued" in `--ink3`; `DEV` in `--warn`;
-        `FAILED` in `--danger` with a muted "log" action instead of results;
-        and — undrawn but required by sw-design.md §15.4 — an `interrupted`
-        run's explicit **Resume**.
+        """ "done" / "running" / "queued" in `--ink3`, `FAILED` in `--danger`,
+        each followed by a `DEV` chip in `--warn` when the run is dev-sized;
+        a muted "log" action for any run that stopped with a reason; and —
+        undrawn but required by sw-design.md §15.4 — an `interrupted` run's
+        explicit **Resume**.
 
-        The marker the design draws *replaces* the status word, so the cell
-        also carries `data-status` and `data-dev`: a dev-sized run that is
-        still `running` is not the same row as a dev-sized run that is `done`,
-        and the drawn cell alone cannot tell them apart. The attributes are the
-        service's two values verbatim — nothing is derived here.
+        The status word and the dev marker are **two elements, not one**
+        (`_status_marker` has the reasoning). `data-status` and `data-dev`
+        stay on the word: they are the service's two values verbatim, nothing
+        is derived here, and they were the only place the two facts were both
+        legible before the chip existed.
         """
         marker, tone = _status_marker(run)
         with ui.element("div").style("display:flex;align-items:center;gap:6px;min-width:0;"):
@@ -1030,6 +1069,10 @@ class _EvaluationPage:
                 f'data-testid="run-status" data-status="{run.status.value}" '
                 f'data-dev="{"true" if run.is_dev else "false"}"'
             ).mark("run-status").style("font-size:11px;")
+            if run.is_dev:
+                ui.label(DEV_MARKER).classes("mono warn").props('data-testid="run-dev"').mark(
+                    "run-dev"
+                ).style("font-size:10.5px;")
             if run.is_resumable:
                 _text_button("Resume", testid="run-resume", on_click=_toggle(self._resume, run))
             # Offered on **any** run carrying a reason, not only a failed one.
@@ -1536,12 +1579,31 @@ class _EvaluationPage:
 
 
 def _render_run_id(run: RunView) -> None:
-    """The run id, linking to Results — a **placeholder route** this phase.
-    An affordance that lands on "Not built in phase 1" is honest; a missing
-    one is not."""
-    link = ui.link(text=str(run.run_id), target=f"/results?run={run.run_id}")
+    """ "run 2", linking to Results — a **placeholder route** this phase. An
+    affordance that lands on "Not built in phase 1" is honest; a missing one
+    is not.
+
+    The design's fixtures use ids like `r-0403`, which fit the 74px this
+    column is allotted (README §2). Real ids are uuid7 — 36 characters in a
+    `table-layout:fixed` cell, and fixed layout does not clip, so the id ran
+    straight through the Model column beside it.
+
+    Clipping alone would not have been enough. uuid7 opens with a millisecond
+    timestamp, so runs launched together share their first eleven characters
+    and a truncated id distinguishes nothing; the *last* eight would, and read
+    as noise. The ordinal is what this product already calls a run everywhere
+    a person has to name one — `mismatch_service._run_label`'s "run 2 ·
+    qwen3:14b", and the discard dialog's lead sentence. The full id stays on
+    the link's `title`, which is where an id belongs when it is wanted for
+    copying rather than for reading.
+    """
+    link = ui.link(text=f"run {run.ordinal}", target=f"/results?run={run.run_id}")
     link.classes(remove="nicegui-link", add="mono")
     link.props('data-testid="run-link"').mark("run-link")
+    # `title` through the mapping, never interpolated into a props string
+    # (`SD31`, `data_props`): `Props.parse` reads a quoted value as Python
+    # source, and this one is an id that did not come from this file.
+    data_props(link, {"title": str(run.run_id)})
     link.style("font-size:11.5px;color:var(--ink);")
 
 
@@ -1565,14 +1627,25 @@ def _render_started(run: RunView) -> None:
 def _status_marker(run: RunView) -> tuple[str, str]:
     """The Status cell's text and its colour class (README §2, "Runs table").
 
-    `FAILED` outranks `DEV`: a failed dev run is a failure first. Both are
-    the design's own uppercase markers; every other state is the service's
-    status word.
+    `FAILED` keeps the design's uppercase marker in `--danger`; every other
+    state is the service's own status word in `--ink3`.
+
+    **`DEV` is no longer one of the answers here.** The design draws it as
+    *replacing* the status word, which is sound on a board where a dev-sized
+    run is the exception — and wrong on this one. `RA2_DEV_RECORD_MAX` is 50
+    and the development seed is 12 records, so *every* run an analyst makes
+    while learning the product is dev-sized and this column rendered one
+    constant string: a running run, a done run and an interrupted run were
+    the same cell. A column that cannot tell those apart is not a status
+    column, and the `data-status` attribute this cell also carries meant the
+    distinction was legible to the test suite and to nobody else.
+
+    The marker moves to a chip beside the word (`_render_status`), so both
+    facts are on screen; the `--warn-soft` row tint the design also specifies
+    is unchanged, and nothing about a dev run is quieter than it was.
     """
     if run.status is RunStatus.FAILED:
         return "FAILED", "danger"
-    if run.is_dev:
-        return "DEV", "warn"
     return run.status.value, "ink3"
 
 

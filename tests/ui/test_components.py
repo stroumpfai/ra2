@@ -1036,6 +1036,55 @@ async def test_progress_card_renders_all_four_states_from_the_read_model_alone(u
     assert all(label._style["color"] == "var(--ink3)" for label in status_labels[:3])
 
 
+async def test_a_running_card_with_nothing_committed_still_shows_it_is_working(user):
+    """The state the Evaluation screen could not describe.
+
+    `_eta_ms` returns `None` until one record has committed — deliberately,
+    because an ETA from zero records is "a guess wearing a number's clothes"
+    (`run_service`). On a model that takes minutes per record that is the
+    whole of the first stretch of a run, during which this line read
+    `0 / 12 · running` over a bar at zero and did not change. Nothing on the
+    screen separated a worker that was extracting from one whose process had
+    died, which is what mvp-spec.md N6's "progress is visible" has to mean
+    while the first record is still in flight.
+
+    `elapsed_ms` was in the read model the whole time; only the finished
+    branch rendered it.
+    """
+    progress = RunProgressView(
+        run_id=RunId("r-fresh"),
+        model_tag="qwen3.5:latest",
+        status=RunStatus.RUNNING,
+        done=0,
+        total=12,
+        elapsed_ms=4 * 60_000,
+    )
+    page("/t/progress/fresh", lambda: progress_card(progress=progress))
+    await user.open("/t/progress/fresh")
+
+    (status,) = _ordered(user.find(marker="progress-card-status"))
+    assert str(status.text) == "0 / 12 · running · 4 m"
+    assert "ETA" not in str(status.text), "nothing has committed to extrapolate from"
+
+
+async def test_a_running_card_shows_elapsed_and_eta_once_it_has_both(user):
+    """Elapsed first, then the ETA — time spent before time guessed."""
+    progress = RunProgressView(
+        run_id=RunId("r-going"),
+        model_tag="qwen3.5:latest",
+        status=RunStatus.RUNNING,
+        done=3,
+        total=12,
+        elapsed_ms=12 * 60_000,
+        eta_ms=36 * 60_000,
+    )
+    page("/t/progress/going", lambda: progress_card(progress=progress))
+    await user.open("/t/progress/going")
+
+    (status,) = _ordered(user.find(marker="progress-card-status"))
+    assert str(status.text) == "3 / 12 · running · 12 m · ETA 36 m"
+
+
 async def test_progress_card_never_calls_a_service(user):
     """Do-NOT #7, mechanically: the component's only input is the read
     model, and rendering it twice with the same value produces the same
