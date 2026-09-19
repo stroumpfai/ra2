@@ -18,7 +18,7 @@ sentence of narrative:
 `Settings.llm_timeout_s` was **120**. Almost all of the time is inside the
 response's `reasoning` field. Every call on that host timed out, always.
 
-Stages 1 and 2 of the plan are in this amendment. Stages 3-6 touch
+Stages 1-3 of the plan are in this amendment. Stages 4-6 touch
 `ra2/infra/tasks.py` and `ra2/services/readmodels.py` further; those items will
 be added to this file as they land, per the one-file-per-branch rule.
 
@@ -204,6 +204,77 @@ because all four hold text.
 The well is `overflow:auto` and the README's stated purpose for it is that the
 table "scrolls horizontally rather than collapsing a column below the design
 width". That is what makes the widening affordable.
+
+## 7. `ra2/services/evaluation_service.py` — `get()` takes the endpoint state back *(Stage 3)*
+
+*Not frozen.* Recorded because it is the seam that makes C3 enforceable.
+
+```diff
+-    async def get(self, evaluation_id: EvaluationId) -> EvaluationView:
++    async def get(
++        self,
++        evaluation_id: EvaluationId,
++        *,
++        connection: ConnectionView | None = None,
++        models: Sequence[ModelChoiceView] | None = None,
++    ) -> EvaluationView:
+```
+
+**Why.** `connection_status`' own docstring says reachability is re-checked
+"on view load and when the settings dialog's refresh is pressed — **never on
+a timer**" (plan-phase-3.md C3). The Evaluation view's progress poll called
+`reload()`, which calls `get()`, which called `connection_status()` **and**
+`_model_choices()`. Both reach `/api/tags`. At `ui.timer(0.2, …)` that is
+**ten HTTP requests a second aimed at the endpoint the worker is waiting on**,
+plus a `pynvml` probe five times a second, for the whole length of a run —
+against an endpoint already saturated generating the answer being waited for.
+
+A caller that already holds the endpoint's state now hands it back instead of
+having it re-probed, which is C3 written at the seam rather than remembered at
+the call site. `models is not None` rather than truthiness: an unreachable
+endpoint's catalogue is legitimately `()`, and treating that as "nothing
+supplied" would put the probe back on the timer for the endpoint least able to
+answer it.
+
+**Why no test caught it.** `StaticModelCatalog.reachable_calls` exists for
+exactly this claim and is asserted at the *service* layer, where the service
+was being called legitimately. It is the timer that was wrong, and nothing at
+the UI layer counted. `test_the_progress_poll_never_re_probes_the_endpoint`
+now does, and was checked against the old code: it fails there with
+`(2, 2) == (1, 1)`.
+
+## 8. Three more Stage 3 changes in `evaluation_view.py`
+
+**The poll calls `refresh_progress`, not `reload`.** It re-reads the progress
+cards, the runs table and the provenance line — counts over committed rows —
+and redraws the progress column only. The corpora, feature sets and templates
+are not re-read at all: a run in flight cannot change any of them.
+
+**The poll slows down.** 0.2 s is `import_view`'s and right for the seconds
+after a submit; it is absurd for a model answering one record every two
+minutes, where it is six hundred full redraws between two numbers changing.
+After `POLL_FAST_TICKS` the interval moves to `POLL_SETTLED_S` — `ui.timer`
+re-reads `interval` before each sleep, so no timer is torn down.
+
+**A page opened mid-run now polls.** `_start_polling` was reached only from
+Launch and Resume, so the tab that submitted the work updated and every other
+view of it did not: reload the browser mid-run, or open a second tab, and the
+screen froze at whatever it read once — indistinguishable from a dead worker,
+which is the confusion this branch exists for.
+
+**And `_settled` moved to the reclaimed statuses.** It read
+`EvaluationView.progress`; it now reads `RunService.list_runs`. Only
+`RunService` can reclaim — `self._active` is the sole record of which runs
+*this* process is executing, and `EvaluationService` builds its progress cards
+straight from the rows — so off the unreclaimed statuses this property called
+a run left behind by a dead process **live**, and polled a screen that could
+not change until a later tick reclaimed it by another route.
+
+That inconsistency is still there underneath: on a page loaded after a crash,
+the progress cards say `running` and the runs table says `interrupted`, from
+one read of the same rows. This change stops the view *acting* on the wrong
+half. Closing it properly means giving `EvaluationService` a way to ask
+`RunService` what it is executing, which is a seam this branch does not open.
 
 ---
 

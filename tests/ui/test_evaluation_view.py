@@ -1225,3 +1225,117 @@ async def test_two_dev_runs_in_different_states_render_different_status_cells(
     # Both are still marked dev-sized: the word gained a state, it did not
     # cost the marker (mvp-spec.md §9 — "smoke test, not a result").
     assert len(_find(user, "run-dev")) == 2
+
+
+# --- the progress poll (plan-fix-evaluation-runs.md Stage 3) -------------------
+
+
+@pytest.fixture
+async def polling(
+    app_factory: Callable[..., FastAPI], migrated_db: Settings
+) -> AsyncIterator[tuple[Seeded, StaticModelCatalog]]:
+    """A launched evaluation with a **queued** run, and a handle on the
+    catalogue behind the endpoint.
+
+    Queued rather than running on purpose: `RunService._reclaim` relabels a
+    run this process is not executing, so a seeded `running` row becomes
+    `interrupted` on the first read and the view settles before it can tick.
+    `queued` is the honest shape of "launched, the worker has not reached it
+    yet" and it is what keeps `_settled` false.
+
+    The catalogue is handed in rather than defaulted because "never on a
+    timer" (plan-phase-3.md C3) is a claim about **how many times**
+    `reachable()` is called, and `StaticModelCatalog` counts.
+    """
+    catalog = StaticModelCatalog()
+    async for value in _mounted(app_factory, name="polling", model_catalog=catalog):
+        await _seed_launch(value.app, value.draft.evaluation_id)
+        await _seed_run(
+            value.app,
+            run_id="r-0440",
+            evaluation_id=value.draft.evaluation_id,
+            template_id=value.template.prompt_template_id,
+            model_tag=FITS_A,
+            status=RunStatus.QUEUED,
+            started_at=None,
+        )
+        yield value, catalog
+
+
+def _timers(user: User) -> list[ui.timer]:
+    return [e for e in user.find(kind=ui.element).elements if isinstance(e, ui.timer)]
+
+
+async def test_the_progress_poll_never_re_probes_the_endpoint(
+    polling: tuple[Seeded, StaticModelCatalog],
+) -> None:
+    """plan-phase-3.md C3, made into a gate.
+
+    `connection_status`' own docstring says reachability is re-checked "on
+    view load and when the settings dialog's refresh is pressed — **never on a
+    timer**". The poll called `reload()`, which calls `evaluation.get()`,
+    which calls `connection_status()` **and** `_model_choices()` — both of
+    which reach `/api/tags`. At a 0.2 s interval that was ten HTTP requests a
+    second aimed at the endpoint the worker was waiting on, plus a `pynvml`
+    probe five times a second, for the whole length of a run.
+
+    No test caught it at any layer. The service-level assertion counts calls
+    into a service that was being called legitimately; it is the *timer* that
+    was wrong, and nothing counted at this layer.
+
+    The run's status is changed underneath the page to prove the timer is
+    genuinely running: this cannot pass by never ticking.
+    """
+    seeded, catalog = polling
+    user = seeded.user
+
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+
+    # A view load *does* probe — that half of C3 is the permitted half.
+    after_load = (catalog.reachable_calls, catalog.models_calls)
+    assert after_load > (0, 0), "a view load re-checks reachability"
+
+    async with seeded.app.state.session_factory() as session:
+        await session.execute(update(Run).where(Run.id == "r-0440").values(status=RunStatus.DONE))
+        await session.commit()
+
+    await _until(lambda: _statuses(user) == {RunStatus.DONE.value})
+
+    assert (catalog.reachable_calls, catalog.models_calls) == after_load
+
+
+async def test_a_page_opened_while_a_run_is_in_flight_polls(
+    polling: tuple[Seeded, StaticModelCatalog],
+) -> None:
+    """Polling used to start only from Launch and Resume.
+
+    So the tab that submitted the work updated and every other view of it did
+    not: reload the browser mid-run, or open the page in a second tab, and the
+    screen froze at whatever it read once — which is indistinguishable from a
+    worker that has died, and is the confusion this branch exists for.
+    """
+    seeded, _ = polling
+    user = seeded.user
+
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+
+    assert _timers(user), "an unsettled view polls without anyone pressing anything"
+
+
+async def test_the_poll_backs_off_once_the_handshake_is_over(
+    polling: tuple[Seeded, StaticModelCatalog],
+) -> None:
+    """0.2 s is right for the seconds after a submit and absurd for the hours
+    after that: a model answering one record every two minutes would get six
+    hundred full redraws between two numbers changing."""
+    seeded, _ = polling
+    user = seeded.user
+
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+
+    (timer,) = _timers(user)
+    assert timer.interval == evaluation_view.POLL_FAST_S
+    await _until(lambda: timer.interval == evaluation_view.POLL_SETTLED_S)

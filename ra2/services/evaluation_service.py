@@ -271,14 +271,32 @@ class EvaluationService:
             rows = await EvaluationRepository(session).list_all()
             return [_draft_view(row) for row in rows]
 
-    async def get(self, evaluation_id: EvaluationId) -> EvaluationView:
+    async def get(
+        self,
+        evaluation_id: EvaluationId,
+        *,
+        connection: ConnectionView | None = None,
+        models: Sequence[ModelChoiceView] | None = None,
+    ) -> EvaluationView:
         """One whole Evaluation screen: setup, models, connection, progress,
         runs and provenance.
 
+        `connection` and `models` let a caller that **already holds** the
+        endpoint's state hand it back instead of having it re-probed. That is
+        not an optimisation, it is plan-phase-3.md C3 expressed at the seam:
+        reachability is re-checked on view load and when the settings dialog's
+        refresh is pressed, *never on a timer* — and the progress poll is a
+        timer. Left out, both are read, which is what a view load does.
+
+        `models is not None` rather than a truthiness test: an unreachable
+        endpoint's catalogue is legitimately `()`, and treating that as
+        "nothing supplied" would put the probe back on the timer for exactly
+        the endpoint least able to answer it.
+
         :raises NotFoundError: no such evaluation.
         """
-        connection = await self.connection_status()
-        models = await self._model_choices(connection)
+        connection = connection if connection is not None else await self.connection_status()
+        models = models if models is not None else await self._model_choices(connection)
         async with self._session_factory() as session:
             evaluation = await self._require(session, evaluation_id)
             return await self._view(session, evaluation, connection, models)

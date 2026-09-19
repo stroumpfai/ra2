@@ -165,6 +165,9 @@ __all__ = [
     "NO_SETUP_MESSAGE",
     "PAGE_SIZE",
     "PINNED_SUFFIX",
+    "POLL_FAST_S",
+    "POLL_FAST_TICKS",
+    "POLL_SETTLED_S",
     "PROGRESS_CAPTION",
     "PROMPT_NOTE",
     "PROVENANCE_EXPLAINER",
@@ -335,6 +338,22 @@ TIMESTAMP_FORMAT: Final = "%d.%m.%y - %H:%M:%S"
 #: This view's own ladder for an underspecified control (module docstring).
 TEMPERATURE_CHOICES: Final[tuple[float, ...]] = (0.0, 0.2, 0.5, 0.7, 1.0)
 
+#: The progress poll's two intervals, and how long the first one lasts.
+#:
+#: 0.2 s is `import_view`'s, and right for what this shares with Import: the
+#: seconds just after a submit, where the worker's first write is imminent and
+#: a stale screen is most misleading. It is wrong for everything after that. A
+#: run is minutes per record at best and hours end to end, so holding 0.2 s
+#: means six hundred full re-reads and redraws between two numbers changing —
+#: against a SQLite file the worker is also committing to.
+#:
+#: `POLL_FAST_TICKS` × `POLL_FAST_S` is three seconds of handshake before the
+#: ladder drops. Neither value is a setting: an analyst has no basis on which
+#: to turn either, and the thing they would be tuning is a redraw rate.
+POLL_FAST_S: Final = 0.2
+POLL_SETTLED_S: Final = 2.0
+POLL_FAST_TICKS: Final = 15
+
 #: The design's dev-sized marker (README §2), now a chip **beside** the status
 #: word rather than in place of it — `_status_marker` has the reasoning.
 DEV_MARKER: Final = "DEV"
@@ -447,6 +466,17 @@ class _EvaluationPage:
                     list_extra=SETUP_LIST_EXTRA, detail_extra=PROGRESS_DETAIL_EXTRA
                 )
         await self.reload()
+        # A run already in flight when this page opens must tick too. Polling
+        # used to start only from Launch and Resume, so the tab that submitted
+        # the work updated and every other view of it did not: reload the
+        # browser mid-run, or open the page in a second tab, and the screen
+        # froze at whatever it read once — indistinguishable from a worker
+        # that had died, which is the confusion this whole branch is about.
+        # `_start_polling` is a no-op when there is already a timer, and the
+        # timer stops itself on the first settled tick, so this costs one read
+        # on a page with nothing running.
+        if not self._settled:
+            self._start_polling()
 
     async def reload(self) -> None:
         """Re-read everything this view shows, then redraw.
@@ -501,6 +531,53 @@ class _EvaluationPage:
                     )
                 ).items
             self._render()
+
+    async def refresh_progress(self) -> None:
+        """Re-read only what a run in flight changes, and redraw only that
+        column. **This is what the timer calls**; `reload` is what a view load
+        and a user action call.
+
+        The split exists because `reload` probes the endpoint. It reads
+        `evaluation.get()`, which reads `connection_status()` and
+        `_model_choices()`, and both reach `/api/tags` — so a timer at 0.2 s
+        put **ten HTTP requests a second on the endpoint the worker was
+        waiting on**, and a `pynvml` probe five times a second beside them,
+        for the whole length of a run. `connection_status`' own docstring
+        forbids this in as many words: "re-checked on view load and when the
+        settings dialog's refresh is pressed — **never on a timer**"
+        (plan-phase-3.md C3).
+
+        So the endpoint state this view already holds is handed back to
+        `get()` rather than re-asked for, and the corpora, feature sets and
+        templates are not re-read at all: a run in flight cannot change any of
+        them. What is left is the progress cards, the runs table and the
+        provenance line — all of them counts over committed rows.
+        """
+        if self._view is None or self._connection is None or self._progress_slot is None:
+            # Nothing has been loaded yet, so there is no cheap refresh to do
+            # and nothing to hand back. A full read is the honest fallback.
+            await self.reload()
+            return
+        evaluation_id = self._view.draft.evaluation_id
+        self._view = await self._services.evaluation.get(
+            evaluation_id, connection=self._connection, models=self._models
+        )
+        state = table_state(
+            RUNS_TABLE, sort_key="started_at", sort_dir=SortDir.DESC, page_size=PAGE_SIZE
+        )
+        self._runs = await self._services.run.list_runs(
+            evaluation_id,
+            page=state.page,
+            page_size=state.page_size,
+            sort_key=state.sort_key,
+            sort_dir=state.sort_dir,
+        )
+        self._all_runs = (
+            await self._services.run.list_runs(evaluation_id, page=1, page_size=RUNS_SUMMARY_CAP)
+        ).items
+        self._progress_slot.clear()
+        with self._progress_slot:
+            self._render_progress()
 
     async def _current_evaluation(self) -> EvaluationView | None:
         """The evaluation this tab is looking at.
@@ -1430,29 +1507,62 @@ class _EvaluationPage:
 
     @property
     def _settled(self) -> bool:
-        view = self._view
-        if view is None:
+        """Whether anything is still expected to move.
+
+        Read from `_all_runs` — `RunService.list_runs` — rather than from
+        `EvaluationView.progress`, and the difference is not cosmetic.
+        `RunService` **reclaims** on its read paths: a run left `running` by a
+        process that died is relabelled `interrupted` there (`_reclaim`), and
+        it can only be done there, because `self._active` is the only record
+        of which runs *this* process is executing. `EvaluationService` builds
+        its progress cards straight from the rows and so has no way to know.
+
+        Off the unreclaimed statuses this property called a dead run live, and
+        polled a screen that could never change until a later tick reclaimed
+        it by a different route. Same rows, two answers, on one screen.
+        """
+        if self._view is None:
             return True
-        return not any(p.status in (RunStatus.QUEUED, RunStatus.RUNNING) for p in view.progress)
+        return not any(r.status in (RunStatus.QUEUED, RunStatus.RUNNING) for r in self._all_runs)
 
     def _start_polling(self) -> None:
-        """`ui.timer`, exactly as `import_view._start_polling` does it — and
+        """`ui.timer`, in `import_view._start_polling`'s shape — and
         unconditionally, for its reason: the work was submitted a moment ago
-        and `reload()` can legitimately beat the worker's first write, so a
-        `_settled` read taken here can be stale. The timer re-checks on every
-        tick and stops itself the moment it is genuinely settled.
+        and a read taken here can legitimately beat the worker's first write,
+        so a `_settled` check at this point can be stale. The timer re-checks
+        on every tick and stops itself the moment it is genuinely settled.
+
+        **Two differences from Import**, both because an import takes seconds
+        and a run takes hours.
+
+        It calls `refresh_progress`, not `reload` — see that method for the
+        ten-requests-a-second this was doing to the endpoint the worker was
+        waiting on.
+
+        And it slows down. `POLL_FAST_S` is right for the handshake, where the
+        submit has just happened and the first write is imminent; it is absurd
+        for a model answering one record every two minutes, where it means six
+        hundred redraws between two numbers changing. After `POLL_FAST_TICKS`
+        the interval moves to `POLL_SETTLED_S`. `ui.timer` re-reads `interval`
+        before each sleep, so this takes effect on the next tick without
+        tearing the timer down.
         """
         if self._poll is not None or self._root is None:
             return
+        ticks = 0
 
         async def poll() -> None:
-            await self.reload()
+            nonlocal ticks
+            await self.refresh_progress()
+            ticks += 1
+            if ticks == POLL_FAST_TICKS and self._poll is not None:
+                self._poll.interval = POLL_SETTLED_S
             if self._settled and self._poll is not None:
                 self._poll.deactivate()
                 self._poll = None
 
         with self._root:
-            self._poll = ui.timer(0.2, poll)
+            self._poll = ui.timer(POLL_FAST_S, poll)
 
     # --- table actions -------------------------------------------------------
 
