@@ -104,14 +104,35 @@ __all__ = ["RunService", "run_ordinals"]
 _SORT_KEYS: Final[frozenset[str]] = frozenset({"started_at", "model_tag", "status", "records_done"})
 
 #: How many records in a row may fail at the endpoint before the worker stops
-#: asking. One failure is a **record**'s problem and leaves a hole the resume
-#: query finds; three in a row is the **endpoint**'s problem, and grinding a
-#: 5 000-record corpus through `RA2_LLM_TIMEOUT_S` × `RA2_LLM_MAX_RETRIES`
-#: apiece to discover that would be neither honest nor bounded. The run is
-#: left `interrupted` either way, which is the state Resume acts on (§15 F8).
-#: Deliberately not a setting: it is a property of "the endpoint is down", not
-#: a knob an analyst has any basis to turn.
+#: asking, **once this run has committed at least one row**. One failure is a
+#: **record**'s problem and leaves a hole the resume query finds; three in a
+#: row is the **endpoint**'s problem, and grinding a 5 000-record corpus
+#: through `RA2_LLM_TIMEOUT_S` apiece to discover that would be neither honest
+#: nor bounded. The run is left `interrupted` either way, which is the state
+#: Resume acts on (§15 F8). Deliberately not a setting: it is a property of
+#: "the endpoint is down", not a knob an analyst has any basis to turn.
 _MAX_CONSECUTIVE_ENDPOINT_ERRORS: Final = 3
+
+#: The same bound **before** this run has committed anything — one failure,
+#: and stop.
+#:
+#: Three in a row is the right tolerance for an endpoint that has demonstrably
+#: worked: it has answered for this run, with this model, this prompt and this
+#: schema, so a failure now is plausibly transient and worth another ask.
+#: Nothing supports that reading on a run that has never produced a row. There
+#: the first failure is the *only* evidence there is, and it says the
+#: configuration does not work — a verdict, not a flake.
+#:
+#: The arithmetic is why it matters. An `LlmEndpointError` reaching this
+#: module means the adapter already exhausted its own bounded retries, so each
+#: of these records has cost up to `RA2_LLM_TIMEOUT_S` — 600 s since the bound
+#: was measured against a reasoning model (`Settings.llm_timeout_s`). Three of
+#: them is half an hour to be told something the first one already said.
+#:
+#: Counted over the run, not over this execution: a resume of a run that has
+#: rows gets the full tolerance, because those rows are the evidence. A resume
+#: of a run that has none does not, because it has none.
+_MAX_ENDPOINT_ERRORS_BEFORE_FIRST_ROW: Final = 1
 
 #: `extraction.parse_error` when the *adapter* already judged the response
 #: unreadable (`Extraction.parse_ok is False`) but named no reason. A stable
@@ -345,7 +366,11 @@ class RunService:
                 # here would destroy resume (sw-design.md §15.3).
                 last_endpoint_error = str(exc)
                 consecutive_endpoint_errors += 1
-                if consecutive_endpoint_errors >= _MAX_CONSECUTIVE_ENDPOINT_ERRORS:
+                # `done` is the count of **committed rows for this run**, from
+                # this execution or any earlier one, so this reads "has this
+                # configuration ever worked" rather than "is this the first
+                # record I tried".
+                if consecutive_endpoint_errors >= _endpoint_error_budget(done):
                     break
                 continue
             consecutive_endpoint_errors = 0
@@ -765,6 +790,18 @@ def _is_dev(evaluation: Evaluation | None) -> bool:
     if evaluation is None:
         return False
     return evaluation.is_dev or EvaluationSize(evaluation.size) is EvaluationSize.DEV
+
+
+def _endpoint_error_budget(done: int) -> int:
+    """How many consecutive endpoint failures this run tolerates.
+
+    The two constants have the reasoning; this is the one line that chooses
+    between them, kept separate so the choice is testable without driving a
+    whole run at it.
+    """
+    if done > 0:
+        return _MAX_CONSECUTIVE_ENDPOINT_ERRORS
+    return _MAX_ENDPOINT_ERRORS_BEFORE_FIRST_ROW
 
 
 def run_ordinals(runs: Sequence[Run]) -> dict[str, int]:

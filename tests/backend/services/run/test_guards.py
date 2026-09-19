@@ -175,3 +175,79 @@ async def test_a_run_that_finished_cleanly_carries_no_reason(seed, make_run_serv
     view = await service.get(seeded.run_id)
     assert view.status is RunStatus.DONE
     assert view.error is None
+
+
+async def test_a_first_record_that_fails_at_the_endpoint_stops_the_run_at_once(
+    seed, make_run_service, reporter, extractions_of
+):
+    """A run that has never produced a row has no evidence the configuration
+    works, so the first endpoint failure is the verdict, not a flake.
+
+    The bound matters because of what each of these costs. An
+    `LlmEndpointError` reaching the worker means the adapter already exhausted
+    its own retries, so the record has spent up to `RA2_LLM_TIMEOUT_S` — 600 s
+    since that bound was measured against a reasoning model. Tolerating three
+    was half an hour to be told what the first one said.
+    """
+    seeded = await seed(records=5)
+    client = FakeLLMClient(
+        response=answer(),
+        fail_from=0,
+        failure=LlmEndpointError(DEFAULT_ENDPOINT, EndpointStatus.TIMED_OUT),
+    )
+    service = make_run_service(client)
+
+    await service.execute_run(seeded.run_id, reporter)
+
+    assert client.call_count == 1
+    assert await extractions_of(seeded.run_id) == []
+    assert (await service.get(seeded.run_id)).status is RunStatus.INTERRUPTED
+
+
+async def test_a_run_that_has_committed_a_row_still_tolerates_three(
+    seed, make_run_service, reporter, extractions_of
+):
+    """The other side of the bound, and the reason it is two numbers rather
+    than one.
+
+    An endpoint that has answered *for this run* — this model, this prompt,
+    this schema — has demonstrated the configuration works, so a failure now
+    is plausibly transient and worth asking again. One committed row is the
+    whole of that evidence, and it is enough.
+    """
+    seeded = await seed(records=6)
+    client = FakeLLMClient(response=answer(), fail_from=1)
+    service = make_run_service(client)
+
+    await service.execute_run(seeded.run_id, reporter)
+
+    # One answered, then three asked and refused before the worker stopped.
+    assert client.call_count == 4
+    assert len(await extractions_of(seeded.run_id)) == 1
+    assert (await service.get(seeded.run_id)).status is RunStatus.INTERRUPTED
+
+
+async def test_a_resume_of_a_run_with_rows_keeps_the_larger_tolerance(
+    seed, make_run_service, reporter, extractions_of
+):
+    """The bound counts committed rows for the **run**, not calls in this
+    execution.
+
+    So a resume inherits the evidence its earlier attempt produced: a run with
+    rows is a configuration that has worked, whichever process proved it. A
+    resume of a run with no rows gets the strict bound, because it has none —
+    which is what `tests/backend/api/runs/test_runs_resume.py` exercises from
+    the other end.
+    """
+    seeded = await seed(records=6)
+    await make_run_service(FakeLLMClient(response=answer(), fail_from=2)).execute_run(
+        seeded.run_id, reporter
+    )
+    assert len(await extractions_of(seeded.run_id)) == 2
+
+    # The resumed attempt fails from its very first call, and still gets three.
+    resumed_client = FakeLLMClient(response=answer(), fail_from=0)
+    await make_run_service(resumed_client).execute_run(seeded.run_id, reporter)
+
+    assert resumed_client.call_count == 3
+    assert len(await extractions_of(seeded.run_id)) == 2

@@ -18,7 +18,7 @@ sentence of narrative:
 `Settings.llm_timeout_s` was **120**. Almost all of the time is inside the
 response's `reasoning` field. Every call on that host timed out, always.
 
-Stages 1-3 of the plan are in this amendment. Stages 4-6 touch
+Stages 1-4 of the plan are in this amendment. Stages 5-6 touch
 `ra2/infra/tasks.py` and `ra2/services/readmodels.py` further; those items will
 be added to this file as they land, per the one-file-per-branch rule.
 
@@ -275,6 +275,44 @@ the progress cards say `running` and the runs table says `interrupted`, from
 one read of the same rows. This change stops the view *acting* on the wrong
 half. Closing it properly means giving `EvaluationService` a way to ask
 `RunService` what it is executing, which is a seam this branch does not open.
+
+## 9. `ra2/services/run_service.py` — the endpoint bound becomes two numbers *(Stage 4)*
+
+*Not frozen*, but it changes a deliberately documented constant, so it is
+recorded here and in CONTRACTS.md.
+
+```diff
+ _MAX_CONSECUTIVE_ENDPOINT_ERRORS: Final = 3
++_MAX_ENDPOINT_ERRORS_BEFORE_FIRST_ROW: Final = 1
+```
+
+**Why three was right and still is — after the first row.** An endpoint that
+has answered *for this run*, with this model, this prompt and this schema, has
+demonstrated the configuration works. A failure after that is plausibly
+transient and worth asking again.
+
+**Why one before it.** Nothing supports that reading on a run that has never
+produced a row: the first failure is the only evidence there is, and it says
+the configuration does not work. That is a verdict, not a flake.
+
+**The arithmetic is the point.** An `LlmEndpointError` reaching this module
+means the adapter already exhausted its own bounded retries, so each of these
+records has cost up to `RA2_LLM_TIMEOUT_S` — 600 s since item 2 raised it
+against a measurement. Three of them is half an hour spent being told what the
+first one already said, and it is the other half of what made the reported
+defect a twenty-minute silence.
+
+**Counted over the run, not over the execution.** `done` is committed rows for
+the run, from this attempt or any earlier one, so a resume inherits the
+evidence its first attempt produced. A resume of a run *with* rows keeps the
+tolerance of three; a resume of a run with none does not, because it has none.
+
+**One test fixture changed rather than adapted.**
+`tests/backend/api/runs/test_runs_resume.py` failed calls 0, 1 and 2 "three in
+a row, the worker's own bound" to produce an interrupted run with nothing
+committed. It now fails call 0. The fixture was built around the old bound and
+says so; leaving it and loosening the assertion would have been the reverse of
+what it is for.
 
 ---
 

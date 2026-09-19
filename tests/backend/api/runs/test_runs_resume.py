@@ -19,12 +19,19 @@ from ra2.infra.ollama_client import LlmEndpointError
 
 @pytest.fixture
 def api_llm_client() -> FakeLLMClient:
-    """Fails calls 0, 1 and 2 — three in a row, the worker's own bound — then
-    answers normally. A launch over four records is therefore interrupted
-    with **nothing committed**, and Resume (starting the call count over from
-    the same instance) succeeds on every record."""
+    """Fails call 0 — the worker's bound before a run has committed anything
+    is **one**. A launch over four records is therefore interrupted with
+    nothing committed, and Resume (continuing the call count on the same
+    instance) succeeds on every record.
+
+    This used to fail calls 0, 1 and 2, because the bound used to be three
+    whatever the run had done. `_MAX_ENDPOINT_ERRORS_BEFORE_FIRST_ROW` is why
+    it is one now: a run that has never produced a row has no evidence the
+    configuration works, and at a 600 s timeout three of them is half an hour
+    spent re-learning what the first said.
+    """
     failure = LlmEndpointError(DEFAULT_ENDPOINT, EndpointStatus.UNREACHABLE)
-    return FakeLLMClient(failures={0: failure, 1: failure, 2: failure})
+    return FakeLLMClient(failures={0: failure})
 
 
 async def test_resume_an_interrupted_run_finishes_it(
