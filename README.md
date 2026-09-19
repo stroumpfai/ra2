@@ -129,6 +129,10 @@ its own HTTP API — so the API is there for scripts, not for the UI.
 6. **Evaluation** — pin a corpus, a frozen feature set and a template, choose
    models and decoding settings, and launch. Runs execute one model at a time.
 
+To land on step 6 without doing 1–5 by hand, run `just reset-seed yes` — it
+wipes the data directory and drives the same services the first five steps
+drive. See [The development seed](#the-development-seed).
+
 ---
 
 ## Local LLMs
@@ -317,11 +321,121 @@ Everything goes through `just`. Never bare `pip`, never `python -m venv`.
 | `just fmt` | Apply the formatter and autofixes. |
 | `just migrate` | Bring the database to head. |
 | `just reset [yes]` | Show what a wipe of `RA2_DATA_DIR` would remove; `yes` carries it out. |
-| `just reset-seed yes` | Wipe, then seed a delivery, a corpus, a feature set and a prompt. |
+| `just reset-seed yes` | Wipe, then seed a delivery, a corpus, a feature set and a prompt — see [The development seed](#the-development-seed). |
 | `just revision "msg"` | Create a migration. **One author per phase** — see below. |
 | `just census-export <corpus> <out>` | Export a corpus's census as CSV. |
 | `just setup-e2e` | Install the Chromium the E2E layer drives. |
 | `just eval` | The eval suite against a real Ollama (needs a GPU). |
+
+### The development seed
+
+```bash
+just reset-seed yes
+```
+
+Wipes `RA2_DATA_DIR` and leaves a **working** state behind: one delivery, one
+frozen corpus, a frozen feature set and an active prompt template. `just
+migrate` alone gives you a migrated *empty* database, which is a state nobody
+can do anything with — every screen in the app needs a corpus, and getting one
+by hand means six clicks and a delivery you have to find first.
+
+`yes` is the same confirmation token `just reset` takes, and it is not
+optional-with-a-default. Without it the reset prints its plan and deletes
+nothing — **and the seed then runs anyway, on top of whatever was already
+there.**
+
+#### What you get
+
+`scripts/seed_dev.py` writes its delivery to `{RA2_DATA_DIR}/seed/` and imports
+it:
+
+| | |
+|---|---|
+| **Delivery** | Three files — `unfall.txt` and `objekt.txt` in RADIS format (`\|`-delimited, CRLF, the full 67/77-column vocabulary) and `text.csv` (`;`-delimited). |
+| **Corpus** | 12 records, frozen. Two cantons, narratives rotating German / French / Italian so per-record language detection is exercised from the first screen. |
+| **Codelists** | Imported **only if** `data/Codes/codes-2018.json` happens to be on this host. `data/` is gitignored, so a fresh clone has none; the script prints that it skipped rather than skipping silently. |
+| **Features** | A set named *seed features*, frozen: one labelled (`UnfZeitFeld`, matched within a 5-minute tolerance) and one exploratory (`phone_use`). |
+| **Prompt** | One template, saved as the next version and activated. |
+
+Absent on purpose: **no `person` table** (so the two-hop person→accident
+join is the one thing the seed cannot show you), **no enum feature** (that needs a codelist mapping,
+which a clone without `data/` cannot make), and **no evaluation run** (that
+needs a model).
+
+#### Why it works the way it does
+
+**It drives the services, not the database.** The script builds the app's own
+`Services` bundle via `create_app(mount_ui=False)` and calls
+`delivery.register → analyse → corpus.freeze` in the order the Import view
+calls them — no raw SQL, no ORM. So the seed cannot drift from the schema, and
+it doubles as an end-to-end smoke test of the import pipeline on a real
+machine, with no test harness. It substitutes an inline task runner for the
+app's asyncio one, because a script has no UI to poll `GET /api/v1/tasks/{id}`
+from; same seam, same work, finished before `submit()` returns.
+
+**The corpus is deliberately imperfect**, for the same reason the test fixtures
+are:
+
+- the last record declares two objects and ships one — a count mismatch,
+  reported and non-blocking;
+- `Witter0Ausw` is empty on every row — an all-empty column, 0 % populated in
+  the census and no denominator for any feature over it;
+- the French narrative reads `manuvre`, not `manœuvre`, while `é` and `è`
+  survive. That asymmetry *is* the evidence of the upstream cp1252 → Latin-1
+  conversion, and the seeded corpus's cp1252 canary count is the honest one.
+
+A spotless seed would hide the three things this app exists to surface.
+
+**Every byte is synthetic.** The column *names* come from
+`ra2.domain.parsing.headers`, so a 67-column file stays 67 columns without
+anyone counting; every value is invented in the script, with the right shape
+(`…Ausw` looks like a code, `…Datum` like `YYYYMMDD`, `UnfZeitFeld` like
+`HH:MM`) and nonsense content. Real data is gitignored, stays on the host, and
+is never what a developer's seed leans on.
+
+#### Using it while developing
+
+- **After a schema or pipeline change**, re-seed rather than migrating an old
+  database forward by hand. If `just reset-seed yes` fails, the import pipeline
+  is broken and the script's output names the step it died on — a freeze that
+  is refused is printed as a finding, not swallowed.
+- **12 records is dev-sized by design** — below both `RA2_DEV_RECORD_MAX` (50)
+  and `RA2_EVAL_RECORD_MIN` (200), so every view that shows its numbers must
+  mark it *smoke test, not a result*. That is exactly the state you want when
+  working on those banners, and exactly the wrong one for anything that needs a
+  realistic corpus; raise `RECORDS` in the script, or move the thresholds, if
+  you need the other case.
+- **To seed somewhere other than `./var`**, point `RA2_DATA_DIR` at it first —
+  `RA2_DATA_DIR=/tmp/ra2-scratch just reset-seed yes` on a POSIX shell,
+  `$env:RA2_DATA_DIR='...'; just reset-seed yes` on PowerShell. Both scripts
+  resolve `Settings` exactly as the app does, so they honour it and a `.env`.
+- **`just dev-agent` never sees the seed.** It mints a fresh temporary data
+  directory on every run, by design. A seeded instance is `just dev` against
+  the directory you seeded.
+- **`{RA2_DATA_DIR}/seed/` survives a reset.** The wipe covers the database and
+  its WAL sidecars, `deliveries/` and `codelists/` — not the raw files the seed
+  wrote, which are simply overwritten next time.
+
+#### Using it while testing
+
+**The automated suite does not use the seed, and no test may point at it.**
+`tests/backend`, `tests/ui` and `tests/e2e` build their own state from
+`tests/fixtures/deliveries/hazards/`, which carries a wider and byte-exact
+hazard set — see [Fixtures contain the real hazards](#fixtures-contain-the-real-hazards).
+Two separate things with two separate jobs: fixtures make failures
+reproducible, the seed makes a *machine* demonstrably working.
+
+Where the seed belongs instead:
+
+- **Manual and exploratory testing** — clicking through Census, Features,
+  Prompts and Evaluation against something real enough to be worth looking at.
+- **Verifying a local Ollama setup** — seed, open Evaluation, and launch
+  against the seeded corpus and feature set. Twelve records across three
+  languages is a few minutes on a small model and tells you the whole path
+  works before you commit a GPU to a real run.
+- **Reproducing a report against a clean slate** — `just reset-seed yes` puts
+  two machines in the same state, which is the useful first line of a bug
+  report.
 
 ### Architecture
 
