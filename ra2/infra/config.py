@@ -50,7 +50,22 @@ class Settings(BaseSettings):
 
     #: Per-call timeout. Belongs to client construction, not to a per-call
     #: argument — which is why `LLMClient.extract` never took one.
-    llm_timeout_s: int = 120
+    #:
+    #: **600, raised from 120 against a measurement.** 120 was never checked
+    #: against a reasoning model: on the reporting host a 9.7 B thinking model
+    #: answered *two* features over one sentence of narrative in 136 s cold and
+    #: 126 s warm, almost all of it inside the response's `reasoning` field. At
+    #: 120 every call on that host timed out, always, and — because the bound
+    #: is per call and the model is the slow part — no amount of waiting ever
+    #: produced a row. A bound that the ordinary case cannot meet is not a
+    #: bound, it is an outage with a timer.
+    #:
+    #: Still a bound, and the cost of raising it is bounded too: a timeout is
+    #: no longer retried (`ollama_client._is_retryable`), and `run_service`
+    #: stops asking after `_MAX_CONSECUTIVE_ENDPOINT_ERRORS` records, so a
+    #: genuinely dead endpoint costs that many intervals — not one per record,
+    #: and no longer three attempts apiece.
+    llm_timeout_s: int = 600
 
     #: mvp-spec.md §10.4 — retries are **bounded and counted**, never a
     #: retry-until-quiet loop. The count is carried back on the `Extraction`

@@ -101,6 +101,7 @@ from ra2.services.readmodels import (
 
 __all__ = [
     "CONNECTION_REASON_NOT_LOOPBACK",
+    "CONNECTION_REASON_TIMED_OUT",
     "CONNECTION_REASON_UNREACHABLE",
     "EVAL_ERROR_CONFIG_NOT_FROZEN",
     "EVAL_ERROR_ENDPOINT_UNREACHABLE",
@@ -184,9 +185,18 @@ CONNECTION_REASON_NOT_LOOPBACK: Final = (
     "This endpoint is not on the local machine, so it is refused: "
     "no data leaves this host, and there is no opt-out."
 )
+CONNECTION_REASON_TIMED_OUT: Final = (
+    "This endpoint answered but did not finish in time. "
+    "Raise RA2_LLM_TIMEOUT_S, or pick a model that answers faster."
+)
 
+#: Every `EndpointStatus` but `REACHABLE`, which has no reason to give.
+#: Exhaustive by test rather than by convention: this is a dict keyed on an
+#: enum and read with `[]`, so a member added without an entry here is a
+#: `KeyError` on the Evaluation view's load path and nowhere else.
 _CONNECTION_REASONS: Final[dict[EndpointStatus, str]] = {
     EndpointStatus.UNREACHABLE: CONNECTION_REASON_UNREACHABLE,
+    EndpointStatus.TIMED_OUT: CONNECTION_REASON_TIMED_OUT,
     EndpointStatus.REFUSED_NOT_LOOPBACK: CONNECTION_REASON_NOT_LOOPBACK,
 }
 

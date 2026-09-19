@@ -767,10 +767,15 @@ def _run_view(run: Run, *, records_done: int, is_dev: bool) -> RunView:
         started_at=run.started_at,
         status=status,
         is_dev=is_dev,
-        # "`None` unless `FAILED`" (readmodels.py). An interrupted run's own
-        # reason is on the row either way; the table's "log" action is the
-        # failure's.
-        error=run.error if status is RunStatus.FAILED else None,
+        # Whatever the row carries, whatever the status. This used to be
+        # `run.error if status is RunStatus.FAILED else None`, on the reading
+        # that "log" was the failure's action — which meant an `interrupted`
+        # run's reason was written by `_finish` and then dropped here, one
+        # layer before the only screen that could have shown it. An endpoint
+        # that timed out and one that was never there leave the same row and
+        # the same Resume button, and the sentence telling them apart existed
+        # the whole time (plan-fix-evaluation-runs.md §1.1 e).
+        error=run.error,
     )
 
 

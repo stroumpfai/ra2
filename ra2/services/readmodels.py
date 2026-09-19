@@ -649,7 +649,10 @@ class RunView:
     started_at: datetime | None
     status: RunStatus
     is_dev: bool = False
-    #: Why it failed — the "log" action's content. `None` unless `FAILED`.
+    #: Why the run stopped — the "log" action's content, and `None` only when
+    #: the row itself carries no reason. **Not restricted to `FAILED`**: an
+    #: `interrupted` run's reason is the one an analyst needs most, because it
+    #: is what decides whether pressing Resume will do any good.
     error: str | None = None
 
     @property

@@ -660,6 +660,57 @@ async def test_a_refused_connection_is_retried_then_raised() -> None:
     assert excinfo.value.status is EndpointStatus.UNREACHABLE
 
 
+async def test_a_timeout_is_raised_on_the_first_attempt_and_never_retried() -> None:
+    """`temperature` and `seed` are fixed, so a generation that overran the
+    bound overruns it again. Retrying spends `max_retries` more whole
+    intervals to reach the conclusion already in hand.
+
+    This was measured, not reasoned into: at the old 120 s default a 9.7 B
+    thinking model took 126-136 s for two features over one sentence, so every
+    call timed out — three times per record, three records deep, before a run
+    gave up twenty minutes later.
+    """
+    stub = StubOllama(chat=[httpx2.ReadTimeout("timed out", request=httpx2.Request("POST", "/"))])
+    client = OllamaLLMClient(base_url=LOOPBACK_URL, max_retries=3, http_client=stub.http_client())
+
+    with pytest.raises(LlmEndpointError) as excinfo:
+        await client.extract("prompt", Output, "m", temperature=0.0, seed=1)
+
+    assert len(stub.chat_requests) == 1
+    assert excinfo.value.status is EndpointStatus.TIMED_OUT
+
+
+async def test_a_timeout_and_a_refusal_are_different_answers() -> None:
+    """One means the model is slower than `RA2_LLM_TIMEOUT_S`; the other means
+    start Ollama. Collapsing them is what sent an analyst to look at the port
+    and the firewall while the endpoint was answering fine.
+
+    `OllamaEndpointProber` has told the two apart since P3-D19
+    (`ProbeCode.TIMEOUT`); the generation path had no value to say it with.
+    The positive control is in the same assertion: the refusal must still be
+    retried to its bound, so this cannot pass by making everything terminal.
+    """
+    timing_out = StubOllama(
+        chat=[httpx2.ReadTimeout("timed out", request=httpx2.Request("POST", "/"))]
+    )
+    refusing = StubOllama(
+        chat=[httpx2.ConnectError("connection refused", request=httpx2.Request("POST", "/"))]
+    )
+
+    statuses = []
+    for stub in (timing_out, refusing):
+        client = OllamaLLMClient(
+            base_url=LOOPBACK_URL, max_retries=2, http_client=stub.http_client()
+        )
+        with pytest.raises(LlmEndpointError) as excinfo:
+            await client.extract("prompt", Output, "m", temperature=0.0, seed=1)
+        statuses.append(excinfo.value.status)
+
+    assert statuses == [EndpointStatus.TIMED_OUT, EndpointStatus.UNREACHABLE]
+    assert len(timing_out.chat_requests) == 1
+    assert len(refusing.chat_requests) == 3
+
+
 async def test_a_4xx_is_not_retried() -> None:
     """A wrong model name does not become right on the second attempt, and
     retrying it burns the bound a genuinely busy endpoint needs."""

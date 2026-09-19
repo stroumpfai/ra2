@@ -1095,3 +1095,64 @@ async def test_refresh_picks_up_a_model_that_appeared(
 
         assert len(_find(user, "model-row")) == len(DEFAULT_MODELS)
         assert "reachable" in _all_text(user, "endpoint-line")
+
+
+def test_every_endpoint_status_has_a_word() -> None:
+    """`ENDPOINT_WORDS` is read with `[]` on this view's load path, so a
+    status added without an entry is a `KeyError` on the screen and nowhere
+    else — the check `PROBE_WORDS` already gets in `test_components.py`, and
+    the one that would have caught `TIMED_OUT` arriving.
+    """
+    assert set(evaluation_view.ENDPOINT_WORDS) == set(EndpointStatus)
+
+
+async def test_an_interrupted_run_offers_the_reason_it_stopped_for(seeded: Seeded) -> None:
+    """Resume alone is not enough to act on.
+
+    "The endpoint did not finish in time" and "nothing is listening" produce
+    the same row, the same status word and the same Resume button, and only
+    the stored reason says which — so pressing Resume is a guess until it can
+    be read. The reason was written by `_finish` the whole time; `_run_view`
+    nulled it for anything but `FAILED` and the action was offered only to a
+    failed run, so two layers had to change for one sentence to arrive.
+    """
+    user = seeded.user
+    await _seed_run(
+        seeded.app,
+        run_id="r-0420",
+        evaluation_id=seeded.draft.evaluation_id,
+        template_id=seeded.template.prompt_template_id,
+        model_tag=FITS_A,
+        status=RunStatus.INTERRUPTED,
+        started_at=datetime(2026, 9, 4, 10, 1, 2, tzinfo=UTC),
+        error="llm endpoint http://127.0.0.1:11434/v1: timed_out",
+    )
+
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+
+    (log,) = _find(user, "run-log")
+    assert _element_text(log) == "log"
+    # Both, not either: the reason explains the row, Resume acts on it.
+    assert len(_find(user, "run-resume")) == 1
+
+
+async def test_a_run_that_finished_cleanly_offers_no_log(seeded: Seeded) -> None:
+    """The other half: the action is keyed on there being a reason, not on the
+    status, so a `done` run must not grow an affordance that opens an empty
+    dialog."""
+    user = seeded.user
+    await _seed_run(
+        seeded.app,
+        run_id="r-0421",
+        evaluation_id=seeded.draft.evaluation_id,
+        template_id=seeded.template.prompt_template_id,
+        model_tag=FITS_A,
+        status=RunStatus.DONE,
+        started_at=datetime(2026, 9, 4, 10, 4, 5, tzinfo=UTC),
+    )
+
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+
+    assert _find(user, "run-log") == []

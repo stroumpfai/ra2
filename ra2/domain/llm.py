@@ -119,6 +119,14 @@ class EndpointStatus(StrEnum):
 
     REACHABLE = "reachable"
     UNREACHABLE = "unreachable"
+    #: The endpoint **answered the connection and then did not finish** within
+    #: `RA2_LLM_TIMEOUT_S`. Distinct from `UNREACHABLE` because the two send an
+    #: analyst to opposite ends of the machine: one means start Ollama, the
+    #: other means the model is slower than the bound. `ProbeCode.TIMEOUT` has
+    #: drawn this line for the connection test since P3-D19 — its test says
+    #: "collapsing the two would put the analyst on the wrong trail" — and the
+    #: generation path simply never had a value to draw it with.
+    TIMED_OUT = "timed_out"
     #: Refused before a socket was opened: the configured `base_url` is not
     #: loopback (N1, sw-design.md §15.5). There is deliberately no opt-out.
     REFUSED_NOT_LOOPBACK = "refused_not_loopback"
@@ -154,7 +162,7 @@ class LlmEndpointError(Exception):
     (amendment: feat/p3-llm-adapter). `services/errors.py` re-exports it so
     both adapters keep one import site.
 
-    Two causes, one type:
+    Three causes, one type:
 
     - `REFUSED_NOT_LOOPBACK` — the configured `base_url`'s host is not
       loopback. Raised by `OllamaLLMClient` **at construction**, naming N1.
@@ -172,6 +180,13 @@ class LlmEndpointError(Exception):
       list and a reason, and the view disables Launch beside the endpoint
       line. `GET /api/v1/models` returns 200 with `reachable: false`, never a
       502 — a 502 would force exactly the toast the design rejects.
+    - `TIMED_OUT` — the endpoint accepted the call and did not finish it
+      within `RA2_LLM_TIMEOUT_S`. Raised by `OllamaLLMClient.extract` on the
+      **first** occurrence, never retried: temperature and seed are fixed, so
+      the retry is a deterministic repeat of work already known to exceed the
+      bound. It is the one cause here that is a statement about the *model*
+      rather than about the endpoint, and the run it stops is `interrupted`
+      and resumable like any other endpoint failure.
     """
 
     def __init__(self, base_url: str, status: EndpointStatus) -> None:
@@ -186,8 +201,8 @@ class LlmEndpointError(Exception):
 
 
 #: A connection test is not a generation call. `RA2_LLM_TIMEOUT_S` defaults to
-#: 120 — right for a model that is thinking, wrong for a dialog waiting to
-#: learn whether anything is listening, which would sit spinning for two
+#: 600 — right for a model that is thinking, wrong for a dialog waiting to
+#: learn whether anything is listening, which would sit spinning for ten
 #: minutes against a host that accepts the connection and then goes quiet. A
 #: probe takes the **lower** of the configured timeout and this, and
 #: `ProbeCode.TIMEOUT`'s sentence names the bound it actually used so it does

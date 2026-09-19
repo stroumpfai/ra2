@@ -27,6 +27,7 @@ from ra2.infra.idgen import SeededFactory
 from ra2.persistence.models import Evaluation
 from ra2.services.errors import FeatureValidationError
 from ra2.services.evaluation_service import (
+    _CONNECTION_REASONS,
     CONNECTION_REASON_NOT_LOOPBACK,
     CONNECTION_REASON_UNREACHABLE,
     EVAL_ERROR_MODEL_EXCEEDS_VRAM,
@@ -440,3 +441,14 @@ async def test_catalogue_selects_nothing(
     catalogue = await evaluation_service.catalogue()
 
     assert all(choice.selected is False for choice in catalogue.models)
+
+
+def test_every_unreachable_status_has_a_reason() -> None:
+    """`connection_status` reads `_CONNECTION_REASONS[status]` with `[]` for
+    anything that is not `REACHABLE`, so a status added without an entry is a
+    `KeyError` on the Evaluation view's load path and nowhere else.
+
+    `REACHABLE` is excluded because it is the one state with nothing to
+    explain — the view renders the word alone and the reason line is absent.
+    """
+    assert set(_CONNECTION_REASONS) == set(EndpointStatus) - {EndpointStatus.REACHABLE}

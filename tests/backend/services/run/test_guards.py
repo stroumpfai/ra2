@@ -1,15 +1,22 @@
-"""The three things the worker refuses, and the one it tolerates.
+"""The three things the worker refuses, the one it tolerates, and what it says
+about an endpoint that stopped it.
 
 Each of these is a state a caller can reach and the worker has to answer for:
 a config it does not implement, an evaluation that was never launched, and a
 snapshot it cannot read. None of them is allowed to become a half-written run.
+
+The endpoint cases at the end are about the *answer* rather than the state:
+the run is `interrupted` either way, and the only thing separating "the model
+is slower than the bound" from "nothing is listening" is the reason stored on
+the row — which is why it also has to survive the read model.
 """
 
 import pytest
 from tests.backend.services.run.conftest import WEATHER, answer
-from tests.fixtures.fake_llm import FakeLLMClient
+from tests.fixtures.fake_llm import DEFAULT_ENDPOINT, FakeLLMClient
 
 from ra2.domain.extraction import RunStatus
+from ra2.domain.llm import EndpointStatus, LlmEndpointError
 from ra2.infra.config import Settings
 from ra2.infra.tasks import TaskStatus
 from ra2.services.errors import FeatureValidationError
@@ -87,3 +94,84 @@ async def test_a_snapshot_of_the_wrong_json_shape_is_treated_the_same_way(
     row = (await extractions_of(seeded.run_id))[0]
     assert row.parse_ok is True
     assert (await service.get(seeded.run_id)).status is RunStatus.DONE
+
+
+@pytest.mark.parametrize(
+    ("status", "other"),
+    [
+        (EndpointStatus.TIMED_OUT, EndpointStatus.UNREACHABLE),
+        (EndpointStatus.UNREACHABLE, EndpointStatus.TIMED_OUT),
+    ],
+)
+async def test_an_endpoint_failure_is_reported_as_the_one_it_was(
+    status, other, seed, make_run_service, reporter
+):
+    """Two endpoint failures, two answers — and neither wearing the other's.
+
+    Asserted on `EndpointStatus`' own value rather than on wording: the value
+    is the stable identifier the way a `FindingCode` is, and it is what
+    `LlmEndpointError` puts in the sentence the worker stores. What must not
+    happen is the two reading alike — an analyst told "unreachable" goes to
+    look at Ollama, the port and the firewall, none of which is the problem
+    when the endpoint is answering and merely slow.
+
+    Both directions are run, so this cannot pass by hard-coding either word.
+    """
+    seeded = await seed(records=3)
+    service = make_run_service(
+        FakeLLMClient(
+            response=answer(),
+            fail_from=0,
+            failure=LlmEndpointError(DEFAULT_ENDPOINT, status),
+        )
+    )
+
+    await service.execute_run(seeded.run_id, reporter)
+
+    view = await service.get(seeded.run_id)
+    assert view.status is RunStatus.INTERRUPTED
+    assert view.error is not None
+    assert status.value in view.error
+    assert other.value not in view.error
+
+
+async def test_an_interrupted_runs_reason_survives_the_read_model(
+    seed, make_run_service, reporter, run_row
+):
+    """The reason is stored **and** handed on.
+
+    `_run_view` used to null `error` for anything but `FAILED`, so `_finish`
+    wrote why a run stopped and the read model dropped it one layer before the
+    only screen that could show it. An interrupted run is precisely the case
+    that needs it: the row offers Resume either way, and the reason is what
+    decides whether pressing it will achieve anything.
+    """
+    seeded = await seed(records=4)
+    service = make_run_service(
+        FakeLLMClient(
+            response=answer(),
+            fail_from=1,
+            failure=LlmEndpointError(DEFAULT_ENDPOINT, EndpointStatus.TIMED_OUT),
+        )
+    )
+
+    await service.execute_run(seeded.run_id, reporter)
+
+    stored = await run_row(seeded.run_id)
+    view = await service.get(seeded.run_id)
+    assert view.status is RunStatus.INTERRUPTED
+    assert view.error == stored.error
+
+
+async def test_a_run_that_finished_cleanly_carries_no_reason(seed, make_run_service, reporter):
+    """The other half of the change: passing `run.error` through unconditionally
+    must not invent one. A `done` run has nothing to explain, and a "log"
+    action on it would be an affordance opening an empty dialog."""
+    seeded = await seed(records=2)
+    service = make_run_service(FakeLLMClient(response=answer()))
+
+    await service.execute_run(seeded.run_id, reporter)
+
+    view = await service.get(seeded.run_id)
+    assert view.status is RunStatus.DONE
+    assert view.error is None

@@ -315,6 +315,7 @@ TEMPERATURE_CHOICES: Final[tuple[float, ...]] = (0.0, 0.2, 0.5, 0.7, 1.0)
 ENDPOINT_WORDS: Final[dict[EndpointStatus, str]] = {
     EndpointStatus.REACHABLE: "reachable",
     EndpointStatus.UNREACHABLE: "unreachable",
+    EndpointStatus.TIMED_OUT: "timed out",
     EndpointStatus.REFUSED_NOT_LOOPBACK: "refused — not loopback",
 }
 
@@ -1029,10 +1030,15 @@ class _EvaluationPage:
                 f'data-testid="run-status" data-status="{run.status.value}" '
                 f'data-dev="{"true" if run.is_dev else "false"}"'
             ).mark("run-status").style("font-size:11px;")
-            if run.status is RunStatus.FAILED:
-                _text_button("log", testid="run-log", on_click=lambda: self._open_log(run))
-            elif run.is_resumable:
+            if run.is_resumable:
                 _text_button("Resume", testid="run-resume", on_click=_toggle(self._resume, run))
+            # Offered on **any** run carrying a reason, not only a failed one.
+            # An interrupted run's reason is what decides whether Resume will
+            # help — "the endpoint did not finish in time" and "nothing is
+            # listening" produce the same row and the same button, and only
+            # this sentence tells them apart.
+            if run.error is not None:
+                _text_button("log", testid="run-log", on_click=lambda: self._open_log(run))
             # Discard lives **in this cell**, not in a sixth column: the runs
             # table's five widths are the design's own (README §2), and this
             # cell already carries the row's secondary actions. G1 is why an
@@ -1504,8 +1510,9 @@ class _EvaluationPage:
         dialog.value = True
 
     def _open_log(self, run: RunView) -> None:
-        """A failed run's "log" action — the design's muted action in place of
-        "results". `RunView.error` is what the worker stored; nothing is
+        """The "log" action — the design's muted action in place of "results",
+        now offered by any run that stopped with a reason rather than only by
+        a failed one. `RunView.error` is what the worker stored; nothing is
         derived from it here."""
         if self._root is None:
             return
