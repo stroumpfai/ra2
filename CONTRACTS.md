@@ -467,6 +467,53 @@ UI about to derive something it should be reading, and
 
 ---
 
+## The Windows CI leg — making a permanently red gate readable, a slice
+
+`fix-windows-ci-gate`, landed on top of `feat-evaluation-not-a-dead-end`.
+**No Wave 0, no new frozen baseline, no migration and no amendment.** CI runs
+layers 1–3 on Linux **and** Windows (N3) with `fail-fast: false`; the Windows
+leg carried six failures, the oldest from `0461aea`, and had essentially never
+been green. The six are worth less than the leg being readable again — an
+always-red gate is why `SD31`'s every-page-500 under `just dev-agent` on
+Windows survived until a human found it by hand. `sw-design.md` `SD33` records
+the reasoning, including why the scope is four paths and not `* text=auto`.
+
+**No fixture byte changed.** The committed blobs were always right — the
+delivery hazards CRLF, the codelist, prompt and golden fixtures LF, exactly
+what each generator writes. Only the *checkout* was wrong, so `.gitattributes`
+states what the bytes already are; no `git add --renormalize` was needed and
+none was run.
+
+**`.github/workflows/ci.yml` and `pyproject.toml` are unchanged.** Nothing in
+the workflow was wrong: it was already running the leg, already refusing to
+`fail-fast`, and already uploading the JUnit XML. The failures were in the
+repository, not in the gate.
+
+### New files
+
+| File | Contents |
+|---|---|
+| `.gitattributes` | Four rules, for the four paths a test compares byte-for-byte. `tests/fixtures/deliveries/hazards/** -text diff` — CRLF by construction, and `h13`'s doubled CRLF (`\r\r\n`) is destroyed by *any* text conversion, `eol=crlf` included, so `-text` is the only correct answer and `diff` keeps it reviewable. `eol=lf` for the codelist, prompt and golden fixtures. **Not** `* text=auto eol=lf`: that rewrites every tracked file and conflicts with every pending branch |
+| `tests/test_fixture_line_endings.py` | The recurrence guard. Asks **git** (`git check-attr`), not the filesystem, whether every file under `tests/fixtures/*/hazards/` is pinned at all — so it answers identically on both platforms and a new hazard family added on Linux fails *there*. It does not dictate which of the two attributes a family picks; that is its generator's business |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `tests/test_p3_contract.py` | `.as_posix()` in place of `str()` at the three `relative_to` sites. Two of them — the `openai` and `pynvml` single-seam guards — compare against a POSIX literal and so could never pass on Windows. They failed **closed**, so Do-NOT #1 was never unguarded; but CLAUDE.md names them as what makes the loopback rule a gate rather than a promise |
+| `sw-design.md` | `SD33`, and §11.4's paragraph saying that "byte-exactly" includes the line endings |
+
+The rest of `tests/` was swept for the same shape. Four sites build a
+`str(path.relative_to(...))`, all of them into an *offenders* list compared
+against `[]` — `test_files_chokepoint.py`, `test_migrations.py`,
+`test_m0_contract.py` and `test_no_lenient_decoding.py`. A separator there
+changes a failure *message*, never a verdict, so they are left alone.
+`test_check_no_real_data.py` passes one into `guard.inspect`, which normalises
+with `Path(path).as_posix()` before it matches anything — that one is already
+correct, and deliberately so.
+
+---
+
 ## Phase 5 — owner: M35 (Wave 0), amendment only
 
 Re-established at tag `p5-frozen`, the same way M27 established the phase-4

@@ -214,6 +214,12 @@ def test_openai_is_imported_in_exactly_one_module():
     The lint rule is the gate; this documents *which* module holds the
     exemption, so a reader of the test suite learns the seam's location
     without reading `.importlinter` (plan-phase-3.md §7, H4).
+
+    `.as_posix()`, never `str()`: the comparison target below is a POSIX
+    literal, and `str()` on a `Path` is `ra2\\infra\\ollama_client.py` on
+    Windows. It failed *closed* — the guard reported a violation that was not
+    there — but a gate that cannot pass on a platform CI runs it on is a gate
+    nobody reads (`SD33`).
     """
     offenders = []
     for path in sorted((REPO_ROOT / "ra2").rglob("*.py")):
@@ -225,7 +231,7 @@ def test_openai_is_imported_in_exactly_one_module():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 names = [node.module]
             if any(n == "openai" or n.startswith("openai.") for n in names):
-                offenders.append(str(path.relative_to(REPO_ROOT)))
+                offenders.append(path.relative_to(REPO_ROOT).as_posix())
     assert offenders in ([], ["ra2/infra/ollama_client.py"]), (
         f"openai must be imported only in ra2/infra/ollama_client.py; found {offenders}"
     )
@@ -233,7 +239,9 @@ def test_openai_is_imported_in_exactly_one_module():
 
 def test_pynvml_is_imported_in_exactly_one_module():
     """The GPU probe is an adapter too (sw-design.md §15.6): `ra2/infra/gpu.py`
-    is the one place NVML may be loaded."""
+    is the one place NVML may be loaded.
+
+    `.as_posix()` for the same reason as the test above (`SD33`)."""
     offenders = []
     for path in sorted((REPO_ROOT / "ra2").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -244,7 +252,7 @@ def test_pynvml_is_imported_in_exactly_one_module():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 names = [node.module]
             if any(n == "pynvml" or n.startswith("pynvml.") for n in names):
-                offenders.append(str(path.relative_to(REPO_ROOT)))
+                offenders.append(path.relative_to(REPO_ROOT).as_posix())
     assert offenders in ([], ["ra2/infra/gpu.py"]), (
         f"pynvml must be imported only in ra2/infra/gpu.py; found {offenders}"
     )
@@ -267,7 +275,7 @@ def test_nothing_shells_out(app_factory):
     banned_calls = {"system", "popen", "spawn", "execv", "execvp"}
     offenders = []
     for path in sorted((REPO_ROOT / "ra2").rglob("*.py")):
-        relative = str(path.relative_to(REPO_ROOT))
+        relative = path.relative_to(REPO_ROOT).as_posix()
         tree = ast.parse(path.read_text(encoding="utf-8"))
         docstrings = {
             ast.get_docstring(n, clean=False)

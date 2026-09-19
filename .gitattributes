@@ -1,0 +1,27 @@
+# Line endings for the fixtures whose bytes are asserted (sw-design.md SD33).
+#
+# `core.autocrlf` is a setting on a *machine*, not in the repository, so
+# without an attribute the bytes a fixture checks out with are a property of
+# whoever cloned it. Every path below has a test that compares its bytes
+# against a generator's output, so leaving them unpinned makes those tests'
+# results depend on the runner — which is how CI's Windows leg came to be red
+# from M3 onwards while the Linux leg was green on the same commit.
+#
+# Deliberately narrow, and deliberately **not** `* text=auto eol=lf`: the paths
+# named here are the ones a test compares byte-for-byte. Renormalising the
+# repository would rewrite every tracked file for no gate's benefit.
+
+# CRLF **by construction**, and `-text` is the only correct attribute.
+# `generate_hazards.py` joins every line with CRLF because the delivery it
+# stands in for does, and `h13_astrana_blank_row` carries Astrana's doubled
+# CRLF (`\r\r\n`) — a sequence no text normalisation survives, because git's
+# clean filter folds `\r\n` to `\n` and so rewrites `\r\r\n` as a plain
+# `\r\n`, deleting the hazard. `eol=crlf` round-trips through LF and would do
+# exactly that, so it is wrong here; `-text` converts in neither direction.
+# `diff` is set alongside it so `git diff` still renders them as text.
+tests/fixtures/deliveries/hazards/** -text diff
+
+# LF by construction — these generators write JSON and templates with `\n`.
+tests/fixtures/codelists/hazards/** eol=lf
+tests/fixtures/prompts/hazards/** eol=lf
+tests/fixtures/golden/import_report_hazards.json eol=lf
