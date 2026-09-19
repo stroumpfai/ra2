@@ -711,6 +711,53 @@ async def test_a_timeout_and_a_refusal_are_different_answers() -> None:
     assert len(refusing.chat_requests) == 3
 
 
+@pytest.mark.parametrize(
+    ("max_retries", "expected_attempts"),
+    [(0, 1), (1, 2), (3, 4)],
+)
+async def test_an_exhausted_call_reports_how_many_attempts_it_cost(
+    max_retries: int, expected_attempts: int
+) -> None:
+    """The attempts a record spent before giving up are otherwise counted
+    nowhere.
+
+    `Extraction.retry_count` carries them for a call that answered. A call
+    that exhausted its attempts writes no `extraction` row — by design, since
+    the hole is what the resume query finds — so §10.4's "bounded, counted and
+    visible" held only for the records that succeeded, and the most expensive
+    ones in a run were the invisible ones.
+
+    `retries + 1`, because the bound counts *retries* and the calls made are
+    one more.
+    """
+    stub = StubOllama(chat=[(503, {"error": "busy"})])
+    client = OllamaLLMClient(
+        base_url=LOOPBACK_URL, max_retries=max_retries, http_client=stub.http_client()
+    )
+
+    with pytest.raises(LlmEndpointError) as excinfo:
+        await client.extract("prompt", Output, "m", temperature=0.0, seed=1)
+
+    assert excinfo.value.attempts == expected_attempts
+    assert len(stub.chat_requests) == expected_attempts
+
+
+async def test_a_call_that_gives_up_at_once_reports_one_attempt() -> None:
+    """A non-retryable failure costs exactly one call, and must say so.
+
+    Reporting `max_retries + 1` here would overstate it — which matters most
+    for the timeout, since that is now the non-retryable case an analyst is
+    most likely to meet.
+    """
+    stub = StubOllama(chat=[httpx2.ReadTimeout("timed out", request=httpx2.Request("POST", "/"))])
+    client = OllamaLLMClient(base_url=LOOPBACK_URL, max_retries=3, http_client=stub.http_client())
+
+    with pytest.raises(LlmEndpointError) as excinfo:
+        await client.extract("prompt", Output, "m", temperature=0.0, seed=1)
+
+    assert excinfo.value.attempts == 1
+
+
 async def test_a_4xx_is_not_retried() -> None:
     """A wrong model name does not become right on the second attempt, and
     retrying it burns the bound a genuinely busy endpoint needs."""

@@ -11,8 +11,11 @@ is slower than the bound" from "nothing is listening" is the reason stored on
 the row — which is why it also has to survive the read model.
 """
 
+import asyncio
+
 import pytest
 from tests.backend.services.run.conftest import WEATHER, answer
+from tests.backend.services.run.test_in_flight import _wait_for_terminal
 from tests.fixtures.fake_llm import DEFAULT_ENDPOINT, FakeLLMClient
 
 from ra2.domain.extraction import RunStatus
@@ -251,3 +254,111 @@ async def test_a_resume_of_a_run_with_rows_keeps_the_larger_tolerance(
 
     assert resumed_client.call_count == 3
     assert len(await extractions_of(seeded.run_id)) == 2
+
+
+async def test_the_attempts_a_refused_record_cost_are_recorded(
+    seed, make_run_service, reporter, run_row
+):
+    """mvp-spec.md §10.4 wants retries "bounded, counted, **and visible**".
+
+    They were counted for records that eventually answered — `sum_retries`
+    adds up `extraction.retry_count` over committed rows — and nowhere at all
+    for a record that never answered, because that one deliberately writes no
+    row. The attempts it spent were the most expensive in the run and the only
+    ones invisible.
+
+    They ride out on `run.error`, which is durable and, since the "log" action
+    was opened to any run carrying a reason, reachable.
+    """
+    seeded = await seed(records=4)
+    service = make_run_service(
+        FakeLLMClient(
+            response=answer(),
+            fail_from=0,
+            failure=LlmEndpointError(DEFAULT_ENDPOINT, EndpointStatus.UNREACHABLE, attempts=3),
+        )
+    )
+
+    await service.execute_run(seeded.run_id, reporter)
+
+    run = await run_row(seeded.run_id)
+    assert run.error is not None
+    assert "1 record failed at the endpoint after 3 attempts" in run.error
+    # The larger number is separate and still there: most of what is missing
+    # was never attempted, because the worker stopped.
+    assert "4 record(s) not extracted" in run.error
+
+
+async def test_a_failure_that_cannot_say_what_it_cost_reports_no_total(
+    seed, make_run_service, reporter, run_row
+):
+    """An unknown is not a zero.
+
+    `LlmEndpointError.attempts` is `None` when no call was made, and a total
+    that silently omitted it would read as complete. The record count is still
+    reported, because that part is known.
+    """
+    seeded = await seed(records=4)
+    service = make_run_service(
+        FakeLLMClient(
+            response=answer(),
+            fail_from=0,
+            failure=LlmEndpointError(DEFAULT_ENDPOINT, EndpointStatus.UNREACHABLE),
+        )
+    )
+
+    await service.execute_run(seeded.run_id, reporter)
+
+    run = await run_row(seeded.run_id)
+    assert run.error is not None
+    assert "1 record failed at the endpoint" in run.error
+    assert "attempts" not in run.error
+
+
+async def test_a_run_that_stopped_for_no_endpoint_failure_says_nothing_about_one(
+    seed, make_run_service, async_task_runner, run_row
+):
+    """A stopped run is `interrupted` too, and must not grow a clause about a
+    thing that did not happen."""
+    gate = asyncio.Event()
+    fake = FakeLLMClient(response=answer(), gate=gate)
+    seeded = await seed(records=3)
+    service = make_run_service(fake, task_runner=async_task_runner)
+
+    task_id = await service.launch_runs(seeded.evaluation_id)
+    await fake.wait_until_called(1)
+    await service.cancel(seeded.run_id)
+    gate.set()
+    await _wait_for_terminal(async_task_runner, task_id)
+
+    run = await run_row(seeded.run_id)
+    assert run.error is not None
+    assert "failed at the endpoint" not in run.error
+
+
+async def test_the_attempts_are_summed_across_every_refused_record(
+    seed, make_run_service, reporter, run_row
+):
+    """Three records refused at two attempts each is six attempts, and the two
+    numbers are reported separately because they answer different questions:
+    how much of the corpus is missing, and how much work was spent finding
+    that out.
+
+    One record commits first, so the bound is the larger one and the worker
+    asks three times before stopping (`_endpoint_error_budget`).
+    """
+    seeded = await seed(records=8)
+    service = make_run_service(
+        FakeLLMClient(
+            response=answer(),
+            fail_from=1,
+            failure=LlmEndpointError(DEFAULT_ENDPOINT, EndpointStatus.TIMED_OUT, attempts=2),
+        )
+    )
+
+    await service.execute_run(seeded.run_id, reporter)
+
+    run = await run_row(seeded.run_id)
+    assert run.error is not None
+    assert "3 records failed at the endpoint after 6 attempts" in run.error
+    assert "7 record(s) not extracted" in run.error

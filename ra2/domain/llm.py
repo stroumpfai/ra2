@@ -189,10 +189,27 @@ class LlmEndpointError(Exception):
       and resumable like any other endpoint failure.
     """
 
-    def __init__(self, base_url: str, status: EndpointStatus) -> None:
+    #: How many calls were made before giving up, when that is known.
+    #:
+    #: `Extraction.retry_count` carries this for a call that *succeeded*; a
+    #: call that exhausted its attempts writes no `extraction` row at all — by
+    #: design, because the hole is what `pending_record_ids` finds — so
+    #: without this the attempts it spent were counted nowhere. mvp-spec.md
+    #: §10.4 asks for retries "bounded, counted, **and visible**", and that
+    #: held only for records that eventually answered.
+    #:
+    #: `None` when no call was made: `REFUSED_NOT_LOOPBACK` is raised at
+    #: construction, before a socket exists, and reporting attempts for it
+    #: would be inventing one.
+    attempts: int | None
+
+    def __init__(
+        self, base_url: str, status: EndpointStatus, *, attempts: int | None = None
+    ) -> None:
         super().__init__(f"llm endpoint {base_url}: {status.value}")
         self.base_url = base_url
         self.status = status
+        self.attempts = attempts
 
 
 # ===========================================================================

@@ -419,7 +419,13 @@ class OllamaLLMClient:
                 )
             except (openai.APIConnectionError, openai.APIStatusError) as exc:
                 if retries >= self._max_retries or not _is_retryable(exc):
-                    raise LlmEndpointError(self._base_url, _status_for(exc)) from exc
+                    # `retries + 1`: the bound counts *retries*, so the calls
+                    # actually made are one more. A non-retryable failure gives
+                    # up on the first, and reporting `max_retries + 1` for it
+                    # would overstate what it cost.
+                    raise LlmEndpointError(
+                        self._base_url, _status_for(exc), attempts=retries + 1
+                    ) from exc
                 retries += 1
                 continue
             break

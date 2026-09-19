@@ -478,6 +478,15 @@ class RunService:
 
         consecutive_endpoint_errors = 0
         last_endpoint_error: str | None = None
+        #: Records that exhausted their attempts at the endpoint, and what
+        #: those attempts cost. Neither is derivable from anything committed:
+        #: a record that never answered writes **no** `extraction` row, so its
+        #: attempts are the one part of §10.4's "bounded, counted and visible"
+        #: that had nowhere to be counted (`plan-fix-evaluation-runs.md` §1.1
+        #: b). They ride out on `run.error`, which is durable and — since the
+        #: "log" action was opened to any run carrying a reason — reachable.
+        endpoint_failures = 0
+        endpoint_attempts: int | None = 0
 
         for record_id in pending:
             prompt_text = await self._resolve_prompt(plan, record_id)
@@ -495,6 +504,14 @@ class RunService:
                 # here would destroy resume (sw-design.md §15.3).
                 last_endpoint_error = str(exc)
                 consecutive_endpoint_errors += 1
+                endpoint_failures += 1
+                # `None` the moment one failure cannot say what it cost, and
+                # `None` from then on: a total that silently omits an unknown
+                # is worse than no total, because it reads as complete.
+                if exc.attempts is None or endpoint_attempts is None:
+                    endpoint_attempts = None
+                else:
+                    endpoint_attempts += exc.attempts
                 # `done` is the count of **committed rows for this run**, from
                 # this execution or any earlier one, so this reads "has this
                 # configuration ever worked" rather than "is this the first
@@ -514,10 +531,13 @@ class RunService:
             # missing records are named by count, never silently dropped
             # (Do-NOT #6) — `pending_record_ids` re-derives exactly which.
             reason = last_endpoint_error or "the endpoint stopped answering"
+            cost = _endpoint_cost(endpoint_failures, endpoint_attempts)
             await self._finish(
                 plan.run_id,
                 RunStatus.INTERRUPTED,
-                error=f"interrupted with {len(remaining)} record(s) not extracted: {reason}",
+                error=(
+                    f"interrupted with {len(remaining)} record(s) not extracted{cost}: {reason}"
+                ),
             )
         else:
             await self._finish(plan.run_id, RunStatus.DONE, error=None)
@@ -919,6 +939,27 @@ def _is_dev(evaluation: Evaluation | None) -> bool:
     if evaluation is None:
         return False
     return evaluation.is_dev or EvaluationSize(evaluation.size) is EvaluationSize.DEV
+
+
+def _endpoint_cost(failures: int, attempts: int | None) -> str:
+    """What the records that never answered cost, as a clause or nothing.
+
+    Separate from the records *not extracted*, which is the larger number: the
+    worker stops after `_endpoint_error_budget` failures, so most of what is
+    missing was never attempted at all. Conflating "12 records have no
+    extraction" with "12 records were tried and refused" would overstate the
+    evidence by an order of magnitude.
+
+    Empty when there were no endpoint failures, so a run interrupted for some
+    other reason does not grow a clause about a thing that did not happen.
+    """
+    if failures <= 0:
+        return ""
+    records = "record" if failures == 1 else "records"
+    if attempts is None:
+        return f"; {failures} {records} failed at the endpoint"
+    calls = "attempt" if attempts == 1 else "attempts"
+    return f"; {failures} {records} failed at the endpoint after {attempts} {calls}"
 
 
 def _endpoint_error_budget(done: int) -> int:

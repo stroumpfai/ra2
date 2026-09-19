@@ -18,8 +18,7 @@ sentence of narrative:
 `Settings.llm_timeout_s` was **120**. Almost all of the time is inside the
 response's `reasoning` field. Every call on that host timed out, always.
 
-Stages 1-5 of the plan are in this amendment. Stage 6 is optional and not
-started; if it lands it is added here, per the one-file-per-branch rule.
+All six stages of the plan are in this amendment.
 
 ---
 
@@ -400,6 +399,64 @@ the literal `12`, and gave the reason: an assertion kept green by editing a
 literal is one that gets edited without anyone asking whether the change was
 wanted. Adding a line to that set is a visible claim that a new failure mode is
 real.
+
+## 11. `ra2/domain/llm.py` — `LlmEndpointError.attempts` *(Stage 6)*
+
+```diff
+-    def __init__(self, base_url: str, status: EndpointStatus) -> None:
++    def __init__(
++        self, base_url: str, status: EndpointStatus, *, attempts: int | None = None
++    ) -> None:
+```
+
+**Why.** mvp-spec.md §10.4 asks for retries "bounded, counted, **and
+visible**". `Extraction.retry_count` carries them for a call that answered —
+an amendment made in phase 3 for exactly this reason — and
+`RunRepository.sum_retries` adds those up over committed rows. A call that
+exhausted its attempts writes **no** `extraction` row, by design, because the
+hole is what `pending_record_ids` finds. So the attempts spent on the records
+that never answered were counted nowhere, and those are the most expensive
+ones in the run.
+
+`None` when no call was made: `REFUSED_NOT_LOOPBACK` is raised at
+construction, before a socket exists, and reporting attempts for it would be
+inventing one. `retries + 1` everywhere else, because the bound counts
+*retries* and the calls made are one more — a non-retryable failure costs
+exactly one, and reporting `max_retries + 1` for it would overstate what it
+cost. That matters most for the timeout, which item 3 made the non-retryable
+case an analyst is now most likely to meet.
+
+**Where it surfaces.** `run.error`, through `_endpoint_cost`: *"interrupted
+with 7 record(s) not extracted; 3 records failed at the endpoint after 6
+attempts: …"*. Durable, and reachable because item 4 opened the "log" action
+to any run carrying a reason. The two numbers stay separate deliberately —
+the worker stops after `_endpoint_error_budget` failures, so most of what is
+missing was never attempted, and conflating "7 records have no extraction"
+with "7 records were tried and refused" would overstate the evidence by an
+order of magnitude.
+
+### The plan's own Stage 6 was not buildable, and this is what replaced it
+
+`plan-fix-evaluation-runs.md` proposed a live `RunProgressView` field
+rendering *"attempt 2 of 3 · waiting 3 m"*. Two things in the way, both
+structural:
+
+- **The worker cannot see inside the retry loop.** `LLMClient.extract` returns
+  only on success, and `LLMClient` is a frozen protocol with no progress
+  callback — CONTRACTS records "`LLMClient` **unchanged**" as a deliverable of
+  its own wave. Reporting attempts *while they happen* means changing that
+  protocol, which is a large amendment for a line of text.
+- **`RunProgressView` has two builders.** Live worker state lives on the
+  `RunService` instance, and the Evaluation screen's progress cards come from
+  `EvaluationService._progress`, which cannot see it. A field populated by one
+  builder and not the other would widen exactly the split item 8 already had
+  to work around.
+
+So the goal is delivered where it is durable rather than where it is live: the
+attempts are recorded when the run stops, on the row, in the place the UI
+already reads. A run that exhausted records always ends `interrupted` — any
+hole makes `remaining` non-empty — so there is always a `run.error` to carry
+them.
 
 ---
 
