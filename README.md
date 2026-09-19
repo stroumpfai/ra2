@@ -63,10 +63,13 @@ Import → Census → Codelists → Features → Prompts → Evaluation → Resu
 |---|---|
 | **OS** | Windows or Linux. macOS is not a target but nothing is designed out of it. |
 | **Python** | 3.14 — **provisioned by `uv`**, so your system Python does not matter. |
-| **`uv`** | The only thing you install by hand. https://docs.astral.sh/uv/ |
-| **`just`** | The command surface. Every command below is a `just` recipe. https://github.com/casey/just |
+| **`uv`** | Install it yourself. It provisions Python and every dependency. https://docs.astral.sh/uv/ |
+| **`just`** | Install it yourself. The command surface — every command below is a `just` recipe. https://github.com/casey/just |
 | **Disk** | The database, uploaded deliveries and imported codelists live under one directory (`./var` by default). CSV exports do not: they are streamed to the browser and land wherever it saves downloads. |
 | **GPU** | Only for actually running models. Import, Census, Codelists, Features and Prompts need no GPU and no LLM. |
+
+`uv` and `just` are the two things you install by hand. Everything else —
+Python itself included — arrives with `uv sync --frozen`.
 
 You do **not** need Docker, a database server, Redis, or a network connection
 at runtime.
@@ -75,12 +78,21 @@ at runtime.
 
 ## Setup
 
+Install `uv` first — https://docs.astral.sh/uv/. Then:
+
 ```bash
 git clone <this repo>
 cd ra2
-uv sync --frozen        # provisions Python 3.14 and every dependency, locked
-just migrate            # creates the SQLite database and brings it to head
+uv tool install rust-just   # skip if `just --version` already answers
+uv sync --frozen            # provisions Python 3.14 and every dependency, locked
+just migrate                # creates the SQLite database and brings it to head
 ```
+
+`uv tool install rust-just` is the shortest route to `just` on both target
+platforms, and it keeps the toolchain under `uv`. It drops the binary in the
+same directory `uv` installed itself into (`~/.local/bin`), so it is on `PATH`
+already. Any other install works too — a package manager, or a release binary
+from https://github.com/casey/just — as long as `just --version` answers.
 
 `uv sync --frozen` is deliberate: it installs exactly what `uv.lock` pins, so
 "works on my machine" does not happen. Never use bare `pip` or
