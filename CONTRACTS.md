@@ -439,6 +439,9 @@ and one §8 entry per finding closed. The register in §4 is left as written.
 | `sw-design.md` | `SD27`, `SD28` and §7's sample-rule section; §15.5's transport paragraph; **§12 gains the thirteenth invariant** and the paragraph on why it is the only one addressed to people rather than to code |
 | `README.md` | The loopback rule now states both halves |
 | `risk-assesment.md` | The `Status` column, and §8 |
+| `ra2/ui/shell.py` | `_data_dir_chip` only — `title` moves from the props *string* to the props *mapping* (`SD31`), and `html.escape` goes with it. **Not a register finding**: a defect found while working this slice, landed the same way because it is a fix to a control that already exists (`fix-ui-windows-data-dir`) |
+| `tests/ui/test_data_dir_chip.py` | Two cases the POSIX `_DATA_DIR = "/srv/ra2/var"` could never have caught — a `tempfile.mkdtemp()`-shaped Windows path (the crash) and a path of *valid* escapes (the silent rewrite). The fixture had no backslash in it, which is what CLAUDE.md's *fixtures must contain the real hazards* is about, read one hazard wider than encodings (`fix-ui-windows-data-dir`) |
+| `sw-design.md` *(second entry, later branch)* | `SD31` — a prop whose value did not come from the source file is assigned through the props mapping, never through the props string (`fix-ui-windows-data-dir`) |
 
 ---
 
