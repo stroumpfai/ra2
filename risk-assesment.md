@@ -50,12 +50,14 @@ patterns account for almost everything found:
 remediation entry in §8, then `✓ §8.n` pointing at it. **`◑`** means the code
 is done and a decision for the project is not — the entry says which. It is
 the only part of this document that is kept current; the register in §4 stays
-as written at `616bf2b`.
+as written at `616bf2b`. A row may be `open` **and** name an entry: §8.5
+closed a third of an action and left the rest, and saying so is more useful
+than a symbol for it.
 
 | # | Status | Action | Effort | Risk |
 |---|---|---|---|---|
 | 1 | **✓ §8.1** | Build the adapter's HTTP client with `trust_env=False` (a proxy env var currently redirects loopback traffic off-host — reproduced) | ~1 h | **A1** |
-| 2 | open | Write the data-handling rules the app cannot enforce: outputs, retention, destruction, named owner, incident path | ~1 day, no code | **F1, B2, B3** |
+| 2 | **◑ §8.6** | Write the data-handling rules the app cannot enforce: outputs, retention, destruction, named owner, incident path | ~1 day, no code | **F1, B2, B3** |
 | 3 | **◑ §8.4** | Suppress or gate verbatim value samples in the census export; screen every export before it leaves the machine | ~½ day | **B1** |
 | 4 | **◑ §8.2** | Make the real-data commit guard content-shaped and run it in CI; reconsider the repository being public | ~½ day | **C1** |
 | 5 | open | Measure and bound the prompt against the model's context window before the evaluation corpus is cut | ~1 day | **D1** |
@@ -363,6 +365,14 @@ re-identification acceptance rests on.
 
 **B3 · No retention limit, no deletion path, no end-of-PoC destruction**
 · Severity: **High** · Control status: **absent**
+
+> **Re-checked 2026-09-18 against `af0150f` — see §8.5; remediated in part the
+> same day — see §8.6.** The deletion path exists, and the finding below
+> understated the gap it describes rather than overstating it. A discard now
+> erases the bytes and not merely the rows, and `data-handling.md` carries the
+> destruction procedure — but **the retention period, the destruction date and
+> the named signer are still blank**, and they are the larger half. Left as
+> written, like every other entry here.
 
 *Scenario.* The PoC ends. The data stays.
 
@@ -875,7 +885,9 @@ land.
 remediation entry in §8, then `✓ §8.n` pointing at it. **`◑`** means the code
 is done and a decision for the project is not — the entry says which. It is
 the only part of this document that is kept current; the register in §4 stays
-as written at `616bf2b`.
+as written at `616bf2b`. A row may be `open` **and** name an entry: §8.5
+closed a third of an action and left the rest, and saying so is more useful
+than a symbol for it.
 
 **Now — before the next real import** (small, mostly code)
 
@@ -886,6 +898,7 @@ as written at `616bf2b`.
 | 3 | **✓ §8.3** | Add Do-NOT #13 (agents never read `data/` or `RA2_DATA_DIR`) and a matching permission deny rule | C2 | 1 h |
 | 4 | **✓ §8.4** | Suppress verbatim value samples for non-coded columns; classification header on every export | B1 | ½ d |
 | 5 | open | Render the anonymisation marking as three states until its semantics are confirmed | B5 | 2 h |
+| 19 | **✓ §8.6** | ~~Write exports to `settings.exports_dir`~~ — **deleted instead**, and the two documents that claimed exports live under the data directory are corrected (`SD30`) | B3, B2 | 2 h |
 
 **Before the evaluation corpus is cut** (validity of the answer)
 
@@ -901,11 +914,12 @@ as written at `616bf2b`.
 
 | # | Status | Action | Risk | Effort |
 |---|---|---|---|---|
-| 11 | open | The governance page: owner, basis, retention, destruction, permitted outputs, incident path | F1, B2, B3 | 1 d |
-| 12 | open | Deployment conditions in the runbook: disk encryption, custody, no cloud-synced data dir, loopback bind, model-server pinning, no tunnels | B4, A2, A3, F2 | ½ d |
-| 13 | open | Extend the NDA or equivalent to the reviewing domain expert before Goal 3's review | B2 | — |
-| 14 | open | Delivery delete + `VACUUM`; decide and document backup vs. accepted re-run | B3, E1 | ½ d |
+| 11 | **◑ §8.6** | The governance page: owner, basis, retention, destruction, permitted outputs, incident path | F1, B2, B3 | 1 d |
+| 12 | **◑ §8.6** | Deployment conditions in the runbook: disk encryption, custody, no cloud-synced data dir, loopback bind, model-server pinning, no tunnels | B4, A2, A3, F2 | ½ d |
+| 13 | open · §8.6 | Extend the NDA or equivalent to the reviewing domain expert before Goal 3's review | B2 | — |
+| 14 | **◑ §8.6** | ~~`PRAGMA secure_delete=ON`~~ **done**; decide backup vs. accepted re-run — the question is now written down (`data-handling.md` §4.4) and unanswered | B3, E1 | ½ d |
 | 15 | open | Close B1–B4 with named owners and dates; write the decommission condition and the "to operate for real" list | F5, F3 | ½ d |
+| 20 | **◑ §8.6** | A numbered destruction procedure — written (`data-handling.md` §4.1); the **rehearsal on synthetic data before handover** is still to be done | B3, F1 | ½ d |
 
 **At the acceptance pass (M34)**
 
@@ -918,6 +932,10 @@ as written at `616bf2b`.
 ---
 
 ## 6. Open questions for the data owner and the project
+
+**Questions 1-4 and 6-8 are now carried as the decision table in
+[`data-handling.md`](data-handling.md) §7**, with owner and date columns to
+fill in. They are repeated here as the review left them.
 
 1. Who is the named owner of this processing, and what is its legal basis?
    (F1)
@@ -1156,3 +1174,240 @@ them now leave with a line saying what they are, which is not the same as a
 rule about what may be in them. B1 was a sample nobody had decided to include;
 B2 is content the design requires, and it needs a decision rather than a
 predicate.
+
+### 8.5 B3 — the deletion path · re-checked 2026-09-18 against `af0150f` · one third closed
+
+**Status: in place for the deletes, absent for erasure, open for retention.**
+B3 named three things: no delivery delete, no `VACUUM`, no retention rule. The
+first landed. The second is still absent and is now **verified** rather than
+inferred. The third is untouched and is still the larger half.
+
+**Chronology, because it changes what this entry is.** `af0150f` was committed
+on the evening of 2026-09-16 — the day of this review's own baseline — and
+implements `plan-reset-and-discard.md`, written before the review existed. It
+is not an answer to B3 and its author had not read it. The overlap is real and
+coincidental, and the parts of B3 that a feature plan had no reason to think
+about are exactly the parts still open.
+
+**What changed.**
+
+| Where | Change |
+|---|---|
+| `ra2/services/lifecycle_service.py:197` | `discard_delivery` — the delete B3 said did not exist. Removes the `delivery` and `delivery_file` rows and, **for an upload**, the bytes, through the same `FileStore` seam intake used. Asserted in `tests/backend/services/lifecycle/test_discard_delivery.py:79`, which counts both |
+| `ra2/services/lifecycle_service.py:154`, `:173` | `discard_run` and `discard_evaluation`. **This is the larger correction to B3's evidence**, and it runs the other way: at `616bf2b` the gap was not only the delivery. `run` and `evaluation` had no delete at all, and `corpus_service.delete` refuses a corpus any evaluation cites — so a corpus that had been evaluated once could not be removed by **any** route the app offered, and neither could the delivery under it. The finding said *no delete for a delivery*; the truth was that the whole chain below the delivery was immovable |
+| the same commit | The chain now completes, in exactly one order: **discard the runs or the evaluation → delete the corpus** (its existing 409-when-cited guard) **→ discard the delivery** (`DeliveryCitedError`, because `corpus.delivery_id` is `SET NULL` and the database would otherwise null a provenance link rather than refuse) |
+| `scripts/reset_data.py:59` | `just reset yes` — the whole data directory: the database **and its `-wal` and `-shm` sidecars**, `deliveries/`, `codelists/`, `exports/`, then `alembic upgrade head`. Naming the sidecars rather than globbing is what makes it a wipe instead of a wipe that comes back with rows in it, and it is the closest thing the project now has to an end-of-PoC destruction command |
+| `sw-design.md` §18, `SD23` | The design is written down: whole objects only, two guards, and **no discard state is ever persisted** — no `deleted_at`, no tombstone, no export flag (§18.3). Deliberate, and it is why the slice needed no migration |
+
+**What it does not close.**
+
+**1 · Nothing reclaims or zeroes the freed pages — now verified, on synthetic
+data.** B3 inferred this from SQLite's behaviour; it reproduces exactly. A
+`DELETE` of 500 rows carrying a synthetic evidence span, followed by a WAL
+checkpoint, leaves **572 readable occurrences** of that span in the file. This
+is not a footnote any more: before `af0150f` the app could not delete a scored
+run at all, so there was nothing to leave behind. The verb that closes a third
+of B3 is the verb that creates this residue, and `mismatch.evidence_span` —
+verbatim narrative — is among the rows it frees.
+
+| Path | Occurrences of the deleted text still in the file |
+|---|---|
+| `DELETE` + checkpoint, `secure_delete` at its default | **572** |
+| `DELETE` + `VACUUM` + checkpoint | 0, and the file shrinks |
+| `DELETE` + checkpoint, `secure_delete=ON` at connect | 0, no `VACUUM` needed |
+
+`PRAGMA secure_delete` reads back **`0`** on the SQLite this project's
+interpreter bundles (3.50.4). It is a compile-time default, so it is not a
+thing to assume in either direction — which is the argument for setting it
+explicitly rather than for trusting it.
+
+**Two details worth having before choosing.** In WAL mode a `VACUUM` alone
+changes nothing observable: the rebuild lands in `-wal` and the main file is
+untouched until a checkpoint, so *run `VACUUM` after a discard* is half an
+instruction. And both routes are about the **database file**; the bytes the
+filesystem already holds are B4's problem, and full-disk encryption is the only
+control that reaches them.
+
+**2 · A host-path delivery's files are never removed, by design.**
+`discard_delivery` removes bytes only for `SourceKind.UPLOAD`
+(`lifecycle_service.py:230`); `HostPathFileStore` registers the analyst's own
+files in place and refuses to remove them, and the service relies on that
+rather than working around it. That is the right call for a store seam and the
+wrong shape for a destruction claim: if the real delivery is registered from a
+host path — which A4 shows is unconstrained — then *deleting the delivery*
+removes rows only, and the raw `Unfall.csv` sits where it always was, outside
+`RA2_DATA_DIR` and outside `just reset`'s reach. The empty
+`{data_dir}/deliveries/{id}/` directory is likewise left behind, documented at
+`lifecycle_service.py:350`.
+
+**3 · The one destructive verb hands out a copy on the way past.** `R-D2`
+chose an exported file over an audit row, so the confirm dialog offers
+**Export** beside **Discard**, and `run_mismatches_csv`
+(`ra2/services/export_service.py:394`) writes `record_value`,
+`extracted_value` and **`evidence_span`** — verbatim narrative fragments — per
+row. The trade is defensible and the reasoning is sound. Its consequence for
+this finding is not: **the deletion path manufactures precisely the artefact
+B2 says nothing governs**, at the one moment the analyst has been told the data
+is about to be gone. The file leaves with §8.4's `CLASSIFICATION_COMMENT` on
+its first line, which is a label, not a rule. And since §18.3 keeps no export
+bookkeeping — correctly, by the same posture that keeps no logs — **how many
+copies exist and where they went is unknowable by construction**.
+
+**4 · `settings.exports_dir` is written by nothing.** It is declared at
+`ra2/infra/config.py:105` ("Where CSV exports are written"), and the only
+readers in the repository are `reset_data.py` and its test. Exports stream to
+the browser and land in Downloads. So `just reset` clears a directory the app
+never fills, while the copies that actually matter are somewhere no RA2 verb
+reaches. This is `Settings.host` from A4, the same shape: a setting that
+implies a control nobody implemented. Here it is worth *building* rather than
+deleting — a single directory the app writes to gives the runbook's screening
+sentence (B1) somewhere to point, and gives `just reset` something true to do.
+
+**5 · The delete with no way to reach it.** §18.6 records that delivery
+discard ships as a route with no UI affordance, the reasoning being that the
+Import view has no delivery list and a table would be a design amendment. That
+is a sound answer to *where does the button go*. It leaves the analyst's only
+route to removing a delivery as `just reset` — which removes **everything**,
+including the corpus, the codelists and every run — or an HTTP call by hand. A
+destruction step that needs a shell is E3's problem arriving early.
+
+**6 · The half that no commit can close.** No retention period. No destruction
+date. Nobody named to sign that it happened. `grep` over every document in the
+repository finds the words nowhere. `af0150f` gave the project a verb; what is
+missing is the sentence that says when to use it, and that is still
+recommendation 11's governance page and F1's argument, unchanged.
+
+**How it was re-checked.**
+
+| Check | Result |
+|---|---|
+| The free-page reproduction above, on a temp database with synthetic rows — 500 inserts of one marker string, `DELETE`, `wal_checkpoint(TRUNCATE)`, then a byte search of the file and its `-wal` | 572 occurrences remain. `VACUUM`+checkpoint clears them; `secure_delete=ON` prevents them. No project data was touched (Do-NOT #13) |
+| `PRAGMA secure_delete` on this interpreter's SQLite | `0`, version 3.50.4 |
+| `grep -rn -i vacuum` over `ra2/`, `scripts/`, `justfile` and the docs | No occurrence outside `plan-reset-and-discard.md` §2.2 and `sw-design.md` §18.6, both deferring *snapshot/restore*, neither about erasure |
+| `grep -rn -iE` for retention, destruction and destroy over every `.md` | Nothing about data retention anywhere; every hit is about destroying `analyst_tag` or a Vue component |
+| Readers of `settings.exports_dir` and `settings.deliveries_dir` across the repository | `exports_dir`: `reset_data.py` and its test only. `deliveries_dir`: `main.py` wiring into `UploadFileStore`, as expected |
+| `ra2/services/corpus_service.delete` | Unchanged — still removes rows only, still refused while an evaluation cites the corpus. What changed is that the evaluation can now be discarded first |
+| `tests/backend/services/lifecycle/test_discard_delivery.py:139` | `test_a_host_path_delivery_keeps_the_analysts_own_files` — the behaviour of §2 above is asserted, deliberate and tested, not an oversight |
+
+**Propositions**, cheapest first. The first is a one-line change in an existing
+pattern; the last is the one that matters most.
+
+**P1 · `PRAGMA secure_delete=ON` beside the other three connect-time pragmas**
+(`ra2/persistence/session.py:57`), which already says the pragmas live there
+and **nowhere else**. It zeroes pages as they are freed, needs no `VACUUM`, no
+checkpoint dance and no decision about when to run it, and it costs write
+throughput on a workload that is one row per record per run. Prefer it to
+`VACUUM`-after-discard: a `VACUUM` is a second thing to remember, must be
+followed by a checkpoint to mean anything in WAL, and cannot run inside the
+transaction a discard already holds. Test it the way `foreign_keys=ON` is
+tested — the real-file fixture, reading the pragma back — plus the byte search
+above over a discarded run. *(Recommendation 14, reworded.)*
+
+**P2 · Say in one place what "the data is deleted" covers.** The chain has an
+order and each step refuses out of order, so today the order is discoverable
+only by trying. A numbered procedure — discard evaluations, delete the corpus,
+discard the delivery, `just reset yes`, then the host-path source files, then
+the exports in Downloads, then the disk — belongs in the runbook, and should be
+rehearsed once on synthetic data before handover, as an acceptance step beside
+the three at M34. *(New recommendation 20.)*
+
+**P3 · Make `exports_dir` true, or delete it.** Writing every export there and
+serving the download from the file gives one screenable location, makes
+`just reset` cover the copies, and gives B1's screening sentence an address.
+The alternative — deleting the setting — is honest but throws away the only
+cheap place to put a retention rule later. *(New recommendation 19.)*
+
+**P4 · One sentence in the discard dialog, beside Export.** *This file leaves
+RA2's control — it carries verbatim narrative and is not covered by anything
+the app deletes.* One string, the pattern D6 already asks for on Results, at
+the only moment in the product where a person is deliberately creating a copy
+of sensitive data outside the machine's rules.
+
+**P5 · Decide whether real deliveries may be registered from a host path at
+all.** If intake for real data is upload-only, then discard removes the bytes,
+`just reset` removes the tree, and a destruction claim is complete without
+qualification. If host-path intake stays — and A4 wants it constrained to an
+`RA2_IMPORT_ROOT` under `{data_dir}` anyway — then that root is inside the data
+directory and `just reset` reaches it. **Either way A4's fix closes this one
+too**, which is worth knowing before either is scheduled.
+
+**P6 · The governance page still decides this finding.** A retention period, a
+destruction date, and a named person who signs that destruction happened.
+Everything above is plumbing for a decision nobody has taken. `af0150f` moved
+B3 from *there is no way to delete this* to *there is a way, and no rule saying
+when* — which is progress, and is the smaller half.
+
+### 8.6 B3 — erasure, and the page that decides the rest · closed 2026-09-18 · `fix-b3-deletion-path` · retention open
+
+**Status: in place for the erasure and the procedure, open for every decision
+that needs a person.** §8.5 left six propositions. Five are done; the sixth was
+never a diff.
+
+**What changed.**
+
+| Where | Change |
+|---|---|
+| `ra2/persistence/session.py` | **P1 — a fourth connect-time PRAGMA, `secure_delete=ON`.** One line, in the file §4.4 already says owns the pragmas and *nowhere else*. SQLite frees a deleted row's page with its bytes intact, so a discarded run's `mismatch.evidence_span` — verbatim narrative — stayed readable in the database file until an unrelated write reused that page. It is now zeroed as it is freed |
+| `ra2/infra/config.py`, `scripts/reset_data.py` | **P3 — `Settings.exports_dir` is deleted**, along with the `exports/` reset target. See *the proposition that changed* below |
+| `ra2/ui/components/discard_dialog.py` | **P4 — `EXPORT_LEAVES_RA2`**, beside the Export button: *the file carries verbatim narrative and leaves RA2's control — nothing the app deletes can reach it again.* The one place the product says *this cannot be undone* is the one place it offers to make a copy that nothing here can delete, and now it says both |
+| `data-handling.md` *(new)* | **P2, P5 and P6.** Outputs (§3), the numbered destruction procedure (§4.1), what the software does and does not guarantee (§4.2), the rehearsal before handover (§4.3), backup (§4.4), the incident path (§5), the decommission condition (§6) — and §7, ten decisions with owner and date columns left **blank**. Recommendations 11, 14 and 20 |
+| `sw-design.md` | `SD29`, `SD30`, §4.4, §10, and **§18.7 — *What a discard erases***. §18.1 said *whole objects*; nothing said what *removed* meant, and the difference is the whole of this finding |
+| `README.md` | Two false claims removed: exports do **not** live under the data directory |
+
+**The proposition that changed on contact with the code.** §8.5's P3 said to
+*build* `exports_dir` rather than delete it. Reading the export path changed
+the answer, and the reason is worth keeping: a server-side copy **does not
+replace the downloaded one — it adds a second copy at rest**, unpruned, of the
+artefact B2 says nothing governs. For a finding about data outliving its
+purpose that is the wrong direction, and the five UI call sites and five API
+routes it would have cost buy nothing B3 wanted. The setting is gone, the two
+documents that repeated its claim are corrected, and where the copies actually
+are is now a sentence in `data-handling.md` §3 instead of a directory that was
+always empty. `SD30`.
+
+**How it was verified.**
+
+| Check | Result |
+|---|---|
+| `PRAGMA secure_delete` read back off the real engine (`test_secure_delete_pragma_is_on`) | `1` |
+| The property, through the real service against the real temp-file database (`test_discard_erasure.py`): plant a synthetic span on a `mismatch`, discard the run, close every connection so the WAL is checkpointed and removed, then search the file | **0 occurrences.** A positive control asserts the same search finds the span *before* the discard, so the assertion cannot pass vacuously |
+| The control, `secure_delete` at SQLite's own default (`test_the_search_can_tell_the_difference`) | The bytes survive the `DELETE`. This is both the defect and the proof that the gate is not tautological |
+| The new tests against the **unfixed** module — the pragma line removed | **2 fail.** The gate is real |
+| `test_a_reset_has_no_exports_target` | Both halves asserted: `Settings` has no `exports_dir`, and no reset target is named `exports`. Either one returning alone re-creates the same false reassurance |
+| `test_the_export_offer_says_the_file_leaves_ra2`, and the absence asserted in the nothing-to-export state | The sentence is load-bearing copy, tested like `DISCARD_KEEPS` |
+| `ruff format --check`, `ruff check`, `mypy`, `lint-imports` | Green |
+| `pytest`, by layer | **2 340 passed, 9 skipped, nothing failed** — `tests/unit` + `tests/api` + the five contract modules 1 169, `tests/backend` 868, `tests/ui` 303. (`tests/e2e` needs a browser and is a separate gate; the discard journey's new assertion is not run here) |
+| The six failures this work first ran into | **None of them were this change** — each was reproduced at `HEAD` with the work stashed, and all were Windows artefacts of the repository itself: four CRLF fixture comparisons and two path-separator assertions in `test_p3_contract.py`, both fixed under `contracts/amendments/fix-windows-paths-and-eol.md` |
+| `tests/ui`, and whose fix it is | Most of the layer was failing because the data-dir chip pastes `RA2_DATA_DIR` into a NiceGUI prop string parsed with `ast.literal_eval`. That was already diagnosed and fixed **first**, independently, on branch `fix-ui-windows-data-dir` (`8665563`, `SD31`); this work reached the same fix, found theirs, and dropped its own rather than commit a second copy. **The 303 figure above was measured with that branch's fix applied** — on `main` alone, `tests/ui` stays red until it lands |
+
+**What this does not close.**
+
+**1 · Every decision in `data-handling.md` §7.** Ten of them, blank: the named
+owner and legal basis, the machine and its custody, what may leave and to whom,
+**the retention period**, **the destruction date and who signs it**, host-path
+intake, backup, the incident contact and its time bound, NDA cover for the
+reviewing expert, and the decommission condition. The page is a form; nobody
+has filled it in. That is why B3 keeps a `◑` and not a `✓`, and why
+recommendation 11 is not closed by a file existing.
+
+**2 · The manual steps stay manual.** Destruction is complete at step 4 only if
+no delivery was registered from a host path. Step 5 — deleting the analyst's
+own source files — and step 6 — deleting the exports in Downloads — are
+procedure, not code, and A4's `RA2_IMPORT_ROOT` is what would fold step 5 into
+`just reset` (P5, `data-handling.md` §4.2).
+
+**3 · Two of the three discard routes have no button.** §18.6 records this for
+the delivery. Writing the procedure down surfaced that it is also true of the
+**evaluation**: the row action in the Evaluation view discards *one run*
+(`run-discard`), and an analyst clearing three inconclusive evaluations
+discards each of their runs one at a time or calls the API. That is consistent
+with `R-D5` — one object at a time, no bulk verb over a destructive
+operation — and it is not what §18.6's text implies. Recorded in
+`data-handling.md` §4.1 rather than fixed: adding the affordance is a design
+change, and the destruction procedure needs to describe what exists.
+
+**4 · The filesystem, and every earlier copy.** `secure_delete` reaches the
+database file. It does not reach the blocks the filesystem freed, a backup, or
+a disk image. **B4 carries this**, and `data-handling.md` §2 states full-disk
+encryption as the deployment condition that makes every deletion above mean
+something — still unconfirmed, still not the reviewer's to observe.
