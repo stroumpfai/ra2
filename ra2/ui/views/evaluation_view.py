@@ -36,7 +36,7 @@ rather than from a task counter a restart can disagree with (§15 F6). So the
 timer re-reads `EvaluationService.get()` and stops when no run is `queued` or
 `running` — one polling loop, no websocket, no SSE.
 
-**Two places this file departs from the drawn board, both deliberate:**
+**Three places this file departs from the drawn board, all deliberate:**
 
 - *Step 2's note.* The design reads "Freezes when the first run executes."
   That was true before phase 2. `mvp-spec.md` §9 now says a feature set is
@@ -46,6 +46,12 @@ timer re-reads `EvaluationService.get()` and stops when no run is `queued` or
 - *The token figure* in the prompt preview is `≈ N tokens` — an estimate, and
   labelled as one, because an exact count needs the model's tokeniser and
   every tokeniser package downloads its vocabulary (N1, C6, R8).
+- *The toolbar's right group* carries **"New evaluation"** wherever "Save
+  draft" cannot honestly act, and the setup column carries `LAUNCHED_MESSAGE`
+  once it is locked (`sw-design.md` §13 `SD32`). The design's fixture shows an
+  evaluation that already exists, so it draws neither; without them a launched
+  evaluation is a dead end with nothing on screen saying why, and the "clone
+  into a new evaluation" its own step-2 copy prescribes has nowhere to go.
 
 **Three components this view places but does not implement** —
 `progress_card`, `ollama_settings_dialog` and `prompt_preview_panel` — are
@@ -61,9 +67,10 @@ view keeps only the handle it needs to close it on "refresh".
   re-derive — is computed from the **persisted** `selected_models`. A local
   edit buffer would make the Launch button disagree with the service about its
   own precondition, so there is none; `update_draft` is called as each control
-  changes. "Save draft" therefore *creates* the row when none exists yet and
-  re-saves the setup when one does, which is the one thing it can honestly
-  mean once everything else already saves itself.
+  changes. "Save draft" therefore only ever *re-saves* an existing draft, which
+  is the one thing it can honestly mean once everything else already saves
+  itself — creating is `NEW_EVALUATION_LABEL`'s, and the two are never on
+  screen together.
 - *The temperature ladder* (`TEMPERATURE_CHOICES`) is this view's own: the
   design draws a caret and one fixed value, so the option list is
   underspecified in exactly the way `census_view.POPULATED_THRESHOLDS` and
@@ -149,7 +156,10 @@ __all__ = [
     "DETERMINISM_NOTE",
     "ENDPOINT_WORDS",
     "FEATURE_SET_NOTE",
+    "LAUNCHED_MESSAGE",
+    "MODELS_UNSAVED_MESSAGE",
     "MODELS_WELL_PX",
+    "NEW_EVALUATION_LABEL",
     "NO_RUNS_MESSAGE",
     "NO_SETUP_MESSAGE",
     "PAGE_SIZE",
@@ -242,6 +252,11 @@ GEAR: Final = (
 #: followed by this. "Weather & conditions · v2 — only the model varies".
 PINNED_SUFFIX: Final = " — only the model varies"
 SAVE_DRAFT_LABEL: Final = "Save draft"
+#: The creation affordance the design never drew, in `features_view`'s "New
+#: set" and `prompts_view`'s "New version" register (SD32). It is the **only**
+#: toolbar button in the two states where "Save draft" cannot honestly act:
+#: before any evaluation exists, and after one has been launched.
+NEW_EVALUATION_LABEL: Final = "New evaluation"
 
 STEP_TITLES: Final[tuple[str, ...]] = (
     "Corpus",
@@ -307,7 +322,7 @@ ENDPOINT_WORDS: Final[dict[EndpointStatus, str]] = {
 #: asks for and plan-phase-3.md C3 settles: the standard empty card, no new
 #: pattern.
 NO_SETUP_MESSAGE: Final = (
-    "No evaluation yet — pick a corpus and a frozen feature set, then “Save draft”."
+    "No evaluation yet — pick a corpus and a frozen feature set, then “New evaluation”."
 )
 NO_CORPUS_MESSAGE: Final = "No corpus yet — freeze one on Import first."
 NO_FROZEN_SET_MESSAGE: Final = "No frozen feature set yet — create one on Features first."
@@ -323,11 +338,20 @@ NO_MODELS_UNREACHABLE_MESSAGE: Final = "No models — the endpoint could not be 
 NO_RECORDS_MESSAGE: Final = "This corpus has no records to preview a prompt against."
 NO_RUNS_MESSAGE: Final = "No runs yet — Launch queues one per selected model."
 NO_PROVENANCE_MESSAGE: Final = "Nothing stored yet — provenance is written when a run starts."
-UNSAVED_MESSAGE: Final = "Save the draft to pin the prompt, the decoding settings and the size."
+UNSAVED_MESSAGE: Final = "“New evaluation” pins the prompt, the decoding settings and the size."
 #: Step 4's own version of `UNSAVED_MESSAGE`: the list above is real and
 #: current, and only the selection needs somewhere to be recorded.
-MODELS_UNSAVED_MESSAGE: Final = "Save the draft to select models."
+MODELS_UNSAVED_MESSAGE: Final = "“New evaluation” first — the ticks need a row to record into."
 DRAFT_SAVED_MESSAGE: Final = "Draft saved."
+EVALUATION_CREATED_MESSAGE: Final = "New evaluation created."
+#: Why the setup column is read-only, and the way out. Rendered **over the
+#: whole column**, not beside step 4: the lock is not step 4's, and three of
+#: its neighbours were equally silent about it (SD32).
+LAUNCHED_MESSAGE: Final = (
+    "Launched — every step below is fixed, because the runs beside them cite these "
+    "exact inputs. “New evaluation” clones the corpus and the feature set into an "
+    "editable draft."
+)
 UNKNOWN_VALUE: Final = "unknown"
 EMPTY_CELL: Final = "—"
 
@@ -498,30 +522,66 @@ class _EvaluationPage:
                 "mono ink2"
             ).props('data-testid="pinned-inputs"').mark("pinned-inputs").style("font-size:11px;")
         with ui.element("div").style(RIGHT_GROUP_STYLE):
-            button = (
-                ui.element("button")
-                .classes("btn secondary")
-                .props('type="button" data-testid="save-draft"')
-                .mark("save-draft")
-            )
             if self._can_save_draft():
-                button.on("click", _sync(self._save_draft))
+                self._toolbar_button(
+                    SAVE_DRAFT_LABEL,
+                    testid="save-draft",
+                    enabled=True,
+                    on_click=self._save_draft,
+                )
             else:
-                button.props("disabled").style("opacity:.45;")
-            with button:
-                ui.label(SAVE_DRAFT_LABEL)
+                self._toolbar_button(
+                    NEW_EVALUATION_LABEL,
+                    testid="new-evaluation",
+                    enabled=self._can_create(),
+                    on_click=self._new_evaluation,
+                )
+
+    def _toolbar_button(
+        self,
+        label: str,
+        *,
+        testid: str,
+        enabled: bool,
+        on_click: Callable[[], Awaitable[None]],
+    ) -> None:
+        button = (
+            ui.element("button")
+            .classes("btn secondary")
+            .props(f'type="button" data-testid="{testid}"')
+            .mark(testid)
+        )
+        if enabled:
+            button.on("click", _sync(on_click))
+        else:
+            button.props("disabled").style("opacity:.45;")
+        with button:
+            ui.label(label)
 
     def _can_save_draft(self) -> bool:
-        """A draft needs a corpus and a **frozen** feature set to cite. After
-        launch nothing is editable, so there is nothing left to save."""
+        """Whether the toolbar's one button is "Save draft" rather than "New
+        evaluation" — **the two are mutually exclusive** (SD32).
+
+        There is exactly one thing to offer in each of the three states, and
+        the label never has to describe an act the press cannot perform: with
+        no evaluation there is nothing to save, after a launch there is
+        nothing left to edit, and on an unlaunched draft a *second* draft
+        would be debris — the one on screen is already fully editable, and
+        this view has no switcher to find the other one with again.
+        """
         view = self._view
-        if view is not None:
-            return not view.draft.is_launched
+        return view is not None and not view.draft.is_launched
+
+    def _can_create(self) -> bool:
+        """ "New evaluation" cites a corpus and a **frozen** feature set, so
+        both have to exist. Steps 1 and 2 already say which one is missing."""
         return bool(self._corpora) and bool(self._sets)
 
     # --- setup column --------------------------------------------------------
 
     def _render_setup(self) -> None:
+        if self._locked:
+            self._launched_note()
         self._step_corpus()
         self._step_feature_set()
         self._step_prompt()
@@ -529,6 +589,19 @@ class _EvaluationPage:
         self._step_determinism()
         self._step_size()
         self._launch_row()
+
+    def _launched_note(self) -> None:
+        """The reason the six steps below are read-only.
+
+        It sits at the head of the **column**, not inside a step: every
+        control in it is locked by the same fact, and hanging the sentence
+        off step 4 would say so about one of them and leave the other five
+        silent. Before this existed the column said nothing at all — the
+        selects were simply dead (SD32).
+        """
+        ui.label(LAUNCHED_MESSAGE).classes("warn").props('data-testid="launched-note"').mark(
+            "launched-note"
+        ).style("font-size:11.5px;line-height:1.5;")
 
     def _step(self, number: int, *, extra: str = "") -> Element:
         element = (
@@ -1118,32 +1191,85 @@ class _EvaluationPage:
         await self.reload()
 
     async def _save_draft(self) -> None:
-        """Create the evaluation row when there is none, else re-save the
-        setup. `EvaluationService.save_draft` supplies the design's own
-        defaults — the active template, temperature 0.0, seed 42, size
-        `full` — so nothing here duplicates them."""
+        """Re-save an **existing, unlaunched** draft.
+
+        It no longer doubles as the create path: creating is
+        `_new_evaluation`, and a label reading "Save draft" over a row that
+        does not exist yet was half of what made this view unreadable
+        (SD32). Every step already persists as it is chosen (module
+        docstring), so this is the explicit confirmation of a setup that is
+        on disk either way — which is the one thing it can honestly mean.
+        """
         view = self._view
+        if view is None:
+            return
         try:
-            if view is None:
-                corpus_id = self._selected_corpus_id()
-                config_id = self._selected_config_id()
-                if corpus_id is None or config_id is None:
-                    return
-                name = next(s.name for s in self._sets if str(s.feature_config_id) == config_id)
-                draft = await self._services.evaluation.save_draft(
-                    name=name,
-                    corpus_id=CorpusId(corpus_id),
-                    feature_config_id=FeatureConfigId(config_id),
-                )
-                self._remember(evaluation_id=str(draft.evaluation_id))
-            else:
-                await self._services.evaluation.update_draft(
-                    view.draft.evaluation_id, name=view.draft.name
-                )
+            await self._services.evaluation.update_draft(
+                view.draft.evaluation_id, name=view.draft.name
+            )
             ui.notify(DRAFT_SAVED_MESSAGE, type="positive")
         except ServiceError as exc:
             ui.notify(str(exc), type="negative")
         await self.reload()
+
+    async def _new_evaluation(self) -> None:
+        """Create an evaluation and make it the one this client is looking at.
+
+        **One action with one meaning**, reached from the two states where the
+        toolbar offers it, and doing the same thing in both:
+
+        - *Nothing saved yet.* The row is created from the corpus and the
+          frozen set steps 1 and 2 already show — both default to a concrete
+          pick, so there is never a press that has nothing to cite.
+        - *A launched evaluation on screen.* `_selected_corpus_id` and
+          `_selected_config_id` return **that evaluation's** two ids, so the
+          new draft cites the same corpus and the same frozen set. This is
+          literally the "clone into a new evaluation" `FEATURE_SET_NOTE` and
+          `design/prompt-evaluation/README.md` §2 step 2 both instruct, which
+          until now had nothing to clone into.
+
+        No sentinel is needed in `EvaluationSetup` for either (SD32): the row
+        exists before `reload()` runs, so `_current_evaluation` resolves the
+        remembered id rather than falling back to `drafts[0]` — there is no
+        "no evaluation selected, but evaluations exist" state to represent.
+
+        `EvaluationService.save_draft` supplies the design's own defaults —
+        the active template, temperature 0.0, seed 42, size `full` — so
+        nothing here duplicates them, and the clone deliberately carries the
+        *defaults* rather than the launched evaluation's decoding settings:
+        copying those would make "same as the last run" a silent claim the
+        controls no longer say out loud.
+        """
+        corpus_id = self._selected_corpus_id()
+        config_id = self._selected_config_id()
+        if corpus_id is None or config_id is None:
+            return
+        try:
+            draft = await self._services.evaluation.save_draft(
+                name=self._new_name(config_id),
+                corpus_id=CorpusId(corpus_id),
+                feature_config_id=FeatureConfigId(config_id),
+            )
+        except ServiceError as exc:
+            ui.notify(str(exc), type="negative")
+            await self.reload()
+            return
+        self._remember(evaluation_id=str(draft.evaluation_id))
+        ui.notify(EVALUATION_CREATED_MESSAGE, type="positive")
+        await self.reload()
+
+    def _new_name(self, config_id: str) -> str:
+        """A new evaluation is named after the feature set it cites — the
+        module docstring's rule, unchanged, and applied to the clone too.
+
+        `evaluation.name` has no unique constraint and `save_draft` does not
+        dedupe, so a clone and its original share a name **on purpose**: they
+        pin the same set, the name is the only thing in the row that says so,
+        and a "(2)" suffix invented here would be a fact about this view's
+        history rather than about either evaluation (SD32). Nothing in the
+        product identifies an evaluation by name; `evaluation_id` does that.
+        """
+        return next(s.name for s in self._sets if str(s.feature_config_id) == config_id)
 
     # --- launch, resume and polling -----------------------------------------
 

@@ -125,6 +125,15 @@ class EvaluationSetup:
 
     Empty (`EvaluationSetup()`) is the honest state of a fresh tab, and of a
     tab whose remembered evaluation has since been deleted.
+
+    **There is deliberately no "starting a new one" sentinel** (sw-design.md
+    §13 `SD32`). `evaluation_view._current_evaluation` falls back to the newest
+    evaluation whenever `evaluation_id` does not resolve, so a fourth state
+    meaning *creating, not yet created* looks necessary the moment the view
+    grows a "New evaluation" button. It is not: that button creates the row
+    **before** the redraw and remembers its id, so there is never a moment with
+    no evaluation selected while evaluations exist. A sentinel here would be a
+    state in `app.storage.client` that no code path can reach.
     """
 
     #: `None` until an evaluation exists, or once the remembered one is gone.
