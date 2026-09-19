@@ -41,7 +41,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page, expect
 
-from ra2.services.export_service import CSV_BOM, CSV_DELIMITER
+from ra2.services.export_service import CLASSIFICATION_COMMENT, CSV_BOM, CSV_DELIMITER
 
 pytestmark = pytest.mark.e2e
 
@@ -85,6 +85,10 @@ CENSUS_CSV_HEADER = [
     "top_value_share",
     "long_tail",
     "top_values",
+    #: Risk B1. Empty `top_values` means "empty in every row" for a column with
+    #: no values and "you may not have these" for one whose sample was withheld
+    #: — opposite conclusions, so the file says which it is.
+    "top_values_withheld",
 ]
 
 
@@ -217,7 +221,15 @@ def test_a_delivery_becomes_a_corpus(
     # UTF-8 **with BOM** — Excel on Windows reads UTF-8 no other way (N3).
     assert raw.startswith(CSV_BOM)
     text = raw.decode("utf-8-sig")
-    comment, _, body = text.partition("\r\n")
+    # Line 1 says what the file is, before anything says what is in it (B1).
+    # Imported rather than spelled out, unlike the header below: the header is
+    # the contract with Excel and a test that agreed with any change to it
+    # would assert nothing, whereas the marking's wording is explicitly one
+    # string "and nowhere else" — a formal marking replaces it when the
+    # governance page exists (F1), and that must not be a two-file edit.
+    classification, _, rest = text.partition("\r\n")
+    assert classification == CLASSIFICATION_COMMENT
+    comment, _, body = rest.partition("\r\n")
     # The header comment line names the corpus and its version (sw-design.md §7).
     assert comment.startswith("# corpus ")
     assert comment.endswith(" v1")
