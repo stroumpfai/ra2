@@ -375,16 +375,22 @@ it:
 
 | | |
 |---|---|
-| **Delivery** | Three files — `unfall.txt` and `objekt.txt` in RADIS format (`\|`-delimited, CRLF, the full 67/77-column vocabulary) and `text.csv` (`;`-delimited). |
-| **Corpus** | 12 records, frozen. Two cantons, narratives rotating German / French / Italian so per-record language detection is exercised from the first screen. |
-| **Codelists** | Imported **only if** `data/Codes/codes-2018.json` happens to be on this host. `data/` is gitignored, so a fresh clone has none; the script prints that it skipped rather than skipping silently. |
-| **Features** | A set named *seed features*, frozen: one labelled (`UnfZeitFeld`, matched within a 5-minute tolerance) and one exploratory (`phone_use`). |
-| **Prompt** | One template, saved as the next version and activated. |
+| **Delivery** | Four files — `unfall.txt`, `objekt.txt` and `person.txt` in RADIS format (`\|`-delimited, CRLF, the full 67/77/18-column vocabulary) and `text.csv` (`;`-delimited). |
+| **Corpus** | 48 records by default, frozen. Two cantons; narratives generated German / French / Italian in a 6:3:1 mix, plus one record too short to call (`mixed`) and one with no narrative at all (`und`). |
+| **Codelists** | `data/Codes/codes-2018.json` when this host has it; otherwise a small code table the script synthesises, so an `enum` feature works on a fresh clone. Both `UnfTypAusw` and `PersSchaAusw` are mapped. |
+| **Features** | A set named *seed features*, frozen: six labelled (`time` within tolerance, `date`, `integer`, `enum`, and two derived — `count_objects` and `any_person_matches`) and one exploratory (`phone_use`). |
+| **Prompt** | One template, saved as the next version and activated. It carries a **format contract** — what a `date`, a `time` and an `enum` code must look like — because a labelled feature's description is never rendered into the prompt and `domain/matching.py` parses `YYYYMMDD` and `HH:MM` and nothing else. |
 
-Absent on purpose: **no `person` table** (so the two-hop person→accident
-join is the one thing the seed cannot show you), **no enum feature** (that needs a codelist mapping,
-which a clone without `data/` cannot make), and **no evaluation run** (that
-needs a model).
+`--records N` changes the size; the default 48 stays under `RA2_DEV_RECORD_MAX`
+so the corpus is still marked dev-sized, and `just reset-seed yes --records 200`
+reaches `RA2_EVAL_RECORD_MIN`.
+
+Absent on purpose: **no evaluation run** — that needs a model, and picking one
+stays a deliberate act.
+
+**[`docs/seed.md`](docs/seed.md) is the reference**: every hazard the corpus
+carries, and the score a perfect reader could reach on it, so a surprising
+number can be attributed rather than guessed at.
 
 #### Why it works the way it does
 
@@ -400,15 +406,23 @@ from; same seam, same work, finished before `submit()` returns.
 **The corpus is deliberately imperfect**, for the same reason the test fixtures
 are:
 
-- the last record declares two objects and ships one — a count mismatch,
-  reported and non-blocking;
+- one record declares two objects and ships one — a count mismatch, reported
+  and non-blocking;
 - `Witter0Ausw` is empty on every row — an all-empty column, 0 % populated in
   the census and no denominator for any feature over it;
-- the French narrative reads `manuvre`, not `manœuvre`, while `é` and `è`
+- the French narratives read `manuvre`, not `manœuvre`, while `é` and `è`
   survive. That asymmetry *is* the evidence of the upstream cp1252 → Latin-1
-  conversion, and the seeded corpus's cp1252 canary count is the honest one.
+  conversion, and the seeded corpus's cp1252 canary count is the honest one;
+- one record's `UnfTypAusw` is a code no code table carries, and one code in
+  the table has no Italian label;
+- and the narratives themselves disagree with the records on purpose: a time
+  three minutes out that the tolerance rule earns, one eight minutes out that
+  it does not, a narrative contradicting a count, a date or an injury, a silent
+  narrative, and a record whose source column is empty and therefore leaves the
+  denominator entirely.
 
-A spotless seed would hide the three things this app exists to surface.
+A spotless seed would hide what this app exists to surface, and a corpus every
+model scores 100 % on would teach nothing at all.
 
 **Every byte is synthetic.** The column *names* come from
 `ra2.domain.parsing.headers`, so a 67-column file stays 67 columns without
@@ -594,6 +608,7 @@ question `sw-design.md` wins:
 | [`CONTRACTS.md`](CONTRACTS.md) | What is frozen, and every documented deviation with its reason. |
 | [`data-handling.md`](data-handling.md) | Outputs, retention, destruction and the incident path. **Decisions still open** are marked as such. |
 | [`risk-assesment.md`](risk-assesment.md) | External review of the use cases and the implementation, with a remediation log. |
+| [`docs/seed.md`](docs/seed.md) | What the development seed contains, and the score a perfect reader could reach on it. Reference, not authority. |
 | `plan-phase-*.md` | Who built what, wave by wave. |
 | `design/*/README.md` | The UI handoff packages. Layout and copy are load-bearing. |
 
