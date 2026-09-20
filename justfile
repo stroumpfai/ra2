@@ -90,9 +90,10 @@ reset token="":
     uv run python scripts/reset_data.py {{token}}
 
 # Wipe, then seed a working state. Needs the same token: `just reset-seed yes`.
-reset-seed token="":
+# Extra arguments go to the seed: `just reset-seed yes --records 200`.
+reset-seed token="" *seed-args:
     uv run python scripts/reset_data.py {{token}}
-    uv run python scripts/seed_dev.py
+    uv run python scripts/seed_dev.py {{seed-args}}
 
 # ---------------------------------------------------------------------------
 # Database
