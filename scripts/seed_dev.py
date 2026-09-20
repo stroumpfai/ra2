@@ -992,12 +992,38 @@ async def _seed_features(services: Services, corpus_id: CorpusId) -> None:
 
 
 async def _seed_prompt(services: Services) -> None:
+    """The active template, and it **carries a format contract**.
+
+    `render_feature_block` gives a labelled feature exactly one line,
+    `"{key} — {value_type}"`, and a labelled feature's `description` is never
+    rendered at all (mvp-spec.md §10.2). The template is therefore the only
+    place that can say what a `date` *looks* like — and without it the models
+    answer `"14. Januar 2025"` against a `YYYYMMDD` record, and
+    `"14. Januar 2025 um 07:45"` against an `HH:MM` one. Both have read the
+    narrative correctly; both score `wrong`, because `domain/matching.py`
+    parses `YYYYMMDD` and `HH:MM` and nothing else.
+
+    Measured on this corpus before the contract existed: `UnfDatumFeld`
+    scored 4 % and 16 % across two models that had in fact read every date
+    right, and `qwen3.5:2b` scored **0 %** on `UnfZeitFeld` having read every
+    time right. A seed whose numbers blame the model for the prompt's
+    omission teaches the opposite of what this app is for.
+    """
     source = (
         "You extract structured facts from Swiss accident reports.\n\n"
         "Language: {{language}}\n\n"
         "Read the narrative below. For each feature, emit only the value the\n"
         "narrative supports, and quote the span it came from.\n\n"
         "{{feature_block}}\n\n"
+        "Answer each feature in exactly the form its type takes, or null:\n\n"
+        "  date      YYYYMMDD, digits only. 14 January 2025 is 20250114.\n"
+        "  time      HH:MM, 24-hour, the time by itself and never the date.\n"
+        "  integer   digits only.\n"
+        "  enum      one of the codes listed above, copied character for\n"
+        "            character and keeping any leading zero. Never the label,\n"
+        "            never its position in the list.\n"
+        "  boolean   true or false.\n\n"
+        "A value the narrative does not state is null, never a guess.\n\n"
         "Answer as JSON only, one key per feature, no prose.\n\n"
         "--- narrative ---\n"
         "{{narrative}}\n"
