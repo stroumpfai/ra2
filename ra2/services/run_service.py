@@ -104,7 +104,7 @@ from ra2.persistence.repositories.run_repo import RunRepository
 from ra2.persistence.session import session_scope
 from ra2.services.errors import FeatureValidationError, NotFoundError, RunNotActiveError
 from ra2.services.feature_service import matching_rule_from_json
-from ra2.services.protocols import PromptResolver
+from ra2.services.protocols import PromptResolver, ScoreSubmitter
 from ra2.services.readmodels import Page, RunProgressView, RunView, SortDir
 
 __all__ = ["RunService", "run_ordinals"]
@@ -244,6 +244,7 @@ class RunService:
         llm_client: LLMClient,
         prompt_resolver: PromptResolver,
         gpu_probe: GpuProbe,
+        scorer: ScoreSubmitter | None = None,
         task_runner: TaskRunner,
         clock: Clock,
         ids: IdFactory,
@@ -253,6 +254,11 @@ class RunService:
         self._llm_client = llm_client
         self._prompt_resolver = prompt_resolver
         self._gpu_probe = gpu_probe
+        #: SD17's chain. `None` leaves a run unscored, which is what every
+        #: suite that is not about scoring wants; `create_app` always
+        #: supplies one, and `test_scoring_is_chained.py` asserts that it
+        #: does — a default nobody checks is how this seam went missing.
+        self._scorer = scorer
         self._task_runner = task_runner
         self._clock = clock
         self._ids = ids
@@ -477,6 +483,7 @@ class RunService:
         try:
             plan = await self._load_plan(run_id)
             await self._extract_all(plan, reporter)
+            await self._chain_scoring(run_id)
         except Exception as exc:
             # A failure is a **recorded** outcome (mvp-spec.md §10.4): the row
             # carries why before the exception reaches the task runner. An
@@ -491,6 +498,38 @@ class RunService:
             # the stop from the caller's task instead.
             await self._finish(run_id, RunStatus.FAILED, error=_error_text(exc))
             raise
+
+    async def _chain_scoring(self, run_id: RunId) -> None:
+        """**SD17**: the run worker's terminal `done` submits the scoring job.
+
+        There is no Score button and the design draws none — every input a
+        score depends on is immutable from the launch commit onward, so there
+        is no moment between a run finishing and its scores existing in which a
+        user could decide anything. This is the line that makes that true; it
+        was missing, and a finished run therefore sat at "Not scored yet"
+        forever while the Results view told the analyst scoring was automatic.
+
+        **Only `done`.** The status is re-read rather than assumed, because
+        `_extract_all` decides between `done` and `interrupted` from what
+        actually committed and this method is not entitled to a second opinion.
+        A partial corpus is never scored: it produces real-looking numbers over
+        an unstated denominator, which §11.4's suppression rule exists to
+        prevent at the other end of the scale. `scoring_service` refuses it
+        too — this just declines to ask.
+
+        **Scheduled, not awaited.** `submit` returns a task id and returns
+        immediately, so the next model in the job does not wait on this one's
+        scoring, and a scoring failure is recorded on its own task rather than
+        turning a finished run into a failed one.
+        """
+        if self._scorer is None:
+            return
+        async with self._session_factory() as session:
+            run = await RunRepository(session).get(run_id)
+            if run is None or RunStatus(run.status) is not RunStatus.DONE:
+                return
+        task_id = self._scorer.submit(run_id)
+        _log.info("run %s: done, scoring submitted as task %s", run_id, task_id)
 
     async def _extract_all(self, plan: _RunPlan, reporter: ProgressReporter) -> None:
         """The record loop. Every transaction in here is opened and closed

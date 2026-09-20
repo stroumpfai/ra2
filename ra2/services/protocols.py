@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ra2.domain.codelist_coverage import ColumnCoverage
 from ra2.domain.derivation import RecordProjection
-from ra2.domain.ids import CorpusId, EvaluationId, FeatureId, RecordId, RunId
+from ra2.domain.ids import CorpusId, EvaluationId, FeatureId, RecordId, RunId, TaskId
 from ra2.domain.mismatch import ReviewTally
 from ra2.domain.prompt import ResolvedPrompt
 
@@ -32,6 +32,7 @@ __all__ = [
     "GroundTruthProvider",
     "MismatchTally",
     "PromptResolver",
+    "ScoreSubmitter",
     "Scorer",
     "ScoringStatus",
 ]
@@ -212,6 +213,31 @@ class Scorer(Protocol):
     """
 
     async def status(self, session: AsyncSession, run_id: RunId) -> ScoringStatus: ...
+
+
+@runtime_checkable
+class ScoreSubmitter(Protocol):
+    """ "Score this run, now that it is done" — **SD17's chain**, expressed as a
+    seam so `run_service` never imports `scoring_service`.
+
+    Separate from `Scorer` rather than a second method on it, because the two
+    have different consumers and neither wants the other's surface: `Scorer` is
+    a **read** the results views make to choose between numbers and an empty
+    state, and this is the **write** the run worker makes once, at the moment a
+    run turns `done`. The split is `GroundTruthProvider`/`Scorer`'s, one more
+    time.
+
+    Returns the task id, because scoring is polled through
+    `GET /api/v1/tasks/{id}` exactly as import and runs are (sw-design.md
+    §16.7) — and because the Results view's "scoring…" state has nothing to
+    poll until something hands it one.
+
+    Not `async`: it *schedules*, like `TaskRunner.submit`, and returns
+    immediately. A run must not wait on its own scoring pass to finish, and the
+    next model in the job must not wait on the previous one's.
+    """
+
+    def submit(self, run_id: RunId) -> TaskId: ...
 
 
 # ---------------------------------------------------------------------------

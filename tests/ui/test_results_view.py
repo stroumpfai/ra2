@@ -25,6 +25,7 @@ from tests.fixtures.scored_corpus import WEATHER, ScoredCorpus, seed_scored_corp
 from ra2.infra.clock import Clock
 from ra2.infra.config import Settings
 from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
+from ra2.services.container import Services
 from ra2.services.scoring_service import ScoringService
 from ra2.ui.views.results.chrome import DEV_PILL, RUN_PILL
 from ra2.ui.views.results.extraction_tab import (
@@ -56,6 +57,12 @@ class Scored:
 
     user: User
     corpus: ScoredCorpus
+    #: The app's own services, so a test can ask what the view was handed
+    #: rather than restate it. The descriptor is built from three rows the
+    #: fixture does not carry — the corpus name and count, and the frozen
+    #: per-feature fingerprints — so restating it here would just be a
+    #: second, driftable copy of `build_descriptor`.
+    services: Services
 
 
 @pytest.fixture
@@ -91,7 +98,7 @@ async def scored(
                 )
                 for run_id in corpus.run_ids:
                     await scoring.score_run(run_id)
-                yield Scored(User(client), corpus)
+                yield Scored(User(client), corpus, app.state.services)
         finally:
             os.environ.pop("NICEGUI_USER_SIMULATION", None)
 
@@ -324,11 +331,28 @@ async def test_the_ranking_tab_renders_its_verdict_and_rules(scored: Scored) -> 
 
 async def test_the_validity_footer_names_the_real_cfg_and_corpus(scored: Scored) -> None:
     """A ranking is valid for one config on one corpus, and the footer says
-    which — interpolated, never a placeholder."""
+    which — interpolated, never a placeholder.
+
+    It used to assert the corpus **id** and the first eight characters of the
+    feature config **id**, because that is what the descriptor carried: three
+    services each held an identical stub returning `record_count=0` and the two
+    ids where the design asks for a name and a hash. The intent in the sentence
+    above was always right; the values it pinned were the placeholder it was
+    written to catch.
+
+    `cfg` is now `compute_set_fingerprint` over the frozen per-feature
+    fingerprints, which is what makes the chip answer "do these two boards
+    describe the same question" rather than "are these two rows the same row".
+    """
+    descriptor = (await scored.services.ranking.ranking_tab(scored.corpus.evaluation_id)).descriptor
+
+    assert descriptor.corpus_label.startswith("scored corpus")
+    assert descriptor.config_fingerprint != scored.corpus.feature_config_id
+
     await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}&tab=ranking")
     await scored.user.should_see(
         VALIDITY_FOOTER.format(
-            cfg=scored.corpus.feature_config_id[:8], corpus=scored.corpus.corpus_id
+            cfg=descriptor.config_fingerprint[:8], corpus=descriptor.corpus_label
         )
     )
 

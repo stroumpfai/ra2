@@ -60,11 +60,11 @@ from ra2.services.readmodels import (
     PerRecordRow,
     PresenceRow,
     PresenceTabView,
-    RunDescriptorView,
     ScoringStatusView,
     SortDir,
     SuppressedCell,
 )
+from ra2.services.run_descriptor import build_descriptor
 
 __all__ = ["ResultsService"]
 
@@ -157,7 +157,7 @@ class ResultsService:
                 )
 
             return ExtractionTabView(
-                descriptor=_descriptor(evaluation, runs),
+                descriptor=await build_descriptor(session, evaluation, runs),
                 models=models,
                 features=Page(
                     items=tuple(paged),
@@ -234,7 +234,7 @@ class ResultsService:
                 for row in _presence_row(feature, chosen, cells, floor)
             )
             return PresenceTabView(
-                descriptor=_descriptor(evaluation, runs),
+                descriptor=await build_descriptor(session, evaluation, runs),
                 models=tuple(
                     ModelColumnView(model_id=r.id, tag=r.model_name, digest=r.model_digest)
                     for r in runs
@@ -539,27 +539,6 @@ def _by_language(
         feature_name=feature.key,
         model_id=model_id,
         rows=tuple(rows),
-    )
-
-
-def _descriptor(evaluation: Evaluation, runs: Sequence[Run]) -> RunDescriptorView:
-    """The identity line every tab carries — "a score without its config is
-    not a result" (design README).
-
-    `is_dev` is not decoration: mvp-spec.md §13 requires the "smoke test, not a
-    result" marker on **every** dev-sized result wherever its numbers appear,
-    and on these boards it replaces the "Evaluation run" pill rather than
-    sitting beside it. There is no state in which a dev number renders
-    unmarked.
-    """
-    return RunDescriptorView(
-        evaluation_id=EvaluationId(evaluation.id),
-        corpus_label=evaluation.corpus_id,
-        record_count=0,
-        model_count=len(runs),
-        config_fingerprint=evaluation.feature_config_id,
-        is_dev=evaluation.is_dev,
-        min_cell_count=evaluation.min_cell_count,
     )
 
 

@@ -69,6 +69,7 @@ from ra2.persistence.models import (
 )
 from ra2.persistence.session import create_engine, create_session_factory
 from ra2.services.feature_service import matching_rule_json
+from ra2.services.protocols import ScoreSubmitter
 from ra2.services.run_service import RunService
 
 #: The design's host, so a `gpu_name` assertion is the same on a laptop with
@@ -237,6 +238,7 @@ def make_run_service(
         session_factory: async_sessionmaker[AsyncSession] | None = None,
         id_factory: SeededFactory | None = None,
         task_runner: TaskRunner | None = None,
+        scorer: ScoreSubmitter | None = None,
     ) -> RunService:
         return RunService(
             session_factory=session_factory or db_session_factory,
@@ -244,6 +246,9 @@ def make_run_service(
             prompt_resolver=resolver,
             gpu_probe=gpu,
             task_runner=task_runner or default_runner,
+            # `None` by default, so the suites that are not about SD17's
+            # chain leave their runs unscored exactly as they always have.
+            scorer=scorer,
             clock=clock,
             ids=id_factory or ids,
             settings=settings or backend_settings,
@@ -298,7 +303,11 @@ async def build_app(
     lifespans = AsyncExitStack()
 
     async def _build(
-        *, llm_client: LLMClient, settings: Settings | None = None, seed: int = 0
+        *,
+        llm_client: LLMClient,
+        settings: Settings | None = None,
+        seed: int = 0,
+        task_runner: TaskRunner | None = None,
     ) -> FastAPI:
         app = create_app(
             settings=settings or run_upgrade_head,
@@ -307,7 +316,14 @@ async def build_app(
             # same `extraction.id`, and `SeededFactory` is deterministic by
             # design. Production uses `Uuid7Factory`, where this is free.
             ids=SeededFactory(seed=seed),
-            task_runner=InlineTaskRunner(SeededFactory(seed=seed + 1)),
+            # `InlineTaskRunner` by default, which drives work to completion
+            # before `submit()` returns. Overridable because it cannot model
+            # **chained** work: it runs each job on a throwaway thread with a
+            # fresh event loop, so a job that submits another (SD17's scoring
+            # chain) would reach this engine's aiosqlite connections from a
+            # second loop. Production runs one loop, so a test that needs the
+            # chain passes `AsyncioTaskRunner` and waits for it.
+            task_runner=task_runner or InlineTaskRunner(SeededFactory(seed=seed + 1)),
             llm_client=llm_client,
             model_catalog=StaticModelCatalog(),
             gpu_probe=gpu,

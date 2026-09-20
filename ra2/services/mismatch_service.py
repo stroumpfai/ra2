@@ -46,9 +46,9 @@ from ra2.services.readmodels import (
     ModelColumnView,
     Page,
     ReviewTallyView,
-    RunDescriptorView,
     SortDir,
 )
+from ra2.services.run_descriptor import build_descriptor
 
 __all__ = ["MismatchService"]
 
@@ -237,7 +237,7 @@ class MismatchService:
             options = await repo.tally_for(RunId(chosen.id))
 
             return MismatchListView(
-                descriptor=_descriptor(evaluation, runs),
+                descriptor=await build_descriptor(session, evaluation, runs),
                 runs=tuple(
                     ModelColumnView(model_id=run.id, tag=run.model_name, digest=run.model_digest)
                     for run in runs
@@ -354,27 +354,3 @@ def _run_label(chosen: Run, runs: Sequence[Run]) -> str:
     """
     ordinal = next((i for i, run in enumerate(runs, start=1) if run.id == chosen.id), 1)
     return f"run {ordinal} · {chosen.model_name}"
-
-
-def _descriptor(evaluation: Evaluation, runs: Sequence[Run]) -> RunDescriptorView:
-    """The identity line the view carries — "a score without its config is not
-    a result" (design/results/README.md).
-
-    Built here rather than imported from `results_service`: two read services
-    of one layer, and the Results one owns a `Scorer` this module must not
-    acquire (§17.3). The shape is the frozen read model; the six values are the
-    evaluation's own.
-
-    `is_dev` is not decoration. mvp-spec.md §13 requires the "smoke test, not a
-    result" marker on **every** dev-sized result wherever its numbers appear,
-    and a mismatch list is somewhere they appear.
-    """
-    return RunDescriptorView(
-        evaluation_id=EvaluationId(evaluation.id),
-        corpus_label=evaluation.corpus_id,
-        record_count=0,
-        model_count=len(runs),
-        config_fingerprint=evaluation.feature_config_id,
-        is_dev=evaluation.is_dev,
-        min_cell_count=evaluation.min_cell_count,
-    )

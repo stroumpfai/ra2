@@ -34,9 +34,9 @@ from ra2.services.protocols import Scorer
 from ra2.services.readmodels import (
     RankingRow,
     RankingTabView,
-    RunDescriptorView,
     SeparatingRow,
 )
+from ra2.services.run_descriptor import build_descriptor
 
 __all__ = ["RankingService"]
 
@@ -111,7 +111,7 @@ class RankingService:
             if not any(
                 any(not cell.suppressed for cell in cells) for cells in cells_by_model.values()
             ):
-                return _nothing_scoreable(evaluation, runs, features)
+                return await _nothing_scoreable(session, evaluation, runs, features)
 
             rankings = rank_models(cells_by_model)
             separating = separating_features(cells_by_model)
@@ -150,7 +150,7 @@ class RankingService:
             )
             headline, detail = _compose_verdict(rows, separating, scored_count)
             return RankingTabView(
-                descriptor=_ranking_descriptor(evaluation, runs),
+                descriptor=await build_descriptor(session, evaluation, runs),
                 rows=rows,
                 separating=tuple(
                     SeparatingRow(
@@ -314,20 +314,11 @@ def _reading(row: object, name: str, rows: Sequence[RankingRow]) -> str:
     return f"{leader} leads alone on {name}"
 
 
-def _ranking_descriptor(evaluation: Evaluation, runs: Sequence[Run]) -> RunDescriptorView:
-    return RunDescriptorView(
-        evaluation_id=EvaluationId(evaluation.id),
-        corpus_label=evaluation.corpus_id,
-        record_count=0,
-        model_count=len(runs),
-        config_fingerprint=evaluation.feature_config_id,
-        is_dev=evaluation.is_dev,
-        min_cell_count=evaluation.min_cell_count,
-    )
-
-
-def _nothing_scoreable(
-    evaluation: Evaluation, runs: Sequence[Run], features: Sequence[Feature]
+async def _nothing_scoreable(
+    session: AsyncSession,
+    evaluation: Evaluation,
+    runs: Sequence[Run],
+    features: Sequence[Feature],
 ) -> RankingTabView:
     """A well-formed "nothing scoreable" payload, never an empty list.
 
@@ -335,7 +326,7 @@ def _nothing_scoreable(
     different fact from "not enough data for results" (§16.7).
     """
     return RankingTabView(
-        descriptor=_ranking_descriptor(evaluation, runs),
+        descriptor=await build_descriptor(session, evaluation, runs),
         rows=(),
         separating=(),
         verdict_headline="Nothing in this run could be scored.",

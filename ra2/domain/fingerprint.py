@@ -12,12 +12,13 @@ the hash is taken.
 
 import hashlib
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final
 
 from ra2.domain.feature import Grain, Kind, ValueType
 
-__all__ = ["FingerprintInput", "compute_fingerprint"]
+__all__ = ["FingerprintInput", "compute_fingerprint", "compute_set_fingerprint"]
 
 #: The application controls key order and separators so the hash is
 #: reproducible byte-for-byte, and `ensure_ascii=False` so label text hashes
@@ -75,4 +76,32 @@ def compute_fingerprint(input: FingerprintInput) -> str:
         "description": input.description,
     }
     canonical = json.dumps(payload, **_JSON_KWARGS)  # type: ignore[arg-type]
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def compute_set_fingerprint(fingerprints: Iterable[str]) -> str:
+    """One identity for a whole frozen feature set — the `cfg` chip's hash.
+
+    `design/results/README.md` draws the results identity line as
+    `Corpus 2026-09-02 · 4 978 records · 3 models` beside a `cfg 4f9a2c1e`
+    chip, and its context block names the field `cfgHash`. Eight hex
+    characters is a hash, not the head of a `feature_config_id`, and the two
+    answer different questions: the id says *which row*, the hash says
+    *whether two sets ask the same thing*. Two configs cloned and re-frozen
+    without an edit have different ids and the same hash, and that is the
+    comparison a reader of two result boards actually needs.
+
+    Built from the per-feature fingerprints rather than from the features, so
+    every guarantee of `compute_fingerprint` carries up unchanged: change a
+    matching rule, a codelist snapshot or a description on any one feature and
+    this moves too. It invents no new notion of sameness, it sums the one
+    §8.5 already defines.
+
+    **Sorted, and not de-duplicated.** Sorted because a set has no order and
+    the hash must not depend on how the rows came back. Not de-duplicated
+    because a fingerprint carries the feature's own key, so two identical ones
+    mean two identical features — a fact about the set worth hashing, not
+    noise worth hiding (Do-NOT #6's spirit: nothing is silently repaired).
+    """
+    canonical = "\n".join(sorted(fingerprints))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

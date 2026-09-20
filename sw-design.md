@@ -1324,8 +1324,15 @@ re-ran. A sentinel makes the key real. `ALL_LANGUAGES` lives in
 `domain/scoring.py` beside the metric names.
 
 **Scoring is chained, not triggered** (**SD17**). The run worker's terminal
-`done` submits the scoring job; there is no Score button, and the design draws
-none. Every input a score depends on — the corpus, the frozen config, the
+`done` submits the scoring job through the `ScoreSubmitter` seam
+(`services/protocols.py`), which `create_app` satisfies with `ScoringService`;
+there is no Score button, and the design draws none. **This paragraph
+described the arrangement for four phases before anything implemented it** —
+`RunService` took no scorer and `ScoringService.submit` had no caller, so a
+finished run sat at "Not scored yet" forever. `test_scoring_is_chained.py` is
+what makes the sentence a claim rather than an intention, and it drives the
+chain through `create_app` — because every layer was green on its own the
+whole time it was broken. Every input a score depends on — the corpus, the frozen config, the
 codelist snapshot, the matching rules, the extractions — is immutable from the
 launch commit onward, so there is no moment between a run finishing and its
 scores existing in which a user could make a meaningful decision. A `failed` or

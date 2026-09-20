@@ -194,28 +194,38 @@ def create_app(
     # test cannot substitute through the composition root is a seam only
     # production uses. I3 had to reach for a private attribute without this.
     prompt_resolver = prompt_resolver or prompt_service
-    run_service = RunService(
-        session_factory=session_factory,
-        llm_client=llm_client,
-        prompt_resolver=prompt_resolver,
-        gpu_probe=gpu_probe,
-        task_runner=task_runner,
-        clock=clock,
-        ids=ids,
-        settings=settings,
-    )
     # --- phase 4 (M27): scoring and results -------------------------------
     # `ground_truth` is a defaulted keyword argument like every other adapter
     # (§12.12) so a test can substitute the EAV read without a test-mode branch
     # (Do-NOT #12), and P3-D13's lesson applies: a seam only production can
     # wire is a seam only production uses.
     ground_truth = ground_truth or GroundTruthRepository()
+    # **Built before `run_service`, which is the whole point.** SD17 chains
+    # scoring off the run worker's terminal `done`, so the worker needs a
+    # `ScoreSubmitter` in hand at construction. It read well in the design and
+    # existed nowhere in the wiring: runs finished, nothing scored, and the
+    # Results view sat at "Not scored yet" telling the analyst that scoring
+    # starts automatically.
     scoring_service = ScoringService(
         session_factory=session_factory,
         ground_truth=ground_truth,
         task_runner=task_runner,
         clock=clock,
         id_factory=ids,
+    )
+    run_service = RunService(
+        session_factory=session_factory,
+        llm_client=llm_client,
+        prompt_resolver=prompt_resolver,
+        gpu_probe=gpu_probe,
+        # `scoring_service` satisfies `ScoreSubmitter` structurally —
+        # `run_service` never imports it, exactly as it never imports
+        # `prompt_service`.
+        scorer=scoring_service,
+        task_runner=task_runner,
+        clock=clock,
+        ids=ids,
+        settings=settings,
     )
     # `scoring_service` satisfies `Scorer` structurally — neither read service
     # imports it directly.

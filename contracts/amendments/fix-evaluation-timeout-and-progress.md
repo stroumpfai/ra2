@@ -944,3 +944,139 @@ by making `reclaim_orphans` tolerate a missing table: a launcher that produces
 an unusable instance is the defect, and tolerating it would hide the next
 misconfiguration too. "Empty **but migrated**" is what the README promises
 there.
+
+## 18. `SD17`'s chain existed only in the design
+
+With the evaluation finally completing, the obvious next question was whether
+Results and Mismatches worked. They do. **Nothing ever reached them.**
+
+`sw-design.md` §16.1 states it plainly:
+
+> **Scoring is chained, not triggered** (**SD17**). The run worker's terminal
+> `done` submits the scoring job; there is no Score button, and the design
+> draws none.
+
+No such code. `RunService` took no scorer, `main.py` gave it none, and
+`ScoringService.submit` — written for this, its docstring saying it "is called
+by the run worker's terminal `done` rather than by a view" — had **no caller
+anywhere in `ra2/`**. Measured on a real 15-record run against the endpoint:
+
+    scored_features: 0 · labelled_features: 6 · is_scoreable: true · is_scored: false
+
+A finished, scoreable run with nothing scored. The Results view meanwhile
+renders *"Scoring starts automatically when a run completes; use Re-score if
+you need to run it again"* — and a case-insensitive grep for `re-?score` over
+`ra2/ui/` is empty, so neither half was true. Its third state, **"scoring…"**,
+polls `GET /api/v1/tasks/{id}` for a task id that only the uncalled `submit`
+returns: unreachable by construction. The one working route to a Results board
+was `POST /api/v1/runs/{id}/rescore`, which nothing in the product issues.
+
+**Why four phases of green tests missed it.** Every scoring, results, ranking
+and mismatch conftest calls `score_run` itself, and `tests/e2e/conftest.py`
+seeds `score` rows directly — its own comment says *"nothing in the product
+writes those except the run worker and the scoring pass"*. Each layer was
+exercised alone and each built the chain by hand. A seam nobody crosses in a
+test is a seam nobody notices is missing; that is the finding, more than the
+line of wiring.
+
+| File | Change | Contract |
+|---|---|---|
+| `ra2/services/protocols.py` | `+ ScoreSubmitter` | **amendment — frozen** |
+| `ra2/services/run_service.py` | `+ scorer` argument, `+ _chain_scoring` | — |
+| `ra2/main.py` | `ScoringService` built **before** `RunService`, and passed to it | **amendment — frozen** |
+
+**A new protocol, not a second method on `Scorer`.** `Scorer` is the *read* the
+results views make to choose between numbers and an empty state; this is the
+*write* the worker makes once, when a run turns `done`. Different consumers,
+neither wanting the other's surface — `GroundTruthProvider`/`Scorer`'s split,
+one more time. `ScoringService` satisfies both without either module importing
+the other.
+
+**Only `done`, and the status is re-read rather than assumed.** `_extract_all`
+decides between `done` and `interrupted` from what actually committed, and
+`_chain_scoring` is not entitled to a second opinion. A partial corpus is never
+scored (§16.1); `scoring_service` refuses it too, so the worker declining to
+ask is a second line rather than the only one.
+
+**Scheduled, not awaited.** `submit` returns a task id immediately, so the next
+model in the job does not wait on this one's scoring, and a scoring failure is
+recorded on its own task instead of turning a finished run into a failed one.
+
+### `InlineTaskRunner` cannot model chained work
+
+Found building the test, and worth recording because it looks like a product
+bug and is not. `InlineTaskRunner` drives each job on a throwaway thread with a
+fresh event loop, so a job that submits another reaches the shared engine's
+aiosqlite connections from a **second** loop, and the failure surfaces as an
+unraisable thread exception in whatever test runs next. Production has one
+loop — `AsyncioTaskRunner.submit` is `loop.create_task` on the loop already
+running the worker — so the chain is fine there. `build_app` now takes a
+`task_runner` override, and the integration test passes `AsyncioTaskRunner`.
+
+### The test that would have caught it
+
+`tests/backend/services/run/test_scoring_is_chained.py`. Three service-level
+tests pin the conditions — submitted on `done`, never after an endpoint
+abandonment, never after a Stop. The fourth,
+`test_a_finished_run_is_scored_through_the_composition_root`, is the one that
+matters: it goes through `create_app`, because the defect was in the wiring and
+a service-level test with a scorer passed in by hand would have been green the
+whole time this was broken.
+
+It asserts `scored_features > 0` and deliberately **not** `is_scored`: the run
+suite's corpus carries no `unfall_row` ground truth, so `_scoreable_count` is 0
+and the run is correctly "nothing scoreable". Whether scoring produces the
+right numbers is the scoring suite's question; this file asks only whether
+anything asks it.
+
+## 19. The results identity line was placeholder data
+
+`design/results/README.md` §2 draws it as `Corpus 2026-09-02 · 4 978 records ·
+3 models` beside a `cfg 4f9a2c1e` chip and says **every tab must carry it**;
+`RunDescriptorView` puts it as *"a score without its config is not a result"*.
+
+What every tab actually carried: `corpus_label=evaluation.corpus_id` (a uuid
+where a name goes), `record_count=0` (hardcoded), and
+`config_fingerprint=evaluation.feature_config_id` (an id where the design asks
+for a hash). So every Results, Ranking and Mismatches board read
+`Corpus 01a0bebb-… · 0 records`, over numbers computed from thousands of them.
+`RunDescriptorView`'s own comment already said what the third field should be —
+*"the frozen feature config's fingerprint, **not** the evaluation's id"*.
+
+**The stub was triplicated**, byte-identically, across `results_service`,
+`ranking_service` and `mismatch_service`. That is why it survived four phases
+and why no single fix would have worked: correcting one leaves two boards
+lying. The three are now one `ra2/services/run_descriptor.py`.
+
+| Field | Was | Now |
+|---|---|---|
+| `record_count` | `0` | `corpus.record_count`, which has carried it since phase 1 |
+| `corpus_label` | `evaluation.corpus_id` | `corpus.name` |
+| `config_fingerprint` | `evaluation.feature_config_id` | `compute_set_fingerprint` over the frozen per-feature fingerprints |
+
+`+ domain/fingerprint.compute_set_fingerprint` is an **amendment** — that file
+is frozen. It invents no new notion of sameness: it hashes the sorted §8.5
+fingerprints, so every guarantee of `compute_fingerprint` carries up unchanged.
+Sorted because a set has no order and the hash must not depend on row order;
+**not** de-duplicated, because a fingerprint carries the feature's own key, so
+two identical ones mean two identical features — a fact about the set worth
+hashing rather than noise worth hiding.
+
+The id and the hash answer different questions, which is why swapping them was
+not merely untidy: the id says *which row*, the hash says *whether two sets ask
+the same thing*. A config cloned and re-frozen without an edit gets a new id
+and keeps its hash, and that is the comparison a reader of two boards needs.
+
+**One test was asserting the stub.**
+`test_the_validity_footer_names_the_real_cfg_and_corpus` pinned the corpus id
+and the config id's first eight characters. Its docstring — *"interpolated,
+never a placeholder"* — was right about the intent and wrong about the values,
+which is the failure mode a literal expectation has. It now reads the
+descriptor the view was handed rather than restating it.
+
+**And the "(corpus removed)" branch is defensive, not live.** The first version
+of `test_the_corpus_cannot_be_removed_out_from_under_a_board` tried to delete
+the corpus and got an `IntegrityError`: `Evaluation.corpus_id` is
+`ondelete=RESTRICT`. That FK *is* the guarantee that lets a board name its
+corpus, so the test now asserts it, and the branch says which test speaks for
+it should the FK ever be relaxed.
