@@ -39,13 +39,21 @@ presses **"New evaluation"** and asserts the exit is real in a browser: the
 lock sentence goes, the selects come back, and the models are tickable again
 (`sw-design.md` §13 `SD32`).
 
-That leg leaves **one extra draft** on the session-scoped server, deliberately
-and inertly. It is this journey's own second evaluation, it cites this
-journey's corpus and feature set, and it has no runs. The one query that could
-notice it is `_current_evaluation`'s "newest", and the only two rows sharing
-the frozen clock's instant there are J10's draft and J10's clone — the journey
-that does depend on being newest (`test_reset_discard.py`) stamps its own
-`created_at` far past both, for exactly this reason.
+**And it ends by clearing up after itself.** The clone that leg creates used
+to stay on the session-scoped server, inert but real; the last leg now
+discards it through the runs card's **"Discard evaluation"** (`sw-design.md`
+§13 `SD35`), which is both the affordance under test and the reason the
+leftover no longer exists. The clone is the right target: it has no runs, so
+the dialog renders its **nothing-to-export** state — no Export button, the
+loss line reading "nothing recorded yet", Discard live immediately — which is
+the state no other browser journey reaches. `test_reset_discard.py` discards a
+*run* and still depends on being newest; it stamps its own `created_at` far
+past every frozen-clock row, so what this journey adds or removes upstream of
+it cannot matter either way.
+
+The verdict is read back through `GET /api/v1/evaluations`, not off the
+screen: the server is shared, so which evaluation `_current_evaluation` falls
+back to after the row goes is another journey's business.
 
 **The second test is the dialog-clipping check.** L3's own suite proves
 `ollama_settings_dialog` uses `dialog_card`'s 96vw wrapper *structurally*; only
@@ -58,6 +66,7 @@ this app supports (sw-design.md §8.2).
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import cast
 
@@ -349,6 +358,55 @@ def test_j10_launch_an_evaluation_and_watch_it_finish(
     original = _get(page, server_url, f"/api/v1/evaluations/{evaluation_id}")
     draft = cast("dict[str, object]", original["draft"])
     assert draft["launched_at"] is not None, original
+
+    # --- and the clone can be cleared up again (SD35) -------------------------
+    # The action is in the runs card's header, not the toolbar: the toolbar
+    # still carries exactly one secondary button, and it is "Save draft".
+    discard = page.locator('[data-testid="evaluation-discard"]')
+    expect(discard).to_have_text(evaluation_view.DISCARD_EVALUATION_LABEL)
+    expect(page.locator('[data-testid="evaluation-toolbar"] button')).to_have_count(1)
+    discard.click()
+
+    # The clone has no runs, so this is the dialog's "nothing to export" state.
+    expect(page.locator('[data-testid="discard-dialog"]')).to_have_count(1, timeout=TIMEOUT_MS)
+    expect(page.locator('[data-testid="discard-loss"]')).to_have_text("nothing recorded yet")
+    expect(page.locator('[data-testid="discard-export"]')).to_have_count(0)
+    expect(page.locator('[data-testid="discard-blocked"]')).to_have_count(0)
+    confirm = page.locator('[data-testid="discard-confirm"]')
+    expect(confirm).to_be_enabled()
+    confirm.click()
+
+    # The row is gone and the launched one it was cloned from is not — read
+    # back through the API, because which evaluation the view falls back to on
+    # a shared server is not this journey's fact.
+    _until_discarded(page, server_url, corpus_id=corpus_id, besides=evaluation_id)
+    survivor = _get(page, server_url, f"/api/v1/evaluations/{evaluation_id}")
+    surviving_draft = cast("dict[str, object]", survivor["draft"])
+    assert surviving_draft["launched_at"] is not None, survivor
+    surviving_runs = _get(page, server_url, f"/api/v1/runs?evaluation_id={evaluation_id}")
+    assert len(cast("list[object]", surviving_runs["items"])) == 2, surviving_runs
+
+
+def _until_discarded(page: Page, server_url: str, *, corpus_id: str, besides: str) -> None:
+    """Poll `GET /api/v1/evaluations` until this journey's clone is gone.
+
+    Polled rather than read once: the confirm handler closes the dialog and
+    *then* awaits the service call, so the click returns before the row does.
+    """
+    deadline = time.monotonic() + TIMEOUT_MS / 1000
+    while time.monotonic() < deadline:
+        response = page.request.get(f"{server_url}/api/v1/evaluations")
+        assert response.ok, f"GET /api/v1/evaluations: {response.status} {response.text()}"
+        rows = cast("list[dict[str, object]]", response.json())
+        remaining = [
+            row
+            for row in rows
+            if row["corpus_id"] == corpus_id and str(row["evaluation_id"]) != besides
+        ]
+        if not remaining:
+            return
+        page.wait_for_timeout(100)
+    raise AssertionError("the clone was never discarded")
 
 
 def _clone_of(page: Page, server_url: str, *, corpus_id: str, besides: str) -> dict[str, object]:
