@@ -315,6 +315,7 @@ Every setting is an environment variable prefixed `RA2_`, readable from a
 | `RA2_HOST` / `RA2_PORT` | `127.0.0.1` / `8080` | Where the app listens. Loopback by default. |
 | `RA2_LLM_BASE_URL` | `http://127.0.0.1:11434/v1` | The LLM endpoint. **Must be loopback.** |
 | `RA2_LLM_TIMEOUT_S` | `600` | Per-call timeout. Measured, not chosen: a 9.7 B thinking model answered one record in 136 s on the reporting host, and almost all of it was the response's `reasoning` field. |
+| `RA2_LLM_REASONING_EFFORT` | `none` | How hard the model is asked to think — `none`, `low`, `medium` or `high`, refused at startup if Ollama cannot map it. **Measured, not preferred:** the same record cost 190 s at the model's own default and 6 s at `none`, both answering correctly, and the default could not finish a 12-record run inside the timeout. Pinned on every run's provenance, so setting `high` and launching a second evaluation gives a comparison that is still legible afterwards. |
 | `RA2_LLM_MAX_RETRIES` | `2` | Retries per call — bounded, counted, and shown in the progress card. |
 | `RA2_RUN_CONCURRENCY` | `1` | Models run one at a time. Raising it is not implemented. |
 | `RA2_GPU_VRAM_GB` / `RA2_GPU_NAME` | unset | Declare the GPU instead of probing it. |

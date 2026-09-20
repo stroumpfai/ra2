@@ -120,6 +120,7 @@ def create_app(
         base_url=settings.llm_base_url,
         timeout_s=settings.llm_timeout_s,
         max_retries=settings.llm_max_retries,
+        reasoning_effort=settings.llm_reasoning_effort,
     )
     model_catalog = model_catalog or OllamaModelCatalog(
         base_url=settings.llm_base_url, timeout_s=settings.llm_timeout_s

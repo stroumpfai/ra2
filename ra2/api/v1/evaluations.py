@@ -166,6 +166,7 @@ def _provenance_response(view: ProvenanceView | None) -> ProvenanceResponse | No
         host_platform=view.host_platform,
         gpu_name=view.gpu_name,
         llm_endpoint=view.llm_endpoint,
+        llm_reasoning_effort=view.llm_reasoning_effort,
     )
 
 

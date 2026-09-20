@@ -9,12 +9,18 @@ reaches for a global settings object** (sw-design.md §3).
 """
 
 from pathlib import Path
-from typing import Self
+from typing import Final, Self
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-__all__ = ["Settings"]
+__all__ = ["REASONING_EFFORTS", "Settings"]
+
+#: The `reasoning_effort` values Ollama maps onto its own `think` levels.
+#: Deliberately narrower than the OpenAI SDK's literal, which also carries
+#: `minimal`, `xhigh` and `max` — this endpoint is the only one N1 allows the
+#: app to talk to, so its vocabulary is the real one.
+REASONING_EFFORTS: Final[frozenset[str]] = frozenset({"none", "low", "medium", "high"})
 
 
 class Settings(BaseSettings):
@@ -72,6 +78,38 @@ class Settings(BaseSettings):
     #: and rendered in the progress card's metrics line.
     llm_max_retries: int = 2
 
+    #: How hard the model is asked to think before it answers. Pinned on the
+    #: `run` row beside the model digest, the temperature and the seed, so two
+    #: runs cannot ask different questions and look identical in provenance.
+    #:
+    #: **`none` is the default because the measured cost is not marginal.** On
+    #: the reporting host, one record with two features and one sentence of
+    #: narrative, against `qwen3.5:latest` (9.7 B Q4_K_M, CPU-bound), through
+    #: the adapter's own call shape:
+    #:
+    #: | `reasoning_effort` | elapsed | completion tokens | reasoning |
+    #: |---|---|---|---|
+    #: | unset (the model's own default) | **190 s** | 977 | 3 259 chars |
+    #: | `none` | **6 s** | 38 | none |
+    #:
+    #: Both answered correctly. The first never finished a 12-record run
+    #: inside `llm_timeout_s`; the second finishes one in about a minute. A
+    #: default that cannot complete the product's own development seed is not
+    #: a default.
+    #:
+    #: **It is a setting and not a constant** because whether a thinking model
+    #: extracts these features *better* is exactly the question RA2 exists to
+    #: answer, and foreclosing it in the adapter would be the tool deciding
+    #: its own subject. Set `high` and launch a second evaluation to compare —
+    #: the value rides on both runs' provenance, so the comparison is legible
+    #: afterwards.
+    #:
+    #: Restricted to what Ollama maps (`none`, `low`, `medium`, `high`). The
+    #: OpenAI SDK's literal is wider; sending it `xhigh` would fail per record,
+    #: at the endpoint, after the run had started. Refused at construction
+    #: instead — `OllamaLLMClient`'s loopback check, same reasoning.
+    llm_reasoning_effort: str = "none"
+
     #: sw-design.md §15.4 — runs execute serially, one model at a time: the
     #: GPU is the bottleneck and two models sharing 24 GB is slower than two
     #: in sequence. Phase 3 never raises this; it exists so lifting the limit
@@ -113,6 +151,23 @@ class Settings(BaseSettings):
     #: deliberately no level at which narrative reaches a log record, which is
     #: why this is a level and not a `log_prompts` flag.
     log_level: str = "INFO"
+
+    @model_validator(mode="after")
+    def _check_reasoning_effort(self) -> Self:
+        """Refuse an effort Ollama cannot map, **at construction**.
+
+        The alternative is a value the endpoint rejects on every record, one
+        `RA2_LLM_TIMEOUT_S` apart, after the analyst has launched and walked
+        away. Same reasoning as the loopback refusal in `OllamaLLMClient`: a
+        misconfiguration that can be caught before the first call should be.
+        """
+        if self.llm_reasoning_effort not in REASONING_EFFORTS:
+            raise ValueError(
+                f"RA2_LLM_REASONING_EFFORT must be one of "
+                f"{', '.join(sorted(REASONING_EFFORTS))}; got "
+                f"{self.llm_reasoning_effort!r}"
+            )
+        return self
 
     @model_validator(mode="after")
     def _default_db_path(self) -> Self:

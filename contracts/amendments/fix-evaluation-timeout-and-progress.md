@@ -813,3 +813,134 @@ would present as a resume bug. It also means `test_resume.py` now covers the
 **wiring** end to end — with `lifespan=` removed from `create_app`,
 `test_a_dead_process_leaves_the_run_interrupted_not_running` fails with
 `RUNNING is not INTERRUPTED`, which is checked rather than asserted.
+
+## 16. `RA2_LLM_REASONING_EFFORT` — the measurement the plan never took
+
+Items 12–15 made the failure legible. This is what the legible failure turned
+out to say.
+
+A real 12-record run on the development seed, against the reported host's own
+`qwen3.5:latest`, with every earlier item in place. It behaved perfectly and
+still failed:
+
+```
+07:54:04 run …fc02: 12 pending, 0 already done, model=qwen3.5:latest, timeout=600s
+07:54:04 run …fc02: record 1/12 (…8b2) → qwen3.5:latest
+08:04:05 run …fc02: record 1/12 (…8b2) failed at the endpoint (timed_out) after 1 attempt(s)
+08:04:05 run …fc02: interrupted — 12 record(s) not extracted; 1 record failed … timed_out
+```
+
+Correct diagnosis (`timed_out`, not "unreachable"), no retry, stopped on the
+first failure, ten minutes instead of twenty, resumable, and the log said all
+of it as it happened. **Every fix worked and the run still could not complete**,
+which is what made the next question askable at all.
+
+### The measurement
+
+One record, two features, one sentence of narrative, `qwen3.5:latest`
+(9.7 B Q4_K_M, resident, `size_vram: 0` — CPU-bound), same prompt and same
+schema each time:
+
+| Call | Elapsed | Completion tokens | `reasoning` |
+|---|---|---|---|
+| Ollama native `/api/generate` with `format` | **9.4 s** | 33 | 88 chars |
+| OpenAI-compatible `/v1/chat/completions` with `response_format` — **what the adapter sends** | **190 s** | 977 | 3 259 chars |
+| the same, `+ reasoning_effort: "none"` | **6.1 s** | 38 | none |
+
+All three answered correctly.
+
+**`plan-fix-evaluation-runs.md` §1 measured the wrong thing.** Its table — 136 s
+cold, 126 s warm — is what made `llm_timeout_s` 120 → 600 look like the fix, and
+it attributed the cost to the model: *"almost all of it is the model's
+`reasoning` field"*. That observation was right and the conclusion did not
+follow. The reasoning is not a property of the model; it is a property of **how
+the model is asked**, and the adapter was not asking. Raising the bound treated
+a symptom, and the symptom then outgrew the new bound too.
+
+### What was added
+
+| File | Change | Contract |
+|---|---|---|
+| `ra2/infra/config.py` | `+ llm_reasoning_effort: str = "none"`, `+ REASONING_EFFORTS`, and a validator that refuses anything else **at construction** | **amendment** |
+| `ra2/infra/ollama_client.py` | constructor argument, sent on every `chat.completions.create` | — |
+| `ra2/persistence/models.py` | `+ run.llm_reasoning_effort`, `String(16)`, nullable | **amendment** |
+| `…/versions/…090e7fdc12c5_…py` | the column | **the one phase-5 revision** |
+| `ra2/services/run_service.py` | `_start` pins it, beside `llm_endpoint` | — |
+| `ra2/services/readmodels.py` | `+ RunProvenanceView.llm_reasoning_effort` | **amendment** |
+| `ra2/api/schemas.py`, `api/v1/evaluations.py` | `+ ProvenanceResponse.llm_reasoning_effort` | **amendment**; snapshot additive |
+| `ra2/ui/views/evaluation_view.py` | the provenance line, beside temperature and seed | — |
+
+**A setting and not a constant.** Hardcoding `none` in the adapter was the
+cheaper option and was refused: whether a thinking model extracts these
+features *better* is the question this product exists to answer, and deciding
+it in the adapter would be the instrument deciding its own subject. `high` and a
+second evaluation is now a legible comparison.
+
+**Pinned, and that is what costs the migration.** A setting that lived only in
+the environment would let two runs ask different questions and record identical
+provenance — which mvp-spec.md §19.8 exists to prevent. The value sits beside
+the model digest, the temperature and the seed because it decides the answer as
+much as they do. Nullable, no backfill: rows written before the column sent no
+`reasoning_effort` at all, so the model's own default applied and nothing here
+knows what it was. `NULL` reads "not recorded", `run.gpu_name`'s convention.
+
+**Why `none` is the default.** A default that cannot complete the product's own
+12-record development seed inside `RA2_LLM_TIMEOUT_S` is not a default.
+
+**Why narrower than the SDK.** `openai`'s `ReasoningEffort` also carries
+`minimal`, `xhigh` and `max`; Ollama maps none of them, and it is the only
+endpoint N1 permits. An unmappable value would be rejected per record, one
+600 s bound apart, after the analyst had launched and walked away — so
+`Settings` refuses it at construction, exactly as `OllamaLLMClient` refuses a
+non-loopback URL. The adapter takes a `str` and narrows to the SDK literal
+**inside itself**, because that literal is `openai`'s vocabulary and Do-NOT #1
+puts that vocabulary in one file.
+
+### Verified against the real endpoint
+
+Same seed, same host, same model, `reasoning_effort=none`:
+
+```
+09:34:25 launch                          09:37:05 run …c580: done
+done 12/12 · parse_failures 0 · retries 0 · median latency 10 921 ms · elapsed 159 997 ms
+provenance: temperature 0.0 · seed 42 · llm_reasoning_effort none
+```
+
+Two minutes forty, twelve records, every one parsed, nothing retried — on the
+host where one record had exhausted a 600 s bound an hour earlier.
+
+## 17. Two tooling defects `just revision` was hiding
+
+Both found by needing item 16's migration, and both meant the documented way to
+create one **could not run on Windows** — the platform this project is
+developed on and one of the two CI gates.
+
+| | |
+|---|---|
+| `alembic.ini` sets `timezone = UTC`, which alembic resolves through `zoneinfo`; Windows ships no tz database, so `just revision` died on `Can't locate timezone: UTC` | **fixed**: `tzdata` added to the `dev` dependency group in `pyproject.toml` (**amendment** — it pins every dependency). A dev dependency, not a runtime one: nothing in `ra2/` resolves a named zone, and only revision *authoring* needs it |
+| the `ruff_format` post-write hook fails with `Could not find entrypoint console_scripts.ruff` | **not fixed**, recorded. The revision file is still written; only the formatting hook fails, so the cost is that the author formats it themselves. Named here so the next person does not re-diagnose it |
+
+`SD33`'s finding applies to both — *"a gate that is always red is a gate nobody
+reads"*. A recipe that cannot run on the platform it is run from is the same
+shape, and it had been that way since `alembic.ini` was written.
+
+### And one regression item 15 introduced, found the same way
+
+`just dev-agent` mints a **fresh, unmigrated** temp data dir. Once the app began
+reading the `run` table at startup, it stopped booting at all:
+
+```
+STARTUP FAILED: OperationalError (sqlite3.OperationalError) no such table: run
+```
+
+Before item 15 nothing touched the database during `create_app`, so an
+unmigrated instance started and failed per request instead. The gap was always
+there — `session.py` says "the schema comes from `alembic upgrade head`,
+always", and this is the one launcher that starts against a directory that never
+existed — but nothing made it visible.
+
+Fixed in `scripts/dev_agent.py`, which now migrates before serving, rather than
+by making `reclaim_orphans` tolerate a missing table: a launcher that produces
+an unusable instance is the defect, and tolerating it would hide the next
+misconfiguration too. "Empty **but migrated**" is what the README promises
+there.

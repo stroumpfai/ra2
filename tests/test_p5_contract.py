@@ -110,19 +110,70 @@ def test_claude_md_names_all_five_migration_authors():
     assert "W1 for phase 5" in text
 
 
+#: Revisions added **after** phase 5 closed, by name, for the reason
+#: `POST_PHASE_5_ERRORS` is named: subtracting a listed set rather than bumping
+#: a literal keeps the phase's own claim assertable, and makes every later
+#: addition a visible entry somebody had to write rather than a number somebody
+#: edited to get green.
+POST_PHASE_5_REVISIONS = {
+    # `fix/evaluation-timeout-and-progress` — `run.llm_reasoning_effort`. The
+    # effort decides the answer as much as the temperature and the seed do
+    # (190 s against 6 s on the same record, both correct), so two runs that
+    # asked different questions must not record identical provenance
+    # (mvp-spec.md §19.8). Additive, nullable, no backfill.
+    "20260920_0729_090e7fdc12c5_pin_the_reasoning_effort_on_the_run.py",
+}
+
+
 def test_the_migration_chain_is_unchanged():
     """C7: `mismatch` exists with its unique key and its `(run_id, feature_id)`
     index since phase 4, so this phase expects **no revision**.
 
-    If W1 finds the filtered list wants one more index, this test is the thing
-    that has to be updated deliberately — which is the point. A new head that
-    nobody noticed is how parallel migration authorship goes wrong (CLAUDE.md).
+    Still true, and still asserted, with the post-phase slices' own revisions
+    subtracted by name — see `POST_PHASE_5_REVISIONS`. The claim was always
+    about *the phase*; writing it as a count of files made it a lock on the
+    directory instead, which is `fix-c2`'s lesson in a second place.
+
+    What it is really guarding is unchanged and is the reason it stays: **one
+    head**. A revision nobody noticed is how parallel migration authorship goes
+    wrong (CLAUDE.md), so the chain is walked below rather than counted.
     """
-    versions = sorted(
-        p.name for p in (REPO_ROOT / "ra2/persistence/migrations/versions").glob("*.py")
-    )
-    assert len(versions) == 5, f"phase 5 adds no revision; found {versions}"
-    assert any("phase_4_scoring_and_results" in name for name in versions)
+    versions = {p.name for p in (REPO_ROOT / "ra2/persistence/migrations/versions").glob("*.py")}
+    unknown = versions - POST_PHASE_5_REVISIONS
+    assert len(unknown) == 5, f"phase 5 adds no revision; found {sorted(unknown)}"
+    assert any("phase_4_scoring_and_results" in name for name in unknown)
+
+
+def test_the_migrations_are_a_single_chain_with_one_head():
+    """The invariant the count was standing in for.
+
+    `down_revision` is read out of each file rather than asked of alembic, so
+    this needs no database and fails on the diff rather than on a migrate. Two
+    revisions naming the same parent is a fork — two heads — which is what
+    CLAUDE.md's one-author-per-phase rule exists to prevent, and the thing a
+    file count would never have caught: adding two revisions keeps any count
+    consistent while splitting the chain.
+    """
+    import re
+
+    directory = REPO_ROOT / "ra2/persistence/migrations/versions"
+    revisions: dict[str, str | None] = {}
+    for path in sorted(directory.glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        revision = re.search(r'^revision: str = "([^"]+)"', text, re.M)
+        down = re.search(r"^down_revision: str \| None = (?:\"([^\"]+)\"|None)", text, re.M)
+        assert revision is not None, f"{path.name} declares no revision id"
+        assert down is not None, f"{path.name} declares no down_revision"
+        revisions[revision.group(1)] = down.group(1)
+
+    parents = [parent for parent in revisions.values() if parent is not None]
+    assert len(parents) == len(set(parents)), f"two revisions share a parent: {parents}"
+
+    roots = [rev for rev, parent in revisions.items() if parent is None]
+    assert len(roots) == 1, f"expected one root, found {roots}"
+
+    heads = set(revisions) - set(parents)
+    assert len(heads) == 1, f"expected one head, found {sorted(heads)}"
 
 
 # ---------------------------------------------------------------------------

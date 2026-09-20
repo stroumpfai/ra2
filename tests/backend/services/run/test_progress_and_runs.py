@@ -146,6 +146,12 @@ async def test_provenance_is_written_at_run_start_not_at_completion(
     assert run.host_platform != ""
     assert run.gpu_name == "RTX 4090"
     assert run.llm_endpoint == backend_settings.llm_base_url
+    # Pinned beside the model digest, temperature and seed, because it decides
+    # the answer as much as they do: the same record cost 190 s at the model's
+    # own default and 6 s at `none` on the reporting host, and whether the
+    # thinking one is *better* is what this product measures. Two runs that
+    # asked different questions must not look identical afterwards.
+    assert run.llm_reasoning_effort == backend_settings.llm_reasoning_effort
     assert run.started_at is not None
     assert RunStatus(run.status) is RunStatus.INTERRUPTED
     # Interrupted is not terminal: a human moves it out of that state.

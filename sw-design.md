@@ -448,6 +448,7 @@ runs, which additionally persist to the `run` table and must be restart-safe.
 | `RA2_DEV_RECORD_MAX` / `RA2_EVAL_RECORD_MIN` | `50` / `200` | §9 |
 | `RA2_MIN_CELL_COUNT` | `20` | D3, unused until scoring |
 | `RA2_LLM_TIMEOUT_S` / `RA2_LLM_MAX_RETRIES` | `600` / `2` | §15.5. 600 is measured, not chosen — a thinking model answered one record in 136 s on the reporting host |
+| `RA2_LLM_REASONING_EFFORT` | `none` | §15.5. How hard the model is asked to think, pinned on the `run` row. `none` is measured, not preferred: 190 s → 6 s on the same record |
 | `RA2_LOG_LEVEL` | `INFO` | §5.1 of `data-handling.md` — the level of the `ra2` stderr logger. A level, **not** a switch on what may be logged: no level puts narrative in a log record |
 
 - **Every file operation specifies `encoding=`** (N4). Enforced by ruff `PLW1514`
@@ -1021,9 +1022,9 @@ exactly as Import does. No streaming, no websocket push.
   back on the `Extraction` and rendered in the progress card's metrics line —
   never a retry-until-quiet loop (`mvp-spec.md` §10.4).
 - **Provenance written at run start**, not at completion: model + digest,
-  template version + fingerprint, temperature, seed, config id, corpus id +
-  version, host platform, GPU name, endpoint. A run that dies mid-corpus is
-  still a reproducible run (`mvp-spec.md` §19.8).
+  template version + fingerprint, temperature, seed, **reasoning effort**,
+  config id, corpus id + version, host platform, GPU name, endpoint. A run
+  that dies mid-corpus is still a reproducible run (`mvp-spec.md` §19.8).
 - **Interrupted, then resumed explicitly.** A process death leaves the run
   `interrupted` and the view offers **Resume**. N6 asks for restart-*safe* and
   resumable, which this is; it does not ask for automatic, and a run that

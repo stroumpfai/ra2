@@ -39,6 +39,27 @@ def main() -> int:
     print(f"RA2 (agent instance): http://127.0.0.1:{port}", flush=True)
     print(f"RA2_DATA_DIR: {data_dir}", flush=True)
 
+    # **Migrate first.** `session.py` states the rule — "the schema comes from
+    # `alembic upgrade head`, always" — and this is the one launcher that
+    # starts against a directory that has never existed before, so it is the
+    # one that has to apply it. `just dev` and `just dev-agent` are not
+    # symmetrical here: `dev` points at a `./var` a developer migrated long
+    # ago, and nothing made the difference visible until the app began reading
+    # the `run` table at startup (`RunService.reclaim_orphans`) and an
+    # unmigrated instance stopped booting rather than merely 500-ing on the
+    # first page.
+    #
+    # Empty **but migrated** is the state the README promises here: "it mints
+    # a fresh temporary data directory on every run, by design".
+    migrated = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        env=env,
+        check=False,
+    )
+    if migrated.returncode != 0:
+        print("migration failed; not starting the server", flush=True)
+        return migrated.returncode
+
     result = subprocess.run(
         [
             sys.executable,

@@ -508,6 +508,46 @@ async def test_extract_sends_the_prompt_and_the_schema_for_constrained_decoding(
     assert sent["response_format"]["json_schema"]["schema"] == Output.model_json_schema()
 
 
+async def test_extract_sends_the_reasoning_effort_on_every_call(stub: StubOllama) -> None:
+    """The parameter that decides whether a run finishes at all.
+
+    Measured on the reporting host against `qwen3.5:latest` (9.7 B Q4_K_M,
+    CPU-bound), one record with two features and one sentence of narrative,
+    through this exact call shape: **190 s** with no `reasoning_effort` and
+    977 completion tokens, of which 3 259 characters were the response's
+    `reasoning` field — against **6 s** and 38 tokens at `none`. Both answered
+    correctly. The first could not finish a 12-record run inside
+    `RA2_LLM_TIMEOUT_S`; that is the defect
+    `plan-fix-evaluation-runs.md` §1 attributed to the model rather than to
+    the call.
+
+    Asserted on **both** calls, because omitting it once would make a run's
+    pinned `llm_reasoning_effort` a claim about the model's own default rather
+    than about what was asked.
+    """
+    client = OllamaLLMClient(
+        base_url=LOOPBACK_URL, reasoning_effort="high", http_client=stub.http_client()
+    )
+
+    await client.extract("a", Output, "m", temperature=0.0, seed=1)
+    await client.extract("b", Output, "m", temperature=0.0, seed=1)
+
+    assert [sent["reasoning_effort"] for sent in stub.chat_requests] == ["high", "high"]
+
+
+async def test_the_default_effort_is_none(stub: StubOllama) -> None:
+    """`Settings.llm_reasoning_effort` defaults to `none` and so does the
+    adapter, so a client built without the setting asks the same question the
+    app does. A default that differed from the configured one would make the
+    tests a poor witness for production."""
+    client = OllamaLLMClient(base_url=LOOPBACK_URL, http_client=stub.http_client())
+
+    await client.extract("a", Output, "m", temperature=0.0, seed=1)
+
+    (sent,) = stub.chat_requests
+    assert sent["reasoning_effort"] == "none"
+
+
 async def test_extract_asks_the_same_question_twice(stub: StubOllama) -> None:
     """Key order is stable across calls — two runs must ask the same question
     (sw-design.md §15.3)."""

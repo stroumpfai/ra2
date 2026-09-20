@@ -3265,6 +3265,17 @@
             "title": "Llm Endpoint",
             "type": "string"
           },
+          "llm_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Reasoning Effort"
+          },
           "model_digest": {
             "title": "Model Digest",
             "type": "string"

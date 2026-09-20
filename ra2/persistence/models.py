@@ -1037,6 +1037,16 @@ class Run(Base):
     #: "unknown", not an error (§15.6).
     gpu_name: Mapped[str | None] = mapped_column(String(200), default=None)
     llm_endpoint: Mapped[str] = mapped_column(String(400), default="")
+    #: `RA2_LLM_REASONING_EFFORT` as this run asked it — beside the model
+    #: digest, the temperature and the seed, because it decides the answer as
+    #: much as they do. On the reporting host the same record cost 190 s at
+    #: the model's own default and 6 s at `none`, and both answered correctly;
+    #: whether the thinking one is *better* is what RA2 exists to measure, so
+    #: two runs that differ in it must not look identical afterwards.
+    #:
+    #: `None` on rows written before the column existed — an honest "this run
+    #: did not record it", never a guessed default (`gpu_name`'s reasoning).
+    llm_reasoning_effort: Mapped[str | None] = mapped_column(String(16), default=None)
 
     evaluation: Mapped[Evaluation] = relationship(back_populates="runs")
     extractions: Mapped[list[Extraction]] = relationship(

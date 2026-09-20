@@ -695,6 +695,10 @@ class ProvenanceView:
     host_platform: str
     gpu_name: str | None
     llm_endpoint: str
+    #: How hard the model was asked to think, as this run asked it. `None` on
+    #: a run written before the field existed — "not recorded", never a
+    #: guessed default (`gpu_name`'s convention).
+    llm_reasoning_effort: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

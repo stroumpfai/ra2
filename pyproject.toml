@@ -42,6 +42,14 @@ dev = [
     "mypy>=1.11",
     "import-linter>=2.1",
     "pre-commit>=3.8",
+    # `alembic.ini` sets `timezone = UTC`, and alembic resolves that through
+    # `zoneinfo`, which on Windows has no system tz database to read. Without
+    # this, `just revision` fails with "Can't locate timezone: UTC" — so the
+    # one documented way to create a migration did not run on the platform
+    # this project is developed on, and CI gates. A dev dependency, not a
+    # runtime one: nothing in `ra2/` resolves a named zone (`datetime.UTC`
+    # everywhere), and only revision *authoring* needs it.
+    "tzdata>=2024.1",
 ]
 
 [build-system]

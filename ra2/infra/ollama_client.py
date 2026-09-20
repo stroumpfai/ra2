@@ -350,6 +350,7 @@ class OllamaLLMClient:
         base_url: str,
         timeout_s: int = 120,
         max_retries: int = 2,
+        reasoning_effort: str = "none",
         http_client: httpx2.AsyncClient | None = None,
     ) -> None:
         # First statement in the constructor, before the SDK client exists:
@@ -358,6 +359,20 @@ class OllamaLLMClient:
         self._base_url = base_url
         self._timeout_s = timeout_s
         self._max_retries = max(0, max_retries)
+        # Construction, like the timeout and for its reason: it is a property
+        # of how this endpoint is being asked, not of one record, and
+        # `LLMClient.extract` stays unchanged (it is frozen). Pinned on the
+        # `run` row by `run_service._start`, so a run records the question it
+        # asked and not merely the model it asked.
+        #
+        # Taken as `str` and narrowed **here**, not at the call site: the SDK's
+        # literal is `openai`'s vocabulary, and Do-NOT #1 puts that vocabulary
+        # inside this file. `Settings` has already refused anything Ollama
+        # cannot map (`REASONING_EFFORTS`), so this narrows a validated value
+        # rather than asserting a new one.
+        self._reasoning_effort = cast(
+            "openai.types.shared_params.ReasoningEffort", reasoning_effort
+        )
         self._client = _build_client(
             base_url=base_url, timeout_s=timeout_s, http_client=http_client
         )
@@ -416,6 +431,11 @@ class OllamaLLMClient:
                     response_format=response_format,
                     temperature=temperature,
                     seed=seed,
+                    # Sent on every call, including when it is the model's own
+                    # default: a run's provenance says which effort it used, and
+                    # a parameter that is sometimes omitted makes that a claim
+                    # about the model's build rather than about this call.
+                    reasoning_effort=self._reasoning_effort,
                 )
             except (openai.APIConnectionError, openai.APIStatusError) as exc:
                 if retries >= self._max_retries or not _is_retryable(exc):

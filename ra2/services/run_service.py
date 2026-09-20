@@ -723,6 +723,8 @@ class RunService:
                 run.host_platform = platform.platform()
             if not run.llm_endpoint:
                 run.llm_endpoint = self._settings.llm_base_url
+            if run.llm_reasoning_effort is None:
+                run.llm_reasoning_effort = self._settings.llm_reasoning_effort
             if run.gpu_name is None:
                 gpu = self._gpu_probe.describe()
                 # `None` stays `None`: no NVIDIA GPU is an honest answer, not

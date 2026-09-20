@@ -1819,6 +1819,11 @@ def _provenance_line(provenance: ProvenanceView) -> str:
             f"host {provenance.host_platform}",
             f"gpu {provenance.gpu_name or UNKNOWN_VALUE}",
             f"endpoint {_endpoint_text(provenance.llm_endpoint)}",
+            # Beside temperature and seed, which is where it belongs: it
+            # decides the answer as much as they do, and a run that asked
+            # the model to think and one that did not must not read the
+            # same here.
+            f"reasoning {provenance.llm_reasoning_effort or UNKNOWN_VALUE}",
         )
     )
 

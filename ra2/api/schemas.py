@@ -822,6 +822,9 @@ class ProvenanceResponse(_Schema):
     host_platform: str
     gpu_name: str | None = None
     llm_endpoint: str
+    #: `None` on a run written before the field existed — "not
+    #: recorded", never a guessed default.
+    llm_reasoning_effort: str | None = None
 
 
 class EvaluationResponse(_Schema):

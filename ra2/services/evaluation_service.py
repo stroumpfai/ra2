@@ -1006,6 +1006,7 @@ class EvaluationService:
             host_platform=run.host_platform,
             gpu_name=run.gpu_name,
             llm_endpoint=run.llm_endpoint,
+            llm_reasoning_effort=run.llm_reasoning_effort,
         )
 
 
