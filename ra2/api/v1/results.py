@@ -249,10 +249,21 @@ async def rescore(run_id: str, service: ScoringServiceDep) -> TaskAcceptedRespon
     409 for a `failed` or `interrupted` run: a partial corpus produces
     real-looking numbers over an unstated denominator.
     """
+    # **`202 Accepted` now means it.** This awaited the whole pass and then
+    # answered with `task_id=run_id` — a status code describing work that had
+    # already finished, and an id that `GET /api/v1/tasks/{id}` answers 404
+    # for. `submit_rescore` raises both refusals before scheduling anything,
+    # so the status codes are unchanged; the id is now one the caller can
+    # poll, which is what the response model has always claimed it was.
+    #
+    # The docstring above is deliberately untouched: it *is* the endpoint's
+    # public description (`tests/api/openapi_snapshot.json`), and nothing
+    # about the wire contract changed — only whether the app keeps its side
+    # of it. History belongs here, not in the published schema.
     try:
-        await service.rescore_run(RunId(run_id))
+        task_id = await service.submit_rescore(RunId(run_id))
     except NotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
     except RunNotScoreableError as error:
         raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
-    return TaskAcceptedResponse(task_id=run_id)
+    return TaskAcceptedResponse(task_id=str(task_id))

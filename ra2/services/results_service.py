@@ -26,6 +26,7 @@ from collections.abc import Mapping, Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ra2.domain.extraction import RunStatus
 from ra2.domain.feature import Kind
 from ra2.domain.ids import EvaluationId, FeatureId, RecordId, RunId
 from ra2.domain.scoring import ALL_LANGUAGES, ScoreMetric
@@ -103,6 +104,12 @@ class ResultsService:
                         scored_features=status.scored_features,
                         labelled_features=status.labelled_features,
                         running=status.running,
+                        # Read off the row this loop already holds. The
+                        # `Scorer` seam answers "how far did the scoring get";
+                        # "is the run over" is the run's own column, and
+                        # widening the protocol to carry it would make
+                        # `ScoringStatus` a second place to ask.
+                        run_status=RunStatus(run.status),
                     )
                 )
             return tuple(statuses)

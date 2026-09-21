@@ -115,6 +115,7 @@ from ra2.services.readmodels import (
     PromptTemplateView,
     ProvenanceView,
     RunExportView,
+    RunProgressView,
     RunView,
     SortDir,
 )
@@ -172,11 +173,14 @@ __all__ = [
     "POLL_FAST_TICKS",
     "POLL_SETTLED_S",
     "PROGRESS_CAPTION",
+    "PROGRESS_TITLE_SETTLED",
     "PROMPT_NOTE",
     "PROVENANCE_EXPLAINER",
     "PROVENANCE_TITLE",
+    "RESULTS_LINK_LABEL",
     "RUNS_TABLE",
     "RUNS_TITLE",
+    "SCORED_MARKER",
     "SETUP_LIST_EXTRA",
     "SIZE_NOTE",
     "STATUS_COLUMN_PX",
@@ -326,7 +330,20 @@ SIZE_NOTE: Final = (
     "Below the evaluation minimum a run is marked dev and every view carries "
     "“smoke test, not a result”."
 )
+#: The design's own header for this column (`design/prompt-evaluation/README.md`
+#: §2), and it is **kept verbatim for the state the design drew** — a run in
+#: flight. It was rendered in every other state too, which is how a column of
+#: cards all reading `done` sat under the words "In progress" and was read,
+#: reasonably, as a screen that had not moved. The design mock shows this
+#: column mid-run and says nothing about the rest, so the settled wording
+#: below is this view's own answer rather than a departure from the design.
 PROGRESS_TITLE: Final = "In progress"
+PROGRESS_TITLE_SETTLED: Final = "Runs"
+#: What a finished, scored card offers: the one link the analyst has been
+#: waiting for. Without it the Evaluation screen never says the boards exist,
+#: and the only route to them is a runs-table link two cards further down.
+RESULTS_LINK_LABEL: Final = "See results"
+SCORED_MARKER: Final = "scored"
 PROGRESS_CAPTION: Final = (
     "in-process asyncio worker · restart-safe · resumes from last committed extraction"
 )
@@ -439,6 +456,10 @@ class _EvaluationPage:
         self._templates: tuple[PromptTemplateView, ...] = ()
         self._runs: Page[RunView] | None = None
         self._all_runs: tuple[RunView, ...] = ()
+        #: Which runs of this evaluation have scores, so a finished card can
+        #: carry the link the analyst is waiting for. Read from
+        #: `ResultsService.scoring_status`, never derived here.
+        self._scored_runs: frozenset[RunId] = frozenset()
         self._connection: ConnectionView | None = None
         #: The endpoint's catalogue. Held separately from `_view`
         #: because it does not depend on one: which models the endpoint
@@ -457,11 +478,13 @@ class _EvaluationPage:
     # --- lifecycle -----------------------------------------------------------
 
     async def build(self) -> None:
+        data_dir_view = self._services.lifecycle.data_dir()
         with shell(
             title=_ITEM.title,
             description=_ITEM.description,
             active=_ITEM.key,
-            data_dir=self._services.lifecycle.data_dir().data_dir,
+            data_dir=data_dir_view.data_dir,
+            database_replaced=data_dir_view.database_replaced,
             content_padding=CONTENT_PADDING,
             content_gap=CONTENT_GAP,
         ):
@@ -540,6 +563,7 @@ class _EvaluationPage:
                         evaluation_id, page=1, page_size=RUNS_SUMMARY_CAP
                     )
                 ).items
+                self._scored_runs = await self._read_scored(evaluation_id)
             self._render()
 
     async def refresh_progress(self) -> None:
@@ -585,9 +609,22 @@ class _EvaluationPage:
         self._all_runs = (
             await self._services.run.list_runs(evaluation_id, page=1, page_size=RUNS_SUMMARY_CAP)
         ).items
+        self._scored_runs = await self._read_scored(evaluation_id)
         self._progress_slot.clear()
         with self._progress_slot:
             self._render_progress()
+
+    async def _read_scored(self, evaluation_id: EvaluationId) -> frozenset[RunId]:
+        """Which of this evaluation's runs have a board to link to.
+
+        A read, not a derivation: `ScoringStatusView.is_scored` is the same
+        property the Results view branches on, so the link on the card and
+        the page it opens cannot disagree about whether there is anything
+        there. Counted over committed `score` rows, like everything else
+        about scoring (§16.1, F5).
+        """
+        statuses = await self._services.results.scoring_status(evaluation_id)
+        return frozenset(status.run_id for status in statuses if status.is_scored)
 
     async def _current_evaluation(self) -> EvaluationView | None:
         """The evaluation this tab is looking at.
@@ -1027,7 +1064,10 @@ class _EvaluationPage:
             .props('data-testid="progress-header"')
             .style("display:flex;align-items:baseline;gap:14px;min-width:0;flex:none;")
         ):
-            ui.label(PROGRESS_TITLE).classes("lbl nowrap")
+            settled = "true" if self._settled else "false"
+            ui.label(PROGRESS_TITLE_SETTLED if self._settled else PROGRESS_TITLE).classes(
+                "lbl nowrap"
+            ).props(f'data-testid="progress-title" data-settled="{settled}"').mark("progress-title")
             ui.label(PROGRESS_CAPTION).classes("mono ink3").props(
                 'data-testid="progress-caption"'
             ).mark("progress-caption").style(
@@ -1047,6 +1087,31 @@ class _EvaluationPage:
                 return
             for progress in view.progress:
                 progress_card(progress=progress)
+                self._results_link(progress)
+
+    def _results_link(self, progress: RunProgressView) -> None:
+        """ "done · scored — See results", under the card it belongs to.
+
+        Only for a run that **has** a board: a link to "Not scored yet" is
+        the dead end this whole fix is about. Rendered beside the card rather
+        than inside it, so `progress_card` keeps its one job and its frozen
+        signature (`components/progress_card.py`).
+        """
+        if progress.run_id not in self._scored_runs:
+            return
+        with (
+            ui.element("div")
+            .props(f'data-testid="progress-scored" data-run="{progress.run_id}"')
+            .mark("progress-scored")
+            .style("display:flex;align-items:baseline;gap:8px;padding:0 2px;min-width:0;")
+        ):
+            ui.label(SCORED_MARKER).classes("mono ink3").props(
+                'data-testid="progress-scored-marker"'
+            ).style("font-size:10.5px;")
+            link = ui.link(text=RESULTS_LINK_LABEL, target=f"/results?run={progress.run_id}")
+            link.classes(remove="nicegui-link", add="mono")
+            link.props('data-testid="progress-results-link"').mark("progress-results-link")
+            link.style("font-size:10.5px;color:var(--ink);")
 
     def _runs_card(self) -> None:
         page = self._runs

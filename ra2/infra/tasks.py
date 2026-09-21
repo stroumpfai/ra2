@@ -13,6 +13,7 @@ A4 implements `AsyncioTaskRunner` (real, concurrent) and `InlineTaskRunner`
 """
 
 import asyncio
+import logging
 import threading
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
@@ -31,6 +32,27 @@ __all__ = [
     "TaskStatus",
     "TaskWork",
 ]
+
+_log = logging.getLogger(__name__)
+
+
+def _log_failure(task_id: TaskId, name: str, exc: BaseException) -> None:
+    """One line for a job that crashed — **the type, never the message**.
+
+    A failed task used to be recorded in `_ProgressTable` and nowhere else:
+    no log line, no persistence, gone at the next restart. A scoring pass that
+    raised therefore looked exactly like one that succeeded — the run worker's
+    "scoring submitted as task …" and then silence — and diagnosing which had
+    happened meant asking the live process through `GET /api/v1/tasks/{id}`
+    before it was restarted.
+
+    `str(exc)` stays out of the log on purpose. A SQLAlchemy error interpolates
+    the statement's bound parameters into its message, and a bound parameter
+    here is a narrative (Do-NOT #13, `data-handling.md` §5). The message is
+    still recorded in the task table, which is per-process memory the analyst
+    reaches deliberately — not a file on disk.
+    """
+    _log.warning("task %s (%s) failed: %s", task_id, name, type(exc).__name__)
 
 
 class TaskStatus(StrEnum):
@@ -180,6 +202,7 @@ class AsyncioTaskRunner:
             try:
                 await work(reporter)
             except Exception as exc:  # a failure is a recorded outcome, never a silent retry
+                _log_failure(task_id, name, exc)
                 self._table.mark_failed(task_id, str(exc))
             else:
                 self._table.mark_ok(task_id)
@@ -228,6 +251,7 @@ class InlineTaskRunner:
         worker.join()
 
         if errors:
+            _log_failure(task_id, name, errors[0])
             self._table.mark_failed(task_id, str(errors[0]))
         else:
             self._table.mark_ok(task_id)

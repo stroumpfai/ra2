@@ -24,6 +24,7 @@ from ra2.ui.components.icons import NAV_ICONS, svg
 __all__ = [
     "BRAND_SUBTITLE",
     "BRAND_TITLE",
+    "DATABASE_REPLACED_MESSAGE",
     "NAV_GROUPS",
     "NAV_ITEMS",
     "NAV_WIDTH_PX",
@@ -38,6 +39,20 @@ NAV_WIDTH_PX: Final = 196
 
 BRAND_TITLE: Final = "RA2"
 BRAND_SUBTITLE: Final = "Accident report analysis"
+
+#: Shown on **every** screen when the database file under this process has
+#: been replaced — `just reset` or `just reset-seed` run while the app was up.
+#:
+#: There is no partial version of this state and no screen it does not apply
+#: to: the process is reading two databases at once (`DataDirView.
+#: database_replaced`), and which one any given page saw is pool luck. So the
+#: sentence names the cause, names the fix, and does not pretend the page
+#: below it means anything.
+DATABASE_REPLACED_MESSAGE: Final = (
+    "The database file was replaced while this app was running — a reset or "
+    "a re-seed. This process is still holding the old one, so what you see "
+    "below may come from either. Restart the app."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +201,7 @@ def shell(
     description: str,
     active: str,
     data_dir: str | None = None,
+    database_replaced: bool = False,
     content_padding: str = "20px 28px",
     content_gap: str = "16px",
 ) -> Iterator[None]:
@@ -207,6 +223,13 @@ def shell(
     :param content_gap: the gap between the content column's children.
     :param active: the calling view's nav key, used only when the request path
         is not a nav route.
+    :param database_replaced: `DataDirView.database_replaced` — the file this
+        process opened is not the file at `database_path` any more. Rendered
+        as a banner above the content of every screen, because the condition
+        is about the process rather than about any one view, and because a
+        state a page can only be told about by one particular screen is a
+        state most sessions never hear about. Defaults to `False` so the
+        placeholder view and the shell's own tests need not pass it.
     :param data_dir: the active `RA2_DATA_DIR`, rendered read-only at the right
         of the header so which database you are looking at is never a guess
         (plan-reset-and-discard.md §2.1 item 6). It arrives as an argument
@@ -222,16 +245,40 @@ def shell(
         _header(title=title, description=description, data_dir=data_dir)
         with ui.element("div").style("display:flex;flex:1;min-height:0;"):
             _nav(active_key)
-            with (
-                ui.element("main").style("flex:1;min-width:0;display:flex;flex-direction:column;"),
-                ui.element("div")
-                .props('data-testid="content"')
-                .style(
-                    f"flex:1;min-height:0;overflow:auto;padding:{content_padding};"
-                    f"display:flex;flex-direction:column;gap:{content_gap};"
-                ),
-            ):
-                yield
+            with ui.element("main").style("flex:1;min-width:0;display:flex;flex-direction:column;"):
+                if database_replaced:
+                    _database_replaced_banner()
+                with (
+                    ui.element("div")
+                    .props('data-testid="content"')
+                    .style(
+                        f"flex:1;min-height:0;overflow:auto;padding:{content_padding};"
+                        f"display:flex;flex-direction:column;gap:{content_gap};"
+                    )
+                ):
+                    yield
+
+
+def _database_replaced_banner() -> None:
+    """`--danger-soft`, full width, above everything the view draws.
+
+    Not a dialog: a dialog is dismissed and the condition is not. It sits in
+    the layout, pushing the content down, for as long as the process lives.
+    """
+    with (
+        ui.element("div")
+        .props('data-testid="database-replaced"')
+        .mark("database-replaced")
+        .style(
+            "flex:none;padding:10px 28px;background:var(--danger-soft);"
+            "border-bottom:1px solid var(--rule);"
+        )
+    ):
+        ui.label(DATABASE_REPLACED_MESSAGE).classes("mono").props(
+            'data-testid="database-replaced-message"'
+        ).mark("database-replaced-message").style(
+            "font-size:11.5px;line-height:1.5;color:var(--danger);"
+        )
 
 
 def _header(*, title: str, description: str, data_dir: str | None = None) -> None:

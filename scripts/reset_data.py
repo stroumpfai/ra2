@@ -104,6 +104,22 @@ def remove(path: Path) -> bool:
     return False
 
 
+#: Printed with the plan, whether or not the token was given — the state it
+#: warns about is created by carrying the reset out, so it has to be read
+#: *before* that, and the dry run is the only place a person reliably looks.
+#:
+#: This is not hypothetical. Unlinking the SQLite file leaves a running app
+#: holding the deleted inode on its pooled connections while every connection
+#: it opens afterwards gets the new file: one process, two databases, no
+#: error. The app now says so on every screen (`DataDirView.
+#: database_replaced`), and this says so one step earlier.
+RUNNING_APP_WARNING = (
+    "\nStop the app first. A running `just dev` keeps the deleted database "
+    "open on its pooled connections and opens the new one on every connection "
+    "it makes afterwards, so it ends up reading both. Restart it after this."
+)
+
+
 def upgrade_head(settings: Settings) -> None:
     """`alembic upgrade head` against this data directory, in-process.
 
@@ -125,6 +141,7 @@ def main(argv: list[str]) -> int:
     print("This would remove:")
     for path in planned:
         print(f"  {describe(path)}")
+    print(RUNNING_APP_WARNING)
 
     if CONFIRM_TOKEN not in argv:
         print(f"\nNothing removed. Run `just reset {CONFIRM_TOKEN}` to carry this out.")

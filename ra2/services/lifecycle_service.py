@@ -25,6 +25,7 @@ to keep, which is what `run_export` is for.
 """
 
 from collections.abc import Sequence
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -69,6 +70,22 @@ DELIVERY_KIND = "delivery"
 ACTIVE_STATUSES = frozenset({RunStatus.QUEUED, RunStatus.RUNNING})
 
 
+def _file_identity(path: Path) -> tuple[int, int] | None:
+    """`(st_dev, st_ino)` — what makes two paths the same *file*.
+
+    A path comparison cannot see this: `just reset-seed` writes the new
+    database at exactly the path the old one had. The inode is what changed,
+    and it is populated on Windows as well as POSIX, so this needs no branch
+    (N3). `None` when the file is not there — during a reset it genuinely is
+    not, and "absent" is a third answer, not a replacement.
+    """
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (stat.st_dev, stat.st_ino)
+
+
 class LifecycleService:
     def __init__(
         self,
@@ -80,6 +97,15 @@ class LifecycleService:
         self._session_factory = session_factory
         self._upload_store = upload_store
         self._settings = settings
+        #: The identity of the database file this process started against —
+        #: `(st_dev, st_ino)`, or `None` when there was no file yet.
+        #:
+        #: Stamped in the constructor rather than at the first read, because
+        #: "the file this process opened" is a fact about startup and a lazy
+        #: stamp would adopt whatever file happened to be there when the
+        #: first page loaded — including one that had already replaced the
+        #: original.
+        self._database_identity = _file_identity(self._settings.database_path)
 
     # --- previews ----------------------------------------------------------
 
@@ -285,15 +311,31 @@ class LifecycleService:
     # --- the header chip ---------------------------------------------------
 
     def data_dir(self) -> DataDirView:
-        """Which database this process is looking at (§2.1 item 6).
+        """Which database this process is looking at (§2.1 item 6), and
+        **whether it is still the one it opened**.
 
         Synchronous and touching no session: it is a `Settings` value, and the
         reason it comes through a service at all is that `ra2/ui/` may not
-        import `ra2/infra/` (§1.1).
+        import `ra2/infra/` (§1.1). The identity check is one `os.stat` of a
+        path this process already knows, on a call every page makes once —
+        which is the cheapest place in the app to notice a swapped file, and
+        the only one every screen passes through.
+
+        **A file appearing where there was none is not a replacement.** The
+        app can legitimately start before `alembic upgrade head` has created
+        the database; the stamp is adopted then, and only a change from one
+        known identity to a different one is reported.
         """
+        identity = _file_identity(self._settings.database_path)
+        replaced = False
+        if self._database_identity is None:
+            self._database_identity = identity
+        elif identity is not None and identity != self._database_identity:
+            replaced = True
         return DataDirView(
             data_dir=str(self._settings.data_dir),
             database_path=str(self._settings.database_path),
+            database_replaced=replaced,
         )
 
     # --- internals ---------------------------------------------------------

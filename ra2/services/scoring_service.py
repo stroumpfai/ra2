@@ -23,7 +23,11 @@ handed this class as that protocol and never import it directly, the same seam
 **M27 freezes the constructor and the signatures. T1 writes the bodies.**
 """
 
-from collections.abc import Mapping, Sequence
+import logging
+import time
+from collections import Counter
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from typing import Protocol
 
 from sqlalchemy import select
@@ -63,6 +67,8 @@ from ra2.services.protocols import GroundTruthProvider, ScoringStatus
 
 __all__ = ["ScoringService"]
 
+_log = logging.getLogger(__name__)
+
 
 class ScoringService:
     def __init__(
@@ -79,6 +85,21 @@ class ScoringService:
         self._task_runner = task_runner
         self._clock = clock
         self._id_factory = id_factory
+        #: Which runs have a pass in flight **right now**, and how many.
+        #:
+        #: `ScoringStatus.running` was the literal `False` for four phases, so
+        #: §16.7's "scoring…" state was unreachable by construction and the
+        #: Results view could not tell a pass that was still going from one
+        #: that had crashed — both rendered "Not scored yet". The counts come
+        #: from committed rows, as F5 requires, and they always will; *this*
+        #: is not a count of anything, it is the one fact no row can carry:
+        #: whether this process is working on it at this instant.
+        #:
+        #: A `Counter` rather than a `set` because the guard nests — `submit`
+        #: marks the run before the task is scheduled, and the pass it
+        #: schedules marks it again — and a set would have the inner exit
+        #: clear a flag the outer scope still owns.
+        self._in_flight: Counter[RunId] = Counter()
 
     async def score_run(self, run_id: RunId) -> None:
         """Score one finished run, feature by feature, committing each.
@@ -106,12 +127,65 @@ class ScoringService:
         Returns the task id the UI polls through `GET /api/v1/tasks/{id}`,
         exactly as import and runs do (§9). There is no Score button, so this
         is called by the run worker's terminal `done` rather than by a view.
+
+        **The run is marked in flight here, synchronously**, not inside the
+        scheduled coroutine: `submit` returns before the event loop gets
+        anywhere near `work`, and a Results page that polls in that gap would
+        otherwise be told "not scored yet" about a run whose pass is already
+        queued — the exact sentence this fix exists to stop being ambiguous.
         """
+        self._enter(run_id)
 
         async def work(reporter: ProgressReporter) -> None:
-            await self._score(run_id, rescore=False, reporter=reporter)
+            try:
+                await self._score(run_id, rescore=False, reporter=reporter)
+            finally:
+                self._exit(run_id)
 
-        return self._task_runner.submit(f"score:{run_id}", work)
+        try:
+            return self._task_runner.submit(f"score:{run_id}", work)
+        except BaseException:
+            # The work will never run, so nothing will ever clear the mark.
+            self._exit(run_id)
+            raise
+
+    async def submit_rescore(self, run_id: RunId) -> TaskId:
+        """`rescore_run`, scheduled rather than awaited.
+
+        The same pass `rescore_run` runs and the same tag preservation
+        (`SD21`); the difference is who waits. `POST /runs/{id}/rescore`
+        answers `202 Accepted` with a task id, and a route that held the
+        request open for the whole pass was describing something other than
+        what it did — it also returned the *run's* id in the `task_id` field,
+        which is not a task id and cannot be polled. The UI's Re-score control
+        needs this for the same reason import and runs need it: one seam,
+        polled one way (§9).
+
+        **`async`, unlike `submit`.** A refusal — no such run, or a run that
+        is not `done` — has to reach the caller as a 404 or a 409, and an
+        exception raised inside a scheduled task reaches nobody but the task
+        table. So the guard is read here, before anything is submitted, and
+        `_score` reads it again inside its own transaction: this one decides
+        the HTTP status, that one decides whether to write, and a run that
+        changed status in between is refused by the one that matters.
+
+        :raises NotFoundError: no such run.
+        :raises RunNotScoreableError: the run is not `done`.
+        """
+        await self._require_scoreable(run_id)
+        self._enter(run_id)
+
+        async def work(reporter: ProgressReporter) -> None:
+            try:
+                await self._score(run_id, rescore=True, reporter=reporter)
+            finally:
+                self._exit(run_id)
+
+        try:
+            return self._task_runner.submit(f"rescore:{run_id}", work)
+        except BaseException:
+            self._exit(run_id)
+            raise
 
     async def rescore_run(self, run_id: RunId) -> None:
         """Re-score every feature of a run, **preserving analyst tags**.
@@ -131,7 +205,8 @@ class ScoringService:
         await self._score(run_id, rescore=True, reporter=None)
 
     async def status(self, session: AsyncSession, run_id: RunId) -> ScoringStatus:
-        """`Scorer`. Derived from committed rows, never from a column."""
+        """`Scorer`. Derived from committed rows, never from a column —
+        **except `running`**, which no row can answer (`_in_flight`)."""
         run = await session.get(Run, run_id)
         if run is None:
             raise NotFoundError("run", run_id)
@@ -146,8 +221,45 @@ class ScoringService:
             labelled_features=await _scoreable_count(
                 session, CorpusId(evaluation.corpus_id), features
             ),
-            running=False,
+            running=self._in_flight[run_id] > 0,
         )
+
+    # -- in flight ---------------------------------------------------------
+
+    def _enter(self, run_id: RunId) -> None:
+        self._in_flight[run_id] += 1
+
+    def _exit(self, run_id: RunId) -> None:
+        """Symmetric with `_enter`, and it **removes** the key at zero.
+
+        A `Counter` left holding zeros is a dictionary that grows by one entry
+        per run for the life of the process. `status()` reads `[run_id]`,
+        which a `Counter` answers with `0` for an absent key, so nothing
+        downstream can tell the difference.
+        """
+        remaining = self._in_flight[run_id] - 1
+        if remaining > 0:
+            self._in_flight[run_id] = remaining
+        else:
+            del self._in_flight[run_id]
+
+    @contextmanager
+    def _in_flight_for(self, run_id: RunId) -> Iterator[None]:
+        self._enter(run_id)
+        try:
+            yield
+        finally:
+            self._exit(run_id)
+
+    async def _require_scoreable(self, run_id: RunId) -> None:
+        """`submit_rescore`'s pre-flight — the refusal the route reports."""
+        async with self._session_factory() as session:
+            run = await session.get(Run, run_id)
+            if run is None:
+                raise NotFoundError("run", run_id)
+            status = RunStatus(run.status)
+            if status is not RunStatus.DONE:
+                raise RunNotScoreableError(run_id, f"run status is {status.value}")
 
     # -- the pass ----------------------------------------------------------
 
@@ -160,7 +272,16 @@ class ScoringService:
         across the EAV read that feeds the next one — so an interruption
         leaves whole features done and whole features absent, never a feature
         half-scored from two different reads of the corpus.
+
+        **It says what it did.** Before this, a pass logged nothing at all:
+        not a start, not a finish, not a failure. `AsyncioTaskRunner` records
+        a crash in an in-memory table and logs nothing either, so a run whose
+        scoring raised and a run whose scoring succeeded produced byte-identical
+        output — one line from the run worker announcing the submission, and
+        then silence. Ids, counts and durations only; `infra/logging.py` owns
+        that rule and `data-handling.md` §5 is why.
         """
+        started_ms = time.monotonic()
         async with self._session_factory() as session:
             run = await session.get(Run, run_id)
             if run is None:
@@ -187,15 +308,47 @@ class ScoringService:
             languages = await _languages(session, corpus_id)
 
         pending = [f for f in features if FeatureId(f.id) not in already]
-        for index, feature in enumerate(pending):
-            # A fresh session per feature: the transaction boundary is the
-            # point, and holding one open across the EAV read would make an
-            # interrupted pass ambiguous about what it had committed.
-            async with self._session_factory() as session:
-                await self._score_one_feature(session, run_id, corpus_id, feature, languages)
-                await session.commit()
-            if reporter is not None:
-                reporter.report(index + 1, len(pending), f"scored {feature.key}")
+        _log.info(
+            "run %s: scoring %d feature(s)%s",
+            run_id,
+            len(pending),
+            " (re-score)" if rescore else "",
+        )
+        with self._in_flight_for(run_id):
+            for index, feature in enumerate(pending):
+                # A fresh session per feature: the transaction boundary is the
+                # point, and holding one open across the EAV read would make an
+                # interrupted pass ambiguous about what it had committed.
+                try:
+                    async with self._session_factory() as session:
+                        await self._score_one_feature(
+                            session, run_id, corpus_id, feature, languages
+                        )
+                        await session.commit()
+                except Exception as exc:
+                    # The count is the part that matters: it says how much of
+                    # the pass committed, and therefore what a re-entry has
+                    # left to do. The exception itself is re-raised for the
+                    # task table to record — `exc_info` is deliberately not
+                    # passed, because a SQLAlchemy traceback carries bound
+                    # parameters and a bound parameter here is a narrative
+                    # (Do-NOT #13).
+                    _log.warning(
+                        "run %s: scoring failed after %d of %d feature(s) (%s)",
+                        run_id,
+                        index,
+                        len(pending),
+                        type(exc).__name__,
+                    )
+                    raise
+                if reporter is not None:
+                    reporter.report(index + 1, len(pending), f"scored {feature.key}")
+        _log.info(
+            "run %s: scored %d feature(s) in %d ms",
+            run_id,
+            len(pending),
+            round((time.monotonic() - started_ms) * 1000),
+        )
 
     async def _score_one_feature(
         self,

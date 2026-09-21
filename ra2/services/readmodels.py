@@ -1124,10 +1124,52 @@ class ScoringStatusView:
     scored_features: int
     labelled_features: int
     running: bool
+    #: The run's own status, because **three states were never enough**. A
+    #: finished run with no `score` rows and no pass in flight is not "not
+    #: scored yet" — that sentence describes the seconds after a run ends,
+    #: and it was also what the view said about a pass that had crashed
+    #: hours ago. `queued`/`running` is the honest "not yet"; `done` with
+    #: nothing scored and nothing running is "it did not finish", and the
+    #: two want different sentences and different controls.
+    run_status: RunStatus = RunStatus.DONE
 
     @property
     def is_scored(self) -> bool:
         return self.labelled_features > 0 and self.scored_features >= self.labelled_features
+
+    @property
+    def is_finished(self) -> bool:
+        """Whether the run is in a state that could have been scored at all."""
+        return self.run_status is RunStatus.DONE
+
+    @property
+    def scoring_stalled(self) -> bool:
+        """The run finished, the evaluation has something scoreable, nothing
+        is in flight, and there are **no rows at all**.
+
+        Distinct from `scoring_incomplete` because the two are different
+        facts and want different sentences: this one is a pass that never
+        wrote anything, which reads as "it did not run".
+        """
+        return self.is_settled and self.scored_features == 0
+
+    @property
+    def scoring_incomplete(self) -> bool:
+        """The same, with **some** rows: `0 < scored < labelled`.
+
+        `ScoringStatus`'s own docstring names this as one of three states
+        that must not be conflated, and it was conflated — with "not scored
+        yet", which is what a run that has not finished gets. `_score`
+        commits one `(run, feature)` at a time precisely so an interrupted
+        pass leaves whole features behind; this is what that looks like from
+        outside, and it is the state a re-entry finishes.
+        """
+        return self.is_settled and 0 < self.scored_features < self.labelled_features
+
+    @property
+    def is_settled(self) -> bool:
+        """Nothing about this run's scoring is going to change on its own."""
+        return self.is_finished and self.is_scoreable and not self.running
 
     @property
     def is_scoreable(self) -> bool:
@@ -1249,6 +1291,18 @@ class DataDirView:
 
     data_dir: str
     database_path: str
+    #: The file at `database_path` is **not the one this process opened**.
+    #:
+    #: `just reset-seed` unlinks the SQLite file and writes a new one. A live
+    #: process keeps its pooled connections on the deleted inode while every
+    #: connection opened afterwards gets the new file, so reads and writes
+    #: split across two databases by pool luck — one process, two databases,
+    #: and no error anywhere. Measured: sixteen concurrent reads in one
+    #: process returned two different corpora.
+    #:
+    #: Nothing can repair that from inside the process; the only honest
+    #: answers are to say so and to be restarted. This is the saying so.
+    database_replaced: bool = False
 
 
 # ===========================================================================
