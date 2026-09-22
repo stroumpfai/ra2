@@ -28,10 +28,17 @@ view in this app feeds the header from its nav item, and
 here would mean editing `shell.py` beyond the one `built` flag §6.1 permits V1.
 Left as an open point for a later design round rather than taken silently.
 
-Three states that must not share a rendering (§16.7): **not scored yet**,
-**scoring…** (polled through `GET /api/v1/tasks/{id}` exactly as import and
-runs are), and **nothing scoreable** — the last one says *which*, because
-"no results" and "not enough data for results" are different facts.
+**Four** states that must not share a rendering (§16.7 named three):
+**not scored yet**, **scoring…**, **nothing scoreable** — which says *which*,
+because "no results" and "not enough data for results" are different facts —
+and **scoring did not finish**, added here because the first and the last
+shared a sentence. A finished run with no `score` rows was told "Not scored
+yet. Scoring starts automatically when a run completes", which is a promise
+about the next few seconds; a pass that crashed wears that sentence for as
+long as the tab stays open, and the control it names did not exist.
+
+The page **polls** while a run or a pass is still moving, which is what the
+"scoring…" copy has always claimed and what nothing in this file did.
 
 The usual rules: no business logic (Do-NOT #7) — every number, interval, mark
 and suppression decision arrives already made from `ResultsService` and
@@ -41,23 +48,63 @@ the expanded feature, the page and the sort live in `app.storage.client`.
 **M27 freezes the signature. V1 writes the body.**
 """
 
+from collections.abc import Sequence
+from datetime import datetime
 from typing import Final
 
 from nicegui import ui
 from nicegui.element import Element
 
-from ra2.domain.ids import EvaluationId
+from ra2.domain.ids import EvaluationId, RunId
 from ra2.services.container import Services
-from ra2.services.errors import NotFoundError
-from ra2.services.readmodels import SortDir
+from ra2.services.errors import NotFoundError, RunNotScoreableError
+from ra2.services.readmodels import EvaluationDraftView, ScoringStatusView, SortDir
 from ra2.ui.shell import item_for_key, shell
 from ra2.ui.state import ResultsState, results_state, set_results_state
 from ra2.ui.views.results.chrome import empty_card
 from ra2.ui.views.results.extraction_tab import render_extraction_tab
 from ra2.ui.views.results.presence_tab import render_presence_tab
 from ra2.ui.views.results.ranking_tab import render_ranking_tab
+from ra2.ui.views.scoring_states import (
+    INCOMPLETE_BODY,
+    INCOMPLETE_TITLE,
+    NOT_SCORED_BODY,
+    NOT_SCORED_TITLE,
+    NOTHING_SCOREABLE_BODY,
+    NOTHING_SCOREABLE_TITLE,
+    PARTIAL_NOTE,
+    POLL_FAST_S,
+    POLL_SLOW_S,
+    RESCORE_STARTED,
+    SCORING_BODY,
+    SCORING_TITLE,
+    STALLED_BODY,
+    STALLED_TITLE,
+    rescore_row,
+    run_label,
+)
 
-__all__ = ["TABS", "register"]
+#: The scoring sentences are **re-exported deliberately**: they live in
+#: `views/scoring_states.py` so Mismatches says the same things, and every
+#: existing reader — tests included — imports them from here.
+__all__ = [
+    "INCOMPLETE_BODY",
+    "INCOMPLETE_TITLE",
+    "NOTHING_SCOREABLE_BODY",
+    "NOTHING_SCOREABLE_TITLE",
+    "NOT_SCORED_BODY",
+    "NOT_SCORED_TITLE",
+    "PARTIAL_NOTE",
+    "POLL_FAST_S",
+    "POLL_SLOW_S",
+    "RESCORE_STARTED",
+    "SCORING_BODY",
+    "SCORING_TITLE",
+    "STALLED_BODY",
+    "STALLED_TITLE",
+    "TABS",
+    "register",
+]
 
 _ITEM: Final = item_for_key("results")
 
@@ -73,20 +120,43 @@ EMPTY_BODY = (
     "Results are read for one evaluation at a time. Pick a launched evaluation "
     "below, or follow a run from the Evaluation view."
 )
-NOT_SCORED_TITLE = "Not scored yet."
-NOT_SCORED_BODY = (
-    "This run finished but has not been scored. Scoring starts automatically "
-    "when a run completes; use Re-score if you need to run it again."
+#: The same card when there is genuinely nothing to list. The sentence above
+#: would be pointing at an empty space again, which is the defect this state
+#: exists to stop.
+EMPTY_BODY_NONE = (
+    "Results are read for one evaluation at a time, and no evaluation has been "
+    "launched yet. Set one up on the Evaluation view and launch it."
 )
-SCORING_TITLE = "Scoring…"
-NOTHING_SCOREABLE_TITLE = "Nothing in this run could be scored."
+#: **The four scoring sentences now live in `views/scoring_states.py`** and are
+#: re-exported here, because Mismatches says the same things about the same
+#: runs and two copies of a sentence are two sentences waiting to drift
+#: (`plan-scoring-visibility-follow-ups.md` Part 1). Tests and any other
+#: reader keep importing them from this module.
+
+#: How many runs one evaluation's ordinals are read from — `evaluation_view`'s
+#: `RUNS_SUMMARY_CAP`, for its reason: the ordinal is a property of the whole
+#: set, so it cannot be taken from a page of it.
+_RUNS_CAP: Final = 200
 
 
 def register(services: Services) -> None:
     @ui.page(_ITEM.path)
-    async def _page(evaluation: str = "", tab: str = "") -> None:
+    async def _page(evaluation: str = "", run: str = "", tab: str = "") -> None:
+        """`?evaluation=<id>` — and **`?run=<id>`**, which is what links here.
+
+        The Evaluation view's runs table has linked each row to
+        `/results?run=<run id>` since phase 3, and this page understood only
+        `?evaluation=`. FastAPI drops an undeclared query parameter without a
+        word, so the one control in the product that takes an analyst from a
+        finished run to its board landed on **"No evaluation selected."** —
+        the picker, which lists the evaluation they had just come from.
+
+        Accepted here rather than rewritten there, because a link that names
+        the run is the right link: it says which board, and it is the id in
+        every log line about that run.
+        """
         page = _ResultsPage(services)
-        await page.build(evaluation=evaluation, tab=tab)
+        await page.build(evaluation=evaluation, run=run, tab=tab)
 
 
 class _ResultsPage:
@@ -107,8 +177,26 @@ class _ResultsPage:
         self._services = services
         self._state: ResultsState | None = None
         self._body: Element | None = None
+        self._root: Element | None = None
+        self._poll: ui.timer | None = None
+        #: The statuses the current render was drawn from — what the poll
+        #: compares against to decide whether it still has anything to wait
+        #: for, and what the Re-score control reads the run id from.
+        self._statuses: tuple[ScoringStatusView, ...] = ()
+        #: Whether the one extra read a stalled page is allowed has been
+        #: spent (`_start_polling`).
+        self._stalled_recheck = False
 
-    async def build(self, *, evaluation: str, tab: str) -> None:
+    async def build(self, *, evaluation: str, run: str = "", tab: str = "") -> None:
+        if run and not evaluation:
+            # A run id names its evaluation, and one read resolves it. A
+            # missing run falls through to the picker rather than raising:
+            # this is a URL somebody followed, and the picker is the page
+            # that can say "pick another one".
+            try:
+                evaluation = str((await self._services.run.get(RunId(run))).evaluation_id)
+            except NotFoundError:
+                evaluation = ""
         state = results_state()
         if evaluation:
             # A URL naming a different evaluation resets what was open: an
@@ -123,17 +211,23 @@ class _ResultsPage:
         set_results_state(state)
         self._state = state
 
+        data_dir_view = self._services.lifecycle.data_dir()
         with shell(
             title=_ITEM.title,
             description=_ITEM.description,
             active=_ITEM.key,
-            data_dir=self._services.lifecycle.data_dir().data_dir,
+            data_dir=data_dir_view.data_dir,
+            database_replaced=data_dir_view.database_replaced,
             content_padding="0",
             content_gap="0",
         ):
-            self._body = ui.element("div").style(
+            self._root = ui.element("div").style(
                 "display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;"
             )
+            with self._root:
+                self._body = ui.element("div").style(
+                    "display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;"
+                )
         await self.reload()
 
     async def reload(self) -> None:
@@ -155,6 +249,11 @@ class _ResultsPage:
             with self._body:
                 await self._render_picker(missing=state.evaluation_id)
             return
+        self._statuses = statuses
+        #: The runs a Re-score would help: a pass that wrote nothing, and one
+        #: that wrote some of it. Never a run still in flight — `submit_rescore`
+        #: refuses that, and offering it would be a button that 409s.
+        unscored = [s for s in statuses if s.scoring_stalled or s.scoring_incomplete]
 
         with self._body:
             self._render_tab_strip()
@@ -162,17 +261,155 @@ class _ResultsPage:
                 "flex:1;min-height:0;min-width:0;display:flex;flex-direction:column;"
             )
         with content:
-            # Three states that must not share a rendering (§16.7). The third
-            # says *which*, because "no results" and "not enough data for
-            # results" are different facts about the run.
+            # **Four** states that must not share a rendering (§16.7 plus
+            # `STALLED_TITLE`). Each says *which*: "no results", "not enough
+            # data for results", "not yet" and "it stopped" are four different
+            # facts about the run, and the last two shared a sentence.
             if statuses and not any(s.is_scoreable for s in statuses):
-                empty_card(NOTHING_SCOREABLE_TITLE, "This evaluation has no labelled features.")
+                empty_card(NOTHING_SCOREABLE_TITLE, NOTHING_SCOREABLE_BODY)
             elif any(s.running for s in statuses):
-                empty_card(SCORING_TITLE, "Progress is polled; this page refreshes itself.")
+                empty_card(SCORING_TITLE, SCORING_BODY)
             elif not any(s.is_scored for s in statuses):
-                empty_card(NOT_SCORED_TITLE, NOT_SCORED_BODY)
+                # Three different facts, not one. A run that has not finished
+                # is waiting; a finished run with no rows did not run its
+                # pass; a finished run with *some* rows stopped part-way. The
+                # first is patience, the other two are a button.
+                if not all(s.is_finished for s in statuses):
+                    empty_card(NOT_SCORED_TITLE, NOT_SCORED_BODY)
+                elif any(s.scoring_stalled for s in statuses):
+                    empty_card(STALLED_TITLE, STALLED_BODY)
+                else:
+                    empty_card(INCOMPLETE_TITLE, INCOMPLETE_BODY)
+                await self._render_rescore(unscored)
             else:
+                # **Also when the boards render.** An evaluation runs several
+                # models and each is scored by its own pass, so one model's
+                # pass can fail while the others succeed — and then the board
+                # draws a column of blanks for it, which reads as a model that
+                # answered nothing rather than one nobody scored. The strip
+                # says which, and offers the same control.
+                await self._render_rescore(unscored, note=PARTIAL_NOTE)
                 await self._render_active_tab(evaluation_id)
+        self._start_polling()
+
+    async def _render_rescore(
+        self, unscored: Sequence[ScoringStatusView], *, note: str | None = None
+    ) -> None:
+        """The control the empty card has named since phase 4, from
+        `scoring_states.rescore_row` so that Mismatches offers the same one.
+
+        The ordinals are this view's to fetch — `RunView.ordinal` is computed
+        once over the whole set, precisely so no view works it out from the
+        rows it happens to be holding — and the markup is shared.
+        """
+        if not unscored:
+            return
+        ordinals = await self._ordinals()
+        rescore_row(
+            [(status.run_id, ordinals.get(status.run_id, 0)) for status in unscored],
+            on_rescore=self._rescore,
+            note=note,
+        )
+
+    async def _ordinals(self) -> dict[RunId, int]:
+        """`run_id -> ordinal`, from the service that owns the numbering.
+
+        `RunView.ordinal` is computed once, over the whole set, precisely so
+        no view has to work it out from the rows it happens to be holding.
+        """
+        assert self._state is not None
+        page = await self._services.run.list_runs(
+            EvaluationId(self._state.evaluation_id), page=1, page_size=_RUNS_CAP
+        )
+        return {run.run_id: run.ordinal for run in page.items}
+
+    async def _rescore(self, run_id: RunId, ordinal: int) -> None:
+        """Submit the pass and redraw. **Submitted, never awaited**: the
+        request returns a task id and the poll below is what watches it, the
+        same handshake import and runs use (§9)."""
+        try:
+            await self._services.scoring.submit_rescore(run_id)
+        except (NotFoundError, RunNotScoreableError) as error:
+            # The run changed under the page — discarded, or resumed and no
+            # longer `done`. A redraw is the answer; the notification says
+            # why the screen is about to look different.
+            ui.notify(str(error))
+            await self.reload()
+            return
+        ui.notify(RESCORE_STARTED.format(run=run_label(ordinal)))
+        await self.reload()
+
+    # --- the poll ----------------------------------------------------------
+
+    def _start_polling(self) -> None:
+        """Re-read while anything is still expected to move, then stop.
+
+        `evaluation_view._start_polling`'s shape, and the gap it closes is the
+        reported one: this page had **no timer at all** while its own copy
+        said *"Progress is polled; this page refreshes itself."* A Results
+        page opened during a run rendered "Not scored yet" and kept rendering
+        it after the pass had finished, for as long as the tab stayed open.
+
+        **Not unconditional**, unlike `evaluation_view`'s: a settled page here
+        is waiting for a *click*, not for time, and a timer on a scored board
+        would re-read the whole status set for as long as the tab is open for
+        nothing.
+
+        The one exception is the stalled state, which gets **one** more tick
+        (`_stalled_recheck`). `run_service._chain_scoring` re-reads the run
+        row between writing `done` and calling `submit`, so a page that loads
+        inside that gap sees a finished run, no rows and nothing in flight —
+        and would say "scoring did not finish" about a pass that is a
+        heartbeat from starting. That is precisely the misdiagnosis this whole
+        change exists to remove, so it is worth one read to avoid making it
+        from the other direction.
+        """
+        if self._root is None:
+            return
+        if self._settled:
+            if self._poll is not None:
+                self._poll.deactivate()
+                self._poll = None
+            return
+        if self._poll is not None:
+            # Already running: only the interval can have changed, and
+            # `ui.timer` re-reads it before each sleep — so this takes effect
+            # on the next tick without tearing the timer down.
+            self._poll.interval = self._interval
+            return
+
+        async def poll() -> None:
+            await self.reload()
+            if self._poll is not None:
+                if self._settled:
+                    self._poll.deactivate()
+                    self._poll = None
+                else:
+                    self._poll.interval = self._interval
+
+        with self._root:
+            self._poll = ui.timer(self._interval, poll)
+
+    @property
+    def _interval(self) -> float:
+        """Fast for a pass, slow for a run — see `POLL_FAST_S`."""
+        return POLL_FAST_S if any(s.running for s in self._statuses) else POLL_SLOW_S
+
+    @property
+    def _settled(self) -> bool:
+        """Whether anything on this page is still expected to change.
+
+        A scoring pass in flight, or a run that has not finished — that run's
+        own terminal `done` is what submits the pass (`SD17`), so a page
+        watching a running run is waiting for two things in sequence. Plus
+        the single stalled re-check `_start_polling` explains.
+        """
+        if any(s.running or not s.is_finished for s in self._statuses):
+            return False
+        if any(s.scoring_stalled for s in self._statuses) and not self._stalled_recheck:
+            self._stalled_recheck = True
+            return False
+        return True
 
     async def _render_active_tab(self, evaluation_id: EvaluationId) -> None:
         assert self._state is not None
@@ -263,11 +500,67 @@ class _ResultsPage:
                     ui.label(label)
 
     async def _render_picker(self, *, missing: str = "") -> None:
-        """The index the design does not draw (C7)."""
+        """The index the design does not draw (C7) — **with the list in it**.
+
+        This rendered the card and nothing else, under copy reading *"Pick a
+        launched evaluation below"*. There was nothing below. Every route
+        into this view that does not carry an id — the sidebar's own Results
+        entry, most of all — therefore ended on a sentence pointing at an
+        empty space, which is the same defect as an empty state naming a
+        control that does not exist, one screen further out.
+
+        Launched evaluations only, newest first: an unlaunched draft has no
+        runs, so it has no board, and offering it would be a link to another
+        empty state.
+        """
+        drafts = [d for d in await self._services.evaluation.list_evaluations() if d.is_launched]
         with ui.element("div").style(
             "padding:18px 28px;display:flex;flex-direction:column;gap:12px;"
         ):
             empty_card(
                 EMPTY_TITLE if not missing else f"No evaluation {missing}.",
-                EMPTY_BODY,
+                EMPTY_BODY if drafts else EMPTY_BODY_NONE,
             )
+            if drafts:
+                self._picker_list(drafts)
+
+    def _picker_list(self, drafts: Sequence[EvaluationDraftView]) -> None:
+        """One row per launched evaluation: its name, when it was launched,
+        and the models it ran. Enough to tell two apart, which is all this
+        has to do — the board itself carries the full identity line."""
+        with (
+            ui.element("div")
+            .classes("card")
+            .props('data-testid="evaluation-picker"')
+            .mark("evaluation-picker")
+            .style("display:flex;flex-direction:column;")
+        ):
+            for index, draft in enumerate(drafts):
+                border = "" if index == 0 else "border-top:1px solid var(--rule);"
+                with ui.element("div").style(
+                    f"{border}padding:11px 16px;display:flex;align-items:baseline;"
+                    "gap:12px;min-width:0;"
+                ):
+                    link = ui.link(
+                        text=draft.name or str(draft.evaluation_id),
+                        target=f"/results?evaluation={draft.evaluation_id}",
+                    )
+                    link.classes(remove="nicegui-link", add="mono")
+                    link.props('data-testid="picker-evaluation"').mark("picker-evaluation")
+                    link.style("font-size:12.5px;color:var(--ink);")
+                    ui.label(_launched_label(draft.launched_at)).classes("mono ink3").props(
+                        'data-testid="picker-launched"'
+                    ).style("font-size:11px;")
+                    if draft.selected_models:
+                        ui.label(" · ".join(draft.selected_models)).classes("mono ink3").props(
+                            'data-testid="picker-models"'
+                        ).style(
+                            "font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                        )
+
+
+def _launched_label(launched_at: datetime | None) -> str:
+    """`dd.mm.yy - hh:mm:ss`, the timestamp format the runs table already
+    uses (`evaluation_view.TIMESTAMP_FORMAT`). `None` cannot happen on a
+    launched evaluation, and says so rather than rendering an empty cell."""
+    return "—" if launched_at is None else launched_at.strftime("%d.%m.%y - %H:%M:%S")

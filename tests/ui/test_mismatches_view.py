@@ -44,6 +44,7 @@ from ra2.ui.views.mismatches_view import (
     TAG_LABELS,
     tally_sentence,
 )
+from ra2.ui.views.scoring_states import STALLED_TITLE
 
 
 class _Ids:
@@ -466,13 +467,26 @@ async def test_without_an_evaluation_the_view_offers_the_picker(scored: Seeded) 
     await scored.user.should_not_see(marker="table-mismatches")
 
 
-async def test_an_unscored_evaluation_says_it_is_not_scored_yet(unscored: Seeded) -> None:
-    """The second state. **Not** the same as "no mismatches": scoring has not
-    run, so nothing is known yet either way (§16.7's three states, applied to
-    this list)."""
+async def test_a_finished_run_nobody_scored_says_the_pass_did_not_finish(
+    unscored: Seeded,
+) -> None:
+    """The second state, **split** (`plan-scoring-visibility-follow-ups.md`
+    Part 1).
+
+    This asserted `NOT_SCORED_TITLE` — "Not scored yet." — for a run that is
+    `done` with no `score` rows, and that sentence was right only while
+    nothing chained scoring off a finished run. Since `6dbe6e0`'s `SD17`
+    chain, a finished run whose pass never wrote anything is a pass that
+    **crashed or never ran**, and "not scored yet" tells the analyst to wait
+    for something that is not coming. What it must not say is still the
+    important half: not "no mismatches".
+    """
     await unscored.user.open(_url(unscored.corpus))
-    await unscored.user.should_see(NOT_SCORED_TITLE)
+    await unscored.user.should_see(STALLED_TITLE)
     await unscored.user.should_not_see(NO_MISMATCHES_TITLE)
+    await unscored.user.should_not_see(NOT_SCORED_TITLE)
+    # And the state carries the control that moves it, as Results' does.
+    await unscored.user.should_see(marker="rescore")
 
 
 async def test_a_run_with_no_mismatches_reads_as_a_good_result(flawless: Seeded) -> None:

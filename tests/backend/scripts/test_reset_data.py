@@ -81,6 +81,30 @@ def test_the_token_removes_every_target_including_the_sidecars(
     assert not populated.codelists_dir.exists()
 
 
+def test_the_plan_warns_that_a_running_app_must_be_stopped(
+    reset_data: ModuleType,
+    populated: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Unlinking the database under a live process is a **split brain**, not a
+    clean slate: it keeps the deleted inode on its pooled connections and
+    opens the new file on every connection it makes afterwards, so it reads
+    both (`plan-fix-results-visibility.md` §3.1).
+
+    Printed with the **plan**, before the token is checked, because the dry
+    run is the only place a person reliably reads this script's output — and
+    because by the time the reset has happened the warning is too late.
+    """
+    monkeypatch.setattr(reset_data, "Settings", lambda: populated)
+
+    assert reset_data.main([]) == 0
+
+    printed = capsys.readouterr().out
+    assert "Stop the app first." in printed
+    assert "Restart it after this." in printed
+
+
 def test_a_reset_has_no_exports_target(reset_data: ModuleType, populated: Settings) -> None:
     """The absence is the contract (`SD30`, risk-assesment.md B3 §8.6).
 

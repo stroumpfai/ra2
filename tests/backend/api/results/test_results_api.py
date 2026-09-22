@@ -168,6 +168,28 @@ async def test_rescoring_a_scored_run_is_accepted(
 
 
 @pytest.mark.asyncio
+async def test_the_accepted_rescore_returns_a_task_id_that_can_be_polled(
+    api_client: AsyncClient, scored: ScoredCorpus
+) -> None:
+    """`202 Accepted` + `task_id`, and the id has to **be** one.
+
+    This route awaited the whole pass and then answered with `task_id` set to
+    the *run's* id — a status code describing finished work, and an id that
+    `GET /api/v1/tasks/{id}` answers 404 for. Both halves of the handshake
+    the UI polls with were wrong, which is why nothing in the product used
+    it (plan-fix-results-visibility.md §3 c).
+    """
+    run_id = scored.run_ids[0]
+    response = await api_client.post(f"/api/v1/runs/{run_id}/rescore")
+    task_id = response.json()["task_id"]
+
+    assert task_id != run_id, "the run's id is not a task id"
+    progress = await api_client.get(f"/api/v1/tasks/{task_id}")
+    assert progress.status_code == 200
+    assert progress.json()["name"] == f"rescore:{run_id}"
+
+
+@pytest.mark.asyncio
 async def test_rescoring_a_failed_run_is_409(
     api_client: AsyncClient,
     scored: ScoredCorpus,

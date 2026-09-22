@@ -175,11 +175,13 @@ class _ImportPage:
     # --- lifecycle ---------------------------------------------------------
 
     async def build(self) -> None:
+        data_dir_view = self._services.lifecycle.data_dir()
         with shell(
             title=_ITEM.title,
             description=_ITEM.description,
             active=_ITEM.key,
-            data_dir=self._services.lifecycle.data_dir().data_dir,
+            data_dir=data_dir_view.data_dir,
+            database_replaced=data_dir_view.database_replaced,
             content_padding=CONTENT_PADDING,
             content_gap=CONTENT_GAP,
         ):
