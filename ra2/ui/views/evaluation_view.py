@@ -1744,10 +1744,30 @@ class _EvaluationPage:
         stays here because the runs table is where a run's status belongs;
         there is no longer a correctness reason for it, which is worth saying
         so nobody restores the old one by moving it back.
+
+        **Both lists, not just `_all_runs`.** `refresh_progress` re-reads the
+        paged `_runs` the table draws and the capped `_all_runs` this property
+        judges as two separate queries, and a tick can land across a commit:
+        the first read returns `queued`, the worker's row is committed, the
+        second read returns `done`. Judging on `_all_runs` alone then stopped
+        the timer *because everything was finished* while the table still
+        showed the `queued` row the first read had returned — and nothing
+        ticks again to correct it, so the screen stays wrong until the page is
+        reloaded. That is the one state this property must never produce,
+        because it is the one the user cannot get out of.
+
+        Reading both closes it without the two queries having to be atomic: a
+        torn tick leaves one list unsettled, so the timer survives to the next
+        tick, where both reads fall on the same side of the commit and agree.
+        A tick that changes nothing is what this poll is made of; a screen
+        frozen on a stale row is not.
         """
         if self._view is None:
             return True
-        return not any(r.status in (RunStatus.QUEUED, RunStatus.RUNNING) for r in self._all_runs)
+        paged = self._runs.items if self._runs is not None else ()
+        return not any(
+            r.status in (RunStatus.QUEUED, RunStatus.RUNNING) for r in (*self._all_runs, *paged)
+        )
 
     def _start_polling(self) -> None:
         """`ui.timer`, in `import_view._start_polling`'s shape — and

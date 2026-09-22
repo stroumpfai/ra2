@@ -1721,3 +1721,55 @@ async def test_pressing_stop_reaches_the_service_with_this_runs_id(
     await _until(lambda: stopped == ["r-0440"])
     await _until(lambda: _statuses(user) == {RunStatus.INTERRUPTED.value})
     await _poll_stops(user)
+
+
+async def test_the_poll_never_stops_on_a_tick_that_read_across_a_commit(
+    polling: tuple[Seeded, StaticModelCatalog],
+) -> None:
+    """The progress poll must not stop while the table still shows `queued`.
+
+    `refresh_progress` re-reads the paged `_runs` the table draws and the
+    capped `_all_runs` `_settled` judges as **two queries**, so a tick can land
+    across the worker's commit: the first read returns `queued`, the row is
+    committed, the second returns `done`. Judged on `_all_runs` alone the view
+    then deactivated its timer *because the run had finished* and left the
+    finished run rendered as `queued` — and no tick follows to correct it, so
+    the screen stays wrong until the page is reloaded. A run ends once; the
+    odds of a tick landing on it are what made this one flaky test in four
+    rather than a bug report.
+
+    The interleaving is **forced**, not waited for: the commit happens inside
+    the first `list_runs` of a tick, which is precisely the window. Waiting for
+    it is what the suite was doing by accident.
+    """
+    seeded, _ = polling
+    user = seeded.user
+
+    await user.open("/evaluation")
+    await user.should_see("Runs in this evaluation")
+    assert _statuses(user) == {RunStatus.QUEUED.value}
+
+    run_service = seeded.app.state.services.run
+    original = run_service.list_runs
+    armed = True
+
+    async def commit_between_the_two_reads(*args: object, **kwargs: object) -> object:
+        nonlocal armed
+        result = await original(*args, **kwargs)
+        if armed:
+            armed = False
+            async with seeded.app.state.session_factory() as session:
+                await session.execute(
+                    update(Run).where(Run.id == "r-0440").values(status=RunStatus.DONE)
+                )
+                await session.commit()
+        return result
+
+    run_service.list_runs = commit_between_the_two_reads
+    try:
+        await _until(lambda: _statuses(user) == {RunStatus.DONE.value})
+    finally:
+        run_service.list_runs = original
+
+    await _poll_stops(user)
+    assert _statuses(user) == {RunStatus.DONE.value}, "the poll stopped on a stale row"
