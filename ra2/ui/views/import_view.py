@@ -47,6 +47,7 @@ from ra2.ui.components import (
     dialog_card,
     footnote,
     format_count,
+    format_local,
     icon_button,
     pagination_row,
     tick,
@@ -593,7 +594,7 @@ class _ImportPage:
                 label="Created",
                 width="118px",
                 cell_class="mono",
-                render=lambda row: ui.label(row.imported_at.strftime("%Y-%m-%d %H:%M")).style(
+                render=lambda row: ui.label(format_local(row.imported_at, "%Y-%m-%d %H:%M")).style(
                     "font-size:11.5px;"
                 ),
             ),

@@ -9,18 +9,22 @@ reaches for a global settings object** (sw-design.md §3).
 """
 
 from pathlib import Path
-from typing import Final, Self
+from typing import Self
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from ra2.domain.llm import DEFAULT_REASONING_EFFORT, REASONING_EFFORTS
+
 __all__ = ["REASONING_EFFORTS", "Settings"]
 
-#: The `reasoning_effort` values Ollama maps onto its own `think` levels.
-#: Deliberately narrower than the OpenAI SDK's literal, which also carries
-#: `minimal`, `xhigh` and `max` — this endpoint is the only one N1 allows the
-#: app to talk to, so its vocabulary is the real one.
-REASONING_EFFORTS: Final[frozenset[str]] = frozenset({"none", "low", "medium", "high"})
+#: Re-exported, not defined here. The `reasoning_effort` values Ollama maps
+#: onto its own `think` levels are narrower than the OpenAI SDK's literal
+#: (which also carries `minimal`, `xhigh` and `max`), and that vocabulary is
+#: now `domain.llm`'s: the Evaluation view offers it in a select and `ui/` may
+#: not import `infra` (amendment: feat/evaluation-view-improvements). The name
+#: stays importable from here because `RA2_LLM_REASONING_EFFORT`'s refusal is
+#: this file's, and so is every caller that has ever asked it what is legal.
 
 
 class Settings(BaseSettings):
@@ -108,7 +112,7 @@ class Settings(BaseSettings):
     #: OpenAI SDK's literal is wider; sending it `xhigh` would fail per record,
     #: at the endpoint, after the run had started. Refused at construction
     #: instead — `OllamaLLMClient`'s loopback check, same reasoning.
-    llm_reasoning_effort: str = "none"
+    llm_reasoning_effort: str = DEFAULT_REASONING_EFFORT
 
     #: sw-design.md §15.4 — runs execute serially, one model at a time: the
     #: GPU is the bottleneck and two models sharing 24 GB is slower than two

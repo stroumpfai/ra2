@@ -45,6 +45,7 @@ async def test_save_draft_creates_a_row(
     # The design's defaults (sw-design.md §15.2).
     assert body["temperature"] == 0.0
     assert body["seed"] == 42
+    assert body["reasoning_effort"] == "none"
     assert body["size"] == "full"
 
 
@@ -118,7 +119,12 @@ async def test_update_draft(
 
     resp = await api_client.put(
         f"/api/v1/evaluations/{seeded['evaluation_id']}",
-        json={"selected_models": [FITTING_MODEL], "temperature": 0.5, "seed": 7},
+        json={
+            "selected_models": [FITTING_MODEL],
+            "temperature": 0.5,
+            "seed": 7,
+            "reasoning_effort": "medium",
+        },
     )
 
     assert resp.status_code == 200, resp.text
@@ -126,6 +132,26 @@ async def test_update_draft(
     assert body["selected_models"] == [FITTING_MODEL]
     assert body["temperature"] == 0.5
     assert body["seed"] == 7
+    assert body["reasoning_effort"] == "medium"
+
+
+async def test_update_draft_with_an_unmappable_reasoning_effort_is_422(
+    api_client: AsyncClient, seed_ready: Callable[..., Awaitable[dict[str, str]]]
+) -> None:
+    """422 with the service's sentence, **not** a pydantic `Literal` error:
+    the repair is "pick one of these four", and the field is typed `str` here
+    precisely so the message that reaches the analyst is the one naming
+    them."""
+    seeded = await seed_ready()
+
+    resp = await api_client.put(
+        f"/api/v1/evaluations/{seeded['evaluation_id']}",
+        json={"reasoning_effort": "xhigh"},
+    )
+
+    assert resp.status_code == 422, resp.text
+    (message,) = resp.json()["validation_errors"]
+    assert "xhigh" in message and "none, low, medium, high" in message
 
 
 async def test_update_draft_not_found(api_client: AsyncClient) -> None:

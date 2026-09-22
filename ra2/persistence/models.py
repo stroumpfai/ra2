@@ -71,6 +71,7 @@ from ra2.domain.ids import (
     RecordId,
     RunId,
 )
+from ra2.domain.llm import DEFAULT_REASONING_EFFORT
 from ra2.domain.scoring import ScoreMetric
 
 __all__ = [
@@ -674,6 +675,25 @@ class Evaluation(Base):
     #: provenance (mvp-spec.md §19.8).
     temperature: Mapped[float] = mapped_column(default=0.0)
     seed: Mapped[int] = mapped_column(default=42)
+    #: Step 5's third control, beside temperature and seed and for their
+    #: reason: it decides the answer, and it travels in every run's provenance
+    #: (mvp-spec.md §19.8). One of `domain.llm.REASONING_EFFORTS`.
+    #:
+    #: **NOT NULL with a default, where `run.llm_reasoning_effort` is
+    #: nullable.** The two nullabilities say different things and both are
+    #: right: a `run` written before `090e7fdc12c5` genuinely does not know
+    #: what effort it used, and a guess there would be invented provenance. An
+    #: `evaluation` is a *setup*, and every row that existed before this
+    #: column ran under the process default — so `none` is a fact about them,
+    #: not a guess (amendment: feat/evaluation-view-improvements).
+    #: The `server_default` is the migration's backfill, declared here too so
+    #: `alembic check` (which runs with `compare_server_default=True`) sees
+    #: one truth rather than a drift.
+    reasoning_effort: Mapped[str] = mapped_column(
+        String(16),
+        default=DEFAULT_REASONING_EFFORT,
+        server_default=DEFAULT_REASONING_EFFORT,
+    )
     #: Step 6. `DEV` takes the first `RA2_DEV_RECORD_MAX` records by id —
     #: deterministic, so a re-run is a check and not a new sample (§15 F9).
     size: Mapped[EvaluationSize] = mapped_column(default=EvaluationSize.FULL)

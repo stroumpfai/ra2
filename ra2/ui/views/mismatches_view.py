@@ -60,7 +60,15 @@ from ra2.services.readmodels import (
     ScoringStatusView,
     SortDir,
 )
-from ra2.ui.components import ColumnSpec, card, card_header, chip, data_table, pagination_row
+from ra2.ui.components import (
+    ColumnSpec,
+    card,
+    card_header,
+    chip,
+    data_table,
+    format_local,
+    pagination_row,
+)
 from ra2.ui.components.primitives import data_props, segmented_control
 from ra2.ui.shell import item_for_key, shell
 from ra2.ui.state import (
@@ -572,7 +580,7 @@ class _MismatchesPage:
         Results package.
         """
         finished = view.run_finished_at
-        label = EMPTY_CELL if finished is None else finished.strftime("%Y-%m-%d %H:%M")
+        label = EMPTY_CELL if finished is None else format_local(finished, "%Y-%m-%d %H:%M")
         readout = (
             ui.element("span")
             .classes("mono")
@@ -950,7 +958,7 @@ def _render_span(row: MismatchRowView) -> None:
 
 def _render_reviewed(row: MismatchRowView) -> None:
     stamped = row.tagged_at
-    ui.label(EMPTY_CELL if stamped is None else stamped.strftime("%Y-%m-%d")).props(
+    ui.label(EMPTY_CELL if stamped is None else format_local(stamped, "%Y-%m-%d")).props(
         'data-testid="mismatch-reviewed"'
     ).mark("mismatch-reviewed").style("font-size:11.5px;color:var(--ink3);")
 

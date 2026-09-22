@@ -158,6 +158,43 @@ async def test_provenance_is_written_at_run_start_not_at_completion(
     assert run.finished_at is None
 
 
+async def test_a_run_asks_with_the_effort_its_launch_pinned_not_the_processs(
+    seed, make_run_service, reporter, backend_settings
+):
+    """The run's **own** copy decides the question, exactly as its temperature
+    and seed do.
+
+    `RA2_LLM_REASONING_EFFORT` is only the default a new draft is created
+    with; once an evaluation pins one, the environment must not be able to
+    change what an already-queued run asks — that is the whole reason the
+    value is on the row (§19.8).
+    """
+    assert backend_settings.llm_reasoning_effort == "none"
+    seeded = await seed(records=2, reasoning_effort="high")
+    client = FakeLLMClient(response=answer())
+    service = make_run_service(client)
+
+    await service.execute_run(seeded.run_id, reporter)
+
+    assert [call[4] for call in client.calls] == ["high", "high"]
+
+
+async def test_a_run_queued_before_the_column_existed_asks_with_the_process_default(
+    seed, make_run_service, reporter, backend_settings
+):
+    """`run.llm_reasoning_effort` is nullable, and `NULL` means "this row was
+    written before the effort was recorded". `_start` fills it from
+    `Settings` so such a run still records the question it asked rather than
+    leaving provenance blank."""
+    seeded = await seed(records=1, reasoning_effort=None)
+    client = FakeLLMClient(response=answer())
+    service = make_run_service(client)
+
+    await service.execute_run(seeded.run_id, reporter)
+
+    assert [call[4] for call in client.calls] == [backend_settings.llm_reasoning_effort]
+
+
 async def test_launching_an_evaluation_runs_its_models_serially(
     seed, make_run_service, task_runner, extractions_of
 ):

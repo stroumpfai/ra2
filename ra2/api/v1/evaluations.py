@@ -75,6 +75,7 @@ def _draft_response(view: EvaluationDraftView) -> EvaluationDraftResponse:
         prompt_language=view.prompt_language,
         temperature=view.temperature,
         seed=view.seed,
+        reasoning_effort=view.reasoning_effort,
         size=view.size,
         selected_models=list(view.selected_models),
         launched_at=view.launched_at,
@@ -275,6 +276,7 @@ async def update_draft(
             prompt_language=body.prompt_language,
             temperature=body.temperature,
             seed=body.seed,
+            reasoning_effort=body.reasoning_effort,
             size=body.size,
             selected_models=(None if body.selected_models is None else tuple(body.selected_models)),
         )

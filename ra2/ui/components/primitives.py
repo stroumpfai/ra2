@@ -16,6 +16,7 @@ from a service (§8.1.1).
 import re
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from typing import Final
 
 from nicegui import ui
@@ -38,6 +39,8 @@ __all__ = [
     "fingerprint_badge",
     "footnote",
     "format_count",
+    "format_latency_ms",
+    "format_local",
     "frozen_readout",
     "icon_button",
     "labeled_field",
@@ -75,6 +78,49 @@ def format_count(value: int) -> str:
     Presentation only — the number itself is always a service's.
     """
     return f"{value:,}".replace(",", " ")
+
+
+def format_latency_ms(ms: int) -> str:
+    """`812` -> `"0.81 s"`. Seconds, two decimals, one rule everywhere.
+
+    **Not `progress_card._format_duration_ms`**, which renders `1 min 40 s`.
+    That one is for a span a person waits out — elapsed, ETA — where minutes
+    are the unit and a sub-second value honestly reads `0 s`. A latency is a
+    *measurement being compared between models*, which is what the Ranking
+    column exists for, and a comparison needs one unit and one precision:
+    two decimals span the 0.4 s of a GPU host and the 190 s of a thinking
+    model on CPU without a unit switch that would make a column of numbers
+    incommensurable.
+
+    A value that is greater than zero but rounds to `0.00` renders
+    `< 0.01 s`. A connection probe answers in single-digit milliseconds, and
+    `0.00 s` there reads as *zero* rather than as *instant* — the same rule
+    `SuppressedCell` follows one layer up: never print a number that says
+    something the datum does not.
+    """
+    if 0 < ms < 5:
+        return "< 0.01 s"
+    return f"{ms / 1000:.2f} s"
+
+
+def format_local(value: datetime, fmt: str) -> str:
+    """A stored instant as the **host's own** wall clock, then `strftime`.
+
+    RA2 is a loopback-only desktop application (N1): the browser and the
+    server are the same machine, so `astimezone()` with no argument is the
+    analyst's zone, and no timezone setting, browser round trip or `Settings`
+    field is needed to reach it.
+
+    A naive value is read as UTC, which is what `persistence.models.
+    UtcDateTime` guarantees for everything that came through the ORM and what
+    `Clock.now()` guarantees for everything that did not. Reading it as
+    *local* instead would shift it silently by the host's offset.
+
+    Stored, exported and API values are unaffected: local time is a property
+    of reading a screen, and it stops at the screen.
+    """
+    aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    return aware.astimezone().strftime(fmt)
 
 
 def data_props[E: Element](element: E, values: Mapping[str, object]) -> E:

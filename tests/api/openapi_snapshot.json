@@ -1659,6 +1659,11 @@
             ],
             "title": "Prompt Template Id"
           },
+          "reasoning_effort": {
+            "default": "none",
+            "title": "Reasoning Effort",
+            "type": "string"
+          },
           "seed": {
             "default": 42,
             "title": "Seed",
@@ -4230,6 +4235,18 @@
               }
             ],
             "title": "Prompt Template Id"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Effort"
           },
           "seed": {
             "anyOf": [

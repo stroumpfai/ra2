@@ -53,6 +53,7 @@ class ObservingClient:
         *,
         temperature: float,
         seed: int,
+        reasoning_effort: str | None = None,
     ) -> LlmOutput[T]:
         async with self._session_factory() as session:
             count = await session.scalar(
@@ -61,7 +62,14 @@ class ObservingClient:
                 .where(Extraction.run_id == self._run_id)
             )
         self.committed_at_call.append(int(count or 0))
-        return await self._inner.extract(text, schema, model, temperature=temperature, seed=seed)
+        return await self._inner.extract(
+            text,
+            schema,
+            model,
+            temperature=temperature,
+            seed=seed,
+            reasoning_effort=reasoning_effort,
+        )
 
 
 async def test_each_record_is_committed_before_the_next_model_call(

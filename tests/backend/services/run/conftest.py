@@ -48,7 +48,7 @@ from ra2.domain.ids import (
     RecordId,
     RunId,
 )
-from ra2.domain.llm import LLMClient
+from ra2.domain.llm import DEFAULT_REASONING_EFFORT, LLMClient
 from ra2.domain.prompt import ResolvedPrompt
 from ra2.infra.clock import FrozenClock
 from ra2.infra.config import Settings
@@ -383,6 +383,7 @@ def seed(
         size: EvaluationSize = EvaluationSize.FULL,
         is_dev: bool = False,
         seed_value: int = 42,
+        reasoning_effort: str | None = None,
         suffix: str = "a",
         snapshot: bool = True,
         codelist_json: str | None = WEATHER_CODELIST,
@@ -393,6 +394,10 @@ def seed(
         :param codelist_json: what the snapshot carries for the `enum`
             feature. Anything but `{code: label}` means "no snapshot to check
             against", never a guess.
+        :param reasoning_effort: what the launch pinned on each run. `None`
+            reproduces a run queued **before** the effort was a
+            per-evaluation input, which is the state `_start`'s fallback to
+            `Settings` exists for.
         """
         now = clock.now()
         corpus_id = CorpusId(f"corpus-{suffix}")
@@ -494,6 +499,7 @@ def seed(
                     prompt_language="de",
                     temperature=0.0,
                     seed=seed_value,
+                    reasoning_effort=reasoning_effort or DEFAULT_REASONING_EFFORT,
                     size=size,
                     selected_models_json=json.dumps(list(models)),
                     launched_at=now,
@@ -523,6 +529,7 @@ def seed(
                         prompt_template_fingerprint="fp-template",
                         temperature=0.0,
                         seed=seed_value,
+                        llm_reasoning_effort=reasoning_effort,
                         status=RunStatus.QUEUED,
                         # Blank on purpose: the host half of the provenance is
                         # the worker's to write, **at run start** (§15.4).

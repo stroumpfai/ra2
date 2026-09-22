@@ -38,7 +38,7 @@ from ra2.domain.ids import (
     RecordId,
     RunId,
 )
-from ra2.domain.llm import EndpointStatus, ProbeCode
+from ra2.domain.llm import DEFAULT_REASONING_EFFORT, EndpointStatus, ProbeCode
 from ra2.domain.mismatch import MismatchTag, ReviewTally, TagFilter, TagState
 from ra2.domain.prompt import PromptValidationError, SlotName
 from ra2.domain.stats import TieMark
@@ -584,6 +584,12 @@ class EvaluationDraftView:
     temperature: float
     seed: int
     size: EvaluationSize
+    #: Step 5's third control — one of `domain.llm.REASONING_EFFORTS`, pinned
+    #: onto every run this evaluation launches. Defaulted, like every
+    #: additive field here, so a partial construction in a test or a fixture
+    #: does not have to know about it (amendment:
+    #: feat/evaluation-view-improvements).
+    reasoning_effort: str = DEFAULT_REASONING_EFFORT
     selected_models: tuple[str, ...] = ()
     launched_at: datetime | None = None
 

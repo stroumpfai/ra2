@@ -90,7 +90,11 @@ Fixed by [ra2.md](ra2.md); restated so the implementation has one place to look.
 ```python
 class LLMClient(Protocol):
     async def extract(self, text: str, schema: type[T], model: str,
-                      *, temperature: float, seed: int) -> Extraction[T]: ...
+                      *, temperature: float, seed: int,
+                      reasoning_effort: str | None = None) -> Extraction[T]: ...
+    # reasoning_effort: one of domain.llm.REASONING_EFFORTS, or None for the
+    # client's constructed default. Per call, not per client, because §9's
+    # evaluation pins it (sw-design.md SD36).
 ```
 
 ---
@@ -270,8 +274,13 @@ prompt_template(id, version, source, created_at, activated_at, fingerprint)
       -- are one foreign key in a table and four conventions on a filesystem.
 
 evaluation(id, name, corpus_id, feature_config_id, prompt_template_id,
-           prompt_language, temperature, seed, size, selected_models_json,
-           min_cell_count, created_at, launched_at, is_dev)
+           prompt_language, temperature, seed, reasoning_effort, size,
+           selected_models_json, min_cell_count, created_at, launched_at,
+           is_dev)
+      -- reasoning_effort added post-phase-5 (sw-design.md SD36): how hard
+      -- the model is asked to think, pinned here and copied onto every run
+      -- the launch creates, because it decides the answer as much as the
+      -- temperature does (§19.8).
       -- min_cell_count added at phase 4 (SD19): §11.4 always said the floor
       -- is "configurable per evaluation", and a column is what makes that
       -- true. Cheap because suppression is applied at READ time from stored
@@ -284,8 +293,11 @@ evaluation_feature(evaluation_id, feature_id, enum_codelist_json, fingerprint)
       -- corpus — which is why they are not on `feature`.
 run(id, evaluation_id, model_name, model_digest, prompt_template_version,
     prompt_template_id, prompt_template_fingerprint,
-    temperature, seed, started_at, finished_at, status, error,
-    host_platform, gpu_name, llm_endpoint)
+    temperature, seed, llm_reasoning_effort, started_at, finished_at,
+    status, error, host_platform, gpu_name, llm_endpoint)
+      -- llm_reasoning_effort: the effort THIS run asked with, copied from
+      -- the evaluation at launch. NULL on a run queued before the column
+      -- existed — "not recorded", never a guessed default.
       -- status: queued | running | done | failed | interrupted
       -- no records_done column: progress is COUNT(extraction WHERE run_id=…)
 
@@ -527,8 +539,9 @@ the corpus size.
   Thresholds: dev 20–50 records; evaluation ≥ 200 (up to 3000).
 
 Every run stores: model name **and digest**, prompt template version, temperature,
-seed, feature config id + fingerprints, corpus id + version, host platform, GPU
-name, LLM endpoint, plus per-extraction latency and token counts.
+seed, **reasoning effort**, feature config id + fingerprints, corpus id + version,
+host platform, GPU name, LLM endpoint, plus per-extraction latency and token
+counts.
 
 Jobs run in the in-process asyncio worker, are restart-safe, and report progress
 (records done / total, ETA) in the UI.

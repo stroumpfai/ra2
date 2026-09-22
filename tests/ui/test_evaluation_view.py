@@ -60,12 +60,13 @@ from ra2.domain.ids import (
     RunId,
     TaskId,
 )
-from ra2.domain.llm import EndpointStatus
+from ra2.domain.llm import REASONING_EFFORTS, EndpointStatus
 from ra2.infra.config import Settings
 from ra2.persistence.models import Corpus, Evaluation, Feature, Mismatch, Record, Run
 from ra2.services.container import Services
 from ra2.services.readmodels import EvaluationDraftView, FeatureSetSummary, PromptTemplateView
 from ra2.ui import theme
+from ra2.ui.components import format_local
 from ra2.ui.components.discard_dialog import EXPORT_PER_RUN
 
 pytestmark = pytest.mark.ui
@@ -427,6 +428,16 @@ def _pick_select(user: User, testid: str, value: str) -> None:
     _one(user, element).trigger("change", args=value)
 
 
+def _selected_option(user: User, testid: str) -> str | None:
+    """The `<option selected>` of a native select, which is what the view
+    renders from the persisted draft."""
+    (element,) = _find(user, testid)
+    for option in element.descendants():
+        if option.tag == "option" and "selected" in option._props:
+            return str(option._props.get("value"))
+    return None
+
+
 def _model_row(user: User, tag: str) -> Element:
     return next(e for e in _find(user, "model-row") if e._props.get("data-model") == tag)
 
@@ -509,9 +520,12 @@ async def test_the_setup_column_renders_all_six_numbered_steps(seeded: Seeded) -
 
     # 1 · Corpus — the record count is the service's.
     assert "4 978 records" in _all_text(user, "corpus-select")
-    # 2 · Feature set — the **corrected** note (plan-phase-3.md C5 / R6).
-    assert _all_text(user, "feature-set-note") == evaluation_view.FEATURE_SET_NOTE
-    assert "Freezes when the first run executes" not in _all_text(user, "feature-set-note")
+    # 2 · Feature set — the picker and **no note**. The design's "Freezes when
+    # the first run executes" was wrong (plan-phase-3.md C5 / R6) and the
+    # correction that replaced it is now dropped too
+    # (`plan-evaluation-view-improvements.md` §3). Asserted rather than simply
+    # deleted: an element with no test is an element that comes back.
+    assert _find(user, "feature-set-note") == []
     # 3 · Prompt — the active template, and the design's note verbatim.
     assert "template · v1" in _all_text(user, "prompt-select")
     assert "active" in _all_text(user, "pill")
@@ -523,11 +537,14 @@ async def test_the_setup_column_renders_all_six_numbered_steps(seeded: Seeded) -
     assert _all_text(user, "models-count") == f"{len(DEFAULT_MODELS)} available · 0 selected"
     assert "reachable" in _all_text(user, "endpoint-line")
     assert not _find(user, "endpoint-reason")
-    # 5 · Determinism — two `labeled_field`s, label above the control.
-    assert len(_find(user, "labeled-field")) == 2
+    # 5 · Determinism — three `labeled_field`s, label above the control:
+    # temperature, seed, and the reasoning effort every run of this
+    # evaluation is launched with.
+    assert len(_find(user, "labeled-field")) == 3
     assert "0.0" in _all_text(user, "temperature-select")
     (seed_input,) = _find(user, "seed-input")
     assert seed_input._props["value"] == "42"
+    assert _all_text(user, "reasoning-select") == " ".join(REASONING_EFFORTS)
     assert _all_text(user, "determinism-note") == evaluation_view.DETERMINISM_NOTE
     # 6 · Size — two `radio_option`s, both reading their numbers from a service.
     assert len(_find(user, "sel-radio")) == 2
@@ -535,6 +552,46 @@ async def test_the_setup_column_renders_all_six_numbered_steps(seeded: Seeded) -
     assert "Evaluation · all 4 978" in radios
     assert "Dev · 50 records" in radios
     assert _all_text(user, "size-note") == evaluation_view.SIZE_NOTE
+
+
+async def test_step_five_persists_the_reasoning_effort_as_it_is_chosen(
+    seeded: Seeded,
+) -> None:
+    """The third pinned input of step 5, saved the moment it is picked.
+
+    Every step persists as it is chosen (the view's module docstring), and
+    this one has to: the effort rides onto every run the launch creates, so a
+    local edit buffer would let Launch queue runs asking a question the screen
+    no longer shows.
+    """
+    user = seeded.user
+    await user.open("/evaluation")
+    await user.should_see("Evaluation")
+
+    (select,) = _find(user, "reasoning-select")
+    assert select._props["aria-label"] == evaluation_view.REASONING_LABEL
+
+    _pick_select(user, "reasoning-select", "high")
+    # The redraw puts the **persisted** value back on the control, so this
+    # waits on the round trip rather than on the click.
+    await _until(lambda: _selected_option(user, "reasoning-select") == "high")
+
+    view = await seeded.services.evaluation.get(seeded.draft.evaluation_id)
+    assert view.draft.reasoning_effort == "high"
+
+
+async def test_a_launched_evaluation_cannot_change_the_reasoning_effort(
+    launched: Seeded,
+) -> None:
+    """§15.2: the runs beside the column cite these exact inputs, and the
+    effort is one of them — `run.llm_reasoning_effort` is what provenance
+    reports."""
+    user = launched.user
+    await user.open("/evaluation")
+    await user.should_see("Evaluation")
+
+    (select,) = _find(user, "reasoning-select")
+    assert _is_disabled(select)
 
 
 async def test_the_toolbar_pins_the_inputs_and_right_aligns_without_a_spacer(
@@ -735,7 +792,12 @@ async def test_the_runs_table_renders_its_five_columns_and_three_row_states(
     assert sum(1 for cell in body_cells if "td-clip" in cell._classes) == 4 * 3
 
     assert _statuses(user) == {"done", "failed", "queued"}
-    assert "04.09.26 - 08:12:04" in _all_text(user, "run-started")
+    # **Local time**, computed rather than written out: the same instant
+    # renders differently in CI's zone and on the analyst's machine, and it is
+    # the conversion that is being asserted, not one host's offset
+    # (`plan-evaluation-view-improvements.md` §4).
+    started = datetime(2026, 9, 4, 8, 12, 4, tzinfo=UTC)
+    assert format_local(started, evaluation_view.TIMESTAMP_FORMAT) in _all_text(user, "run-started")
     # A queued run has neither a record count nor a start time yet.
     assert _all_text(user, "run-records").split().count("—") == 1
     assert _all_text(user, "run-started").count("—") == 1
@@ -916,7 +978,10 @@ async def test_the_progress_column_places_a_card_per_run_and_the_reproducibility
         "endpoint 127.0.0.1:11434/v1",
     ):
         assert expected in line, expected
-    assert _all_text(user, "provenance-explainer") == evaluation_view.PROVENANCE_EXPLAINER
+    # The card renders the provenance and **no explainer paragraph** — the
+    # template version and fingerprint on the line above are the fact it used
+    # to be talking about (`plan-evaluation-view-improvements.md` §3).
+    assert _find(user, "provenance-explainer") == []
 
 
 # --- the gear button ----------------------------------------------------------
@@ -1043,8 +1108,8 @@ async def test_an_unlaunched_draft_offers_save_draft_and_no_second_create(
 # setup control was read-only and nothing on screen said why; "Save draft" was
 # disabled by `not view.draft.is_launched`; and `_current_evaluation` falls
 # back to the newest evaluation, so there was no switcher and nothing to clone
-# into — while both the design's step-2 copy and `FEATURE_SET_NOTE` instructed
-# the analyst to "clone into a new evaluation".
+# into — while the design's own step-2 copy instructed the analyst to "clone
+# into a new evaluation".
 
 
 async def test_a_launched_evaluation_says_why_the_setup_column_is_locked(
