@@ -205,6 +205,11 @@ class _RunPlan:
     model_name: str
     temperature: float
     seed: int
+    #: How hard this run asks the model to think, as the launch pinned it.
+    #: `None` on a run queued before the effort was a per-evaluation input —
+    #: the adapter then asks with its constructed default, which is what that
+    #: run was queued under (amendment: feat/evaluation-view-improvements).
+    reasoning_effort: str | None
     #: The dev cap (`RA2_DEV_RECORD_MAX`), or `None` for the whole corpus.
     limit: int | None
     features: tuple[FeatureBlockEntry, ...]
@@ -584,6 +589,7 @@ class RunService:
                     plan.model_name,
                     temperature=plan.temperature,
                     seed=plan.seed,
+                    reasoning_effort=plan.reasoning_effort,
                 )
             except LlmEndpointError as exc:
                 # **No row.** The hole this leaves is exactly what
@@ -763,6 +769,11 @@ class RunService:
             if not run.llm_endpoint:
                 run.llm_endpoint = self._settings.llm_base_url
             if run.llm_reasoning_effort is None:
+                # Only ever reached by a run queued **before** the effort
+                # became a per-evaluation input: `EvaluationService._new_run`
+                # now pins it at launch, beside the temperature and the seed.
+                # Kept so such a run still records the question it asked
+                # rather than leaving provenance blank.
                 run.llm_reasoning_effort = self._settings.llm_reasoning_effort
             if run.gpu_name is None:
                 gpu = self._gpu_probe.describe()
@@ -997,6 +1008,7 @@ class RunService:
                 # provenance this run is reproducible against (§19.8).
                 temperature=run.temperature,
                 seed=run.seed,
+                reasoning_effort=run.llm_reasoning_effort,
                 limit=self._record_limit(evaluation),
                 features=entries,
                 feature_ids={feature.key: FeatureId(feature.id) for feature, _ in snapshot},

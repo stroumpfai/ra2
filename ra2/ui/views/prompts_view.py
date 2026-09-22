@@ -95,7 +95,7 @@ from ra2.services.readmodels import (
     SlotView,
     SortDir,
 )
-from ra2.ui.components import card, format_count, icon_button, pagination_row
+from ra2.ui.components import card, format_count, format_local, icon_button, pagination_row
 from ra2.ui.components.icons import INFO, PLUS, svg
 from ra2.ui.components.primitives import (
     data_props,
@@ -288,7 +288,7 @@ def versions_label(total: int) -> str:
 
 def citation_text(view: PromptTemplateView) -> str:
     """The design's `.rsub`: "2026-09-04 14:22 · cited by 3 runs"."""
-    created = view.created_at.strftime("%Y-%m-%d %H:%M")
+    created = format_local(view.created_at, "%Y-%m-%d %H:%M")
     if view.cited_by_run_count == 0:
         return f"{created} · {NEVER_RUN}"
     runs = "run" if view.cited_by_run_count == 1 else "runs"

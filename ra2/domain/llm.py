@@ -10,21 +10,26 @@ to violate it (plan-phase-1.md §1). Phase 3 is where the caller arrives:
 `ra2.infra.ollama_client` implements both protocols below and is the one module
 in the repo permitted to import `openai` (sw-design.md §15.5).
 
-`LLMClient` itself is **unchanged** — `extract(text, schema, model, *,
-temperature, seed)` is exactly adequate: `text` takes the resolved prompt, and
+`LLMClient` took `extract(text, schema, model, *, temperature, seed)`
+unchanged from phase 1 through phase 5: `text` takes the resolved prompt, and
 the timeout belongs to client construction, not to a per-call argument.
-Confirming that was part of M17's job (plan-phase-3.md §5.1).
+Confirming that was part of M17's job (plan-phase-3.md §5.1). It now takes one
+more keyword, `reasoning_effort`, for the reason the protocol's own docstring
+gives — the effort became a **per-evaluation** pinned input, and a value that
+varies between two runs in one process cannot live on the client.
 """
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol, runtime_checkable
+from typing import Final, Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
 __all__ = [
     "ALLOWED_SCHEMES",
+    "DEFAULT_REASONING_EFFORT",
     "LOOPBACK_HOSTS",
     "PROBE_TIMEOUT_S",
+    "REASONING_EFFORTS",
     "EndpointProber",
     "EndpointStatus",
     "Extraction",
@@ -38,6 +43,23 @@ __all__ = [
     "is_loopback_url",
     "require_loopback",
 ]
+
+
+#: The reasoning efforts Ollama maps onto its own `think` levels, **in
+#: ascending order** — the order the Evaluation view's step 5 offers them in.
+#:
+#: Here rather than in `infra/config.py`, where it was defined: `ui/` may not
+#: import `infra` (the layer rule) and step 5 needs the list, while `Settings`
+#: still needs it to refuse an unmappable value at construction. `domain` is
+#: the one package all three may read — the move `is_loopback_url` already
+#: made, for exactly this reason. `infra.config` re-exports the name, so
+#: `RA2_LLM_REASONING_EFFORT`'s refusal is unchanged.
+REASONING_EFFORTS: Final[tuple[str, ...]] = ("none", "low", "medium", "high")
+#: What a new evaluation draft asks for unless `RA2_LLM_REASONING_EFFORT` says
+#: otherwise, and what an evaluation written before the column existed is
+#: backfilled with. `none` because the measured cost of the alternative is not
+#: marginal — `Settings.llm_reasoning_effort` carries the numbers.
+DEFAULT_REASONING_EFFORT: Final = "none"
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,11 +102,21 @@ class LLMClient(Protocol):
         *,
         temperature: float,
         seed: int,
+        reasoning_effort: str | None = None,
     ) -> Extraction[T]:
         """One call per (record, model), covering all configured features (D5).
 
         `schema` is a Pydantic model type; it becomes a JSON Schema passed to
         the endpoint as `format:` for constrained decoding (mvp-spec.md §3).
+
+        `reasoning_effort` is one of `REASONING_EFFORTS`, or `None` for the
+        client's constructed default. **A per-call argument, unlike the
+        timeout**, and the reason is the one that decides every such question
+        here: it is pinned per *evaluation* now, so two runs in one process
+        ask with different efforts. Expressing that through construction would
+        mean a second client per run — a second loopback guard, a second
+        connection pool, and a construction inside the record loop
+        (amendment: feat/evaluation-view-improvements).
         """
         ...
 

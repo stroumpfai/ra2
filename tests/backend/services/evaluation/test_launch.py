@@ -119,6 +119,10 @@ async def test_every_run_carries_its_full_provenance(
     assert run.prompt_template_fingerprint == "fp-template-1"
     assert run.temperature == 0.0
     assert run.seed == 42
+    # The evaluation's own effort, copied onto the run at launch. From here on
+    # the run's copy is what the worker asks with and what provenance reports,
+    # so editing a later draft cannot move an already-launched run (§19.8).
+    assert run.llm_reasoning_effort == "none"
     assert run.host_platform != ""
     assert run.gpu_name == fixture_gpu.name
     assert run.llm_endpoint == eval_settings.llm_base_url
@@ -131,6 +135,30 @@ async def test_every_run_carries_its_full_provenance(
     assert provenance.corpus_version == 1
     # The **real** fingerprints, from `evaluation_feature` — never a preview.
     assert set(provenance.feature_fingerprints) == {feature.key for feature in config.features}
+
+
+async def test_the_drafts_reasoning_effort_reaches_every_run_it_launches(
+    evaluation_service: EvaluationService,
+    launchable: Callable[..., Awaitable[tuple[CorpusId, FeatureConfigView, str]]],
+    db_session_factory: async_sessionmaker[AsyncSession],
+    fitting_model: str,
+    second_fitting_model: str,
+) -> None:
+    """Step 5's third control, pinned on **each** run the launch creates.
+
+    Two models, one question: the whole point of an evaluation is that only
+    the model varies (the toolbar's own line), so the effort cannot differ
+    between the runs of one launch.
+    """
+    _, _, evaluation_id = await launchable(models=(fitting_model, second_fitting_model))
+    await evaluation_service.update_draft(EvaluationId(evaluation_id), reasoning_effort="high")
+
+    await evaluation_service.launch(EvaluationId(evaluation_id))
+
+    async with db_session_factory() as session:
+        runs = (await session.scalars(select(Run).where(Run.evaluation_id == evaluation_id))).all()
+    assert len(runs) == 2
+    assert {run.llm_reasoning_effort for run in runs} == {"high"}
 
 
 async def test_the_snapshot_carries_the_whole_mapped_code_table(

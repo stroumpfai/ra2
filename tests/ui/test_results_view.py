@@ -27,6 +27,7 @@ from ra2.infra.config import Settings
 from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
 from ra2.services.container import Services
 from ra2.services.scoring_service import ScoringService
+from ra2.ui.components import format_latency_ms
 from ra2.ui.views.results.chrome import DEV_PILL, RUN_PILL
 from ra2.ui.views.results.extraction_tab import (
     ENCODING_CAVEAT,
@@ -382,6 +383,24 @@ async def test_the_ranking_header_does_not_claim_the_best_column_sums_to_the_fea
     await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}&tab=ranking")
     await scored.user.should_not_see("sums to")
     await scored.user.should_not_see("exactly one highest value per feature")
+
+
+async def test_the_ranking_latency_column_reads_in_seconds(scored: Scored) -> None:
+    """Reported, never scored (SD20) — and in the same unit as every other
+    latency on screen. The expectation comes from the read model, so this
+    asserts the *rendering*, not a number this test chose."""
+    view = await scored.services.ranking.ranking_tab(scored.corpus.evaluation_id)
+    expected = {format_latency_ms(row.median_latency_ms) for row in view.rows}
+    assert expected
+
+    await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}&tab=ranking")
+    rendered = [
+        str(getattr(e, "text", ""))
+        for row in scored.user.find(marker="ranking-row").elements
+        for e in row.descendants()
+    ]
+    assert expected <= set(rendered)
+    assert not any(text.endswith(" ms") for text in rendered)
 
 
 async def test_each_ranking_row_sums_to_the_scored_feature_count(scored: Scored) -> None:

@@ -75,6 +75,7 @@ from playwright.sync_api import Page, expect
 from tests.fixtures.fake_llm import DEFAULT_MODELS
 
 import ra2.ui.views.evaluation_view as evaluation_view
+from ra2.domain.llm import REASONING_EFFORTS
 
 pytestmark = pytest.mark.e2e
 
@@ -232,10 +233,20 @@ def test_j10_launch_an_evaluation_and_watch_it_finish(
 
     # --- the setup column, as the design draws it -----------------------------
     expect(page.locator('[data-testid="step-label"]')).to_have_count(6)
-    # The corrected step-2 copy (plan-phase-3.md C5 / R6) — not the stale note.
-    note = page.locator('[data-testid="feature-set-note"]')
-    expect(note).to_have_text(evaluation_view.FEATURE_SET_NOTE)
-    expect(note).not_to_contain_text("Freezes when the first run executes")
+    # No step-2 note at all: the design's "Freezes when the first run
+    # executes" was wrong (plan-phase-3.md C5 / R6), and the correction that
+    # replaced it is dropped too (`plan-evaluation-view-improvements.md` §3).
+    expect(page.locator('[data-testid="feature-set-note"]')).to_have_count(0)
+    # Step 5's third control, in a real browser: the four efforts Ollama maps,
+    # pinned per evaluation so two evaluations can be compared without an
+    # environment variable and a restart between them.
+    reasoning = page.locator('[data-testid="reasoning-select"]')
+    expect(reasoning).to_have_count(1)
+    assert [o.strip() for o in reasoning.inner_text().split("\n") if o.strip()] == list(
+        REASONING_EFFORTS
+    )
+    reasoning.select_option("medium")
+    expect(page.locator('[data-testid="reasoning-select"] option[selected]')).to_have_count(1)
     # The endpoint is reachable, so Launch is only waiting on a selection.
     expect(page.locator('[data-testid="endpoint-line"]')).to_contain_text("reachable")
     expect(page.locator('[data-testid="endpoint-reason"]')).to_have_count(0)
@@ -307,19 +318,20 @@ def test_j10_launch_an_evaluation_and_watch_it_finish(
     assert "prompt template v1" in line, line
     assert "temperature 0.0" in line, line
     assert "seed 42" in line, line
+    # The effort chosen in step 5 above, carried onto the run at launch.
+    assert "reasoning medium" in line, line
     assert f"cfg {config_id}" in line, line  # feature config + fingerprints
     assert "weather " in line, line  # the per-feature fingerprint, by key
     assert f"corpus {corpus_id} v1" in line, line
     assert "host " in line, line
     assert "gpu RTX 4090" in line, line
     assert "endpoint 127.0.0.1:11434/v1" in line, line
-    expect(page.locator('[data-testid="provenance-explainer"]')).to_have_text(
-        evaluation_view.PROVENANCE_EXPLAINER
-    )
+    expect(page.locator('[data-testid="provenance-explainer"]')).to_have_count(0)
 
     # --- launched is locked, and now says why ---------------------------------
     expect(page.locator('[data-testid="launch"]')).to_be_disabled()
     expect(page.locator('[data-testid="corpus-select"]')).to_be_disabled()
+    expect(page.locator('[data-testid="reasoning-select"]')).to_be_disabled()
     # The column states the reason instead of simply going dead (SD32).
     expect(page.locator('[data-testid="launched-note"]')).to_have_text(
         evaluation_view.LAUNCHED_MESSAGE

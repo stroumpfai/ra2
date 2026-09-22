@@ -17,7 +17,7 @@ from ra2.domain.census import CensusBucketLabel, TypeHint
 from ra2.domain.delivery import DeliveryStatus, Encoding, FileKind, SourceKind
 from ra2.domain.extraction import EvaluationSize, RunStatus
 from ra2.domain.findings import FindingCode, Severity
-from ra2.domain.llm import EndpointStatus, ProbeCode
+from ra2.domain.llm import DEFAULT_REASONING_EFFORT, EndpointStatus, ProbeCode
 from ra2.domain.mismatch import MismatchTag, TagFilter
 from ra2.domain.prompt import PromptValidationCode, SlotName
 from ra2.infra.tasks import TaskStatus
@@ -743,6 +743,11 @@ class UpdateEvaluationRequest(_Schema):
     prompt_language: str | None = Field(default=None, max_length=16)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     seed: int | None = None
+    #: One of `domain.llm.REASONING_EFFORTS`. **Not a `Literal`**: the refusal
+    #: an unmappable effort deserves is `EvaluationService`'s 422, a sentence
+    #: naming the four it could have been, and a `Literal` would answer with a
+    #: schema error that names the field instead of the repair.
+    reasoning_effort: str | None = Field(default=None, max_length=16)
     size: EvaluationSize | None = None
     selected_models: list[str] | None = None
 
@@ -758,6 +763,7 @@ class EvaluationDraftResponse(_Schema):
     prompt_language: str = "de"
     temperature: float = 0.0
     seed: int = 42
+    reasoning_effort: str = DEFAULT_REASONING_EFFORT
     size: EvaluationSize = EvaluationSize.FULL
     selected_models: list[str] = Field(default_factory=list)
     launched_at: datetime | None = None

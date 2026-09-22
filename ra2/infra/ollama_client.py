@@ -311,6 +311,18 @@ def _status_for(error: Exception) -> EndpointStatus:
     return EndpointStatus.UNREACHABLE
 
 
+def _narrow_effort(effort: str) -> openai.types.shared_params.ReasoningEffort:
+    """A validated `str` as the SDK's literal, in the one file that may name it.
+
+    No check here on purpose: `Settings` refuses an unmappable
+    `RA2_LLM_REASONING_EFFORT` at construction and `EvaluationService` refuses
+    one on the draft, both against `domain.llm.REASONING_EFFORTS`. A third
+    check in the adapter would be a second place for the vocabulary to drift —
+    what this narrows is a value two layers have already agreed is legal.
+    """
+    return cast("openai.types.shared_params.ReasoningEffort", effort)
+
+
 def _response_format(schema: type[object]) -> openai.types.shared_params.ResponseFormatJSONSchema:
     """Pydantic model -> JSON Schema -> the endpoint's constrained decoding.
 
@@ -359,20 +371,19 @@ class OllamaLLMClient:
         self._base_url = base_url
         self._timeout_s = timeout_s
         self._max_retries = max(0, max_retries)
-        # Construction, like the timeout and for its reason: it is a property
-        # of how this endpoint is being asked, not of one record, and
-        # `LLMClient.extract` stays unchanged (it is frozen). Pinned on the
-        # `run` row by `run_service._start`, so a run records the question it
-        # asked and not merely the model it asked.
+        # **The process default**, used by any call that does not name its
+        # own: `RA2_LLM_REASONING_EFFORT`, and what a run queued before the
+        # effort became a per-evaluation input still asks with. Since that
+        # change `extract` takes the value per call, because an evaluation
+        # pins it and two runs in one process can differ (amendment:
+        # feat/evaluation-view-improvements).
         #
         # Taken as `str` and narrowed **here**, not at the call site: the SDK's
         # literal is `openai`'s vocabulary, and Do-NOT #1 puts that vocabulary
         # inside this file. `Settings` has already refused anything Ollama
         # cannot map (`REASONING_EFFORTS`), so this narrows a validated value
         # rather than asserting a new one.
-        self._reasoning_effort = cast(
-            "openai.types.shared_params.ReasoningEffort", reasoning_effort
-        )
+        self._reasoning_effort = _narrow_effort(reasoning_effort)
         self._client = _build_client(
             base_url=base_url, timeout_s=timeout_s, http_client=http_client
         )
@@ -395,6 +406,7 @@ class OllamaLLMClient:
         *,
         temperature: float,
         seed: int,
+        reasoning_effort: str | None = None,
     ) -> Extraction[T]:
         """One call per (record, model), covering all configured features.
 
@@ -419,6 +431,12 @@ class OllamaLLMClient:
         the bound to re-learn what is known.
         """
         response_format = _response_format(schema)
+        # The run's own effort when it has one, the constructed default
+        # otherwise. Narrowed here for the same reason the constructor
+        # narrows: the SDK's literal does not leave this file.
+        effort = (
+            self._reasoning_effort if reasoning_effort is None else _narrow_effort(reasoning_effort)
+        )
         started = time.perf_counter()
         retries = 0
         while True:
@@ -435,7 +453,7 @@ class OllamaLLMClient:
                     # default: a run's provenance says which effort it used, and
                     # a parameter that is sometimes omitted makes that a claim
                     # about the model's build rather than about this call.
-                    reasoning_effort=self._reasoning_effort,
+                    reasoning_effort=effort,
                 )
             except (openai.APIConnectionError, openai.APIStatusError) as exc:
                 if retries >= self._max_retries or not _is_retryable(exc):

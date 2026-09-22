@@ -29,6 +29,7 @@ from ra2.ui.components.primitives import (
     data_props,
     footnote,
     format_count,
+    format_local,
     icon_button,
     pill,
 )
@@ -89,8 +90,10 @@ def _set_cell(
 def _created_cell(row: FeatureSetSummary) -> Element:
     element = ui.element("div").style("display:flex;gap:5px;align-items:baseline;")
     with element:
-        ui.label(row.created_at.strftime("%Y-%m-%d")).classes("mono").style("font-size:11.5px;")
-        ui.label(row.created_at.strftime("%H:%M")).classes("mono").style(
+        ui.label(format_local(row.created_at, "%Y-%m-%d")).classes("mono").style(
+            "font-size:11.5px;"
+        )
+        ui.label(format_local(row.created_at, "%H:%M")).classes("mono").style(
             "font-size:11.5px;color:var(--ink3);"
         )
     return element

@@ -195,7 +195,7 @@ class FakeLLMClient:
         self._retry_count = retry_count
         #: `(text, model, temperature, seed)` per call, in order. The shape is
         #: M17's and stays: tests already destructure it.
-        self.calls: list[tuple[str, str, float, int]] = []
+        self.calls: list[tuple[str, str, float, int, str | None]] = []
 
     @property
     def call_count(self) -> int:
@@ -259,12 +259,18 @@ class FakeLLMClient:
         *,
         temperature: float,
         seed: int,
+        reasoning_effort: str | None = None,
     ) -> Extraction[T]:
         index = len(self.calls)
         # Recorded **before** the call blocks: `wait_until_called` is a claim
         # about entry, and a gated call that is never released still has to be
         # visible to the test that is about to cancel it.
-        self.calls.append((text, model, temperature, seed))
+        #
+        # `reasoning_effort` is the fifth element rather than a second list:
+        # the whole point of `calls` is that one entry is one call, and the
+        # effort is now part of *what was sent* — a run pins it at launch
+        # exactly as it pins the temperature and the seed.
+        self.calls.append((text, model, temperature, seed, reasoning_effort))
         delay_s = self._delays.get(index)
         if delay_s is not None:
             await asyncio.sleep(delay_s)

@@ -548,6 +548,41 @@ async def test_the_default_effort_is_none(stub: StubOllama) -> None:
     assert sent["reasoning_effort"] == "none"
 
 
+async def test_a_call_that_names_an_effort_overrides_the_constructed_one(
+    stub: StubOllama,
+) -> None:
+    """The per-call argument, which is why `LLMClient.extract` grew one.
+
+    The effort is pinned per **evaluation** now, so two runs executing in one
+    process ask with different efforts. A constructed value could only express
+    that with a second client per run — a second loopback guard and a second
+    connection pool, built inside the record loop.
+    """
+    client = OllamaLLMClient(
+        base_url=LOOPBACK_URL, reasoning_effort="none", http_client=stub.http_client()
+    )
+
+    await client.extract("a", Output, "m", temperature=0.0, seed=1, reasoning_effort="high")
+    await client.extract("b", Output, "m", temperature=0.0, seed=1, reasoning_effort="low")
+
+    assert [sent["reasoning_effort"] for sent in stub.chat_requests] == ["high", "low"]
+
+
+async def test_a_call_that_names_no_effort_falls_back_to_the_constructed_one(
+    stub: StubOllama,
+) -> None:
+    """`None` means "the process default" — `RA2_LLM_REASONING_EFFORT`, which
+    is what a run queued before the column existed was queued under."""
+    client = OllamaLLMClient(
+        base_url=LOOPBACK_URL, reasoning_effort="medium", http_client=stub.http_client()
+    )
+
+    await client.extract("a", Output, "m", temperature=0.0, seed=1, reasoning_effort=None)
+
+    (sent,) = stub.chat_requests
+    assert sent["reasoning_effort"] == "medium"
+
+
 async def test_extract_asks_the_same_question_twice(stub: StubOllama) -> None:
     """Key order is stable across calls — two runs must ask the same question
     (sw-design.md §15.3)."""

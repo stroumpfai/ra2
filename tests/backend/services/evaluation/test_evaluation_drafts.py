@@ -16,7 +16,11 @@ from ra2.domain.extraction import EvaluationSize
 from ra2.domain.ids import CorpusId, EvaluationId, FeatureConfigId, PromptTemplateId
 from ra2.infra.clock import FrozenClock
 from ra2.persistence.models import Evaluation
-from ra2.services.errors import EvaluationLockedError, NotFoundError
+from ra2.services.errors import (
+    EvaluationLockedError,
+    FeatureValidationError,
+    NotFoundError,
+)
 from ra2.services.evaluation_service import EvaluationService
 from ra2.services.readmodels import FeatureConfigView
 
@@ -40,6 +44,10 @@ async def test_save_draft_takes_the_designs_defaults(
 
     assert draft.temperature == 0.0
     assert draft.seed == 42
+    # The one default read from `Settings` rather than named in the service:
+    # an analyst who set `RA2_LLM_REASONING_EFFORT` has already said what a
+    # new evaluation should ask.
+    assert draft.reasoning_effort == "none"
     assert draft.size is EvaluationSize.FULL
     assert draft.prompt_language == "de"
     assert draft.prompt_template_id == template_id
@@ -103,6 +111,7 @@ async def test_update_draft_edits_every_step(
         prompt_language="fr",
         temperature=0.2,
         seed=7,
+        reasoning_effort="medium",
         size=EvaluationSize.DEV,
         selected_models=("llama3.1:8b-instruct-q8_0",),
     )
@@ -111,11 +120,40 @@ async def test_update_draft_edits_every_step(
     assert updated.prompt_language == "fr"
     assert updated.temperature == 0.2
     assert updated.seed == 7
+    assert updated.reasoning_effort == "medium"
     assert updated.size is EvaluationSize.DEV
     assert updated.selected_models == ("llama3.1:8b-instruct-q8_0",)
     assert updated.launch_label_count == 1
     # Round-tripped, not just returned: the view is built from the row.
     assert (await evaluation_service.get(draft.evaluation_id)).draft == updated
+
+
+async def test_an_effort_the_endpoint_cannot_map_is_refused_and_changes_nothing(
+    evaluation_service: EvaluationService,
+    launchable: Callable[..., Awaitable[tuple[CorpusId, FeatureConfigView, str]]],
+) -> None:
+    """Ollama maps `none|low|medium|high` and nothing else, and an unmappable
+    value costs one `RA2_LLM_TIMEOUT_S` **per record** to discover — after the
+    analyst has launched and walked away. Refused here, where the repair is
+    still one click, and refused in the service rather than in `ui/` so a
+    request that never went through the view is refused too.
+
+    The `Settings` validator draws the same line for the process default; this
+    is the same rule at the other end of the same vocabulary.
+    """
+    _, _, evaluation_id = await launchable()
+    before = await evaluation_service.get(EvaluationId(evaluation_id))
+
+    with pytest.raises(FeatureValidationError) as excinfo:
+        await evaluation_service.update_draft(EvaluationId(evaluation_id), reasoning_effort="xhigh")
+
+    # The sentence names what it could have been — a refusal that only says
+    # "no" has done half the job (the `PROBE_WORDS` discipline).
+    (message,) = excinfo.value.validation_errors
+    assert "xhigh" in message
+    assert "none, low, medium, high" in message
+    # Nothing changed: the whole update is one transaction.
+    assert (await evaluation_service.get(EvaluationId(evaluation_id))).draft == before.draft
 
 
 async def test_update_draft_leaves_untouched_steps_alone(

@@ -29,7 +29,7 @@ from nicegui.element import Element
 
 from ra2.domain.extraction import RunStatus
 from ra2.services.readmodels import RunProgressView
-from ra2.ui.components.primitives import bar, card, format_count
+from ra2.ui.components.primitives import bar, card, format_count, format_latency_ms
 
 __all__ = ["progress_card"]
 
@@ -88,7 +88,7 @@ def _status_text(progress: RunProgressView) -> str:
 
 
 def _metrics_line(progress: RunProgressView) -> str:
-    """ "parse failures 14 (0.3 %) · median latency 812 ms · 2.1 M prompt
+    """ "parse failures 14 (0.3 %) · median latency 0.81 s · 2.1 M prompt
     tok" (design). Segments are included only when the field behind them is
     known/nonzero — this reports what `RunProgressView` carries, in one
     fixed order, never a per-state hand-picked subset."""
@@ -99,7 +99,7 @@ def _metrics_line(progress: RunProgressView) -> str:
     if progress.retries > 0:
         segments.append(f"retries {format_count(progress.retries)} (bounded, counted)")
     if progress.median_latency_ms is not None:
-        segments.append(f"median latency {format_count(progress.median_latency_ms)} ms")
+        segments.append(f"median latency {format_latency_ms(progress.median_latency_ms)}")
     if progress.prompt_tokens > 0:
         segments.append(f"{_format_tokens(progress.prompt_tokens)} prompt tok")
     return " · ".join(segments)
@@ -108,7 +108,7 @@ def _metrics_line(progress: RunProgressView) -> str:
 def progress_card(*, progress: RunProgressView) -> Element:
     """Model tag, a right-aligned status line, a 6px `.bar` at the completion
     percentage, and — for active and finished runs only — the metrics line
-    ("parse failures 14 (0.3 %) · median latency 812 ms · 2.1 M prompt tok")."""
+    ("parse failures 14 (0.3 %) · median latency 0.81 s · 2.1 M prompt tok")."""
     is_queued = progress.status is RunStatus.QUEUED
     is_failed = progress.status is RunStatus.FAILED
     element = (

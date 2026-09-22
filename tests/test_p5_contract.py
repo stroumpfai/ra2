@@ -122,6 +122,13 @@ POST_PHASE_5_REVISIONS = {
     # asked different questions must not record identical provenance
     # (mvp-spec.md §19.8). Additive, nullable, no backfill.
     "20260920_0729_090e7fdc12c5_pin_the_reasoning_effort_on_the_run.py",
+    # `feat/evaluation-view-improvements` — `evaluation.reasoning_effort`. The
+    # revision above pinned the effort on the run and left the choice in the
+    # environment, so comparing two efforts meant restarting the app between
+    # two evaluations that are meant to be comparable. Additive, NOT NULL,
+    # backfilled `none` — every pre-existing row ran under the process
+    # default, so that is a fact about them rather than a guess.
+    "20260922_0900_3b7c1d5a92e4_ask_the_reasoning_question_per_evaluation.py",
 }
 
 

@@ -42,7 +42,12 @@ from nicegui.element import Element
 
 from ra2.domain.llm import ProbeCode, is_loopback_url
 from ra2.services.readmodels import ConnectionProbeView, ConnectionView
-from ra2.ui.components.primitives import data_props, dialog_card, labeled_field
+from ra2.ui.components.primitives import (
+    data_props,
+    dialog_card,
+    format_latency_ms,
+    labeled_field,
+)
 
 __all__ = ["ENDPOINT_INVALID_MESSAGE", "PROBE_WORDS", "ollama_settings_dialog", "probe_sentence"]
 
@@ -60,7 +65,7 @@ _DIALOG_WIDTH_PX = 400
 #: The `{}` placeholders are filled by `probe_sentence` from the view's own
 #: numbers; a code whose sentence takes no number simply has none.
 PROBE_WORDS: Final[dict[ProbeCode, str]] = {
-    ProbeCode.OK: "Reachable — {models}, {latency_ms} ms.",
+    ProbeCode.OK: "Reachable — {models}, {latency}.",
     ProbeCode.REFUSED_NOT_LOOPBACK: (
         "That host is not this machine, so RA2 refuses it without connecting. "
         "The endpoint must be 127.0.0.1, ::1 or localhost."
@@ -103,7 +108,7 @@ def probe_sentence(view: ConnectionProbeView) -> str:
         return str(view.code)
     return template.format(
         models=_model_count_phrase(view.model_count),
-        latency_ms=view.latency_ms if view.latency_ms is not None else "?",
+        latency=("?" if view.latency_ms is None else format_latency_ms(view.latency_ms)),
         http_status=view.http_status if view.http_status is not None else "?",
         probe_timeout_s=view.probe_timeout_s,
     )

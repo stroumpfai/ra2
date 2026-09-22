@@ -36,16 +36,29 @@ rather than from a task counter a restart can disagree with (§15 F6). So the
 timer re-reads `EvaluationService.get()` and stops when no run is `queued` or
 `running` — one polling loop, no websocket, no SSE.
 
-**Three places this file departs from the drawn board, all deliberate:**
+**Four places this file departs from the drawn board, all deliberate:**
 
-- *Step 2's note.* The design reads "Freezes when the first run executes."
-  That was true before phase 2. `mvp-spec.md` §9 now says a feature set is
-  **already frozen from the moment it was created**, and an evaluation only
-  ever cites an already-frozen config; cloning, not editing, is how a set
-  changes. The corrected copy is rendered (plan-phase-3.md C5 / R6).
+- *Step 2's note is not rendered at all.* The design reads "Freezes when the
+  first run executes", which stopped being true at phase 2 — `mvp-spec.md` §9
+  says a feature set is **already frozen from the moment it was created**, and
+  an evaluation only ever cites an already-frozen config. Phase 3 rendered a
+  corrected sentence in its place (C5 / R6); it is now dropped, with the
+  correction kept here. The statement never stopped being true, it stopped
+  being *new* on the twentieth viewing, and the setup column is six steps deep
+  in a 430px column where every line of explanation pushes Launch further
+  down. What made it load-bearing is enforced where it belongs: `launch`
+  refuses an unfrozen config (`EVAL_ERROR_CONFIG_NOT_FROZEN`). The reason the
+  design's own sentence was wrong stays written down here, because that is the
+  argument against reinstating it from the mock
+  (`plan-evaluation-view-improvements.md` §3).
 - *The token figure* in the prompt preview is `≈ N tokens` — an estimate, and
   labelled as one, because an exact count needs the model's tokeniser and
   every tokeniser package downloads its vocabulary (N1, C6, R8).
+- *The reproducibility card carries no explainer.* Phase 3 put a paragraph
+  under the provenance line explaining why a prompt template is versioned
+  separately. Dropped for step 2's reason, and with less cost: the card still
+  *renders* the template version and its fingerprint, which is the fact the
+  paragraph was talking about.
 - *The toolbar's right group* carries **"New evaluation"** wherever "Save
   draft" cannot honestly act, and the setup column carries `LAUNCHED_MESSAGE`
   once it is locked (`sw-design.md` §13 `SD32`). The design's fixture shows an
@@ -101,7 +114,7 @@ from ra2.domain.ids import (
     RecordId,
     RunId,
 )
-from ra2.domain.llm import EndpointStatus
+from ra2.domain.llm import REASONING_EFFORTS, EndpointStatus
 from ra2.services.container import Services
 from ra2.services.errors import ServiceError
 from ra2.services.readmodels import (
@@ -126,6 +139,7 @@ from ra2.ui.components import (
     data_table,
     dialog_card,
     format_count,
+    format_local,
     icon_button,
     pagination_row,
     tick,
@@ -160,7 +174,6 @@ __all__ = [
     "DEV_MARKER",
     "DISCARD_EVALUATION_LABEL",
     "ENDPOINT_WORDS",
-    "FEATURE_SET_NOTE",
     "LAUNCHED_MESSAGE",
     "MODELS_UNSAVED_MESSAGE",
     "MODELS_WELL_PX",
@@ -175,8 +188,8 @@ __all__ = [
     "PROGRESS_CAPTION",
     "PROGRESS_TITLE_SETTLED",
     "PROMPT_NOTE",
-    "PROVENANCE_EXPLAINER",
     "PROVENANCE_TITLE",
+    "REASONING_LABEL",
     "RESULTS_LINK_LABEL",
     "RUNS_TABLE",
     "RUNS_TITLE",
@@ -307,21 +320,20 @@ STEP_TITLES: Final[tuple[str, ...]] = (
     "Size",
 )
 
-#: **Not** the design's "Freezes when the first run executes" (module
-#: docstring, C5/R6): a feature set is frozen from the moment it is created,
-#: and an evaluation only ever cites an already-frozen one.
-FEATURE_SET_NOTE: Final = (
-    "Already frozen — a feature set is frozen the moment it is created, and an "
-    "evaluation only ever cites a frozen one. Clone the set into a new one to "
-    "change it."
-)
 PROMPT_NOTE: Final = (
     "The wording around the feature descriptions. Travels in the run's fingerprint."
 )
 DETERMINISM_NOTE: Final = (
     "Temperature 0.0 takes the most likely token every time; the seed fixes what "
-    "remains random. Same inputs, same output — a re-run is a check, not a new sample."
+    "remains random. Same inputs, same output — a re-run is a check, not a new sample. "
+    "Reasoning above “none” lets the model think before it answers: better on some "
+    "features, and tens of times slower per record."
 )
+#: Step 5's third control. The four values are the endpoint's vocabulary
+#: (`domain.llm.REASONING_EFFORTS`), **not** a ladder this view invented the
+#: way `TEMPERATURE_CHOICES` is: what Ollama maps is a fact about the endpoint,
+#: and `EvaluationService` refuses anything outside it.
+REASONING_LABEL: Final = "Reasoning"
 #: The design names the literal 200 (`RA2_EVAL_RECORD_MIN`). No read model
 #: carries it and `ui/` may not import `infra`, so the sentence keeps its
 #: meaning and drops the number rather than hard-coding a setting (CLAUDE.md
@@ -349,11 +361,6 @@ PROGRESS_CAPTION: Final = (
 )
 RUNS_TITLE: Final = "Runs in this evaluation"
 PROVENANCE_TITLE: Final = "Stored on every run — enough to reproduce it"
-PROVENANCE_EXPLAINER: Final = (
-    "The prompt template is the wording around your feature descriptions — the "
-    "instructions, the output format, where the narrative is placed. It is versioned "
-    "separately because changing it changes every answer without any feature changing."
-)
 PREVIEW_LABEL: Final = "Preview prompt"
 
 #: README §2, "Runs table": `dd.mm.yy - hh:mm:ss`, on one line.
@@ -804,9 +811,6 @@ class _EvaluationPage:
                 testid="feature-set-select",
                 disabled=self._locked,
             )
-            ui.label(FEATURE_SET_NOTE).classes("warn").props('data-testid="feature-set-note"').mark(
-                "feature-set-note"
-            ).style(NOTE_STYLE)
 
     def _step_prompt(self) -> None:
         with self._step(3):
@@ -983,6 +987,20 @@ class _EvaluationPage:
                         on_change=_sync(self._set_seed),
                         disabled=self._locked,
                     )
+            # Its own row rather than a third box in the one above: three
+            # controls in a 430px column put the select at ~120px, which
+            # clips "medium" at this font. Beside temperature and seed in
+            # meaning all the same — it is pinned on every run this
+            # evaluation launches, and provenance reports it there.
+            with labeled_field(REASONING_LABEL):
+                _select(
+                    options=[(effort, effort) for effort in REASONING_EFFORTS],
+                    value=view.draft.reasoning_effort,
+                    label=REASONING_LABEL,
+                    on_change=_sync(self._pick_reasoning_effort),
+                    testid="reasoning-select",
+                    disabled=self._locked,
+                )
             ui.label(DETERMINISM_NOTE).classes("ink2").props('data-testid="determinism-note"').mark(
                 "determinism-note"
             ).style(NOTE_STYLE)
@@ -1300,11 +1318,6 @@ class _EvaluationPage:
             ).mark("provenance-line").style(
                 "font-size:11px;line-height:1.6;margin-top:6px;white-space:normal;"
             )
-            ui.label(PROVENANCE_EXPLAINER).classes("ink2").props(
-                'data-testid="provenance-explainer"'
-            ).mark("provenance-explainer").style(
-                "font-size:11.5px;line-height:1.55;margin-top:8px;"
-            )
 
     # --- setup actions -------------------------------------------------------
 
@@ -1404,6 +1417,9 @@ class _EvaluationPage:
     async def _pick_temperature(self, value: str) -> None:
         await self._update(temperature=float(value))
 
+    async def _pick_reasoning_effort(self, value: str) -> None:
+        await self._update(reasoning_effort=value)
+
     async def _set_seed(self, value: str) -> None:
         try:
             seed = int(value)
@@ -1465,9 +1481,9 @@ class _EvaluationPage:
         - *A launched evaluation on screen.* `_selected_corpus_id` and
           `_selected_config_id` return **that evaluation's** two ids, so the
           new draft cites the same corpus and the same frozen set. This is
-          literally the "clone into a new evaluation" `FEATURE_SET_NOTE` and
-          `design/prompt-evaluation/README.md` §2 step 2 both instruct, which
-          until now had nothing to clone into.
+          literally the "clone into a new evaluation" that
+          `design/prompt-evaluation/README.md` §2 step 2 instructs, which
+          until SD32 had nothing to clone into.
 
         No sentinel is needed in `EvaluationSetup` for either (SD32): the row
         exists before `reload()` runs, so `_current_evaluation` resolves the
@@ -2013,7 +2029,7 @@ def _run_row_style(run: RunView) -> str:
 
 
 def _timestamp(value: datetime | None) -> str:
-    return EMPTY_CELL if value is None else value.strftime(TIMESTAMP_FORMAT)
+    return EMPTY_CELL if value is None else format_local(value, TIMESTAMP_FORMAT)
 
 
 def _provenance_line(provenance: ProvenanceView) -> str:

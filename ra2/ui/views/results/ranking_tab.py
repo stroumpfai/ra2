@@ -38,7 +38,7 @@ from typing import Final
 from nicegui import ui
 
 from ra2.services.readmodels import RankingTabView
-from ra2.ui.components.primitives import data_props
+from ra2.ui.components.primitives import data_props, format_latency_ms
 from ra2.ui.views.results.chrome import run_descriptor
 
 __all__ = ["COMPUTATION_RULES", "VALIDITY_FOOTER", "render_ranking_tab"]
@@ -161,7 +161,7 @@ def _table(view: RankingTabView) -> None:
                         # two after it.
                         _td_mono(f"{row.presence_rate:.3f}", testid="presence-rate")
                         _td_mono(f"{row.best} / {row.tied} / {row.worse}")
-                        _td_mono(f"{row.median_latency_ms} ms")
+                        _td_mono(format_latency_ms(row.median_latency_ms))
                         _td_mono(f"{row.prompt_tokens}")
                         with ui.element("td").classes("td").style("padding:8px 12px;"):
                             pill = (

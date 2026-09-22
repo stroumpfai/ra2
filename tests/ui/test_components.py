@@ -57,6 +57,8 @@ from ra2.ui.components import (
     distribution_bar,
     footnote,
     format_count,
+    format_latency_ms,
+    format_local,
     long_tail_bar,
     pagination_row,
     tick,
@@ -326,6 +328,56 @@ async def test_the_chip_and_the_footnote_render_their_copy(user):
 def test_format_count_uses_the_designs_thousands_separator():
     assert format_count(4978) == "4 978"
     assert format_count(162) == "162"
+
+
+@pytest.mark.parametrize(
+    ("ms", "expected"),
+    [
+        (812, "0.81 s"),
+        (800, "0.80 s"),
+        (1340, "1.34 s"),
+        (104, "0.10 s"),
+        (190_000, "190.00 s"),
+        (0, "0.00 s"),
+    ],
+)
+def test_a_latency_reads_in_seconds_to_two_decimals(ms, expected):
+    """One unit and one precision everywhere a latency is rendered — the
+    progress card's metrics line, the Ranking column and the connection
+    probe. A column of numbers that switched unit between rows could not be
+    compared, which is the only thing the Ranking column is for."""
+    assert format_latency_ms(ms) == expected
+
+
+@pytest.mark.parametrize("ms", [1, 3, 4])
+def test_a_latency_too_small_to_show_says_so_rather_than_reading_zero(ms):
+    """`0.00 s` for a 3 ms probe reads as *zero*, not as *instant*. A number
+    must not say something the datum does not (`SuppressedCell`'s rule)."""
+    assert format_latency_ms(ms) == "< 0.01 s"
+
+
+def test_a_timestamp_renders_in_the_hosts_own_zone():
+    """RA2 is loopback-only (N1), so the server's zone **is** the analyst's.
+
+    The expectation is computed rather than written out: the assertion is
+    about the conversion, not about the offset of whichever machine runs it.
+    """
+    stored = datetime(2026, 9, 4, 8, 12, 4, tzinfo=UTC)
+
+    assert format_local(stored, "%d.%m.%y - %H:%M:%S") == stored.astimezone().strftime(
+        "%d.%m.%y - %H:%M:%S"
+    )
+
+
+def test_a_naive_timestamp_is_read_as_utc_not_as_local():
+    """Everything through the ORM is aware UTC (`UtcDateTime`) and so is
+    `Clock.now()`. A naive value reaching a render site is therefore a UTC
+    instant that lost its offset — reading it as *local* would shift it by
+    the host's offset, silently."""
+    naive = datetime(2026, 9, 4, 8, 12, 4)
+    aware = naive.replace(tzinfo=UTC)
+
+    assert format_local(naive, "%H:%M") == format_local(aware, "%H:%M")
 
 
 # --- Phase 2 (Codelists, Features) component-kit additions ------------------
@@ -1022,8 +1074,8 @@ async def test_progress_card_renders_all_four_states_from_the_read_model_alone(u
 
     metrics = [str(e.text) for e in _ordered(user.find(marker="progress-card-metrics"))]
     assert metrics == [
-        "parse failures 5 (0.2 %) · median latency 800 ms · 1.5 M prompt tok",
-        "parse failures 15 (0.3 %) · retries 11 (bounded, counted) · median latency 1 340 ms",
+        "parse failures 5 (0.2 %) · median latency 0.80 s · 1.5 M prompt tok",
+        "parse failures 15 (0.3 %) · retries 11 (bounded, counted) · median latency 1.34 s",
         "parse failures 3 (0.3 %)",
     ], "queued must be the only card without a metrics line"
 
@@ -1610,7 +1662,7 @@ async def test_a_successful_test_reads_as_success(user):
 
     (sentence,) = user.find(marker="ollama-test-sentence").elements
     assert "ok" in sentence._classes
-    assert "4 models" in sentence.text and "38" in sentence.text
+    assert "4 models" in sentence.text and "0.04 s" in sentence.text
     assert _find_marked(user, "ollama-test-detail") is None
 
 

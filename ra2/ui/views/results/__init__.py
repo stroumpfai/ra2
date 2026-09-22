@@ -59,6 +59,7 @@ from ra2.domain.ids import EvaluationId, RunId
 from ra2.services.container import Services
 from ra2.services.errors import NotFoundError, RunNotScoreableError
 from ra2.services.readmodels import EvaluationDraftView, ScoringStatusView, SortDir
+from ra2.ui.components import format_local
 from ra2.ui.shell import item_for_key, shell
 from ra2.ui.state import ResultsState, results_state, set_results_state
 from ra2.ui.views.results.chrome import empty_card
@@ -563,4 +564,4 @@ def _launched_label(launched_at: datetime | None) -> str:
     """`dd.mm.yy - hh:mm:ss`, the timestamp format the runs table already
     uses (`evaluation_view.TIMESTAMP_FORMAT`). `None` cannot happen on a
     launched evaluation, and says so rather than rendering an empty cell."""
-    return "—" if launched_at is None else launched_at.strftime("%d.%m.%y - %H:%M:%S")
+    return "—" if launched_at is None else format_local(launched_at, "%d.%m.%y - %H:%M:%S")

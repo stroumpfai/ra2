@@ -53,6 +53,7 @@ from ra2.domain.ids import (
 )
 from ra2.domain.llm import (
     PROBE_TIMEOUT_S,
+    REASONING_EFFORTS,
     EndpointProber,
     EndpointStatus,
     ModelCatalog,
@@ -112,6 +113,7 @@ __all__ = [
     "EVAL_ERROR_MODEL_NOT_AVAILABLE",
     "EVAL_ERROR_NO_MODELS_SELECTED",
     "EVAL_ERROR_NO_TEMPLATE",
+    "EVAL_ERROR_UNKNOWN_REASONING_EFFORT",
     "EvaluationService",
     "snapshot_from_json",
     "snapshot_to_json",
@@ -144,6 +146,14 @@ EVAL_ERROR_CONFIG_NOT_FROZEN: Final = (
 #: §15.2 — `prompt_template_id` is nullable so a draft can exist before any
 #: template does; the launch transaction is what requires one.
 EVAL_ERROR_NO_TEMPLATE: Final = "no prompt template is selected; a launch needs one."
+#: Step 5's third control, refused here rather than by a `Literal` on the API
+#: schema: the repair is "pick one of these four", and a sentence that names
+#: them is what an analyst can act on. Ollama maps no others, and an
+#: unmappable value costs one `RA2_LLM_TIMEOUT_S` per record to discover after
+#: the launch.
+EVAL_ERROR_UNKNOWN_REASONING_EFFORT: Final = (
+    "{effort}: not a reasoning effort this endpoint maps; expected one of {expected}."
+)
 #: The design's "Launch N runs" with N = 0 has nothing to launch.
 EVAL_ERROR_NO_MODELS_SELECTED: Final = "no models are selected; a launch needs at least one."
 #: mvp-spec.md §19.8 — a run's record must carry the model **digest**, and the
@@ -309,7 +319,14 @@ class EvaluationService:
         feature_config_id: FeatureConfigId,
     ) -> EvaluationDraftView:
         """Create an unlaunched evaluation with the design's defaults —
-        the active template, temperature 0.0, seed 42, size `full`."""
+        the active template, temperature 0.0, seed 42, size `full`, and the
+        process's `RA2_LLM_REASONING_EFFORT` as the reasoning effort.
+
+        The effort is the one default that is **read from `Settings` rather
+        than named here**: an analyst who has set the environment variable has
+        already said what a new evaluation should ask, and a constant here
+        would quietly overrule them on every new draft.
+        """
         async with session_scope(self._session_factory) as session:
             await self._require_corpus(session, corpus_id)
             await self._require_config(session, feature_config_id)
@@ -327,6 +344,7 @@ class EvaluationService:
                 prompt_language=_DEFAULT_LANGUAGE,
                 temperature=_DEFAULT_TEMPERATURE,
                 seed=_DEFAULT_SEED,
+                reasoning_effort=self._settings.llm_reasoning_effort,
                 size=EvaluationSize.FULL,
                 selected_models_json=None,
             )
@@ -344,6 +362,7 @@ class EvaluationService:
         prompt_language: str | None = None,
         temperature: float | None = None,
         seed: int | None = None,
+        reasoning_effort: str | None = None,
         size: EvaluationSize | None = None,
         selected_models: tuple[str, ...] | None = None,
     ) -> EvaluationDraftView:
@@ -358,7 +377,8 @@ class EvaluationService:
 
         :raises EvaluationLockedError: `launched_at` is set; nothing changed.
         :raises FeatureValidationError: a selected model exceeds the host's
-            VRAM; nothing changed.
+            VRAM, or the reasoning effort is one Ollama does not map; nothing
+            changed.
         :raises NotFoundError: no such evaluation, or a cited row is missing.
         """
         async with session_scope(self._session_factory) as session:
@@ -380,6 +400,21 @@ class EvaluationService:
                 evaluation.temperature = temperature
             if seed is not None:
                 evaluation.seed = seed
+            if reasoning_effort is not None:
+                # Checked here, not in `ui/` and not with a `Literal` on the
+                # request schema: the vocabulary is a fact about the endpoint
+                # (Do-NOT #7), and the same refusal has to hold for a request
+                # that never went through the view.
+                if reasoning_effort not in REASONING_EFFORTS:
+                    raise FeatureValidationError(
+                        [
+                            EVAL_ERROR_UNKNOWN_REASONING_EFFORT.format(
+                                effort=reasoning_effort,
+                                expected=", ".join(REASONING_EFFORTS),
+                            )
+                        ]
+                    )
+                evaluation.reasoning_effort = reasoning_effort
             if size is not None:
                 evaluation.size = size
             if selected_models is not None:
@@ -752,6 +787,11 @@ class EvaluationService:
             prompt_template_fingerprint=template.fingerprint,
             temperature=evaluation.temperature,
             seed=evaluation.seed,
+            # Pinned from the evaluation, beside temperature and seed: from
+            # here on the **run**'s copy is what the worker asks with and what
+            # provenance reports, so re-pointing anything afterwards cannot
+            # move an already-launched run (§19.8).
+            llm_reasoning_effort=evaluation.reasoning_effort,
             status=RunStatus.QUEUED,
             host_platform=platform.platform()[:200],
             gpu_name=connection.gpu_name,
@@ -1059,6 +1099,7 @@ def _draft_view(evaluation: Evaluation) -> EvaluationDraftView:
         prompt_language=evaluation.prompt_language,
         temperature=evaluation.temperature,
         seed=evaluation.seed,
+        reasoning_effort=evaluation.reasoning_effort,
         size=EvaluationSize(evaluation.size),
         selected_models=_selected_models(evaluation),
         launched_at=evaluation.launched_at,
