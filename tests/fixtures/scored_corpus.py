@@ -93,6 +93,9 @@ class ScoredCorpus:
     """What `seed_scored_corpus` built, by the name a test wants it under."""
 
     corpus_id: CorpusId
+    #: The corpus's **display name**, which is what the screens show — the id
+    #: is not on any page. A test asserting what a user reads wants this.
+    corpus_name: str
     evaluation_id: EvaluationId
     feature_config_id: FeatureConfigId
     run_ids: tuple[RunId, ...]
@@ -118,11 +121,12 @@ async def seed_scored_corpus(
     config_id = FeatureConfigId(f"config-{suffix}")
     evaluation_id = EvaluationId(f"eval-{suffix}")
     template_id = PromptTemplateId(f"template-{suffix}")
+    corpus_name = f"scored corpus {suffix}"
 
     session.add(
         Corpus(
             id=corpus_id,
-            name=f"scored corpus {suffix}",
+            name=corpus_name,
             imported_at=NOW,
             version=1,
             source_file_manifest_json="[]",
@@ -201,6 +205,7 @@ async def seed_scored_corpus(
 
     return ScoredCorpus(
         corpus_id=corpus_id,
+        corpus_name=corpus_name,
         evaluation_id=evaluation_id,
         feature_config_id=config_id,
         run_ids=run_ids,

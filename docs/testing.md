@@ -21,7 +21,7 @@ not remembered — re-measure rather than edit them.
 |---|---|
 | Automated tests | **2 592** |
 | Commit gate (`just test`) | 2 501 tests · **~32 s** · currently **green** |
-| PR gate (`just e2e`) | 91 tests · ~1 min 45 s · currently **1 failing** — see §7.1 |
+| PR gate (`just e2e`) | 91 tests · ~1 min 36 s · currently **green** |
 | Coverage | **96 %**, measured on business logic only — see §5 |
 | Manual test effort | none required to run either gate |
 | Nightly / scheduled | none |
@@ -232,23 +232,21 @@ Two consequences worth knowing:
 
 ## 7. Limitations — read this section before relying on the suite
 
-### 7.1 The PR gate is currently failing
+### 7.1 A journey asserts half of what its name claims
 
-`just e2e` is **red**: 1 failed, 89 passed, 1 skipped.
+`just e2e` is green (90 passed, 1 skipped, ~1 min 36 s, measured twice). One
+weakness in it is worth knowing about.
 
-```
-FAILED test_j13_the_validity_footer_names_the_real_cfg_and_corpus
-  expected the footer to contain 'corpus-j11'
-  actual: "...on corpus scored corpus j11 only..."
-```
+`test_j13_the_validity_footer_names_the_real_cfg_and_corpus` checks the corpus
+and the words "must be re-run". It does **not** check the `cfg` hash, and in
+this fixture that hash is `e3b0c442` — the SHA-256 of an empty string, because
+`tests/fixtures/scored_corpus.py` seeds no `evaluation_feature` rows and the
+fingerprint is computed over nothing.
 
-This is a **stale expectation, not a product defect**. The results boards were
-deliberately changed to name a corpus by its human-readable name rather than
-its internal identifier; J13 still asserts the identifier. It predates the
-current work — it has been failing since the commit that made that change
-(`6bae3a3`) — and it is a one-line fix to the test. It is recorded here rather
-than quietly fixed because a gate that is known-red and left red stops being a
-gate.
+So the journey would pass with the cfg chip broken. Closing it means widening a
+fixture six other tests share, which is a change with its own risk and is not
+one to make while fixing a red build. Recorded here as the next thing to do to
+this journey.
 
 ### 7.2 `just lint` is failing on Linux
 

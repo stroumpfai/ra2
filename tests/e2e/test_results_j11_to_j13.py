@@ -340,10 +340,17 @@ def test_j13_the_validity_footer_names_the_real_cfg_and_corpus(
     page: Page, server_url: str, scored_evaluation: ScoredCorpus
 ) -> None:
     """A ranking is valid for one config on one corpus and must be re-run if
-    either moves — and the footer says which, interpolated."""
+    either moves — and the footer says which, interpolated.
+
+    **The corpus by its name, not its id.** This asserted `corpus_id` and went
+    red when the boards were changed to name a corpus the way the rest of the
+    product does (`6bae3a3`). The id is on no page an analyst ever sees, so an
+    id here would have been asserting the one form of the fact the footer must
+    *not* carry.
+    """
     _open(page, server_url, scored_evaluation, "ranking")
     footer = page.locator('[data-testid="validity-footer"]')
-    expect(footer).to_contain_text(scored_evaluation.corpus_id)
+    expect(footer).to_contain_text(scored_evaluation.corpus_name)
     expect(footer).to_contain_text("must be re-run")
 
 
