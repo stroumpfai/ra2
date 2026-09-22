@@ -65,8 +65,46 @@ from ra2.ui.views.results.chrome import empty_card
 from ra2.ui.views.results.extraction_tab import render_extraction_tab
 from ra2.ui.views.results.presence_tab import render_presence_tab
 from ra2.ui.views.results.ranking_tab import render_ranking_tab
+from ra2.ui.views.scoring_states import (
+    INCOMPLETE_BODY,
+    INCOMPLETE_TITLE,
+    NOT_SCORED_BODY,
+    NOT_SCORED_TITLE,
+    NOTHING_SCOREABLE_BODY,
+    NOTHING_SCOREABLE_TITLE,
+    PARTIAL_NOTE,
+    POLL_FAST_S,
+    POLL_SLOW_S,
+    RESCORE_STARTED,
+    SCORING_BODY,
+    SCORING_TITLE,
+    STALLED_BODY,
+    STALLED_TITLE,
+    rescore_row,
+    run_label,
+)
 
-__all__ = ["TABS", "register"]
+#: The scoring sentences are **re-exported deliberately**: they live in
+#: `views/scoring_states.py` so Mismatches says the same things, and every
+#: existing reader — tests included — imports them from here.
+__all__ = [
+    "INCOMPLETE_BODY",
+    "INCOMPLETE_TITLE",
+    "NOTHING_SCOREABLE_BODY",
+    "NOTHING_SCOREABLE_TITLE",
+    "NOT_SCORED_BODY",
+    "NOT_SCORED_TITLE",
+    "PARTIAL_NOTE",
+    "POLL_FAST_S",
+    "POLL_SLOW_S",
+    "RESCORE_STARTED",
+    "SCORING_BODY",
+    "SCORING_TITLE",
+    "STALLED_BODY",
+    "STALLED_TITLE",
+    "TABS",
+    "register",
+]
 
 _ITEM: Final = item_for_key("results")
 
@@ -89,63 +127,11 @@ EMPTY_BODY_NONE = (
     "Results are read for one evaluation at a time, and no evaluation has been "
     "launched yet. Set one up on the Evaluation view and launch it."
 )
-NOT_SCORED_TITLE = "Not scored yet."
-#: **Rewritten.** This said *"This run finished but has not been scored.
-#: Scoring starts automatically when a run completes; use Re-score if you need
-#: to run it again"* — three claims, and on the day it was written none of
-#: them held: nothing chained scoring off a finished run (`SD17`, fixed in
-#: `6bae3a3`), no Re-score existed in `ui/`, and the card was also what a run
-#: that had *not* finished got. The two states that used to share it now have
-#: their own cards below, so this one can say the one true thing left: the
-#: run is still going.
-NOT_SCORED_BODY = (
-    "This run has not finished yet. Scoring starts automatically the moment "
-    "it does, and this page refreshes itself."
-)
-INCOMPLETE_TITLE = "Partly scored."
-INCOMPLETE_BODY = (
-    "Scoring stopped part-way: some features have scores and some have none, "
-    "so the numbers below would be over a corpus nobody stated. Re-score runs "
-    "the pass again and keeps your review tags."
-)
-SCORING_TITLE = "Scoring…"
-NOTHING_SCOREABLE_TITLE = "Nothing in this run could be scored."
-#: §16.7's fourth state, and the one this view could not say. The run is over,
-#: the evaluation has labelled features, nothing is in flight, and no `score`
-#: row exists — so the pass either crashed or never ran, and *waiting* is the
-#: one thing that will not help. It shared a rendering with "Not scored yet",
-#: which describes the seconds after a run ends and reads as "any moment now".
-STALLED_TITLE = "Scoring did not finish."
-STALLED_BODY = (
-    "This run is done and has labelled features, but no scores were written "
-    "and nothing is running. Re-score starts the pass again; the log line "
-    "for this run says what stopped it."
-)
-RESCORE_LABEL = "Re-score"
-#: Shown above a board that is **missing a column's worth of numbers**: one
-#: model's pass failed or stopped part-way while the others succeeded. Without
-#: it the board draws that model's cells empty, which reads as a model that
-#: answered nothing.
-PARTIAL_NOTE = "One or more runs in this evaluation are not fully scored."
-RESCORE_STARTED = "Re-scoring {run} — this page refreshes itself."
-
-#: The poll's two intervals, and when it drops from one to the other.
-#:
-#: **A scoring pass is 0.14 s on the development seed**, so a page waiting for
-#: one wants to be quick: `POLL_FAST_S` is what makes a pass that finishes
-#: feel like a page that noticed. **A run is hours**, and a page opened during
-#: one is waiting for the run first and the pass second — holding the fast
-#: interval there would put two and a half `scoring_status` reads a second,
-#: for hours, against the SQLite file the worker is committing to. That is
-#: the mistake `plan-fix-evaluation-runs.md` §1.2 catalogued on the other
-#: screen, and it is not worth repeating here.
-#:
-#: So: fast while a **pass** is in flight, slow while waiting for a **run**.
-#: The two are read from the statuses rather than counted in ticks, because
-#: here the difference is a fact about what the page is waiting for, not
-#: about how long it has been waiting.
-POLL_FAST_S: Final = 0.4
-POLL_SLOW_S: Final = 3.0
+#: **The four scoring sentences now live in `views/scoring_states.py`** and are
+#: re-exported here, because Mismatches says the same things about the same
+#: runs and two copies of a sentence are two sentences waiting to drift
+#: (`plan-scoring-visibility-follow-ups.md` Part 1). Tests and any other
+#: reader keep importing them from this module.
 
 #: How many runs one evaluation's ordinals are read from — `evaluation_view`'s
 #: `RUNS_SUMMARY_CAP`, for its reason: the ordinal is a property of the whole
@@ -280,9 +266,9 @@ class _ResultsPage:
             # data for results", "not yet" and "it stopped" are four different
             # facts about the run, and the last two shared a sentence.
             if statuses and not any(s.is_scoreable for s in statuses):
-                empty_card(NOTHING_SCOREABLE_TITLE, "This evaluation has no labelled features.")
+                empty_card(NOTHING_SCOREABLE_TITLE, NOTHING_SCOREABLE_BODY)
             elif any(s.running for s in statuses):
-                empty_card(SCORING_TITLE, "Progress is polled; this page refreshes itself.")
+                empty_card(SCORING_TITLE, SCORING_BODY)
             elif not any(s.is_scored for s in statuses):
                 # Three different facts, not one. A run that has not finished
                 # is waiting; a finished run with no rows did not run its
@@ -309,48 +295,21 @@ class _ResultsPage:
     async def _render_rescore(
         self, unscored: Sequence[ScoringStatusView], *, note: str | None = None
     ) -> None:
-        """The control the empty card has named since phase 4.
+        """The control the empty card has named since phase 4, from
+        `scoring_states.rescore_row` so that Mismatches offers the same one.
 
-        `NOT_SCORED_BODY` has read *"use Re-score if you need to run it
-        again"* from the day it was written, and no Re-score existed anywhere
-        in `ui/` — the only way to one was a `POST` nothing in the product
-        issued. A sentence that names a control the product does not have is
-        worse than no sentence: it tells the analyst the dead end is their
-        own fault for not finding the button.
-
-        One button per stalled run, labelled by the run's ordinal — the name
-        this product already uses everywhere a person has to say which run
-        (`mismatch_service._run_label`, the discard dialog, the runs table).
+        The ordinals are this view's to fetch — `RunView.ordinal` is computed
+        once over the whole set, precisely so no view works it out from the
+        rows it happens to be holding — and the markup is shared.
         """
         if not unscored:
             return
         ordinals = await self._ordinals()
-        with (
-            ui.element("div")
-            .props('data-testid="rescore-row"')
-            .mark("rescore-row")
-            .style("padding:0 18px 18px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;")
-        ):
-            if note is not None:
-                ui.label(note).classes("mono warn").props('data-testid="rescore-note"').mark(
-                    "rescore-note"
-                ).style("font-size:11px;")
-            for status in unscored:
-                ordinal = ordinals.get(status.run_id, 0)
-                button = (
-                    ui.element("button")
-                    .classes("btn secondary")
-                    .props(f'type="button" data-testid="rescore" data-run="{status.run_id}"')
-                    .mark("rescore")
-                )
-                button.on(
-                    "click",
-                    lambda _event, run_id=status.run_id, ordinal=ordinal: self._rescore(
-                        run_id, ordinal
-                    ),
-                )
-                with button:
-                    ui.label(f"{RESCORE_LABEL} {_run_label(ordinal)}")
+        rescore_row(
+            [(status.run_id, ordinals.get(status.run_id, 0)) for status in unscored],
+            on_rescore=self._rescore,
+            note=note,
+        )
 
     async def _ordinals(self) -> dict[RunId, int]:
         """`run_id -> ordinal`, from the service that owns the numbering.
@@ -377,7 +336,7 @@ class _ResultsPage:
             ui.notify(str(error))
             await self.reload()
             return
-        ui.notify(RESCORE_STARTED.format(run=_run_label(ordinal)))
+        ui.notify(RESCORE_STARTED.format(run=run_label(ordinal)))
         await self.reload()
 
     # --- the poll ----------------------------------------------------------
@@ -598,16 +557,6 @@ class _ResultsPage:
                         ).style(
                             "font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
                         )
-
-
-def _run_label(ordinal: int) -> str:
-    """ "run 2", or "this run" when the ordinal could not be read.
-
-    A run is named by its ordinal everywhere a person has to say which one —
-    `mismatch_service._run_label`, the discard dialog, the runs table — and
-    "run 0" is not a name this product uses for anything.
-    """
-    return f"run {ordinal}" if ordinal else "this run"
 
 
 def _launched_label(launched_at: datetime | None) -> str:

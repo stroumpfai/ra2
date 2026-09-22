@@ -14,6 +14,13 @@ Authority as always: `mvp-spec.md` on *what*, `sw-design.md` on *how*
 
 ## Part 1 — Mismatches tells a crashed pass as a perfect score
 
+> **DONE** on `fix/results-visibility`. Verified on the development seed with
+> a real half-scored evaluation — two runs over the seeded corpus, one pass's
+> `score` rows removed to stand in for the crash: the unscored run renders
+> "Scoring did not finish." with its Re-score, the scored run renders its
+> table, and neither says anything was correct. §1.5 records what differed
+> from this plan.
+
 ### 1.1 What it does today
 
 `ra2/ui/views/mismatches_view.py` decides between its empty states with one
@@ -85,6 +92,37 @@ they act on. Hiding it produces the same silence by another route.
   them from where Results imports them.
 - `tests/ui/test_mismatches_view.py`'s existing `NOT_SCORED_TITLE` assertions
   still pass, or are updated in the same commit with the reason.
+
+### 1.5 What differed from the plan
+
+**A shared module rather than `chrome.py`.** `chrome.py` is documented as the
+chrome *the three Results tabs* share, and this copy is shared by two
+**screens**. It lives in `ra2/ui/views/scoring_states.py`, which holds the
+sentences, a `ScoringCard`, and `card_for(status)` — the decision itself, once
+— plus `rescore_row`, so the button is the same button. Results re-exports the
+names it used to own, so every existing import and test keeps working, and a
+test asserts the two screens hold the **same objects** rather than two equal
+strings.
+
+**The toolbar had to move.** Deciding per run only helps if the analyst can
+reach the other run, and the old code returned before rendering the toolbar
+whenever it decided nothing was scored. The toolbar — which carries the run
+chip — now renders whatever the state is, and only the table area changes.
+
+**Mismatches polls now.** Not in the plan, and it follows from step 1e: the
+shared "not scored yet" body ends *"and this page refreshes itself"*, which
+was true of Results and false here. Either both refresh or the shared sentence
+is a lie on one screen, so this screen got `results/__init__._start_polling`'s
+shape — fast while a pass is in flight, slow while waiting for a run, stopped
+when nothing is moving.
+
+**One existing test was asserting the defect.**
+`test_an_unscored_evaluation_says_it_is_not_scored_yet` pinned "Not scored
+yet." for a run that is `done` with no rows — true before `6bae3a3` chained
+scoring off a finished run, and a sentence telling the analyst to wait for
+something that is not coming ever since. It now asserts the split, under a
+name that says what it checks, and still asserts the half that always
+mattered: not "no mismatches".
 
 ---
 

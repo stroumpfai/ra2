@@ -52,11 +52,12 @@ from nicegui.element import Element
 from ra2.domain.ids import EvaluationId, FeatureId, MismatchId, RunId
 from ra2.domain.mismatch import MismatchTag, ReviewTally, TagFilter, TagState
 from ra2.services.container import Services
-from ra2.services.errors import NotFoundError
+from ra2.services.errors import NotFoundError, RunNotScoreableError
 from ra2.services.readmodels import (
     MismatchListView,
     MismatchRowView,
     ReviewTallyView,
+    ScoringStatusView,
     SortDir,
 )
 from ra2.ui.components import ColumnSpec, card, card_header, chip, data_table, pagination_row
@@ -71,6 +72,17 @@ from ra2.ui.state import (
     table_state,
 )
 from ra2.ui.views.results.chrome import empty_card, run_descriptor
+from ra2.ui.views.scoring_states import NOT_SCORED_BODY as _NOT_SCORED_BODY
+from ra2.ui.views.scoring_states import NOT_SCORED_TITLE as _NOT_SCORED_TITLE
+from ra2.ui.views.scoring_states import (
+    POLL_FAST_S,
+    POLL_SLOW_S,
+    RESCORE_STARTED,
+    ScoringCard,
+    card_for,
+    rescore_row,
+    run_label,
+)
 
 __all__ = [
     "MISMATCH_TABLE",
@@ -138,10 +150,13 @@ EMPTY_BODY: Final = (
     "Mismatches are reviewed one evaluation at a time. Open one from Results, "
     "or follow a run from the Evaluation view."
 )
-NOT_SCORED_TITLE: Final = "Not scored yet."
-NOT_SCORED_BODY: Final = (
-    "Mismatches are written by the scoring pass. Scoring starts automatically when a run completes."
-)
+#: **One sentence, two screens.** This module had its own "Not scored yet."
+#: and its own body; Results had another pair, and this plan would have made
+#: four. They live in `views/scoring_states.py` now and are re-exported here
+#: so the existing imports and tests keep working
+#: (`plan-scoring-visibility-follow-ups.md` Part 1, step 1e).
+NOT_SCORED_TITLE: Final = _NOT_SCORED_TITLE
+NOT_SCORED_BODY: Final = _NOT_SCORED_BODY
 #: The third empty state, and the reason it has its own wording: **this is a
 #: good result**. A run with nothing wrong in it must not render like a
 #: failure, an error or a missing page — R2's warning applied to copy.
@@ -220,12 +235,23 @@ class _MismatchesPage:
     def __init__(self, services: Services) -> None:
         self._services = services
         self._view: MismatchListView | None = None
-        self._scored: bool | None = None
+        #: One status per run of this evaluation — **not** a boolean over all
+        #: of them. `any(is_scored)` was enough to decide whether to render a
+        #: table, and not enough to decide anything about the run actually on
+        #: screen: with run 1 scored and run 2's pass crashed, picking run 2
+        #: produced an empty list, and an empty list is rendered as "No
+        #: mismatches in this run. Every labelled feature this model answered,
+        #: it answered correctly." A false sentence, on the screen where a
+        #: human decides which model to believe
+        #: (`plan-scoring-visibility-follow-ups.md` Part 1).
+        self._statuses: tuple[ScoringStatusView, ...] = ()
         self._missing = ""
         self._open_menu: str | None = None
         self._toolbar: Element | None = None
         self._table_slot: Element | None = None
         self._tally_slot: Element | None = None
+        self._root: Element | None = None
+        self._poll: ui.timer | None = None
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -273,6 +299,7 @@ class _MismatchesPage:
                     "flex:1;min-height:0;min-width:0;display:flex;flex-direction:column;"
                 )
                 self._tally_slot = ui.element("div").style(TALLY_ROW_STYLE)
+            self._root = root
         await self.reload()
 
     async def reload(self) -> None:
@@ -283,7 +310,7 @@ class _MismatchesPage:
         """
         state = mismatches_state()
         self._view = None
-        self._scored = None
+        self._statuses = ()
         self._missing = ""
         if state.evaluation_id:
             evaluation_id = EvaluationId(state.evaluation_id)
@@ -295,8 +322,7 @@ class _MismatchesPage:
                 # `mismatch_service` -> a scoring module; a *view* composing
                 # two services is what the container exists for, and the
                 # Results view already reads this same call.
-                statuses = await self._services.results.scoring_status(evaluation_id)
-                self._scored = any(status.is_scored for status in statuses)
+                self._statuses = await self._services.results.scoring_status(evaluation_id)
                 table = _state()
                 self._view = await self._services.mismatch.list_mismatches(
                     evaluation_id,
@@ -312,6 +338,7 @@ class _MismatchesPage:
                 self._missing = state.evaluation_id
                 self._view = None
         self._render()
+        self._start_polling()
 
     # --- rendering ---------------------------------------------------------
 
@@ -331,23 +358,125 @@ class _MismatchesPage:
                     EMPTY_BODY,
                 )
             return
-        if self._scored is False:
-            with self._table_slot:
-                empty_card(NOT_SCORED_TITLE, NOT_SCORED_BODY)
-            return
-
+        # **The toolbar first, and unconditionally.** It carries the run
+        # chip, so a screen that drops it because *this* run has no scores
+        # strands the analyst on that run with no way to reach the ones that
+        # do. The old code got away with it by asking about the evaluation
+        # rather than the run.
         with self._toolbar:
             self._filter_toolbar(view)
+
+        card = self._scoring_card(view)
         with self._table_slot:
-            if view.rows.total == 0 and not _is_filtered():
+            if card is not None:
+                # This run has no list to show, and the reason is not "it was
+                # clean". `scoring_states` owns the sentence, so Results and
+                # this screen cannot end up with two accounts of one fact.
+                empty_card(card.title, card.body)
+                if card.offers_rescore:
+                    rescore_row(
+                        [(view.filters.run_id, self._ordinal(view, view.filters.run_id))],
+                        on_rescore=self._rescore,
+                    )
+            elif view.rows.total == 0 and not _is_filtered():
                 # **A good result, and it must not read like an error** —
-                # not an empty table, not a missing page, not a toast.
+                # not an empty table, not a missing page, not a toast. It is
+                # only reachable now when the run really was scored.
                 empty_card(NO_MISMATCHES_TITLE, NO_MISMATCHES_BODY)
             else:
                 self._table_card(view)
         with self._tally_slot:
-            if view.tallies:
+            if card is None and view.tallies:
                 self._tally_strip(view.tallies)
+
+    # --- the poll -----------------------------------------------------------
+
+    def _start_polling(self) -> None:
+        """Re-read while a run or a pass is still moving, then stop.
+
+        `results/__init__._start_polling`, and it is here for the sentence:
+        "Scoring starts automatically the moment it does, **and this page
+        refreshes itself**" is now one string shared by both screens, so
+        either both refresh or the string is a lie on one of them.
+
+        Fast while a pass is in flight, slow while waiting for a run — a pass
+        is 0.14 s on the development seed and a run is hours, and the slow
+        interval is what keeps a page left open during a run off the SQLite
+        file the worker is committing to.
+        """
+        if self._root is None:
+            return
+        if self._settled:
+            if self._poll is not None:
+                self._poll.deactivate()
+                self._poll = None
+            return
+        if self._poll is not None:
+            self._poll.interval = self._interval
+            return
+
+        async def poll() -> None:
+            await self.reload()
+
+        with self._root:
+            self._poll = ui.timer(self._interval, poll)
+
+    @property
+    def _settled(self) -> bool:
+        """Whether anything this screen shows is still expected to change.
+
+        A run that has not finished, or a pass in flight — the run's own
+        terminal `done` is what submits the pass (`SD17`), so a page watching
+        a running run is waiting for two things in sequence.
+        """
+        return not any(s.running or not s.is_finished for s in self._statuses)
+
+    @property
+    def _interval(self) -> float:
+        return POLL_FAST_S if any(s.running for s in self._statuses) else POLL_SLOW_S
+
+    # --- the scoring state --------------------------------------------------
+
+    def _scoring_card(self, view: MismatchListView) -> ScoringCard | None:
+        """Which scoring sentence this **run** deserves, or `None` for a list.
+
+        Per run, because that is the unit the screen shows (`SD26`, §17.6:
+        there is no "all runs" option) and the unit a scoring pass runs over.
+        An evaluation-wide `any(is_scored)` answered a different question than
+        the one the screen asks.
+
+        A run with no status row at all — which nothing in the product
+        produces, since `scoring_status` covers the evaluation's runs — is
+        treated as "show the list", because inventing a refusal for an
+        impossible state is how a real state ends up hidden behind it.
+        """
+        status = next(
+            (s for s in self._statuses if s.run_id == view.filters.run_id),
+            None,
+        )
+        return None if status is None else card_for(status)
+
+    def _ordinal(self, view: MismatchListView, run_id: RunId) -> int:
+        """The run's place in its evaluation, **as this screen already names
+        it**: the run chip reads "run 1 · qwen3:14b" off the position in
+        `view.runs`, and the Re-score button under the card has to say the
+        same number as the chip above it."""
+        for index, run in enumerate(view.runs, start=1):
+            if run.model_id == run_id:
+                return index
+        return 0
+
+    async def _rescore(self, run_id: RunId, ordinal: int) -> None:
+        """Submit the pass and redraw — `results/__init__._rescore`, and
+        deliberately the same: one verb, one seam, one sentence."""
+        try:
+            await self._services.scoring.submit_rescore(run_id)
+        except (NotFoundError, RunNotScoreableError) as error:
+            ui.notify(str(error))
+            await self.reload()
+            return
+        ui.notify(RESCORE_STARTED.format(run=run_label(ordinal)))
+        await self.reload()
 
     # --- the filter toolbar -------------------------------------------------
 
