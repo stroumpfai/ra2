@@ -24,6 +24,7 @@ purpose — `migrations/env.py` calls `asyncio.run`, which cannot re-enter the
 loop an async fixture is already running on.
 """
 
+import asyncio
 import os
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
@@ -79,6 +80,26 @@ async def app_factory(
         return app
 
     yield _tracking
+
+    # Stop anything still ticking, and let it unwind, **before** the engines
+    # go. `dispose()` closes the pool's *idle* connections; a progress tick in
+    # flight holds a session, and that session's connection is checked out,
+    # which is the one thing dispose cannot reach. Left alone it is finalised
+    # by the garbage collector after this loop has closed — `ResourceWarning:
+    # … deleted before being closed`, or aiosqlite's worker thread landing
+    # `call_soon_threadsafe` on a dead loop — and under
+    # `filterwarnings = ["error"]` that is an error in whichever test is
+    # running by then.
+    #
+    # Cancelling rather than waiting is deliberate: a poll over a run that
+    # never settles would never finish on its own, and `gather` here is what
+    # gives each task the turns it needs to run its `async with` exits and put
+    # its connection back while there is still a loop to do it on.
+    tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     for app in built:
         await app.state.engine.dispose()
