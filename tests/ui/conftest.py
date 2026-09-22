@@ -18,20 +18,18 @@ and its corpora from real services, so every UI page now needs a schema.
 `create_app()` never migrates — `just migrate` does — and §12.10 bans
 `metadata.create_all()` in tests as much as in the app, so the schema comes
 from the real Alembic chain here, the same way `tests/backend/conftest.py`
-gets it. `migrated_db` is **synchronous** on purpose: `migrations/env.py`
-calls `asyncio.run`, which cannot re-enter the loop an async fixture is
-already running on.
+gets it: once per session into a template, copied per test
+(`tests/fixtures/migrations.py`). `migrated_template` is **synchronous** on
+purpose — `migrations/env.py` calls `asyncio.run`, which cannot re-enter the
+loop an async fixture is already running on.
 """
 
 import os
-from argparse import Namespace
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
 import httpx
 import pytest
-from alembic import command
-from alembic.config import Config
 from fastapi import FastAPI
 from nicegui import ui
 from nicegui.functions.download import download
@@ -39,31 +37,72 @@ from nicegui.functions.navigate import Navigate
 from nicegui.functions.notify import notify
 from nicegui.testing.general import nicegui_reset_globals
 from nicegui.testing.user import User
+from tests.fixtures.migrations import build_template, copy_template
 
 from ra2.infra.config import Settings
 
-__all__ = ["migrated_db", "user"]
-
-#: `tests/ui/conftest.py` -> `tests/ui` -> `tests` -> the repo root.
-REPO_ROOT = Path(__file__).resolve().parents[2]
+__all__ = ["app_factory", "migrated_db", "migrated_template", "user"]
 
 
 @pytest.fixture
-def migrated_db(settings: Settings) -> Settings:
-    """A real temp-file SQLite database at `alembic upgrade head`."""
-    config = Config(str(REPO_ROOT / "alembic.ini"))
-    config.set_main_option("script_location", str(REPO_ROOT / "ra2" / "persistence" / "migrations"))
-    # Mirrors what `-x url=...` would set from the CLI, exactly as
-    # `tests/backend/conftest.py` does.
-    config.cmd_opts = Namespace(x=[f"url={settings.database_url}"])
-    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
-    command.upgrade(config, "head")
-    return settings
+async def app_factory(
+    app_factory: Callable[..., FastAPI],
+) -> AsyncIterator[Callable[..., FastAPI]]:
+    """The root `app_factory`, with the engines it builds disposed at teardown.
+
+    An undisposed aiosqlite engine finalises on the garbage collector's
+    schedule, and `filterwarnings = ["error"]` turns that into an error in
+    **whichever test happens to be running at the time** — which is what it
+    did, as a `ResourceWarning` about a connection "deleted before being
+    closed" landing on a test that had nothing to do with it.
+    `create_app()` never disposes, correctly: the process owns its engine for
+    its lifetime. So whoever built the app has to, and in this layer that is
+    every test — `user` below, and the fifteen view-specific fixtures in
+    `test_*.py` that mount their own app with their own seeding and their own
+    overrides.
+
+    Wrapping the factory rather than patching those fifteen is the difference
+    between one place that is right and fifteen that have to stay right.
+    `tests/backend/services/run/conftest.py`'s `build_app` already keeps this
+    list by hand for the same reason; this is the same list, kept by the
+    fixture they all go through.
+
+    Overriding a fixture while requesting the enclosing one of the same name
+    is pytest's own idiom for exactly this. The root fixture is frozen
+    (CONTRACTS.md) and stays untouched.
+    """
+    built: list[FastAPI] = []
+
+    def _tracking(**overrides: object) -> FastAPI:
+        app = app_factory(**overrides)
+        built.append(app)
+        return app
+
+    yield _tracking
+
+    for app in built:
+        await app.state.engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def migrated_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The real Alembic chain, run once for the whole session."""
+    return build_template(tmp_path_factory.mktemp("ui-migrated-template"))
+
+
+@pytest.fixture
+def migrated_db(migrated_template: Path, settings: Settings) -> Settings:
+    """A real temp-file SQLite database at head, private to this test."""
+    return copy_template(migrated_template, settings)
 
 
 @pytest.fixture
 async def user(app_factory: Callable[..., FastAPI], migrated_db: Settings) -> AsyncIterator[User]:
-    """A simulated browser against the real, UI-mounted app."""
+    """A simulated browser against the real, UI-mounted app.
+
+    The engine is disposed by `app_factory` above, for every app in the layer
+    rather than only this one.
+    """
     with nicegui_reset_globals():
         os.environ["NICEGUI_USER_SIMULATION"] = "true"
         try:

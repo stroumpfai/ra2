@@ -74,7 +74,7 @@ jobs:
         run: >
           uv run pytest -m "not e2e and not eval and not visual"
           --cov=ra2/domain --cov=ra2/services --cov-report=term-missing
-          --junitxml=test-results/junit-${{ matrix.os }}.xml
+          --junitxml=test-results/junit-${{ matrix.os }}.xml -n auto
       - uses: actions/upload-artifact@v4
         if: always()
         with:

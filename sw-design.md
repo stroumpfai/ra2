@@ -496,7 +496,13 @@ WAL and cross-connection behaviour must be exercised), plus the API through
 `httpx.ASGITransport` with no network.
 
 - The schema fixture runs **`alembic upgrade head`**, never `metadata.create_all`.
-  Every migration is therefore executed on every backend run.
+  Every migration is therefore executed on every backend run — **once per run**,
+  into a template database that each test copies. The chain costs ~220 ms and the
+  copy ~0.1 ms, and 1050 of the gate's 2460 tests need a schema, so per-test
+  migration was a third of the serial suite and nothing about it varied between
+  tests. `tests/backend/persistence/test_migrations.py` keeps a genuine per-test
+  upgrade (`freshly_migrated`): a test named "upgrade head creates every table"
+  must not be asserting against a file copy.
 - A dedicated test runs `alembic check` and fails when models and migrations have
   drifted.
 - Covers: analyse → select → freeze → census, the 409 on a locked corpus, transaction
@@ -585,7 +591,7 @@ settled.
 
 | Gate | Rule |
 |---|---|
-| `just test` | unit + backend + ui — the commit gate |
+| `just test` | unit + backend + ui — the commit gate, `-n auto` across every core |
 | `just e2e` | Playwright journeys — the PR gate |
 | Coverage | `fail_under = 85` on `ra2/domain` and `ra2/services`; no global number |
 | ruff | format + check, `PLW1514` on |

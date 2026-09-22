@@ -55,9 +55,16 @@ dev-agent:
 # Gates (sw-design.md §11.7)
 # ---------------------------------------------------------------------------
 
-# The commit gate: unit + backend + ui.
+# `-n auto` is one worker per core. The gate was 13 minutes serial on a
+# 28-core machine and is about one minute across all of them; the four gating
+# layers share no process state, so `--dist load`'s default round-robin is
+# safe. NiceGUI's `core.app` singleton is per *process*, and a worker runs one
+# test at a time, so layer 3 is unaffected. Debugging one test is still
+# `uv run pytest <path>` — serial, with a usable traceback.
+
+# The commit gate: unit + backend + ui, one worker per core.
 test:
-    uv run pytest -m "not e2e and not eval and not visual" --cov=ra2/domain --cov=ra2/services
+    uv run pytest -m "not e2e and not eval and not visual" --cov=ra2/domain --cov=ra2/services -n auto
 
 # The PR gate: the Playwright journeys.
 e2e:
