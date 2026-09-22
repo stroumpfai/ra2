@@ -9,7 +9,10 @@ a real file, and that is exactly what the FK-enforcement and `busy_timeout`
 tests in `tests/backend/persistence/` need to exercise (sw-design.md §11.2).
 
 The schema always comes from `alembic upgrade head` — never
-`ra2.persistence.models.Base.metadata.create_all()` (§12.10).
+`ra2.persistence.models.Base.metadata.create_all()` (§12.10). It comes from it
+**once per session**, into a template database each test copies; see
+`tests/fixtures/migrations.py` for why, and for the one test that still runs
+the chain itself.
 """
 
 from argparse import Namespace
@@ -18,9 +21,9 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from alembic import command
 from alembic.config import Config
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from tests.fixtures.migrations import build_template, copy_template, upgrade_to_head
 
 from ra2.infra.config import Settings
 from ra2.persistence.session import create_engine, create_session_factory
@@ -31,7 +34,9 @@ __all__ = [
     "backend_settings",
     "db_session",
     "db_session_factory",
+    "freshly_migrated",
     "migrated_engine",
+    "migrated_template",
     "run_upgrade_head",
 ]
 
@@ -61,16 +66,39 @@ def alembic_config(backend_settings: Settings) -> Config:
     return cfg
 
 
-@pytest.fixture
-def run_upgrade_head(alembic_config: Config, backend_settings: Settings) -> Settings:
-    """Runs the real migration chain against a real temp-file SQLite DB.
+@pytest.fixture(scope="session")
+def migrated_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The real migration chain, run once for the whole session.
 
-    Every migration executes on every backend test run — this is what makes
+    Every migration executes on every backend test run — that is what makes
     `alembic check` meaningful and what the round-trip / FK / busy_timeout
-    tests are asserted against (sw-design.md §11.2).
+    tests are asserted against (sw-design.md §11.2). It executes **once per
+    run** rather than once per test; under `-n`, once per worker.
     """
-    backend_settings.database_path.parent.mkdir(parents=True, exist_ok=True)
-    command.upgrade(alembic_config, "head")
+    return build_template(tmp_path_factory.mktemp("migrated-template"))
+
+
+@pytest.fixture
+def run_upgrade_head(migrated_template: Path, backend_settings: Settings) -> Settings:
+    """A real temp-file SQLite database at head, private to this test.
+
+    A copy of `migrated_template`, not a fresh chain: ~0.1 ms instead of
+    ~220 ms, and byte-identical to what the chain produces. Still a real file
+    (never `:memory:`), still never `metadata.create_all()`.
+    """
+    return copy_template(migrated_template, backend_settings)
+
+
+@pytest.fixture
+def freshly_migrated(backend_settings: Settings) -> Settings:
+    """`alembic upgrade head` run for this test alone.
+
+    For the tests **about** the migrations (`persistence/test_migrations.py`):
+    a test named "upgrade head creates every table" must assert against a
+    database the chain just built, not against a file copy of one. Everything
+    else wants `run_upgrade_head`.
+    """
+    upgrade_to_head(backend_settings)
     return backend_settings
 
 

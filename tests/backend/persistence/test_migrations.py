@@ -11,30 +11,37 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from ra2.infra.config import Settings
 from ra2.persistence.models import Base
+from ra2.persistence.session import create_engine
 
 pytestmark = pytest.mark.backend
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-async def test_upgrade_head_creates_every_table(migrated_engine: AsyncEngine) -> None:
+async def test_upgrade_head_creates_every_table(freshly_migrated: Settings) -> None:
     """`alembic upgrade head` against a real temp-file SQLite database
-    (never `:memory:`) produces every table `models.py` declares."""
-    async with migrated_engine.connect() as conn:
-        table_names = await conn.run_sync(lambda c: sa.inspect(c).get_table_names())
+    (never `:memory:`) produces every table `models.py` declares.
+
+    `freshly_migrated`, not `run_upgrade_head`: the rest of the layer copies a
+    session template, and this test is the one that has to watch the chain
+    actually build the schema.
+    """
+    engine = create_engine(freshly_migrated.database_url)
+    try:
+        async with engine.connect() as conn:
+            table_names = await conn.run_sync(lambda c: sa.inspect(c).get_table_names())
+    finally:
+        await engine.dispose()
 
     expected = set(Base.metadata.tables) - {"alembic_version"}
     assert expected.issubset(set(table_names))
     assert "alembic_version" in table_names
 
 
-async def test_alembic_check_reports_no_drift(
-    migrated_engine: AsyncEngine, run_upgrade_head: Settings
-) -> None:
+async def test_alembic_check_reports_no_drift(freshly_migrated: Settings) -> None:
     """The migration and `models.py` agree exactly — no autogenerate diff.
 
     This is the programmatic equivalent of `alembic check`: it fails the same
@@ -49,8 +56,12 @@ async def test_alembic_check_reports_no_drift(
         )
         return list(compare_metadata(context, Base.metadata))
 
-    async with migrated_engine.connect() as conn:
-        diff = await conn.run_sync(_diff)
+    engine = create_engine(freshly_migrated.database_url)
+    try:
+        async with engine.connect() as conn:
+            diff = await conn.run_sync(_diff)
+    finally:
+        await engine.dispose()
 
     assert diff == [], f"models.py and the migration have drifted: {diff!r}"
 
