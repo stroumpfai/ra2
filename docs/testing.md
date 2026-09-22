@@ -11,7 +11,7 @@ do, `sw-design.md` decides *how* it is built and tested, and where either
 disagrees with this page, this page is wrong. Every number below was measured,
 not remembered — re-measure rather than edit them.
 
-**Last reviewed:** 2026-09-22 · against commit `06d1650` · Linux, 28 cores.
+**Last reviewed:** 2026-09-22 · against commit `542d523` · Linux, 28 cores.
 
 ---
 
@@ -19,9 +19,9 @@ not remembered — re-measure rather than edit them.
 
 | | |
 |---|---|
-| Automated tests | **2 592** |
+| Automated tests | **2 595** |
 | Commit gate (`just test`) | 2 501 tests · **~32 s** · currently **green** |
-| PR gate (`just e2e`) | 91 tests · ~1 min 36 s · currently **green** |
+| PR gate (`just e2e`) | 94 tests · ~1 min 33 s · currently **green** |
 | Coverage | **96 %**, measured on business logic only — see §5 |
 | Manual test effort | none required to run either gate |
 | Nightly / scheduled | none |
@@ -42,8 +42,8 @@ a tool.
 | 1 · unit | `tests/unit/` | 720 | Business rules alone — parsing, validation, census maths, scoring, ranking statistics. No database, no network, no server. | ~7 s |
 | 2 · backend | `tests/backend/` | 947 | Services, database repositories and the HTTP API, against a real temporary SQLite file and an in-process HTTP client. | ~57 s |
 | 3 · UI | `tests/ui/` | 364 | Every screen, driven through a simulated browser in the same process. No real browser. | ~5 min |
-| 4 · E2E | `tests/e2e/` | 91 | Fourteen end-to-end journeys in a real Chromium against a real server. | ~1 min 45 s |
-| 5 · eval | `tests/eval/` | **0** | Model accuracy against a labelled baseline. **Not built** — see §7.4. |
+| 4 · E2E | `tests/e2e/` | 94 | Fourteen end-to-end journeys in a real Chromium against a real server, plus three checks on the layer's own Windows-only warning filter. | ~1 min 33 s |
+| 5 · eval | `tests/eval/` | **0** | Model accuracy against a labelled baseline. **Not built** — see §7.3. |
 
 Plus 469 contract tests at `tests/` root, which assert that frozen
 architectural decisions have not been edited away, and 1 that the HTTP API's
@@ -90,7 +90,7 @@ Then:
 | Command | Runs | Takes |
 |---|---|---|
 | `just test` | layers 1–3 + coverage — **the commit gate** | ~32 s |
-| `just e2e` | layer 4, real browser — **the PR gate** | ~1 min 45 s |
+| `just e2e` | layer 4, real browser — **the PR gate** | ~1 min 33 s |
 | `just lint` | formatting, type checking, architecture rules | ~15 s first run, <1 s after |
 | `just check-data` | refuses any real production data in the repository | ~2 s |
 | `just eval` | layer 5 — currently collects nothing | — |
@@ -176,7 +176,7 @@ HTTP layer, the database mapping and the external adapters.
 This is a considered choice, not an oversight. Line coverage of a UI measures
 whether a screen was drawn, not whether it was drawn correctly, and chasing it
 produces tests that assert nothing. Those layers are covered by **behaviour**
-instead — 364 UI tests and 91 journeys — which is not expressible as a
+instead — 364 UI tests and 94 journeys — which is not expressible as a
 percentage.
 
 The practical consequence for a test manager: **96 % is a statement about the
@@ -248,20 +248,12 @@ fixture six other tests share, which is a change with its own risk and is not
 one to make while fixing a red build. Recorded here as the next thing to do to
 this journey.
 
-### 7.2 `just lint` is failing on Linux
-
-`uv run mypy` reports one error, `tests/e2e/conftest.py:97: Statement is
-unreachable`. It is a platform artefact: the code after a Windows-only guard is
-genuinely unreachable when the type checker runs on Linux. It affects no test
-and no product code, and it means the lint job is red on Linux. Also
-long-standing.
-
-### 7.3 What is not covered by any automated test
+### 7.2 What is not covered by any automated test
 
 - **Anything a real language model does.** Every test in layers 1–4 runs
   against a substitute model that returns fixed answers. This is deliberate —
   the suite must pass on a machine with no GPU and nothing installed — but it
-  means **model quality is entirely untested** by the gates. See §7.4.
+  means **model quality is entirely untested** by the gates. See §7.3.
 - **Real production data.** By design (§6). The first contact between this
   product and a real delivery is a manual act.
 - **Performance and volume.** There is no load test, no timing assertion, and
@@ -280,7 +272,7 @@ long-standing.
 - **Upgrade from a previous version.** Database migrations are tested forwards
   from empty; no test upgrades a database containing realistic prior data.
 
-### 7.4 Layer 5 does not exist yet
+### 7.3 Layer 5 does not exist yet
 
 The directory, the marker and `just eval` are in place, and collect **zero
 tests**. The intent is 30–100 hand-labelled records scored against a committed
@@ -289,13 +281,13 @@ tells you whether the product's answers are getting better or worse** — the
 question the product exists to answer. This is the largest single gap in the
 strategy and it is a known, scheduled one, not an oversight.
 
-### 7.5 Eight tests skip silently
+### 7.4 Eight tests skip silently
 
 Tests marked `realdata` read sample files if they are present and skip if they
 are not. In CI they always skip. They are never required to pass, so a green
 run does not mean they ran.
 
-### 7.6 Stability
+### 7.5 Stability
 
 The commit gate was measured over 20 consecutive runs at the current commit
 with **no failures**. That is a recent state: two tests in the evaluation

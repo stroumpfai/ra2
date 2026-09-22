@@ -64,6 +64,19 @@ from ra2.ui.state import TableState
 # --- the Windows unraisable-warning filter -----------------------------------
 
 
+#: Whether this is the Windows leg, bound to a `bool` on purpose.
+#:
+#: mypy narrows `sys.platform` to the platform it is *run* on, so
+#: `if sys.platform != "win32": return` makes everything after it unreachable
+#: on Linux — and `warn_unreachable` then fails `just lint` on the very leg CI
+#: gates. A `# type: ignore[unreachable]` only moves the failure: strict mode's
+#: `warn_unused_ignores` rejects it on Windows, where the code *is* reachable.
+#: Binding the comparison to a plain `bool` — not `Final`, which would be
+#: inferred back to a literal — keeps the decision at runtime, where it always
+#: belonged, and identical on both platforms.
+_ON_WINDOWS: bool = sys.platform == "win32"
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """On Windows, ignore `PytestUnraisableExceptionWarning` for layer 4 only.
 
@@ -92,7 +105,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     The alternative was relaxing `filterwarnings` in `pyproject.toml`, which is
     frozen (CONTRACTS.md) and would have blunted layers 1-3 to fix layer 4.
     """
-    if sys.platform != "win32":
+    if not _ON_WINDOWS:
         return
     for item in items:
         item.add_marker(
