@@ -53,7 +53,12 @@ Import → Census → Codelists → Features → Prompts → Evaluation → Resu
   changing one word changes every answer.
 - **Evaluation** — pin one corpus, one frozen feature set and one prompt
   template; run them across several local models; watch progress.
-- **Results / Mismatches** — not built yet; see [Not built yet](#not-built-yet).
+- **Results** — precision, recall and F1 per feature and model, with *n* and
+  Wilson intervals, thin cells suppressed, ties drawn as ties, and a
+  per-language breakdown carrying the encoding caveat.
+- **Mismatches** — every disagreement with its evidence span, tagged three
+  ways, tallied. A mismatch rate is not a model error rate until someone has
+  read this list.
 
 ---
 
@@ -149,6 +154,9 @@ its own HTTP API — so the API is there for scripts, not for the UI.
    exactly what they used.
 6. **Evaluation** — pin a corpus, a frozen feature set and a template, choose
    models and decoding settings, and launch. Runs execute one model at a time.
+7. **Results and Mismatches** — a finished run scores itself. Read the ranking,
+   then read the mismatch list that qualifies it: the numbers do not mean what
+   they appear to mean until someone has.
 
 To land on step 6 without doing 1–5 by hand, run `just reset-seed yes` — it
 wipes the data directory and drives the same services the first five steps
@@ -312,7 +320,7 @@ Every setting is an environment variable prefixed `RA2_`, readable from a
 |---|---|---|
 | `RA2_DATA_DIR` | `./var` | The database, uploads and codelists live here. **Exports do not** — they go to the browser, and `just reset` cannot reach them. |
 | `RA2_DB_PATH` | `{data_dir}/ra2.sqlite` | The SQLite file. |
-| `RA2_HOST` / `RA2_PORT` | `127.0.0.1` / `8080` | Where the app listens. Loopback by default. |
+| `RA2_HOST` / `RA2_PORT` | `127.0.0.1` / `8080` | **Declared, and read by nothing.** The bind address comes from the `uvicorn` command line in the `justfile`, which is loopback in every recipe. These two settings describe that intent; they do not enforce it, and a `--host 0.0.0.0` on the command line would not be refused by any code, test or contract ([`docs/risk-assesment.md`](docs/risk-assesment.md) A4, G3). |
 | `RA2_LLM_BASE_URL` | `http://127.0.0.1:11434/v1` | The LLM endpoint. **Must be loopback.** |
 | `RA2_LLM_TIMEOUT_S` | `600` | Per-call timeout. Measured, not chosen: a 9.7 B thinking model answered one record in 136 s on the reporting host, and almost all of it was the response's `reasoning` field. |
 | `RA2_LLM_REASONING_EFFORT` | `none` | How hard the model is asked to think — `none`, `low`, `medium` or `high`, refused at startup if Ollama cannot map it. **Measured, not preferred:** the same record cost 190 s at the model's own default and 6 s at `none`, both answering correctly, and the default could not finish a 12-record run inside the timeout. Pinned on every run's provenance, so setting `high` and launching a second evaluation gives a comparison that is still legible afterwards. |
@@ -321,7 +329,7 @@ Every setting is an environment variable prefixed `RA2_`, readable from a
 | `RA2_GPU_VRAM_GB` / `RA2_GPU_NAME` | unset | Declare the GPU instead of probing it. |
 | `RA2_DEV_RECORD_MAX` | `50` | At or below this, a run is a dev-sized smoke test. |
 | `RA2_EVAL_RECORD_MIN` | `200` | Below this, a run is marked *dev* and every view says "smoke test, not a result". |
-| `RA2_MIN_CELL_COUNT` | `20` | Result cells below this are suppressed (used once scoring exists). |
+| `RA2_MIN_CELL_COUNT` | `20` | Result cells below this are suppressed. |
 | `RA2_MAX_UPLOAD_MB` | `512` | Upload ceiling. |
 | `RA2_STORAGE_SECRET` | a fixed string | NiceGUI session storage. **Not** a security boundary: the app has no login. |
 | `RA2_LOG_LEVEL` | `INFO` | The `ra2` logger, on **stderr** — no log file, so nothing to retain and nothing for `just reset` to wipe. `INFO` is what makes a long run legible: a line per record before the model is called and one after it. **A level, not a content switch** — a log line may carry ids, counts, statuses, model tags and durations, and never narrative, a prompt, model output or `unfall_uid` ([`data-handling.md` §5.1](data-handling.md)). |
@@ -556,11 +564,21 @@ fails on every machine without one.
 
 ### Fixtures contain the real hazards
 
-Test fixtures are not clean. They carry mixed encodings, a stray delimiter, an
-embedded newline, an orphan key, a key duplicated across two cantonal sets, an
-all-empty column, and French that is already lossy. Real data is gitignored and
-must never reach a test, so the hazards are synthesised byte-exactly and
-committed. A clean fixture proves nothing about this input.
+Test fixtures are not clean. The fourteen under
+`tests/fixtures/deliveries/hazards/` carry a cp1252 file and a byte that
+decodes under neither encoding, a stray delimiter, an embedded newline and an
+unquoted one, an orphan key, a key duplicated across two cantonal sets, an
+all-empty column, a count mismatch, an unmatched text key, an unknown header,
+and French that is already lossy. Real data is gitignored and must never reach
+a test, so the hazards are synthesised byte-exactly and committed. A clean
+fixture proves nothing about this input.
+
+> **One named hazard is still missing.** `CLAUDE.md` requires **mixed
+> encodings** — one file holding both UTF-8 and cp1252 bytes — and no fixture
+> covers it. `detect_encoding` decides per file, so such a file falls back to
+> cp1252 whole and every correctly-encoded UTF-8 row in it is silently
+> mojibaked. Tracked as **G1** and **G4** in
+> [`docs/risk-assesment.md`](docs/risk-assesment.md).
 
 **Byte-exactly is meant literally, and `.gitattributes` is what keeps it
 true.** `* -text` disables line-ending conversion in both directions. Without
@@ -577,8 +595,6 @@ Astrana exports do with it.
 
 Specified, and deliberately not implemented:
 
-- **Scoring, Results and Mismatches.** Runs produce extraction rows and stop
-  there — nothing scores them yet. Those nav entries route to a placeholder.
 - **The first eval run.** `tests/eval` and `evals/baseline.json` need a real GPU
   and a real Ollama, so they are seeded on the target machine rather than here.
 - **Docker packaging and an installer.** Planned; no Dockerfile exists today.
@@ -589,7 +605,8 @@ Specified, and deliberately not implemented:
   `interrupted` and the Evaluation view offers **Resume**. It is restart-*safe*
   and resumable, deliberately not automatic — a run that restarts itself on
   every app start burns GPU hours on work you may have abandoned.
-- **Per-language result breakdowns** and cross-evaluation views.
+- **Cross-evaluation views.** Results and Mismatches read one evaluation at a
+  time; comparing two is done by opening both.
 
 ---
 
@@ -609,6 +626,7 @@ question `sw-design.md` wins:
 | [`data-handling.md`](data-handling.md) | Outputs, retention, destruction and the incident path. **Decisions still open** are marked as such. |
 | [`docs/risk-assesment.md`](docs/risk-assesment.md) | External review of the use cases and the implementation, with a remediation log. |
 | [`docs/seed.md`](docs/seed.md) | What the development seed contains, and the score a perfect reader could reach on it. Reference, not authority. |
+| [`docs/testing.md`](docs/testing.md) | The testing approach, written for someone who has to judge it. Reference, not authority. |
 | `plan-phase-*.md` | Who built what, wave by wave. |
 | `design/*/README.md` | The UI handoff packages. Layout and copy are load-bearing. |
 
