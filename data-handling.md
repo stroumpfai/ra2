@@ -290,4 +290,4 @@ Nothing above is agreed until this table is filled in.
 | [`sw-design.md`](sw-design.md) §18 | Discard: what it removes, what it erases, what it deliberately does not record |
 | [`sw-design.md`](sw-design.md) §15.5 | The loopback rule, and why it has no opt-out |
 | [`CLAUDE.md`](CLAUDE.md) | Do-NOT #13 — agents never read `data/` or `RA2_DATA_DIR` |
-| [`risk-assesment.md`](risk-assesment.md) | The external review. B2, B3, F1 and the remediation log in §8 |
+| [`docs/risk-assesment.md`](docs/risk-assesment.md) | The external review. B2, B3, F1 and the remediation log in §8 |

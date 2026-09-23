@@ -607,7 +607,7 @@ question `sw-design.md` wins:
 | [`CLAUDE.md`](CLAUDE.md) | The Do-NOT list, the layer rule, the ownership rule. |
 | [`CONTRACTS.md`](CONTRACTS.md) | What is frozen, and every documented deviation with its reason. |
 | [`data-handling.md`](data-handling.md) | Outputs, retention, destruction and the incident path. **Decisions still open** are marked as such. |
-| [`risk-assesment.md`](risk-assesment.md) | External review of the use cases and the implementation, with a remediation log. |
+| [`docs/risk-assesment.md`](docs/risk-assesment.md) | External review of the use cases and the implementation, with a remediation log. |
 | [`docs/seed.md`](docs/seed.md) | What the development seed contains, and the score a perfect reader could reach on it. Reference, not authority. |
 | `plan-phase-*.md` | Who built what, wave by wave. |
 | `design/*/README.md` | The UI handoff packages. Layout and copy are load-bearing. |

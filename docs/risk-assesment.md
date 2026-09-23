@@ -1,8 +1,19 @@
 # Risk Assessment — RA2
 
 **External review of the use cases and the implementation.**
-Point-in-time, at commit `616bf2b` (2026-09-16), with phase 4 (scoring and
-results) in progress and phase 5 (mismatch review) not started.
+
+**Two passes, two baselines.**
+
+| Pass | Commit | Date | State of the work |
+|---|---|---|---|
+| **First** | `616bf2b` | 2026-09-16 | Phase 4 (scoring and results) in progress, phase 5 (mismatch review) not started |
+| **Second** | `12268ed` | 2026-09-23 | Phases 4 and 5 shipped; development winding down, first operational use imminent |
+
+The first pass wrote §§1–8. The second wrote **§9**, and touched §§1, 3, 5, 6
+and 7 where they had become factually wrong or where the maintained status
+columns moved. **§4 is not edited by the second pass** — it says what was true
+at `616bf2b`, and the findings the second pass adds are in **§9.2**, in the
+same form and under the same group letters.
 
 Reviewer: external, independent of the implementation. This document is not
 legal advice and not a penetration test — see *Method and limits*.
@@ -66,6 +77,31 @@ Nothing found here calls the architecture into question. Items 1, 3 and 4 are
 small fixes to controls that already exist; item 2 is the gap that no amount of
 code will close.
 
+### Second pass, 2026-09-23 — top five, recalibrated for handover
+
+The first pass's five are above, with their statuses maintained. **§9** re-reads
+the project at `12268ed`, with phases 4 and 5 shipped, development winding down
+and operational use imminent. The architecture still holds; the finding is that
+the register was graded for a project being *built* and the project is now being
+*used*. The five that matter most from here:
+
+| # | Status | Action | Effort | Risk |
+|---|---|---|---|---|
+| 21 | open | **`hide_parameters=True`** — a database error currently writes the narrative and `unfall_uid` into `run.error` **and into the log** (reproduced) | **10 min** | **A5** |
+| 23·24 | open | An intake mojibake canary and the mixed-encoding fixture — a mixed-encoding delivery is silently corrupted today (reproduced), and real files meet the parser for the first time at handover | ~½ day | **G1, G4** |
+| 11·15 | **◑ §8.6** | Fill in `data-handling.md` §7's ten decisions and close `mvp-spec.md` §18's B1–B4. **No longer pending — late**, and four of them gate work that cannot be done afterwards (§6) | ~1 day, no code | **F1, B3, C3** |
+| 31 | open | **A stated support path** — what may be copied off the machine when something breaks. The developer is reachable rather than resident, and §9.1.1 is the chain that makes this the dominant technical residual | ~2 h, no code | **A5, C2, E3** |
+| 26·32 | open | Correct and **gate** the README; start an operations log from the first real run. The handover document currently says the deliverable does not exist | ~½ day | **F6, E3, F4** |
+
+**The headline of the second pass is not a defect.** Every technical control in
+this report has improved since `616bf2b`, the gates are green, and A5 and G1 are
+small. What has not moved at all is the organisational half: ten blank
+decisions, four unanswered dependencies, no runbook, no rehearsed destruction,
+no operations log. At the first pass that imbalance was tolerable because the
+system was not in use. **It is now the larger share of the residual risk by a
+clear margin**, and §9.1 is why the margin widened without anyone changing a
+line of code.
+
 ---
 
 ## 2. Method and limits
@@ -114,7 +150,7 @@ under schedule pressure and expensive to rebuild.
 | **Loopback rule with no opt-out**, enforced at construction, before any client exists | `ra2/domain/llm.py:303` (`classify_endpoint`), `ra2/infra/ollama_client.py:269` | One rule, three faces (raise / ask / report); a literal host list, no DNS; the reasoning for *why there is no setting* is written down where the next person will look |
 | **One LLM seam**, enforced mechanically | `.importlinter` `one-llm-seam`, `tests/test_p3_contract.py:211` | A second provider client cannot be added by accident |
 | **Append-only data** — extractions, records, corpora, prompt templates | `mvp-spec.md` §5, Do-NOT #2 | A re-run cannot destroy evidence; `mismatch` is the single documented exception, with a preservation test |
-| **No logging of any kind** in the application | verified by grep over `ra2/` | The commonest way narrative text escapes a local app simply does not exist here |
+| ~~**No logging of any kind** in the application~~ · **superseded 2026-09-22** | was: verified by grep over `ra2/`. Now `ra2/infra/logging.py` + `data-handling.md` §5.1 | **The strongest claim in this table, and it is no longer true.** An operational log to stderr now exists, bounded by a *content* rule with a test behind it (`test_run_log_carries_no_data.py`). The trade is defensible — absence was fragile and nearly broke on the first silent 26-minute run — but a tested rule is a control with a perimeter, where absence had none. **§9.2 A5 is the hole in that perimeter, and it is verified.** |
 | **Strict parsing, loud failure** — no `errors="replace"`, no silent repair, every recovered or rejected row reported with its key | `ra2/infra/files.py`, `mvp-spec.md` §4.2 | Corrupted labels are the failure mode that surfaces months later as wrong metrics |
 | **Real data cannot reach the test suite** — hazards are synthesised byte-exactly; the one real-data test reads header lines only and skips when absent | `tests/unit/parsing/test_headers_realdata.py` | The discipline is real, not aspirational |
 | **Agent isolation already practised** — `just dev-agent` on a random port and a throwaway data dir | `justfile`, `scripts/dev_agent.py` | The precedent needed for C2 exists already |
@@ -127,6 +163,12 @@ under schedule pressure and expensive to rebuild.
 
 Scenarios are grouped by what actually goes wrong, not by which component is
 involved. **Control status**: *in place* · *partial* · *absent*.
+
+> **This register is the first pass, at `616bf2b`, and is not edited.** The
+> second pass adds **A5**, **B6**, **C4**, **D8**, **E4**, **F6** and a new
+> **Group G — data input integrity**; they are in **§9.2**, written in the same
+> form and under the same group letters. Where the second pass re-graded a
+> severity below, the re-grade is in **§9.3** and the row here is left alone.
 
 ### Group A — Data leaves the host
 
@@ -889,39 +931,55 @@ as written at `616bf2b`. A row may be `open` **and** name an entry: §8.5
 closed a third of an action and left the rest, and saying so is more useful
 than a symbol for it.
 
-**Now — before the next real import** (small, mostly code)
+> **Re-sequenced by the second pass, 2026-09-23.** Row numbers and statuses
+> are unchanged — §8's entries cite them — but the buckets are not. The first
+> pass sequenced by *kind of work*; with development winding down and
+> operational use imminent, the binding constraint is no longer what a task is
+> but **when it stops being possible**. The four buckets below are therefore
+> gates, in date order, and rows 21–30 are the second pass's additions.
+>
+> Nothing here is accepted. Every open row is a live recommendation.
+
+### Gate 1 — before the code freeze
+
+*These become impossible afterwards. Roughly three days in total, and they are
+the last three days in which any of them can be done.*
 
 | # | Status | Action | Risk | Effort |
 |---|---|---|---|---|
-| 1 | **✓ §8.1** | `trust_env=False` on every HTTP client the adapter builds, plus a proxy-environment test | A1 | 1 h |
-| 2 | **✓ §8.2** | Content-shaped real-data guard, wired into CI as well as pre-commit | C1 | ½ d |
-| 3 | **✓ §8.3** | Add Do-NOT #13 (agents never read `data/` or `RA2_DATA_DIR`) and a matching permission deny rule | C2 | 1 h |
-| 4 | **✓ §8.4** | Suppress verbatim value samples for non-coded columns; classification header on every export | B1 | ½ d |
-| 5 | open | Render the anonymisation marking as three states until its semantics are confirmed | B5 | 2 h |
-| 19 | **✓ §8.6** | ~~Write exports to `settings.exports_dir`~~ — **deleted instead**, and the two documents that claimed exports live under the data directory are corrected (`SD30`) | B3, B2 | 2 h |
-
-**Before the evaluation corpus is cut** (validity of the answer)
-
-| # | Status | Action | Risk | Effort |
-|---|---|---|---|---|
-| 6 | open | Record prompt token estimate per extraction; validate against a context budget at setup; decide how context size is set | D1 | 1 d |
+| **21** | open | **`hide_parameters=True` on `create_async_engine`**, plus a provoked-`IntegrityError` test with a positive control | **A5** | **10 min** |
+| **22** | open | Refuse UTF-16/32 BOMs and NUL bytes in `detect_encoding`, each with its own `FindingCode` | **G2** | 1 h |
+| **23** | open | An intake mojibake canary — the mirror of `CP1252_CANARY_ZERO`; one `FindingCode`, no schema change | **G1** | ½ d |
+| **24** | open | `h15_mixed_encoding` — the hazard `CLAUDE.md` has required by name since month one | **G4** | 1 h |
+| **25** | open | `reset_data.py` prints records and corpora, not bytes, and refuses a non-dev corpus without a second token | **E4** | 2 h |
+| **26** | open | Correct the README, and gate it: a test that no shipped nav item appears under *Not built yet* | **F6, E3** | 2 h |
+| **27** | open | A synthetic-corpus marker, rendered beside the dev chip and refused by the ranking — **needs a migration, so its deadline is earlier: before real data is in the database** | **D8** | ½ d + migration |
+| 6 | open | Record the context length on the run (`/api/show`); **flag any extraction whose returned `prompt_tokens` sits at or near the limit** — the per-extraction counts already exist (§9.4) | D1 | ½–1 d |
 | 7 | open | Carry the parse-failure rate onto Results and Ranking | D2 | 2 h |
 | 8 | open | Record model-server version and decoding options on the run; state the determinism caveat in the report template | D3 | 3 h |
-| 9 | open | Constrain `root_path` to an allowed root; make the server honour `Settings.host` or drop it | A4 | ½ d |
-| 10 | open | Standing copy on Results: a mismatch rate is not a model error rate until the list is read | D6 | 1 h |
+| 5 | open | Render the anonymisation marking as three states until its semantics are confirmed | B5 | 2 h |
+| 10 | open | Standing copy on Results: a mismatch rate is not a model error rate until the list is read — D6 closed by delivery, the string is still worth it | D6 | 1 h |
+| 9 | open | Constrain `root_path` to an allowed root; bound the walk; make the server honour `Settings.host` or drop it | A4, G3 | ½ d |
+| **28** | open | A contract test: every `Settings` field has a reader in `ra2/`, or it does not exist | G3 | 2 h |
+| **29** | open | Helper copy under the mismatch note field, in `EXPORT_LEAVES_RA2`'s voice | B6 | 1 h |
 
-**Organisational — no code, highest leverage**
+### Gate 2 — before real data lands on the machine
 
 | # | Status | Action | Risk | Effort |
 |---|---|---|---|---|
-| 11 | **◑ §8.6** | The governance page: owner, basis, retention, destruction, permitted outputs, incident path | F1, B2, B3 | 1 d |
-| 12 | **◑ §8.6** | Deployment conditions in the runbook: disk encryption, custody, no cloud-synced data dir, loopback bind, model-server pinning, no tunnels | B4, A2, A3, F2 | ½ d |
+| 20 | **◑ §8.6** | **Rehearse the destruction procedure end to end** on `reset-seed` data. Written, never executed | B3, F1, E4 | 2 h |
+| **30** | open | **Decide host-path intake: upload-only for real deliveries.** Deletes destruction step 5 and makes `just reset yes` complete | G3, A4, B3 | decision |
+| 15 | open | Confirm **B2 (VRAM)** and **B3 (air-gap)**. If air-gapped, build *and test* the wheel bundle and side-loaded weights **while the developer is still here** | F5, C3 | ½ d + lead time |
+| 12 | **◑ §8.6** | Deployment conditions confirmed, not merely written: disk encryption, custody, single-user, no cloud-synced data dir, loopback bind, `OLLAMA_HOST=127.0.0.1`, `OLLAMA_DEBUG` off, no tunnels | B4, A2, A3, F2 | ½ d |
+| 11 | **◑ §8.6** | The governance page — **fill in `data-handling.md` §7's ten decisions** | F1, B2, B3 | 1 d |
+| 14 | **◑ §8.6** | Decide backup vs. accepted re-run. E4 adds a second way to lose the corpus | B3, E1 | ½ d |
 | 13 | open · §8.6 | Extend the NDA or equivalent to the reviewing domain expert before Goal 3's review | B2 | — |
-| 14 | **◑ §8.6** | ~~`PRAGMA secure_delete=ON`~~ **done**; decide backup vs. accepted re-run — the question is now written down (`data-handling.md` §4.4) and unanswered | B3, E1 | ½ d |
-| 15 | open | Close B1–B4 with named owners and dates; write the decommission condition and the "to operate for real" list | F5, F3 | ½ d |
-| 20 | **◑ §8.6** | A numbered destruction procedure — written (`data-handling.md` §4.1); the **rehearsal on synthetic data before handover** is still to be done | B3, F1 | ½ d |
+| 3 | **✓ §8.3** | **Move real data off the development checkout** — C2's second recommendation, now near-free (§9.4). Closes C2 and C4 together | C2, C4 | ½ d |
 
-**At the acceptance pass (M34)**
+### Gate 3 — at the acceptance pass (M34), once, deliberately
+
+*Unchanged from the first pass except that these now have a date: they are the
+go-live gate, and M34 is still unscheduled.*
 
 | # | Status | Action | Risk |
 |---|---|---|---|
@@ -929,13 +987,48 @@ than a symbol for it.
 | 17 | open | Verify a long record is not silently truncated by the real server | D1 |
 | 18 | open | Check one run's provenance against the machine it claims to have run on | A2 |
 
+### Gate 4 — standing, during operation
+
+| # | Status | Action | Risk |
+|---|---|---|---|
+| **31** | open | **A stated support path**: what may be copied off the machine when something breaks, and to where. Once the freeze lands this is the only remaining break in §9.1.1's chain | A5, C2, B2, F6 |
+| **32** | open | **An operations log from the first real run** — endpoint, model, dates, incidents, decisions. With the developer reachable rather than resident, this is the only knowledge-transfer mechanism there is | F4 |
+| 4 | **✓ §8.4** | Screen every export before it leaves the machine. The classification line is a label; this is the rule | B1, B2 |
+| 15 | open | The decommission condition, with a date, and the "to operate for real" list | F3 |
+
+### Closed, or settled as decisions
+
+| # | Status | Action | Risk |
+|---|---|---|---|
+| 1 | **✓ §8.1** | `trust_env=False` on every HTTP client the adapter builds, plus a proxy-environment test | A1 |
+| 2 | **✓ §8.2** | Content-shaped real-data guard, wired into CI as well as pre-commit | C1 |
+| — | **decided** | **The repository stays public.** No longer a recommendation; see §9.4 for the two residuals that belong beside the acceptance | C1 |
+| 19 | **✓ §8.6** | ~~Write exports to `settings.exports_dir`~~ — **deleted instead**, and the two documents that claimed exports live under the data directory are corrected (`SD30`) | B3, B2 |
+
 ---
 
 ## 6. Open questions for the data owner and the project
 
 **Questions 1-4 and 6-8 are now carried as the decision table in
-[`data-handling.md`](data-handling.md) §7**, with owner and date columns to
+[`data-handling.md`](../data-handling.md) §7**, with owner and date columns to
 fill in. They are repeated here as the review left them.
+
+> **Second pass, 2026-09-23 — these are no longer pending, they are late.**
+> All ten rows of `data-handling.md` §7 are still blank, and `mvp-spec.md`
+> §18's B1–B4 are all still open, seven days after the page was written and
+> with operational use imminent. Four of them now gate work that cannot be
+> done afterwards:
+>
+> | Question | What it gates | Why the deadline is real |
+> |---|---|---|
+> | **4 · air-gap status** (B3) | The offline install path — a wheel bundle and side-loaded weights | There is no Dockerfile and no installer (F6). If the answer is *air-gapped*, this must be built **and tested** while the developer is still resident. Longest lead time of anything in the project |
+> | **B2 · GPU and VRAM** | Which models are testable at all | Unanswered hardware is what makes A2's tunnel tempting, and A2 is now **High** |
+> | **6 · disk encryption, single-user, no cloud sync** | Whether every deletion in `data-handling.md` §4 means anything | The machine goes into use. B4 is now **High**, and "unknown — not recorded" stops being tolerable when the recording *is* the control |
+> | **5 · `UnfHergangTextAnonym` semantics** | What the anonymisation marking may claim (B5) | One email, and it decides whether the chip is a privacy statement or provenance. It should be sent before the first real corpus is cut, not after |
+>
+> Questions 2, 3, 7 and 8 — retention, permitted outputs, NDA cover and the
+> incident path — do not gate code, but they are the whole of F1, and F1 is
+> **overdue** rather than open.
 
 1. Who is the named owner of this processing, and what is its legal basis?
    (F1)
@@ -967,6 +1060,24 @@ fill in. They are repeated here as the review left them.
 | A4 | Read of `ra2/api/v1/deliveries.py`, `ra2/services/delivery_service.py`, `ra2/infra/filestore.py`; grep for readers of `Settings.host` | Arbitrary `root_path` accepted; whole files read to hash; no module reads `Settings.host` |
 | D1 | grep over `ra2/` for `num_ctx`, `max_tokens`, `context`, `truncat`, and for callers of `estimate_tokens` | No context option sent, no length validation; `estimate_tokens` used only in the prompt preview |
 | D2 | Read of `ra2/services/scoring_service.py:373` and `ra2/ui/components/progress_card.py:84` | No `extraction_value` rows → `missing`; rate shown on the progress card only |
+
+**Second pass, 2026-09-23, at `12268ed`.** All four executed checks use
+synthetic bytes or synthetic rows in a throwaway temporary database. No project
+data was opened, queried or printed (Do-NOT #13).
+
+| Finding | Check | Result |
+|---|---|---|
+| **A5** | A duplicate-key insert forced through the project's own `create_engine`, on a temp database with two synthetic rows, then `f"{type(exc).__name__}: {exc}"` — exactly `_error_text` — inspected for the planted narrative and key | Both present. SQLAlchemy's `hide_parameters` defaults to `False` and `create_async_engine` is called without it (`session.py:97`) |
+| **G1** | Six synthetic byte-layouts through `ra2.domain.parsing.encoding.detect_encoding`, including UTF-8 bytes followed by cp1252 bytes in one file | Whole-file fallback to cp1252; the UTF-8 portion returns as `GrÃ¼ezi`. No finding beyond `ENCODING_DETECTED` |
+| **G2** | The same harness, with UTF-16LE with and without a BOM | With BOM → `cp1252`, text `'ÿþU\x00n\x00f…'`. Without BOM → `utf-8`, text `'U\x00n\x00f…'`. Neither is refused; only the UTF-8 BOM is recognised |
+| **G4** | `ls tests/fixtures/deliveries/hazards/` against `CLAUDE.md`'s named hazard list | `h01`–`h14` present; no mixed-encoding fixture. `h01_cp1252` is whole-file, `h02_undecodable` fails the file |
+| **C1** | Read of `scripts/check_no_real_data.py` and `.github/workflows/ci.yml`, since the guard is now a permanent rather than an interim control | Content-shaped via `classify_header`, headerless fallback on a 32-hex key plus delimiter, `_was_invented` excludes fixture keys, stdlib-only, runs first in CI with `--all` over every tracked file |
+| **A4 / G3** | Re-grep for readers of `Settings.host` and `Settings.port` across `ra2/` and `scripts/` | Still none. `scripts/dev_agent.py:37` sets `RA2_PORT` in the environment, which nothing reads; the port it binds is passed on the uvicorn command line |
+| **D1** | Re-grep for `num_ctx`, `max_tokens`, a context budget, and callers of `estimate_tokens`; read of `OllamaModelCatalog` | Still no context option, no budget check. `prompt_tokens`/`completion_tokens` **are** now recorded from the endpoint. The catalogue calls `/api/tags` only, never `/api/show` |
+| **D2 / D3 / D6** | Greps over `ra2/services/results_service.py`, `ranking_service.py`, `ra2/ui/views/results/` | Parse-failure rate absent from Results and Ranking; no model-server version on `run`; no standing mismatch-rate copy. The Mismatches view itself exists, which is what closes D6 |
+| **D8** | Read of `corpus_service.py:189` and every `is_dev` / `is_dev_sized` site | `is_dev_sized = record_count < dev_record_max`. A size threshold; no provenance marker anywhere |
+| **F6** | Read of `README.md` → *At a glance* and *Not built yet*, against the shipped nav | "Scoring, Results and Mismatches … nothing scores them yet … route to a placeholder" — false on all three. "No Dockerfile exists today" — still true |
+| — | `just test` | 2 521 passed, 1 skipped, 96.1 % coverage, 31 s |
 
 ---
 
@@ -1411,3 +1522,510 @@ database file. It does not reach the blocks the filesystem freed, a backup, or
 a disk image. **B4 carries this**, and `data-handling.md` §2 states full-disk
 encryption as the deployment condition that makes every deletion above mean
 something — still unconfirmed, still not the reviewer's to observe.
+
+---
+
+## 9. Second pass — the handover recalibration · 2026-09-23 · `12268ed`
+
+Sixty-two commits, 187 files and roughly 37 000 lines after the first pass.
+Phases 4 and 5 shipped; `just lint` and `just test` are green (2 521 passed,
+1 skipped, 96.1 % coverage, 31 s).
+
+**The code moved a long way. The decisions did not move at all.** All ten rows
+of `data-handling.md` §7 are blank, and `mvp-spec.md` §18's B1–B4 are all still
+open. At the first pass that was a governance finding. It is now a scheduling
+one, because of what §9.1 describes.
+
+### 9.1 Why the second pass re-grades rather than re-reviews
+
+The first pass graded every severity "in this context — a one-month PoC, one
+machine, one small group of analysts, real data". That context was
+**construction**. The project is now crossing into **operation**: development is
+winding down, analysts begin using the PoC, and the developer stays reachable
+rather than resident.
+
+The register has no entry for the crossing itself, and the crossing does not
+move every finding the same way.
+
+| | What the phase does to it |
+|---|---|
+| **Group C falls** — development, tooling, supply chain | Fewer commits, fewer branches, fewer agents. The exposure window closes on its own. **C2 is the exception and does not fall** — see §9.3. |
+| **A2, A3, B3, B4, Group E, Group F rise** | Every one of them was deferred *because* it was an operations concern. Operations starts now. |
+| **Group D's deadline arrives** | "Before the evaluation corpus is cut" was a future tense in September. It is now. |
+| **Group G spikes** — data input | **Real delivery files meet the parser for the first time at handover.** B4 has never landed. G1 and G2 are exactly what first contact surfaces. |
+
+The three acceptance checks the first pass parked "at M34" — an independent
+recomputation of one run's statistics, a truncation check against the real
+server, a provenance check of one run against the machine it claims to have run
+on — **are the go-live gate**, and nobody has scheduled M34. §5 now carries
+them as Gate 3.
+
+### 9.1.1 The support path is the new egress path
+
+This is the finding the second pass would lead with, and none of its parts are
+new. The chain is.
+
+While the system was being built, nobody operated it, so nothing broke in front
+of a user. From now on it will, and when it does:
+
+1. There is **no runbook** — E3, "deferred by design" (`mvp-spec.md` §16). The
+   design is over.
+2. The **README tells the incoming operator that the three screens the PoC
+   exists to produce do not exist** — F6, verbatim, still in the file.
+3. There is **no audit trail anywhere**, by deliberate and well-reasoned choice
+   (F1; `data-handling.md` §5).
+4. So the only diagnostic material is a log line, a screenshot or a traceback,
+   and the natural act — with the developer *reachable rather than resident* —
+   is to send it to them.
+5. **A5 means that log line can carry a narrative and an `unfall_uid`
+   verbatim**, precisely when something has gone wrong.
+6. The destination is a **public repository** (now a settled decision, §9.4) or
+   an **agent transcript**, which leaves the host by construction (Do-NOT #13).
+
+Each link was assessed individually and accepted individually. The chain was
+not, because it could not close while the thing was still being built. It
+closes at handover.
+
+**The developer being reachable rather than resident is what arms it.** A
+resident developer debugs on the machine; a reachable one debugs from a
+description, and a description of a data bug is made of data. Every
+recommendation that breaks this chain is in Gate 1 or Gate 4 of §5.
+
+---
+
+### 9.2 Findings added by the second pass
+
+Written in §4's form. Severities are second-pass severities, already graded for
+the operational phase.
+
+---
+
+**A5 · A database error writes the narrative and the record key into
+`run.error`, and from there into the log** · Severity: **High** · Control
+status: **absent** · **Verified**
+
+*Scenario.* Any exception raised beneath a run — a constraint violation, a
+validation error, a driver fault — is stringified into `run.error`, which is
+persisted, rendered in the runs table's log action, **and written to stderr**.
+SQLAlchemy includes the bound parameters of the failing statement in that
+string by default. For an insert over `record`, the bound parameters are the
+narrative and `unfall_uid`.
+
+*Evidence.* `create_engine` (`ra2/persistence/session.py:97`) calls
+`create_async_engine(database_url, echo=echo, future=True)` — **without
+`hide_parameters=True`**. `_error_text` (`ra2/services/run_service.py:1079`) is
+`f"{type(exc).__name__}: {exc}"` for every exception that is not a
+`FeatureValidationError`, and `run_service.py:808` logs it. Reproduced through
+the project's own engine on synthetic rows:
+
+```
+IntegrityError: (sqlite3.IntegrityError) UNIQUE constraint failed: r.uid
+[SQL: INSERT INTO r VALUES (?,?)]
+[parameters: ('SYNTHETICUID0000000000000000abcd', 'SYNTHETIC-NARRATIVE Lenker A
+ kollidierte mit Fussgaenger B am Fussgaengerstreifen.')]
+
+narrative present : True
+unfall_uid present: True
+```
+
+Both are on `data-handling.md` §5.1's **"may never appear"** list, by name.
+
+*Why the existing control does not catch it.*
+`test_run_log_carries_no_data.py` drives a **successful** run against a fixture
+whose narrative and keys it knows. It never provokes a database error, so the
+one channel that can carry content is the one channel the test cannot reach.
+This is A1's shape exactly: the guard is correct and complete for what it
+inspects, and the defect lives one layer below it.
+
+*Impact.* `ra2/infra/logging.py`'s stated rationale is that the log is *safe
+for an agent to paste into a bug report*. This path makes it unsafe at exactly
+the moment an agent is asked to look, and it is link 5 of §9.1.1's chain.
+
+*Recommendation.*
+1. `hide_parameters=True` on `create_async_engine`. One line.
+2. A test that provokes a real `IntegrityError` through the real engine and
+   asserts the narrative and the key are absent from `str(exc)` — **with a
+   positive control** proving the search can fail, in the idiom §8.1 and §8.6
+   already established. A negative assertion that cannot fail is worse than
+   none.
+3. Say in `data-handling.md` §5.1 that the "may never appear" list is enforced
+   by the engine's configuration as well as by the call sites, because a call
+   site is not where this one came from.
+
+---
+
+**B6 · The mismatch note is an unconstrained free-text channel that exports
+verbatim** · Severity: **Low–Medium** · Control status: **absent**
+
+*Scenario.* Review writes three columns — `analyst_tag`, `tagged_at` and
+`note`. The `note` is unconstrained free text and is exported verbatim in both
+mismatch CSVs (`ra2/services/export_service.py:96`, `:115`). An analyst writing
+*"the text says the driver braked, so the code is wrong"* is doing the job as
+designed, and has just copied narrative into an export whose classification
+line is a label rather than a rule (B2).
+
+`data-handling.md` §3 lists the column. It does not name it as a hazard.
+
+*Secondary, and worth stating as accepted rather than leaving implicit.*
+`tagged_at` exists; **`tagged_by` does not**, and the tag is the single mutable
+row in the schema with no history. A retag leaves no trace and the Goal 3 tally
+is not reconstructible from the machine. That is correct for one analyst on one
+machine and wrong the moment F3 happens — which is the argument for recording
+it as an accepted decision rather than as an absence nobody noticed.
+
+*Recommendation.* One line of helper copy under the note field, in the voice
+`EXPORT_LEAVES_RA2` already uses. Record the `tagged_by` decision as accepted
+in `data-handling.md`, so F3 re-opens it deliberately rather than by drift.
+
+---
+
+**C4 · The agent deny rules are relative paths, and agents work in worktrees**
+· Severity: **Medium** · Control status: **partial**
+
+*Scenario.* `.claude/settings.json` denies `Read(./data/**)`,
+`Read(./var/**)` and `Bash(sqlite3 *)`. Three gaps, in rising order of how
+likely each is to matter:
+
+1. The paths are **relative**. Both the justfile and `.gitignore` document
+   agents working in `.claude/worktrees/agent-*` — full copies of this project.
+   A deny evaluated from a worktree root does not cover
+   `<repo>/var/ra2.sqlite` reached by absolute path.
+2. `Bash(sqlite3 *)` is denied; `uv run python -c "import sqlite3 …"` is not,
+   and neither are `cat`, `head`, `strings` or `grep` against a path the deny
+   list has not been told about.
+3. `RA2_DATA_DIR` can point anywhere — which `CLAUDE.md` concedes in writing:
+   *"no glob covers a path it has not been told about."*
+
+*Recommendation.* Absolute paths in the deny list, plus patterns for the
+database file by name and for the interpreter-shaped bypasses. But the
+recommendation that makes all of it unnecessary is **C2's second one, still
+open — keep real data off the development checkout entirely** — and see §9.3
+for why it is now much cheaper than it was at `616bf2b`.
+
+---
+
+**D8 · Nothing distinguishes a synthetic corpus from a real one** · Severity:
+**High during the transition** · Control status: **absent**
+
+*Scenario.* `corpus.is_dev_sized` is
+`record_count < settings.dev_record_max` (`ra2/services/corpus_service.py:189`)
+— a **size** threshold, not a provenance marker. `just reset-seed yes --records
+3000` produces a corpus above the floor, unmarked, whose Results screen is
+indistinguishable from a real evaluation's.
+
+*Why now and not before.* During the transition — and only during the
+transition — a seeded corpus and the first real corpus exist on the same
+machine at the same time. And the seed is *deliberately convincing*:
+`scripts/seed_dev.py` documents having been rebuilt specifically so a run over
+it would not produce a hollow Results screen, with realistic proportions of
+`HIT`, `WRONG` and `MISSING`. That quality is the risk.
+
+*Impact.* A screenshot or an exported ranking taken from seed data and carried
+into a report. The PoC's deliverable is a number, and D5 already establishes
+that a wrong one is invisible; this is a second way to produce one.
+
+*Recommendation.* A `corpus.is_synthetic` flag, set on the seed path, rendered
+as a chip beside the dev-sized one and refused by the ranking — the same
+pattern the project already accepted for dev-sized results, and asserted the
+same way. **It needs a migration, so its deadline is earlier than the code
+freeze: before real data is in the database.** A migration against a database
+holding real records is a different act from a migration against an empty one.
+The migration-author rule applies (`CLAUDE.md`).
+
+---
+
+**E4 · The rehearsal tool and the destruction tool are the same command, and
+after handover it points at real data** · Severity: **High** · Control status:
+**partial**
+
+*Scenario.* `data-handling.md` §4.3 instructs the operator to rehearse
+destruction using `just reset-seed`. `just reset-seed yes` runs
+`reset_data.py`, which wipes `RA2_DATA_DIR`, and then **seeds a convincing
+synthetic corpus in its place**.
+
+On a development machine that is a convenience. On the operational machine it
+destroys the real corpus, the census, the codelists and every completed run —
+GPU-weeks that the budget does not have — and replaces them with data that
+looks plausible on every screen (D8).
+
+*Existing controls, and why they are thin here.* There is a `yes` token, and
+the script prints its plan before acting — both deliberate, and
+`reset_data.py`'s own docstring gives the right reason: *"a destructive default
+is how the wrong database gets deleted at the end of a long day."* But the plan
+reports **bytes, not records**. The operator sees `ra2.sqlite 281.0 MB`, which
+is a hint, not a statement, and nothing in the output distinguishes the machine
+holding the real corpus from the one holding a seed.
+
+*Impact.* Compounded by two things already in the register: E1 — there is no
+backup and no decision about whether there should be — and E2, which is what
+makes the loss GPU-weeks rather than minutes.
+
+*Recommendation.*
+- Count the corpora and records the plan is about to destroy, and **print
+  them**. The plan should say what is being lost, not how many bytes it
+  occupies.
+- **Refuse outright** when the database holds a corpus that is not dev-sized,
+  unless a second, different token is supplied. This extends the script's own
+  stated principle one step, to match who is now holding it.
+- Consider whether `reset-seed` should exist on the operational machine at all.
+
+---
+
+**F6 · The README is the handover document, and it is materially false** ·
+Severity: **High** · Control status: **absent** · **Verified**
+
+*Scenario.* Not drift in the abstract. Verbatim in `README.md` today, under
+*Not built yet*:
+
+> **Scoring, Results and Mismatches.** Runs produce extraction rows and stop
+> there — nothing scores them yet. Those nav entries route to a placeholder.
+
+All three shipped. Scoring is chained to run completion
+(`tests/backend/services/run/test_scoring_is_chained.py`), Results is V1–V3,
+Mismatches is M35–M40. The *At a glance* section repeats the claim.
+
+The same section's *"Docker packaging and an installer. Planned; no Dockerfile
+exists today"* is **still true**, which is E3 arriving on schedule with the
+resident developer leaving.
+
+*Impact.* The incoming operator's first document tells them the deliverable
+does not exist, and is silent about the two things they will actually need. It
+is link 2 of §9.1.1's chain: a reader who cannot trust the README has no route
+to self-service and goes to the developer instead.
+
+*Why it keeps happening.* §8.6 already had to remove two false README claims
+about exports. This is the third and fourth. The diagnosis is this project's
+own principle turned on itself: `FindingCode` values, load-bearing UI copy,
+line endings, import layers and frozen contracts all have a test, a linter or a
+gate. **The README has a habit.** It is the only document here with nothing
+behind it, and it is the one a stranger reads first.
+
+*Recommendation.* Correct it, and gate it: a test asserting that no nav item
+`ra2/ui/shell.py:NAV_ITEMS` routes to a real view appears in the README's *Not
+built yet* section. One test, in the idiom the project already uses for
+load-bearing copy, and it retires the habit rather than the instance.
+
+---
+
+### Group G — Data input integrity
+
+*New in the second pass.* The first pass had no input-integrity group; intake
+concerns sat scattered under A4 and D4. The group exists now because **B4 —
+real delivery files — has never landed, and the first real import happens at
+handover.** Everything here is upstream of every number the PoC produces.
+
+---
+
+**G1 · A mixed-encoding file is silently mojibaked** · Severity: **High** ·
+Control status: **absent** · **Verified**
+
+*Scenario.* `detect_encoding` decides for the **whole file**: UTF-8 strictly,
+else cp1252, else fail. One cp1252 byte anywhere in a 200 000-row file flips
+the entire file to cp1252 — and every correctly-encoded UTF-8 row *before* it
+becomes mojibake, with no finding raised.
+
+*Evidence.* Synthetic bytes, through the project's own `detect_encoding`:
+
+```
+utf8 + cp1252 mix  ->  cp1252   text='Text\nGrüezi\nFussgänger\n'
+                                           ^^^^^^^  was "Grüezi"
+```
+
+*Why the existing reasoning does not cover it.* `encoding.py`'s docstring
+argues there is deliberately no third fallback because `latin-1` *"would decode
+every byte string ever written and turn a detection failure into silent
+mojibake"*. The argument is sound and the conclusion is right — but **cp1252
+decodes 251 of 256 byte values**, so it is 98 % of the way to being latin-1.
+The reasoning proves slightly less than it is asked to carry.
+
+*Impact.* The D-group failure mode arriving at the head of the pipeline. The
+model reads corrupted German, scores `wrong` or `missing`, and the result is
+indistinguishable from a model that reads badly — in the ranking, which is the
+deliverable. The analyst sees `ENCODING_DETECTED: cp1252`, severity
+**REPORTED** rather than blocking, and has no reason to suspect anything.
+
+*Recommendation.* **The project already owns the right pattern, pointing the
+other way.** `CP1252_CANARY_ZERO` counts Windows-1252-only characters to prove
+a lossy conversion happened *upstream*. Nothing counts the mirror signature —
+`Ã`, `Â`, `â€`, `Ã¼` — which is what UTF-8-read-as-cp1252 looks like *at
+intake*. Add that canary: one new `FindingCode`, one corpus-level count, no
+schema change, symmetric with the one that exists and defensible for the same
+reason.
+
+---
+
+**G2 · A UTF-16 file decodes "successfully" and lands as NUL-riddled text** ·
+Severity: **High** · Control status: **absent** · **Verified**
+
+*Scenario.* Only the UTF-8 BOM is recognised and stripped. A UTF-16 file — an
+Excel "Unicode Text" re-export is the obvious way one arrives — decodes
+cleanly, because UTF-8 accepts `U+0000` and cp1252 accepts almost everything.
+
+*Evidence.*
+
+```
+utf16le with BOM   ->  cp1252   text='ÿþU\x00n\x00f\x00a\x00l\x00l\x00-\x00U\x00I\x00D…'
+utf16le no BOM     ->  utf-8    text='U\x00n\x00f\x00a\x00l\x00l\x00-\x00U\x00I\x00D…'
+```
+
+*Impact, and the saving grace.* The file then fails downstream at header
+classification, so this is **loud** rather than silent — which is why it is
+graded below G1 on impact and level with it on urgency. But the finding names
+the wrong cause: the analyst is told `UNKNOWN_HEADER` and sent to fix a header
+that is fine. At handover, with a first real delivery and no runbook, a
+misdiagnosed import is exactly the event that routes someone to the developer
+(§9.1.1).
+
+*Recommendation.* Three lines, both in the *refuse to guess* posture the parser
+already applies everywhere else: refuse a UTF-16/32 BOM by name, and refuse
+decoded text containing `\x00`, each with its own `FindingCode` so the finding
+names the real cause.
+
+---
+
+**G3 · Host-path intake is unconstrained, unbounded, and now load-bearing for
+the destruction claim** · Severity: **Medium** · Control status: **partial**
+
+*This is A4's intake half, re-stated because its cost has risen rather than
+because the code changed.* Re-verified at `12268ed`: `Settings.host` and
+`Settings.port` still have **no reader anywhere in `ra2/`**;
+`HostPathFileStore.list_files` still does `rglob("*")` with `_stat_file`
+reading every file fully into memory to hash it; `root_path` is still
+unconstrained.
+
+*What changed.* `data-handling.md` §4.2 has promoted this unfixed code finding
+into a **permanent manual step 5 of the destruction procedure**, and a
+`DECISION REQUIRED (P5)`. An open code finding has become a standing operational
+burden on the person least able to carry it.
+
+*Recommendation.* **The cheapest resolution is not code.** Decide that real
+deliveries are **upload-only**. That deletes destruction step 5, makes
+`just reset yes` a complete destruction of everything RA2 has ever held, and
+costs one validation. `RA2_IMPORT_ROOT` is the fallback if host-path intake
+must stay. Separately, bound the walk — file count and total bytes, with a
+`Finding` rather than an exception.
+
+*A pattern worth naming once.* `Settings.host`, `Settings.port`, the deleted
+`Settings.exports_dir` (§8.6) and `scripts/dev_agent.py`'s `RA2_PORT` — set in
+the environment, read by nothing — are four instances of **a setting that
+implies a control nobody implemented**. §8.6 called this shape out for
+`exports_dir`; it is a category, not an instance. One contract test would close
+it: every `Settings` field has a reader in `ra2/`, or it does not exist.
+
+---
+
+**G4 · The hazard corpus is missing the hazard `CLAUDE.md` requires by name** ·
+Severity: **Medium** · Control status: **absent** · **Verified**
+
+*Evidence.* `CLAUDE.md` → *Working agreements*: *"Fixtures must contain the
+real hazards — **mixed encodings**, a stray `|`, an embedded newline, an orphan
+key, a key duplicated across two cantonal sets, an all-empty column, French
+already lossy."* The committed set is `h01`–`h14`. `h01_cp1252` is whole-file
+cp1252; `h02_undecodable` fails the file. **There is no mixed-encoding
+fixture.**
+
+*Impact.* G1 is precisely the defect that fixture was specified to catch, and
+the specification predates the code. This is the one finding in the report that
+costs nothing to close and would have prevented another.
+
+*Recommendation.* `h15_mixed_encoding`, generated byte-exactly by
+`tests/fixtures/deliveries/generate_hazards.py` like the other fourteen.
+
+---
+
+### 9.3 Re-grades
+
+The row in §4 is left as written. This table is the second pass's judgement at
+`12268ed`, for the operational phase.
+
+| Finding | First pass | Second pass | Why the phase moved it |
+|---|---|---|---|
+| **A2** tunnel behind `127.0.0.1` | Medium | **High** | B2 (VRAM) is still unconfirmed at the moment models are chosen. Weak hardware, a short month, and one line of `ssh -L`. |
+| **A3** the Ollama process | Medium | **High** | Setup happens now. `OLLAMA_HOST`, `OLLAMA_DEBUG` and how weights arrive are go-live decisions, not future ones. |
+| **A4** unauthenticated app, arbitrary host-path read | Medium | **Medium**, intake half re-stated as **G3** | Unchanged in code; re-verified. Its destruction consequence is what moved. |
+| **B3** retention and destruction | High | **High, dated** | The rehearsal window (`data-handling.md` §4.3) is *before* real data lands. It is open now and closes at first import. |
+| **B4** encryption and custody | Medium | **High** | The machine goes into use. "Unknown — not recorded" stops being tolerable when the recording is the control. |
+| **C1** real-data commit guard | High | **Closed / accepted** | §9.4. |
+| **C2** AI-assisted development on the corpus machine | Med–High | **Medium–High — unchanged, and its character changes** | The obvious read is that this falls with the build traffic. It does not. A *resident* developer debugs on the machine; a **reachable** one debugs from a description, and a description of a data bug is made of data. The residual moves from *an agent reading the corpus while building a feature* to *an agent reading it while diagnosing a live incident* — unplanned, urgent, and involving precisely the record that broke. Reactive debugging is when Do-NOT #13 gets broken, not scheduled work. |
+| **C3** supply chain and offline install | Low–Med | **High if air-gapped** | If B3 answers "air-gapped", the wheel bundle and the side-loaded weights must be built **while the developer is still here**. There is no Dockerfile and no installer (F6). A schedule gate, not a security nicety. |
+| **D1** context-window truncation | High | **High, dated** | "Before the corpus is cut" is now. Half of it arrived free — see §9.4. |
+| **D2** parse-failure rate invisible on Results | Medium | **Medium** | Unchanged; re-verified absent from Results and Ranking. |
+| **D3** reproducibility claimed too strongly | Medium | **Medium** | Unchanged; the model-server version is still not recorded. |
+| **D6** Results readable before the review exists | Medium | **Closed by delivery** | §9.4. |
+| **E1** one machine, one file, no backup | Medium | **High** | Runs become GPU-weeks of real work, and E4 adds a second way to lose them. |
+| **E3** handover not built | Medium | **High** | No longer deferred. Due. It is what §9.1.1's chain hangs on. |
+| **F1** accountability | High | **High, overdue** | Ten blank decisions. The status changes from pending to late. |
+| **F2** deployment conditions unstated | Medium | **High** | The assumptions — single user, loopback bind, no remote-desktop sharing — become live operating conditions with nobody watching them. |
+| **F3** scope drift | Medium | **High** | "A PoC that works gets used." This is the week it starts being used. |
+| **F4** key-person concentration | Medium | **High, partly mitigated** | The developer staying reachable preserves the knowledge and is the right call. It does not *transfer* it, and reachability ends. The operations log recommendation moves from nice-to-have to the only transfer mechanism there is. |
+
+### 9.4 What the second pass closes
+
+**D6 — closed by delivery, not by remediation.** The finding was bounded:
+*"until the review view ships"*. It shipped (M35–M40, `5a61ed3`). The window
+closed itself. The underlying recommendation — standing copy on Results saying
+*a mismatch rate is not a model error rate until someone has read the list* —
+is still worth one string, and is carried in §5 Gate 1.
+
+**C1 — the repository's visibility is now a settled decision, not an open
+item.** The project has decided the repository stays public. The document
+should stop carrying "reconsider public visibility" as a recommendation.
+
+The guard that now permanently carries the whole weight is sound, and the
+second pass checked it rather than assuming: `scripts/check_no_real_data.py` is
+content-shaped, classifies through the importer's own `classify_header`, has a
+headerless fallback keyed on a 32-hex key plus a delimiter, excludes invented
+fixture keys via `_was_invented`, imports nothing outside the standard library,
+and runs **first** in CI over **every tracked file** with `--all`. It is a good
+permanent control.
+
+Two residuals belong beside the acceptance, because *public, permanently*
+changes what they mean:
+
+- **A mistake is unrecoverable.** A force-push does not help. Content must be
+  assumed mirrored the moment it is pushed.
+- **The guard sees delivery-shaped files.** It does not see a narrative pasted
+  into an issue, a commit message, a test failure, a screenshot or a Playwright
+  trace. **§9.1.1 is the path it cannot cover**, and with the repository public
+  that path now ends somewhere permanent.
+
+**D1 — half of it arrived by another route, and the remaining half got
+cheaper.** `Extraction.prompt_tokens` and `completion_tokens` are now recorded
+**from the endpoint** on every extraction (`ra2/persistence/models.py:1128`),
+which is recommendation 6's first half, reached by a different road. What is
+still missing is only the comparison: no context size is configured, recorded
+or checked; `OllamaModelCatalog` calls `/api/tags` only, never `/api/show`,
+which is where Ollama exposes context length; and `estimate_tokens` still feeds
+nothing but the prompt preview. **The cheapest useful check now needs no setup
+at all** — flag any extraction whose returned `prompt_tokens` sits at or near
+the model's limit, which is what truncation looks like from the client side,
+using a number the database already holds.
+
+**C2's second recommendation got much cheaper.** At `616bf2b` the reason
+`var/ra2.sqlite` held 2 695 real records on the development machine was that
+there was nothing else to develop against. **`just reset-seed` now produces a
+genuinely usable corpus** — realistic scenarios, deliberate `HIT`/`WRONG`/
+`MISSING` proportions, a runnable evaluation, documented in `docs/seed.md`. The
+cost of *keep real data off the development checkout entirely* has fallen to
+near zero, and the first pass could not have known that. It is the single
+recommendation that closes C2 and C4 together, and it makes §9.1.1's link 6
+much harder to reach.
+
+### 9.5 Method and limits of the second pass
+
+Same reviewer posture and the same limits as §2, which are unchanged. In
+addition:
+
+**What was executed.** Four checks were run rather than read, all on synthetic
+bytes or synthetic rows. **No project data was opened, queried or printed**
+(Do-NOT #13) — the engine probe used a throwaway temporary database built for
+the purpose.
+
+**What was not examined**, beyond §2's list: the E2E suite was not run; the
+repository's visibility was not re-queried (the project states it and it is now
+a decision rather than a finding); `data/` and `var/` were not touched.
+
+**What is deliberately not re-derived.** §4's register was not re-audited
+finding by finding. Where the second pass says *unchanged*, that means the code
+paths named in the original finding were re-read or re-grepped at `12268ed` and
+still behave as described — not that the whole scenario was re-reasoned.
