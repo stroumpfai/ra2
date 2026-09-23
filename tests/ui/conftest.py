@@ -44,6 +44,12 @@ from ra2.infra.config import Settings
 
 __all__ = ["app_factory", "migrated_db", "migrated_template", "user"]
 
+#: How many cancel-and-gather passes the teardown makes before giving up. Two
+#: would do for the timer this was written against — one to cancel the loop,
+#: one for the tick it spawned on the way out — and the rest is headroom for a
+#: chain nobody has seen yet.
+_DRAIN_PASSES = 5
+
 
 @pytest.fixture
 async def app_factory(
@@ -95,10 +101,30 @@ async def app_factory(
     # never settles would never finish on its own, and `gather` here is what
     # gives each task the turns it needs to run its `async with` exits and put
     # its connection back while there is still a loop to do it on.
-    tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
-    for task in tasks:
-        task.cancel()
-    if tasks:
+    # **Drained, not snapshotted.** This was one pass — collect the tasks,
+    # cancel them, gather — and one pass cannot win against `ui.timer`.
+    # NiceGUI's timer loop creates a *fresh* task per tick
+    # (`asyncio.create_task(self._invoke_callback())`, `nicegui/timer.py`), so
+    # a tick that starts between the collection and the gather produces a task
+    # that was never in the list and is never cancelled. The loop also catches
+    # its own `CancelledError` and breaks cleanly, so cancelling the outer
+    # task does not guarantee the invocation inside it died.
+    #
+    # Whatever survives holds a session whose connection is checked out — the
+    # one thing `dispose()` below cannot reclaim — and the garbage collector
+    # finalises it later, inside some other test, where
+    # `filterwarnings = ["error"]` turns the `ResourceWarning` into that
+    # test's failure. Re-checking until the loop is quiet closes the window.
+    #
+    # Bounded because an unbounded drain is a hang: a task that reliably
+    # spawns a successor would keep this loop turning for ever, and a slow
+    # teardown that finishes is easier to diagnose than a suite that stops.
+    for _ in range(_DRAIN_PASSES):
+        tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+        if not tasks:
+            break
+        for task in tasks:
+            task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
     for app in built:

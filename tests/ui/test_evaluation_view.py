@@ -299,10 +299,73 @@ async def _mounted(
                     transport=httpx.ASGITransport(app), base_url="http://test"
                 ) as client,
             ):
-                yield await _seed(app, services, User(client), name=name)
+                value = await _seed(app, services, User(client), name=name)
+                yield value
+                await _quiesce(value)
         finally:
             os.environ.pop("NICEGUI_USER_SIMULATION", None)
             _restore_nicegui_functions()
+
+
+async def _quiesce(value: Seeded) -> None:
+    """Stop the progress poll before the app is torn down.
+
+    **This belongs here and not in the five fixtures that go through here.**
+    It lived in `polling` alone, which was the fixture whose whole subject is
+    the timer — but the hazard is not the subject, it is the *state*: any test
+    that leaves a run `queued` or `running` leaves the page polling, and
+    `seeded` is used by far more tests than `polling` is. One of them
+    (`test_an_active_run_blocks_the_evaluation_discard_and_the_dialog_says_which`)
+    seeds a queued run, opens the view and never settles it.
+
+    What that costs is not local. A tick in flight when the app is torn down
+    holds a session whose connection is checked out, which is the one thing
+    `engine.dispose()` cannot reclaim; it is finalised later by the garbage
+    collector, and `filterwarnings = ["error"]` turns the `ResourceWarning`
+    into a failure in **whichever test is running by then**. Under `-n auto`
+    that victim moves with the distribution, which is what makes it look like
+    a flake rather than a leak. Serially it hides completely: in file order
+    the test that leaks runs *after* the tests it would land on.
+
+    Same argument as `tests/ui/conftest.py`'s wrapping of `app_factory` — the
+    difference between one place that is right and five that have to stay
+    right.
+
+    **Best effort, deliberately.** Teardown is not where a property is
+    asserted: a test that has already failed should report its own failure,
+    not a second one from the cleanup behind it. `polling` keeps its explicit
+    `_poll_stops` call, because there the poll deactivating *is* the claim.
+    """
+    async with value.app.state.session_factory() as session:
+        await session.execute(
+            update(Run)
+            .where(Run.status.in_((RunStatus.QUEUED, RunStatus.RUNNING)))
+            .values(status=RunStatus.DONE)
+        )
+        await session.commit()
+
+    # The timer reads the settled state on its next tick and deactivates
+    # itself; this waits for that tick rather than assuming it. Bounded the
+    # way `_until` is, and silent when it expires.
+    for _ in range(500):
+        if not _polling(value.user):
+            return
+        await asyncio.sleep(0.01)
+
+
+def _polling(user: User) -> bool:
+    """Whether anything is still ticking.
+
+    `False` when no page was ever opened — most tests in this module never
+    reach a view that polls, and `User.find` raises `ValueError` rather than
+    returning nothing in that case. Caught narrowly and by name: a broader
+    `except` here would swallow a real failure to read the page and report it
+    as *nothing is polling*, which is the answer that lets the leak through.
+    """
+    try:
+        return any(timer.active for timer in _timers(user))
+    except ValueError:
+        return False
 
 
 @pytest.fixture
@@ -1626,11 +1689,11 @@ async def polling(
             started_at=None,
         )
         yield value, catalog
-        # A queued run never settles, so a test that leaves it queued leaves
-        # the page polling. Settling it here lets the timer deactivate before
-        # the app is torn down: a tick in flight at teardown holds a session
-        # the engine's dispose never sees, and `filterwarnings = ["error"]`
-        # turns that into a failure in whichever test runs next.
+        # `_quiesce` now does this for every fixture that mounts an app, and
+        # says why. It is kept here as well because it runs *before* that one
+        # and because `_poll_stops` below is an assertion, not hygiene: this
+        # is the fixture whose subject is the timer, so "it deactivates once
+        # there is nothing left to watch" is a claim worth failing on.
         async with value.app.state.session_factory() as session:
             await session.execute(
                 update(Run).where(Run.id == "r-0440").values(status=RunStatus.DONE)
@@ -1653,6 +1716,43 @@ async def _poll_stops(user: User) -> None:
     into a failure in whichever test runs next.
     """
     await _until(lambda: not any(timer.active for timer in _timers(user)))
+
+
+async def test_a_test_that_leaves_a_run_queued_does_not_leave_the_page_polling(
+    seeded: Seeded,
+) -> None:
+    """`_quiesce`'s claim, asserted rather than assumed.
+
+    The leak this closes was invisible by construction: it costs nothing in
+    the test that causes it and fails a different test later, chosen by
+    whichever one the garbage collector happens to interrupt. Under `-n auto`
+    that victim moves between runs, which reads as a flaky suite rather than
+    as a fixture that does not clean up.
+
+    So the property is asserted where it is cheap and deterministic — at the
+    point of the leak, in one process, with no scheduling involved. The first
+    assertion is the positive control: without it a `_quiesce` that had
+    stopped working, or a page that had stopped polling, would let the second
+    one pass for the wrong reason.
+    """
+    await _seed_run(
+        seeded.app,
+        run_id="r-0491",
+        evaluation_id=seeded.draft.evaluation_id,
+        template_id=seeded.template.prompt_template_id,
+        model_tag=FITS_A,
+        status=RunStatus.QUEUED,
+        started_at=None,
+    )
+    await seeded.user.open("/evaluation")
+    await seeded.user.should_see("Runs in this evaluation")
+    assert _polling(seeded.user), (
+        "a queued run leaves the page polling — nothing to close otherwise"
+    )
+
+    await _quiesce(seeded)
+
+    assert not _polling(seeded.user)
 
 
 async def test_the_progress_poll_never_re_probes_the_endpoint(
