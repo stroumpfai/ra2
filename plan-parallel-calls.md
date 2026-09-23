@@ -1,0 +1,406 @@
+# plan-parallel-calls.md — more than one record in flight per run
+
+**Status.** Written 2026-09-23 against `12268ed`; **revised the same day**
+after Stage 0 and the eight-model comparison in
+[`docs/performance.md`](docs/performance.md). Nothing implemented. **Stage 0b
+(§5) is the next step and is a go/no-go; deferred by David on 2026-09-23.** Stages 1–4 also wait on the §9
+decisions. Branch `feat/parallel-calls`. Authority as always: `mvp-spec.md`
+on *what*, `sw-design.md` on *how* (CLAUDE.md). This plan changes
+`sw-design.md` §15.4 first, in the same commit as the code, and names every
+frozen file it touches as an amendment (§6).
+
+**What the revision changed.** The first draft had one host-wide number for
+every model. Stage 0 showed the answer is **per model**: `qwen3:8b` gains ~2×
+with unchanged answers, `gemma3:4b` gains ~2× but changes more than half of
+its answers, and Qwen 3.5 can't run in parallel at all. So D1, D3 and the
+ranking display change, and a new gate appears. Ollama's own setting is
+server-wide, so raising it for one model may disturb every other model's
+serial runs (§4.5).
+
+---
+
+## 1. Why, measured
+
+An evaluation's wall time is `records × models × time per call`. Scoring is
+not a factor: 48 records × 7 features score in **0.14 s**. Every other second
+is `LLMClient.extract`, awaited **one record at a time**
+(`run_service._extract_all`, [run_service.py:572](ra2/services/run_service.py#L572)).
+
+The eight-model comparison (`docs/performance.md` §4) recommends **`qwen3:8b`**:
+tied for first on the 200-record seed (macro-F1 0.895), and the fastest of the
+leaders at **1.7 s per record**. That is ~1.5 h for a 3 000-record run. It is
+also the model this plan helps most. **This plan is worth building only if
+`qwen3:8b`, or another model that passes §4.1's gate, becomes an evaluation
+model** (§9 Q1).
+
+Host: RTX 5060 Ti 16 GB, Ollama 0.34.0, system service at
+`OLLAMA_NUM_PARALLEL=1`.
+
+### 1.1 Stage 0 results
+
+**Method.** The 48-record dev seed in a throwaway data dir. Prompts were
+resolved through `RunService._load_plan` / `_resolve_prompt` and sent through
+`OllamaLLMClient.extract`, with effort `none`, temperature 0 and seed 42, at
+N concurrent calls under an `asyncio.Semaphore`. The model was warmed first.
+Parallel passes ran on a **private** `ollama serve` on `127.0.0.1:11435`
+(`NUM_PARALLEL=4`), and the system service was never reconfigured. "Differ"
+counts records whose **canonical JSON** differs from the first serial pass of
+the same session. Scripts printed counts and times only.
+
+| Model | Architecture | Ollama runs it in parallel | 1 call | 2 calls | 4 calls | Differ at 2 / 4 |
+|---|---|---|---|---|---|---|
+| **`qwen3:8b`** | `qwen3` | yes | 83 s | 52 s (1.61×) | **43 s (1.96×)** | **2 / 0** of 48 |
+| `gemma3:4b` | `gemma3` | yes | 142 s | 89 s (1.60×) | 70 s (2.03×) | **27 / 29** of 48 |
+| `qwen3.5:2b` | `qwen35` | **no**: "model architecture does not currently support parallel requests" (ollama#14510) | 111 s | 111 s | 111 s | 0 / 0 |
+| `llama3.2:3b`, `granite4.1:8b`, `ministral-3:8b`, `gemma4:12b` | `llama`, `granite`, `mistral3`, `gemma4` | yes | not measured | | | |
+
+**Serial noise, the yardstick for "differ".** Three serial passes of
+`gemma3:4b` on the one-slot system server differed from the first by 0, 2 and
+0 records. A serial pass of `qwen3:8b` after its parallel passes differed by
+0; one of `gemma3:4b` differed by 9. **0–2 of 48 is the band a model is
+allowed.**
+
+What this says:
+
+1. **The gate is per model.** `qwen3:8b` passes, `gemma3:4b` fails by an
+   order of magnitude, and `qwen35` can't be tried. A host-wide setting
+   (the first draft's D1 and D3) would parallelise models it harms.
+2. **Where Ollama refuses, calls queue.** For `qwen3.5:2b`, throughput stayed
+   flat and median latency went 2.3 → 4.6 → 9.1 s. That is §2 h's timeout
+   hazard, measured.
+3. **VRAM contention hides the gain.** A first `qwen3:8b` attempt ran while
+   the system service still held `gemma4:12b`. Only 6.3 of 7.8 GB fit in
+   VRAM, and N=4 was *slower* than N=1 (196 s vs 146 s).
+4. **A multi-slot server may disturb serial runs.** `gemma3:4b`'s 9-record
+   serial difference was on the four-slot server. Stage 0b has to quantify
+   this, because production would need `OLLAMA_NUM_PARALLEL > 1` on the
+   system service for every model (§4.5).
+5. **Not yet explained:** `qwen3:8b`'s closing serial pass took 110 s against
+   83 s for the opening one. Stage 0b re-measures it.
+
+## 2. What exists and what it means
+
+| # | Where | What |
+|---|---|---|
+| a | [config.py:121](ra2/infra/config.py#L121) `run_concurrency` | Means **runs** (models) in parallel. §15.4 and plan-phase-3 F7 rule that out: two models sharing VRAM is slower than two in sequence. **This plan does not change that.** |
+| b | [run_service.py:341](ra2/services/run_service.py#L341) | Refuses `run_concurrency != 1`. `tests/backend/services/run/test_guards.py` pins the refusal. Both stay. |
+| c | `_extract_all` | One loop: resolve → call → commit, then the next record. `consecutive_endpoint_errors` assumes completion order equals dispatch order. |
+| d | [evaluation_service.py:1002](ra2/services/evaluation_service.py#L1002), [ranking_service.py:246](ra2/services/ranking_service.py#L246) | `extraction.latency_ms` feeds the median latency in the progress card and the **Results ranking**. Per-call latency rises with parallelism even as throughput rises: 1.7 → 3.1 s at N=4 for `qwen3:8b`. |
+| e | `_eta_ms` (both services) | Extrapolates from wall-clock `elapsed_ms / done`. Already correct under parallelism. |
+| f | `session.py` | WAL, `busy_timeout=5000`. Concurrent short commits wait rather than raise. |
+| g | `test_transaction_boundary.py::test_each_record_is_committed_before_the_next_model_call` | True only at N=1. The invariant it guards is "no transaction spans a call"; Stage 3 restates it at any N. |
+| h | Ollama | Queues requests beyond what it serves in parallel, which is `OLLAMA_NUM_PARALLEL` or 1 for a refused architecture. **The queue wait counts against `RA2_LLM_TIMEOUT_S`**, and RA2 can't read either limit over the API. |
+| i | `RankingRow` ([readmodels.py:1050](ra2/services/readmodels.py#L1050)) | One evaluation's ranking puts every model's median latency side by side as a tie-breaker. **With per-model parallelism, those numbers stop being comparable inside one table.** |
+| j | `ranking_service.py:140` | `vram_bytes=0`, hard-coded; no VRAM column is rendered. Not this plan's defect, but §4.5's KV growth would make that number matter. |
+| k | `EvaluationService._reject_infeasible` | Judges `fits_vram` from the model's size on disk. With N slots the loaded size grows by N KV caches: `qwen3:8b` 5.6 GB at 1 slot, 7.5 GB at 4. |
+
+## 3. Decisions
+
+**D1. A per-model setting, not one number.** `RA2_LLM_PARALLEL_CALLS` is a
+JSON **map from model tag to call count**, e.g. `{"qwen3:8b": 4}`. The default
+is `{}`: every model serial, which is today's behaviour. Values outside
+`1..8` and empty tags are refused at construction. `run_concurrency` keeps its
+meaning and its refusal.
+
+*Why per model:* §1.1 point 1. *Why a map in `Settings` and not an evaluation
+input:* whether a model tolerates batching is a **calibration of this host,
+this Ollama and this model**, measured once by §4.1's gate. It isn't a
+question an analyst asks per evaluation. An evaluation input would let two
+evaluations of the same model differ by a number nobody chose on evidence.
+*Why the tag:* the tag is what the analyst selects. The run already pins the
+digest, so a re-pull that changes the digest is visible in provenance
+(§8 lists auto-invalidation as out of scope).
+
+**D2. Pinned on the run at launch.** New column `run.llm_parallel_calls`,
+NOT NULL, written by `EvaluationService._new_run` as
+`settings.llm_parallel_calls.get(model_tag, 1)`. **Resume executes at the
+pinned value**, not at the current map, so one run's rows never mix two
+latency regimes. The migration backfills `1` onto existing rows: every run so
+far executed serially, so this records a fact and repairs nothing.
+
+**D3. Throughput joins latency in the ranking.** `RankingRow` gains
+`records_per_minute` (committed rows over run elapsed time) and
+`parallel_calls`, both **reported, never scored** (SD20). They render beside
+median latency, and a latency cell whose run had `parallel_calls > 1` is
+marked "×N". Throughput is what the analyst actually pays for, and it stays
+comparable across parallelism; latency doesn't (§2 i).
+
+**D4. One code path.** N workers pull from the pending list. N=1 is the same
+code with one worker, not a separate serial branch. There's no test-only
+branch either (Do-NOT #12).
+
+**D5. Everything per record stays per record.** Each worker resolves the
+prompt (its own transaction, closed), calls, and commits one `extraction` and
+its children (its own transaction). Nothing batches across records, and no
+transaction spans a call. §15.3 and plan-phase-3 R3 are unchanged.
+
+**D6. No model enters the map without passing §4.1's gate.** The measurement
+behind each entry is recorded in `docs/performance.md` §5.3: model, digest,
+Ollama version, date, and differ counts. `config.py`'s docstring for the
+setting says so and points there. An entry without a measurement is a
+configuration error that code can't catch, so the rule lives where the
+entries are written.
+
+## 4. The design, in detail
+
+### 4.1 The gate, per model
+
+llama.cpp batches concurrent sequences, and batched kernels aren't guaranteed
+to produce the same floating-point results as batch size 1. At a fixed seed
+that can flip a token, and "a re-run is a check, not a new sample"
+(§15 F9) would stop holding *across* parallelism settings.
+
+A model **passes** at N when, over the 48-record seed:
+
+1. its N-call pass differs from the **one-slot** serial baseline on no more
+   records than two one-slot serial passes differ from each other (the
+   serial-noise band, 0–2 of 48 so far); **and**
+2. its serial pass on the **N-slot** server is also inside that band (§4.5);
+   **and**
+3. throughput at N is at least **1.3×** that at 1. Below that, the gain
+   doesn't pay for the provenance and display this plan adds.
+
+Condition 1 compares against the *one-slot* server, not the private server's
+own first pass as Stage 0 did. That's the comparison production would make.
+
+### 4.2 The worker pool
+
+`_extract_all` keeps its signature. Inside:
+
+- `pending` becomes an iterator shared by `plan.parallel_calls` worker
+  coroutines in one `asyncio.TaskGroup`. Dispatch order stays scope order
+  (`test_the_prompt_is_resolved_once_per_record_in_scope_order` holds).
+  Commit order is completion order. Nothing reads extractions in insertion
+  order, and resume keys on holes (`UNIQUE (run_id, record_id)`).
+- Shared counters (`done`, `endpoint_failures`, `endpoint_attempts`,
+  `consecutive_endpoint_errors`) are mutated only between awaits on one
+  event loop. No lock is needed.
+- **Endpoint-error budget.** "Consecutive" is counted in **completion
+  order**, and any success resets it. When the budget is reached, workers
+  **stop taking new records**. Calls already in flight finish and commit if
+  they succeed. At most N−1 more calls are spent after the budget trips,
+  which is bounded and appears in the count.
+- **An unexpected failure** in one worker: the `TaskGroup` cancels the
+  others and raises an `ExceptionGroup`. `_extract_all` re-raises the first
+  exception and logs the rest by type (ids and counts only,
+  `data-handling.md` §5.1), so `execute_run`'s `except Exception` and
+  `_error_text` see what they see today.
+- **Cancel** is unchanged. `cancel()` cancels the run's task, which cancels
+  the `TaskGroup` and every in-flight call. Committed rows stay, the run is
+  `interrupted`, and Resume continues. `_finish_cancelled` still writes from
+  the caller's task.
+- **Progress** stays `reporter.report(done, total)` after each commit, with
+  `done` re-read from committed rows (§15 F6). The value is monotonic under
+  any completion order.
+- The run-start log line gains `parallel=%d`, beside `timeout=%ds`: both
+  decide how long the next line can take.
+
+### 4.3 What the adapter needs
+
+Nothing. `openai.AsyncOpenAI` is safe to share across coroutines, and the
+SDK's default connection limits exceed 8. `trust_env=False` and
+`follow_redirects=False` (`SD27`) are properties of the one client and don't
+change.
+
+### 4.4 The queue hazard (§2 h, measured in §1.1 point 2)
+
+A map entry above what Ollama will serve in parallel doesn't fail. It queues,
+and the queue wait runs against `RA2_LLM_TIMEOUT_S`, which isn't retried. RA2
+can't read `OLLAMA_NUM_PARALLEL`, and it can't read Ollama's per-architecture
+refusals. D6 makes the gate measurement a precondition of every entry, and the
+gate would catch a refused architecture (its throughput stays at 1.0×). The
+run-start log prints the pinned value.
+
+### 4.5 Ollama's setting is server-wide
+
+`OLLAMA_NUM_PARALLEL` applies to **every** model the system service loads,
+not just those in RA2's map. Raising it has three effects:
+
+| Effect | Measured | Consequence |
+|---|---|---|
+| Serial runs of *other* models may change | `gemma3:4b` serial on the four-slot server: 9 of 48 differ (once, after parallel passes) | **Unquantified. Stage 0b condition 2.** If serial runs of models outside the map leave the noise band, the plan stops here (§9 Q3) |
+| Every loaded model reserves N KV caches | `qwen3:8b` 5.6 → 7.5 GB at 4 slots | Larger models spill to CPU sooner. On 16 GB, `gemma4:12b` (8.1 GB at 1 slot) is the one to check |
+| Other models left in VRAM squeeze the next | §1.1 point 3: the gain vanished | Ollama's `keep_alive` decides residency. Stage 4's runbook note says to unload before a parallel run; §8 lists a residency check |
+
+## 5. Stages
+
+### Stage 0 — measure the gain ✅ (2026-09-23)
+
+Done. The results are in §1.1. The go-ahead for `qwen3:8b` is conditional on
+Stage 0b.
+
+### Stage 0b — measure the side effects (no repo changes) · **go/no-go**
+
+Private `ollama serve` on `127.0.0.1:11435` as in Stage 0, so the system
+service stays untouched. **Unload every model on 11434 first** (§1.1 point 3),
+and confirm with `/api/ps` that the model under test is fully in VRAM before
+each pass. The same script, extended to compare against a baseline saved from
+the one-slot server.
+
+1. **Baseline.** On the one-slot system service, three serial passes each of
+   `qwen3:8b`, `ministral-3:8b`, `granite4.1:8b` and `gemma3:4b`: the
+   serial-noise band per model.
+2. **Condition 1.** On the four-slot server, `qwen3:8b` at N = 2 and 4,
+   compared with (1). `ministral-3:8b` and `granite4.1:8b` too: they're the
+   recommended second opinions, and each could join the map.
+3. **Condition 2.** On a **fresh** four-slot server, three serial passes of
+   each model in (1), compared with (1). This is the one that can stop the
+   plan.
+4. Re-measure the unexplained 110 s serial pass (§1.1 point 5).
+5. `gemma4:12b` loaded size at 4 slots, from `/api/ps`: does it still fit?
+
+**Done when** the tables are in §1.1 and `docs/performance.md` §5.3, and each
+model's gate result is recorded as D6 asks. **Stop** if condition 2 fails for
+any model that stays in use: a server-wide setting that changes serial runs
+costs more reproducibility than the time it saves. §8 lists the fallback
+(a second endpoint) as a separate plan.
+
+### Stage 1 — the contract, first
+
+- `sw-design.md` §15.4: the "Serial" bullet splits into *models serial*
+  (unchanged) and *records: up to the model's `RA2_LLM_PARALLEL_CALLS` entry
+  in flight, each in its own transactions*. §15.8's "Concurrency above 1"
+  bullet narrows to run concurrency. The provenance list gains **parallel
+  calls**. A new `SD` row covers D1–D6. §16's ranking section gains D3's two
+  reported columns.
+- `contracts/amendments/feat-parallel-calls.md` for the frozen files (§6).
+
+**Done when** the design says what Stages 2–3 build, before they build it.
+
+### Stage 2 — setting, column, pin, display
+
+- `Settings.llm_parallel_calls: dict[str, int] = {}`, validated in a
+  `model_validator` beside `_check_reasoning_effort` (values `1..8`, no empty
+  tag). Its docstring carries D6 and §4.4–4.5. The env name goes into
+  `tests/conftest.py`'s scrub list (**frozen**, amendment).
+- One Alembic revision: `run.llm_parallel_calls INTEGER NOT NULL`, backfilled
+  `1`. The migration author for this branch is its implementer. No parallel
+  heads.
+- `EvaluationService._new_run` pins `map.get(tag, 1)`. `_RunPlan` carries it
+  from the row.
+- The run view, API schema and provenance panel show it beside temperature
+  and seed.
+- `RankingRow` gains `records_per_minute` and `parallel_calls` (D3); the
+  ranking tab renders them and the "×N" latency mark.
+
+**Done when** these pass:
+
+- `test_settings_refuse_parallel_calls_outside_1_to_8`
+- `test_settings_refuse_an_empty_model_tag`
+- `test_launch_pins_each_models_own_parallel_calls` (one evaluation, a mapped
+  model and an unmapped one: 4 and 1)
+- `test_migration_backfills_parallel_calls_as_one`
+- `test_ranking_reports_throughput_and_parallel_calls`
+- `tests/ui` assertions for the provenance value and the ranking's "×N" mark
+
+`just lint` and `just test` must be green.
+
+### Stage 3 — the pool
+
+§4.2 in `run_service._extract_all`. Tests in `tests/backend/services/run/`,
+driven by the gated fake client `test_in_flight.py` already uses:
+
+| Test | Asserts |
+|---|---|
+| `test_parallel_calls_keeps_exactly_n_calls_in_flight` | N=3: three calls held open at once, never a fourth |
+| `test_an_unmapped_model_runs_serially` | Same evaluation, second model not in the map: one call at a time |
+| `test_no_transaction_spans_a_model_call` (replaces §2 g's test) | At N=1 and N=3: no session is open while any call is awaited |
+| `test_a_row_and_its_children_are_committed_together` | Unchanged, now parametrised over N |
+| `test_parallel_and_serial_runs_store_identical_values` | Deterministic fake: N=1 and N=3 produce the same `extraction_value` sets. This tests the code; Stage 0b tests the model |
+| `test_endpoint_budget_stops_dispatch_and_lets_in_flight_calls_commit` | Budget trips, no new record starts, in-flight successes commit, run `interrupted` with the right count |
+| `test_cancel_cancels_every_in_flight_call` | N=3: all three calls see `CancelledError`, committed rows kept, Resume completes the run |
+| `test_an_unexpected_failure_cancels_siblings_and_fails_the_run` | One worker raises: others cancelled, run `failed` with that error, commits kept |
+| `test_resume_runs_at_the_pinned_parallelism` | Run pinned at 2, map now says 4: at most two in flight |
+| `test_run_concurrency_above_one_is_refused_not_silently_ignored` | Unchanged |
+
+**Done when** the table is green and `just lint` and `just test` pass. The
+pre-existing mypy error at `tests/e2e/conftest.py:97` is unrelated; say so if
+it's still there.
+
+### Stage 4 — verify end to end, at the score level
+
+Throwaway 200-record seed. The system service, or a private server, runs at
+the `OLLAMA_NUM_PARALLEL` Stage 0b approved, with all models unloaded first.
+`RA2_LLM_PARALLEL_CALLS='{"qwen3:8b": 4}'`.
+
+1. **Two evaluations**, identical except the map: `{}` and
+   `{"qwen3:8b": 4}`. Both use `qwen3:8b` and `ministral-3:8b`. Every
+   per-feature F1 must match within its Wilson interval, and macro-F1 within
+   0.01. This checks at the *score* level what Stage 0b checked at the
+   JSON level.
+2. Record wall times. Expected: `qwen3:8b` ~6 min → ~3 min for 200 records.
+3. `just dev-agent`: the progress card, the provenance panel, the ranking's
+   throughput column and "×4" mark, and Stop mid-run then Resume.
+
+**Done when** (1)'s comparison and (2)'s times are in §1.1 and
+`docs/performance.md` §5.3, the performance doc's "Parallel calls: not
+implemented" row is updated, and this file's Status line names the merge
+commit.
+
+## 6. Frozen files touched — amendments
+
+| File | Change |
+|---|---|
+| `ra2/infra/config.py` | `+ llm_parallel_calls: dict[str, int]` and its validator |
+| `ra2/persistence/models.py` | `+ Run.llm_parallel_calls` |
+| `ra2/services/readmodels.py`, `ra2/api/schemas.py` | `+ llm_parallel_calls` on the run and provenance views; `+ records_per_minute`, `parallel_calls` on `RankingRow` |
+| `tests/conftest.py` | `+ "RA2_LLM_PARALLEL_CALLS"` in the env scrub |
+
+All go in `contracts/amendments/feat-parallel-calls.md`, and each is listed
+in `CONTRACTS.md`'s change log in the style of the `llm_reasoning_effort`
+entry. `ranking_tab.py` and `ranking_service.py` belong to whoever owns
+Results in the implementing wave (`plan-m0-m5.md` §4).
+
+## 7. Host configuration (outside the repo)
+
+`/etc/systemd/system/ollama.service.d/override.conf`, **today**:
+
+```ini
+[Service]
+Environment="OLLAMA_KEEP_ALIVE=-1"
+```
+
+**After Stage 0b passes, and not before:**
+
+```ini
+Environment="OLLAMA_NUM_PARALLEL=4"
+```
+
+`-1` keeps a model loaded until another needs its VRAM. With a model
+pinned, a parallel run has to unload other models first (§4.5), so Stage 0b
+may argue for a finite keep-alive such as `30m` instead. Decide with its
+numbers.
+
+## 8. Not in this plan
+
+- **Runs in parallel** (`run_concurrency > 1`). Still refused, for §2 a's
+  reason.
+- **Detecting Ollama's refusals** from `/api/tags`'s `family` and refusing a
+  map entry for `qwen35` at construction. It's tempting, but it hard-codes
+  another project's list, which will change (ollama#14510). D6's gate covers
+  it.
+- **Auto-invalidating a map entry** when a tag's digest changes. The run
+  records the digest, so a changed digest is visible; making it *enforced*
+  needs a digest in the map and a refusal path. A follow-up if re-pulls
+  happen.
+- **A residency check** (`/api/ps`: is the model fully in VRAM at run start?)
+  that would turn §1.1 point 3 into a finding instead of a silent slowdown.
+  It's worth doing for serial runs as well, so it's a plan of its own.
+- **A second Ollama endpoint** for parallel models only, as the fallback if
+  Stage 0b condition 2 fails. That means per-model endpoints and a second
+  loopback guard, which is a separate design.
+- **Adaptive parallelism** (raising N until latency degrades). One pinned,
+  measured number is reproducible; a controller isn't.
+
+## 9. Decisions for David
+
+| # | Question | Recommendation |
+|---|---|---|
+| Q1 | Adopt `qwen3:8b` as an evaluation model? | **Yes**, alongside `ministral-3:8b` or `granite4.1:8b` (`docs/performance.md` §4.5). Without a parallel-capable model in use, this plan has nothing to speed up |
+| Q2 | Per-model map in `Settings` (D1) rather than one number or an evaluation input? | **Yes**, for the reasons under D1 |
+| Q3 | If Stage 0b condition 2 fails, stop, or plan a second endpoint? | **Stop.** ~45 min saved on a 3 000-record run isn't worth serial runs that stop reproducing, or a second loopback surface |
+| Q4 | Run Stage 0b now? About 1 h of GPU time, on a private server, no repo changes | **Yes**. It's the cheapest way to learn whether Stages 1–4 happen at all |
+
+**Answered 2026-09-23:** Q1 **yes**, `qwen3:8b` is adopted. Q2 **yes**, a
+per-model map. Q4 **no, not now**: Stage 0b is deferred, so Stages 1–4 stay
+blocked behind it. Q3 is open and is explained in plain terms to David.
