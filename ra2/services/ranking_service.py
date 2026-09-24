@@ -132,12 +132,14 @@ class RankingService:
                     tied=by_model[run.id].tied,
                     worse=by_model[run.id].worse,
                     verdict=_verdict(by_model[run.id]),
-                    # Reported, never scored (SD20). None of the four below
-                    # takes any part in `rank`.
+                    # Reported, never scored (SD20, SD38). None of the six
+                    # below takes any part in `rank`.
                     presence_rate=reported[run.id]["presence"],
                     median_latency_ms=int(reported[run.id]["latency"]),
                     prompt_tokens=int(reported[run.id]["tokens"]),
                     vram_bytes=0,
+                    ms_per_record=round(reported[run.id]["per_record"]),
+                    parallel_calls=run.llm_parallel_calls,
                 )
                 for run in ordered
                 if run.id in by_model
@@ -227,7 +229,8 @@ def _interval(score: Score) -> Interval:
 async def _reported_metrics(
     session: AsyncSession, runs: Sequence[Run]
 ) -> dict[str, dict[str, float]]:
-    """Median latency, prompt tokens and the macro presence rate.
+    """Median latency, time per record, prompt tokens and the macro presence
+    rate.
 
     **Reported, never scored** — the design's own rule 4, "the tie-breaker you
     apply, not one the tool applies". The presence rate joins them (SD20):
@@ -268,6 +271,14 @@ async def _reported_metrics(
         )
         reported[run.id] = {
             "latency": float(statistics.median(latencies)) if latencies else 0.0,
+            # SD38 — Little's law: with N calls kept in flight, throughput is
+            # N ÷ mean latency, so a record costs mean latency ÷ N. Wall clock
+            # can't give this: every Resume restamps `started_at`, and an
+            # `extraction` row has no timestamp of its own. The **mean**, not
+            # the median, because the law is about the mean.
+            "per_record": (
+                statistics.fmean(latencies) / run.llm_parallel_calls if latencies else 0.0
+            ),
             "tokens": float(sum(t for t in tokens if t is not None)),
             # A macro over the features, equal weight, like every other macro
             # here — and still not a score.

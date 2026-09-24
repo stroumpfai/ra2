@@ -99,6 +99,7 @@ def settings(tmp_data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
         "RA2_MIN_CELL_COUNT",
         "RA2_LLM_TIMEOUT_S",
         "RA2_LLM_MAX_RETRIES",
+        "RA2_LLM_PARALLEL_CALLS",
         "RA2_RUN_CONCURRENCY",
         "RA2_GPU_VRAM_GB",
         "RA2_GPU_NAME",

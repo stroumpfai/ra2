@@ -20,10 +20,13 @@ import pytest
 from fastapi import FastAPI
 from nicegui.testing.general import nicegui_reset_globals
 from nicegui.testing.user import User
+from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.fixtures.scored_corpus import WEATHER, ScoredCorpus, seed_scored_corpus
 
 from ra2.infra.clock import Clock
 from ra2.infra.config import Settings
+from ra2.persistence.models import Run
 from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
 from ra2.services.container import Services
 from ra2.services.scoring_service import ScoringService
@@ -41,7 +44,7 @@ from ra2.ui.views.results.presence_tab import (
     SCOPE_BANNER,
     WINDOWS_1252_CAVEAT,
 )
-from ra2.ui.views.results.ranking_tab import COMPUTATION_RULES, VALIDITY_FOOTER
+from ra2.ui.views.results.ranking_tab import COMPUTATION_RULES, PARALLEL_NOTE, VALIDITY_FOOTER
 
 
 class _Ids:
@@ -64,6 +67,9 @@ class Scored:
     #: per-feature fingerprints — so restating it here would just be a
     #: second, driftable copy of `build_descriptor`.
     services: Services
+    #: To change a stored row between two renders, as a test that asserts a
+    #: rendering *reacts* to that row has to.
+    session_factory: async_sessionmaker[AsyncSession]
 
 
 @pytest.fixture
@@ -99,7 +105,7 @@ async def scored(
                 )
                 for run_id in corpus.run_ids:
                     await scoring.score_run(run_id)
-                yield Scored(User(client), corpus, app.state.services)
+                yield Scored(User(client), corpus, app.state.services, session_factory)
         finally:
             os.environ.pop("NICEGUI_USER_SIMULATION", None)
 
@@ -401,6 +407,39 @@ async def test_the_ranking_latency_column_reads_in_seconds(scored: Scored) -> No
     ]
     assert expected <= set(rendered)
     assert not any(text.endswith(" ms") for text in rendered)
+
+
+async def test_a_serial_ranking_carries_no_parallel_mark(scored: Scored) -> None:
+    """Every run at 1 — the default — renders the table as before SD38: no
+    `×N` anywhere and no note explaining one."""
+    await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}&tab=ranking")
+    assert scored.user.find(marker="ranking-row").elements
+    await scored.user.should_not_see(marker="parallel-mark")
+    await scored.user.should_not_see(marker="parallel-note")
+
+
+async def test_a_parallel_run_marks_its_latency_and_reports_time_per_record(
+    scored: Scored,
+) -> None:
+    """SD38. The run at 4 gets the `×4` mark beside its median latency, the
+    note says what the mark means, and every row renders its time per record
+    in the same seconds format as the latency (SD37)."""
+    parallel = scored.corpus.run_ids[0]
+    async with scored.session_factory() as session:
+        await session.execute(update(Run).where(Run.id == parallel).values(llm_parallel_calls=4))
+        await session.commit()
+    view = await scored.services.ranking.ranking_tab(scored.corpus.evaluation_id)
+
+    await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}&tab=ranking")
+    marks = [str(getattr(e, "text", "")) for e in scored.user.find(marker="parallel-mark").elements]
+    assert marks == ["×4"]
+    await scored.user.should_see(PARALLEL_NOTE)
+    per_record = {
+        str(getattr(e, "text", ""))
+        for cell in scored.user.find(marker="ms-per-record").elements
+        for e in cell.descendants()
+    }
+    assert {format_latency_ms(row.ms_per_record) for row in view.rows} <= per_record
 
 
 async def test_each_ranking_row_sums_to_the_scored_feature_count(scored: Scored) -> None:

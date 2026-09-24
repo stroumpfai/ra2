@@ -210,6 +210,10 @@ class _RunPlan:
     #: the adapter then asks with its constructed default, which is what that
     #: run was queued under (amendment: feat/evaluation-view-improvements).
     reasoning_effort: str | None
+    #: Records in flight, as the launch pinned it (SD38). Read from the run,
+    #: never from `Settings`: Resume executes at the value the run started
+    #: with, whatever `RA2_LLM_PARALLEL_CALLS` says now.
+    parallel_calls: int
     #: The dev cap (`RA2_DEV_RECORD_MAX`), or `None` for the whole corpus.
     limit: int | None
     features: tuple[FeatureBlockEntry, ...]
@@ -1009,6 +1013,7 @@ class RunService:
                 temperature=run.temperature,
                 seed=run.seed,
                 reasoning_effort=run.llm_reasoning_effort,
+                parallel_calls=run.llm_parallel_calls,
                 limit=self._record_limit(evaluation),
                 features=entries,
                 feature_ids={feature.key: FeatureId(feature.id) for feature, _ in snapshot},

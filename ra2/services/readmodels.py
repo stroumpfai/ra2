@@ -705,6 +705,9 @@ class ProvenanceView:
     #: a run written before the field existed — "not recorded", never a
     #: guessed default (`gpu_name`'s convention).
     llm_reasoning_effort: str | None = None
+    #: Records this run kept in flight (SD38). Always known, because the
+    #: column is NOT NULL, and `1` on every run from before it existed.
+    llm_parallel_calls: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -1053,11 +1056,12 @@ class RankingRow:
     `rank` **repeats on a tie** (`1, 1, 3`), never enumerates (`1, 2, 3`):
     §11.5 renders overlapping intervals as a tie, not as an order.
 
-    The last three fields are **reported, never scored** — the design's own
-    rule 4, "the tie-breaker you apply, not one the tool applies". The presence
-    rate joins them (`SD20`): §11.2 is unambiguous that presence has no gold
-    label, and a model that flags everything present maximises it. None of the
-    three takes any part in `rank`.
+    Everything from `presence_rate` on is **reported, never scored** — the
+    design's own rule 4, "the tie-breaker you apply, not one the tool
+    applies". The presence rate joins them (`SD20`): §11.2 is unambiguous that
+    presence has no gold label, and a model that flags everything present
+    maximises it. So do time per record and parallel calls (`SD38`). None of
+    them takes any part in `rank`.
     """
 
     model_id: str
@@ -1075,6 +1079,14 @@ class RankingRow:
     median_latency_ms: int
     prompt_tokens: int
     vram_bytes: int
+    #: `mean(latency_ms) ÷ parallel_calls`, by Little's law. It is the cost
+    #: per record at this run's parallelism, and it stays comparable across
+    #: runs whose `median_latency_ms` doesn't (SD38). `0` when no row carries a
+    #: latency, the convention `median_latency_ms` already follows.
+    ms_per_record: int = 0
+    #: The run's pinned `llm_parallel_calls`. `> 1` marks the median latency
+    #: cell `×N`.
+    parallel_calls: int = 1
 
 
 @dataclass(frozen=True, slots=True)

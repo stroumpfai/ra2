@@ -129,6 +129,11 @@ POST_PHASE_5_REVISIONS = {
     # backfilled `none` — every pre-existing row ran under the process
     # default, so that is a fact about them rather than a guess.
     "20260922_0900_3b7c1d5a92e4_ask_the_reasoning_question_per_evaluation.py",
+    # `feat/parallel-calls` — `run.llm_parallel_calls` (SD38). Records in
+    # flight, pinned at launch from `RA2_LLM_PARALLEL_CALLS`, so Resume and the
+    # ranking's time per record read what the run executed at. Additive, NOT
+    # NULL, backfilled `1` — no code before it could run two records at once.
+    "20260924_0900_68c8b2a80ca9_pin_the_parallel_calls_on_the_run.py",
 }
 
 

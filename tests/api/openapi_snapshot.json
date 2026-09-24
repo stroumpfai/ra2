@@ -3270,6 +3270,11 @@
             "title": "Llm Endpoint",
             "type": "string"
           },
+          "llm_parallel_calls": {
+            "default": 1,
+            "title": "Llm Parallel Calls",
+            "type": "integer"
+          },
           "llm_reasoning_effort": {
             "anyOf": [
               {
@@ -3352,6 +3357,16 @@
           "model_id": {
             "title": "Model Id",
             "type": "string"
+          },
+          "ms_per_record": {
+            "default": 0,
+            "title": "Ms Per Record",
+            "type": "integer"
+          },
+          "parallel_calls": {
+            "default": 1,
+            "title": "Parallel Calls",
+            "type": "integer"
           },
           "presence_rate": {
             "title": "Presence Rate",

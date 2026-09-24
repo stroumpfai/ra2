@@ -9,14 +9,19 @@ reaches for a global settings object** (sw-design.md §3).
 """
 
 from pathlib import Path
-from typing import Self
+from typing import Final, Self
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ra2.domain.llm import DEFAULT_REASONING_EFFORT, REASONING_EFFORTS
 
-__all__ = ["REASONING_EFFORTS", "Settings"]
+__all__ = ["MAX_PARALLEL_CALLS", "REASONING_EFFORTS", "Settings"]
+
+#: The ceiling on one model's records in flight. Above it the KV caches of
+#: that many slots outgrow any single-GPU host this runs on, and the gain
+#: had flattened by four in every measurement (`plan-parallel-calls.md` §1.2).
+MAX_PARALLEL_CALLS: Final = 8
 
 #: Re-exported, not defined here. The `reasoning_effort` values Ollama maps
 #: onto its own `think` levels are narrower than the OpenAI SDK's literal
@@ -114,6 +119,34 @@ class Settings(BaseSettings):
     #: instead — `OllamaLLMClient`'s loopback check, same reasoning.
     llm_reasoning_effort: str = DEFAULT_REASONING_EFFORT
 
+    #: sw-design.md §15.4, SD38 — how many records of one run are in flight
+    #: at once, **per model tag**: `{"qwen3:8b": 4}`. A model not in the map
+    #: runs serially, and the default `{}` is exactly the behaviour before
+    #: this setting existed. The launch pins `map.get(tag, 1)` on the run, and
+    #: Resume executes at the pin, never at the current map.
+    #:
+    #: **An entry is a measurement, not a preference.** Batched decoding is
+    #: not guaranteed bit-identical to batch size 1. Measured on this host,
+    #: `qwen3:8b` changed 0–2 of 48 answers at four calls, and `granite4.1:8b`
+    #: changed 14–15. Add a tag only after it has passed
+    #: `plan-parallel-calls.md` §4.1's gate here, and record the result in
+    #: `docs/performance.md` §5.3 (model, digest, Ollama version, date,
+    #: differ counts). Code can't check that; this sentence is the check.
+    #:
+    #: Two things RA2 cannot read and so cannot refuse:
+    #:
+    #: - **Ollama's own slot count.** `OLLAMA_NUM_PARALLEL` must be at least
+    #:   the largest value here. It is server-wide, so raising it applies to
+    #:   every model the service loads, and each loaded model reserves that
+    #:   many KV caches (`gemma4:12b`: 8.1 → 10.4 GB at four).
+    #: - **Ollama's per-architecture refusals.** Ollama 0.34 serves `qwen35`
+    #:   one request at a time whatever the setting.
+    #:
+    #: Either way the excess calls **queue** rather than fail, and the queue
+    #: wait counts against `llm_timeout_s`. The run-start log line prints
+    #: `parallel=N` beside `timeout=` for that reason.
+    llm_parallel_calls: dict[str, int] = Field(default_factory=dict)
+
     #: sw-design.md §15.4 — runs execute serially, one model at a time: the
     #: GPU is the bottleneck and two models sharing 24 GB is slower than two
     #: in sequence. Phase 3 never raises this; it exists so lifting the limit
@@ -171,6 +204,21 @@ class Settings(BaseSettings):
                 f"{', '.join(sorted(REASONING_EFFORTS))}; got "
                 f"{self.llm_reasoning_effort!r}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _check_parallel_calls(self) -> Self:
+        """Refuse an unusable map **at construction**, for the reason
+        `_check_reasoning_effort` gives: a value that can be refused before the
+        first call should be, rather than one `RA2_LLM_TIMEOUT_S` into a run.
+        """
+        for tag, calls in self.llm_parallel_calls.items():
+            if not tag.strip():
+                raise ValueError("RA2_LLM_PARALLEL_CALLS names an empty model tag")
+            if not 1 <= calls <= MAX_PARALLEL_CALLS:
+                raise ValueError(
+                    f"RA2_LLM_PARALLEL_CALLS[{tag!r}] must be 1..{MAX_PARALLEL_CALLS}; got {calls}"
+                )
         return self
 
     @model_validator(mode="after")

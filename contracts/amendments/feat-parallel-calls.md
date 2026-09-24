@@ -1,8 +1,9 @@
 # Amendment — `feat/parallel-calls`
 
-> **PROPOSED in Stage 1 of [`plan-parallel-calls.md`](../../plan-parallel-calls.md);
-> applied in Stage 2, in the same commit as the code that needs it**, as
-> `fix-evaluation-timeout-and-progress` was. No wave is running.
+> **APPLIED in Stage 2 of [`plan-parallel-calls.md`](../../plan-parallel-calls.md),
+> in the same commit as the code that needs it**, as
+> `fix-evaluation-timeout-and-progress` was. Proposed in Stage 1. No wave is
+> running. Recorded in `CONTRACTS.md` under "Parallel calls".
 
 The design is `sw-design.md` §15.4 and **SD38**. The measurements behind it
 are `plan-parallel-calls.md` §1.1–1.2. In short, `qwen3:8b` runs 2.3–2.5×

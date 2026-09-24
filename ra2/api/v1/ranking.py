@@ -68,6 +68,8 @@ async def ranking_tab(
                 median_latency_ms=row.median_latency_ms,
                 prompt_tokens=row.prompt_tokens,
                 vram_bytes=row.vram_bytes,
+                ms_per_record=row.ms_per_record,
+                parallel_calls=row.parallel_calls,
             )
             for row in view.rows
         ],

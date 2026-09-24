@@ -41,7 +41,7 @@ from ra2.services.readmodels import RankingTabView
 from ra2.ui.components.primitives import data_props, format_latency_ms
 from ra2.ui.views.results.chrome import run_descriptor
 
-__all__ = ["COMPUTATION_RULES", "VALIDITY_FOOTER", "render_ranking_tab"]
+__all__ = ["COMPUTATION_RULES", "PARALLEL_NOTE", "VALIDITY_FOOTER", "render_ranking_tab"]
 
 #: "How this ranking is computed" — the four numbered rules, verbatim.
 COMPUTATION_RULES: Final = (
@@ -53,6 +53,16 @@ COMPUTATION_RULES: Final = (
     "are excluded — no ground truth, cannot be scored.",
     "Latency and VRAM are reported, never scored — the tie-breaker you apply, "
     "not one the tool applies.",
+)
+
+#: Under the table, and only when some row ran with more than one call in
+#: flight (SD38). Such a model answers each call more slowly and finishes the
+#: corpus sooner, so its median latency is marked `×N` and stops being
+#: comparable down the column; time per record stays comparable. Rule 4 above
+#: is the design's copy and stays verbatim, so the explanation lives here.
+PARALLEL_NOTE: Final = (
+    "×N: this model ran N records at once. Its latency per call is not "
+    "comparable with the other rows; compare time per record instead."
 )
 
 #: Interpolated with the **real** cfg and corpus. A ranking is valid for one
@@ -132,6 +142,7 @@ def _table(view: RankingTabView) -> None:
                     ("Presence rate", "92px"),
                     ("Best / tied / worse", "120px"),
                     ("Median latency", "104px"),
+                    ("Time / record", "104px"),
                     ("Prompt tokens", "104px"),
                     ("Verdict", "134px"),
                 ):
@@ -158,10 +169,11 @@ def _table(view: RankingTabView) -> None:
                             ui.label(f"{row.macro_f1:.3f}").classes("val")
                             ui.label(f"[{row.ci_low:.3f}–{row.ci_high:.3f}]").classes("ci")
                         # Reported, never scored (SD20) — and neither are the
-                        # two after it.
+                        # latency, time-per-record and token cells (SD38).
                         _td_mono(f"{row.presence_rate:.3f}", testid="presence-rate")
                         _td_mono(f"{row.best} / {row.tied} / {row.worse}")
-                        _td_mono(format_latency_ms(row.median_latency_ms))
+                        _latency_cell(row.median_latency_ms, row.parallel_calls)
+                        _td_mono(format_latency_ms(row.ms_per_record), testid="ms-per-record")
                         _td_mono(f"{row.prompt_tokens}")
                         with ui.element("td").classes("td").style("padding:8px 12px;"):
                             pill = (
@@ -174,6 +186,21 @@ def _table(view: RankingTabView) -> None:
                             )
                             with pill:
                                 ui.label(row.verdict)
+        if any(row.parallel_calls > 1 for row in view.rows):
+            ui.label(PARALLEL_NOTE).props('data-testid="parallel-note"').mark(
+                "parallel-note"
+            ).style("padding:8px 14px;font-size:11.5px;color:var(--ink3);")
+
+
+def _latency_cell(median_latency_ms: int, parallel_calls: int) -> None:
+    """Median latency, marked `×N` when the run kept N calls in flight (SD38).
+    The number is true; it is only no longer comparable down its column."""
+    with ui.element("td").classes("td mono").style("padding:8px 12px;font-size:12px;"):
+        ui.label(format_latency_ms(median_latency_ms))
+        if parallel_calls > 1:
+            ui.label(f"×{parallel_calls}").props('data-testid="parallel-mark"').mark(
+                "parallel-mark"
+            ).style("font-size:10.5px;color:var(--ink3);")
 
 
 def _td_mono(text: str, *, size: str = "12px", testid: str | None = None) -> None:
