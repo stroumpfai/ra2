@@ -1,13 +1,14 @@
 # plan-parallel-calls.md — more than one record in flight per run
 
 **Status.** Written 2026-09-23 against `12268ed` and revised the same day
-after Stage 0. **All stages done on 2026-09-24 on branch
-`feat/parallel-calls`, not yet merged.** Stage 0b (§1.2) passed `qwen3:8b` on
+after Stage 0. **All stages done on 2026-09-24; merged into
+`main` as `7f6b45a`.** Stage 0b (§1.2) passed `qwen3:8b` on
 all three gate conditions. It stopped `ministral-3:8b`, which David replaced
 with `granite4.1:8b` (§9 Q5). Stages 1–3 built the design (SD38), the
 setting, the column, the display and the worker pool. Stage 4 (§1.3) found
-identical scores and 2.38× on `qwen3:8b`. **Left for David:** merging, and
-the host change in §7 that makes it take effect outside a private server.
+identical scores and 2.38× on `qwen3:8b`. **Left for the host:** the setup in
+`docs/performance.md` §5.4. Until it's done, the map is `{}` and nothing
+changes.
 Authority as always: `mvp-spec.md` on *what*, `sw-design.md` on *how*
 (CLAUDE.md). Every frozen file the code touches is named as an amendment
 (§6).
@@ -526,8 +527,7 @@ service was never reconfigured. The results are in §1.3 and
 took 349 s → 147 s for 200 records (2.38×). The browser check under
 `just dev-agent` passed: progress card, Stop at 8/48, Resume to done,
 `parallel calls 4` on the provenance line, `×4` and the note on the ranking.
-The Status line can't name a merge commit yet, because the branch isn't
-merged. That, and switching the system service, are David's (§7).
+Merged as `7f6b45a`. Switching a host on is `docs/performance.md` §5.4.
 
 Throwaway 200-record seed. The system service, or a private server, runs at
 the `OLLAMA_NUM_PARALLEL` Stage 0b approved, with all models unloaded first.
