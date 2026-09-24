@@ -46,7 +46,7 @@ and rebases the branches that have not merged yet.
 | `ra2/infra/tasks.py` | `TaskStatus TaskProgress ProgressReporter TaskWork`, the `TaskRunner` protocol |
 | `ra2/infra/filestore.py` | `StoredFile`, the `FileStore` protocol, `FileStoreError` / `ReadOnlyFileStoreError` |
 | `ra2/persistence/models.py` | **the whole phase-1 schema** — mvp-spec.md §5 tables in scope plus SD1, SD2, SD4 |
-| `ra2/persistence/session.py` | async engine, the **four** connect-time PRAGMAs (`secure_delete=ON` added by `fix-b3-deletion-path`), session factory, `session_scope` |
+| `ra2/persistence/session.py` | async engine (**`hide_parameters=True`** added by `fix-a5-bound-parameters`), the **four** connect-time PRAGMAs (`secure_delete=ON` added by `fix-b3-deletion-path`), session factory, `session_scope` |
 | `ra2/persistence/migrations/env.py` | async Alembic env reading `RA2_DB_PATH` through `Settings` |
 | `ra2/services/errors.py` | `ServiceError NotFoundError BlockingFindingsError CorpusLockedError DeliveryNotAnalysedError` |
 | `ra2/services/readmodels.py` | `SortDir Page[T] DeliveryFileView DeliveryView CorpusView CensusColumnView CensusSummary` |

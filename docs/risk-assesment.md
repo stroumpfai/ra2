@@ -87,15 +87,16 @@ the register was graded for a project being *built* and the project is now being
 
 | # | Status | Action | Effort | Risk |
 |---|---|---|---|---|
-| 21 | open | **`hide_parameters=True`** — a database error currently writes the narrative and `unfall_uid` into `run.error` **and into the log** (reproduced) | **10 min** | **A5** |
+| 21 | **✔ closed** | **`hide_parameters=True`** — a database error wrote the narrative and `unfall_uid` into `run.error` **and into the log** (reproduced). Fixed at the engine, with a provoked-`IntegrityError` test and a positive control (`contracts/amendments/fix-a5-bound-parameters.md`) | — | **A5** |
 | 23·24 | open | An intake mojibake canary and the mixed-encoding fixture — a mixed-encoding delivery is silently corrupted today (reproduced), and real files meet the parser for the first time at handover | ~½ day | **G1, G4** |
 | 11·15 | **◑ §8.6** | Fill in `data-handling.md` §7's ten decisions and close `mvp-spec.md` §18's B1–B4. **No longer pending — late**, and four of them gate work that cannot be done afterwards (§6) | ~1 day, no code | **F1, B3, C3** |
-| 31 | open | **A stated support path** — what may be copied off the machine when something breaks. The developer is reachable rather than resident, and §9.1.1 is the chain that makes this the dominant technical residual | ~2 h, no code | **A5, C2, E3** |
+| 31 | open | **A stated support path** — what may be copied off the machine when something breaks. The developer is reachable rather than resident, and §9.1.1 is the chain that makes this the dominant technical residual. **Item 21 broke link 5 and did not break the chain**: a screenshot, a hand-typed description and the export all still carry content | ~2 h, no code | **C2, E3** |
 | 26·32 | open | Correct and **gate** the README; start an operations log from the first real run. The handover document currently says the deliverable does not exist | ~½ day | **F6, E3, F4** |
 
 **The headline of the second pass is not a defect.** Every technical control in
-this report has improved since `616bf2b`, the gates are green, and A5 and G1 are
-small. What has not moved at all is the organisational half: ten blank
+this report has improved since `616bf2b`, the gates are green, and A5 — the
+second pass's lead defect — took one keyword argument and two tests. G1 is
+similarly small. What has not moved at all is the organisational half: ten blank
 decisions, four unanswered dependencies, no runbook, no rehearsed destruction,
 no operations log. At the first pass that imbalance was tolerable because the
 system was not in use. **It is now the larger share of the residual risk by a
@@ -150,7 +151,7 @@ under schedule pressure and expensive to rebuild.
 | **Loopback rule with no opt-out**, enforced at construction, before any client exists | `ra2/domain/llm.py:303` (`classify_endpoint`), `ra2/infra/ollama_client.py:269` | One rule, three faces (raise / ask / report); a literal host list, no DNS; the reasoning for *why there is no setting* is written down where the next person will look |
 | **One LLM seam**, enforced mechanically | `.importlinter` `one-llm-seam`, `tests/test_p3_contract.py:211` | A second provider client cannot be added by accident |
 | **Append-only data** — extractions, records, corpora, prompt templates | `mvp-spec.md` §5, Do-NOT #2 | A re-run cannot destroy evidence; `mismatch` is the single documented exception, with a preservation test |
-| ~~**No logging of any kind** in the application~~ · **superseded 2026-09-22** | was: verified by grep over `ra2/`. Now `ra2/infra/logging.py` + `data-handling.md` §5.1 | **The strongest claim in this table, and it is no longer true.** An operational log to stderr now exists, bounded by a *content* rule with a test behind it (`test_run_log_carries_no_data.py`). The trade is defensible — absence was fragile and nearly broke on the first silent 26-minute run — but a tested rule is a control with a perimeter, where absence had none. **§9.2 A5 is the hole in that perimeter, and it is verified.** |
+| ~~**No logging of any kind** in the application~~ · **superseded 2026-09-22** | was: verified by grep over `ra2/`. Now `ra2/infra/logging.py` + `data-handling.md` §5.1 | **The strongest claim in this table, and it is no longer true.** An operational log to stderr now exists, bounded by a *content* rule with a test behind it (`test_run_log_carries_no_data.py`). The trade is defensible — absence was fragile and nearly broke on the first silent 26-minute run — but a tested rule is a control with a perimeter, where absence had none. **§9.2 A5 was the hole in that perimeter, and it was verified.** Closed by `fix-a5-bound-parameters`: the perimeter now has two halves, the call sites and the engine, and both are tested. |
 | **Strict parsing, loud failure** — no `errors="replace"`, no silent repair, every recovered or rejected row reported with its key | `ra2/infra/files.py`, `mvp-spec.md` §4.2 | Corrupted labels are the failure mode that surfaces months later as wrong metrics |
 | **Real data cannot reach the test suite** — hazards are synthesised byte-exactly; the one real-data test reads header lines only and skips when absent | `tests/unit/parsing/test_headers_realdata.py` | The discipline is real, not aspirational |
 | **Agent isolation already practised** — `just dev-agent` on a random port and a throwaway data dir | `justfile`, `scripts/dev_agent.py` | The precedent needed for C2 exists already |
@@ -947,7 +948,7 @@ the last three days in which any of them can be done.*
 
 | # | Status | Action | Risk | Effort |
 |---|---|---|---|---|
-| **21** | open | **`hide_parameters=True` on `create_async_engine`**, plus a provoked-`IntegrityError` test with a positive control | **A5** | **10 min** |
+| **21** | **✔ closed** | **`hide_parameters=True` on `create_async_engine`**, plus a provoked-`IntegrityError` test with a positive control, and §5.1 of `data-handling.md` stating that the list is enforced at the engine as well as at the call sites. `SD39`; `contracts/amendments/fix-a5-bound-parameters.md` | **A5** | **done** |
 | **22** | open | Refuse UTF-16/32 BOMs and NUL bytes in `detect_encoding`, each with its own `FindingCode` | **G2** | 1 h |
 | **23** | open | An intake mojibake canary — the mirror of `CP1252_CANARY_ZERO`; one `FindingCode`, no schema change | **G1** | ½ d |
 | **24** | open | `h15_mixed_encoding` — the hazard `CLAUDE.md` has required by name since month one | **G4** | 1 h |
@@ -991,7 +992,7 @@ go-live gate, and M34 is still unscheduled.*
 
 | # | Status | Action | Risk |
 |---|---|---|---|
-| **31** | open | **A stated support path**: what may be copied off the machine when something breaks, and to where. Once the freeze lands this is the only remaining break in §9.1.1's chain | A5, C2, B2, F6 |
+| **31** | open | **A stated support path**: what may be copied off the machine when something breaks, and to where. With item 21 closed this is **the** remaining break in §9.1.1's chain, and the one that does not depend on a control being correct | C2, B2, F6 |
 | **32** | open | **An operations log from the first real run** — endpoint, model, dates, incidents, decisions. With the developer reachable rather than resident, this is the only knowledge-transfer mechanism there is | F4 |
 | 4 | **✓ §8.4** | Screen every export before it leaves the machine. The classification line is a label; this is the rule | B1, B2 |
 | 15 | open | The decommission condition, with a date, and the "to operate for real" list | F3 |
@@ -1067,7 +1068,7 @@ data was opened, queried or printed (Do-NOT #13).
 
 | Finding | Check | Result |
 |---|---|---|
-| **A5** | A duplicate-key insert forced through the project's own `create_engine`, on a temp database with two synthetic rows, then `f"{type(exc).__name__}: {exc}"` — exactly `_error_text` — inspected for the planted narrative and key | Both present. SQLAlchemy's `hide_parameters` defaults to `False` and `create_async_engine` is called without it (`session.py:97`) |
+| **A5** | A duplicate-key insert forced through the project's own `create_engine`, on a temp database with two synthetic rows, then `f"{type(exc).__name__}: {exc}"` — exactly `_error_text` — inspected for the planted narrative and key | Both present. SQLAlchemy's `hide_parameters` defaults to `False` and `create_async_engine` is called without it (`session.py:97`). **Re-checked 2026-09-24 after the fix**: absent through `create_engine`, still present through a default-built engine, which is the control |
 | **G1** | Six synthetic byte-layouts through `ra2.domain.parsing.encoding.detect_encoding`, including UTF-8 bytes followed by cp1252 bytes in one file | Whole-file fallback to cp1252; the UTF-8 portion returns as `GrÃ¼ezi`. No finding beyond `ENCODING_DETECTED` |
 | **G2** | The same harness, with UTF-16LE with and without a BOM | With BOM → `cp1252`, text `'ÿþU\x00n\x00f…'`. Without BOM → `utf-8`, text `'U\x00n\x00f…'`. Neither is refused; only the UTF-8 BOM is recognised |
 | **G4** | `ls tests/fixtures/deliveries/hazards/` against `CLAUDE.md`'s named hazard list | `h01`–`h14` present; no mixed-encoding fixture. `h01_cp1252` is whole-file, `h02_undecodable` fails the file |
@@ -1577,8 +1578,15 @@ of a user. From now on it will, and when it does:
 4. So the only diagnostic material is a log line, a screenshot or a traceback,
    and the natural act — with the developer *reachable rather than resident* —
    is to send it to them.
-5. **A5 means that log line can carry a narrative and an `unfall_uid`
-   verbatim**, precisely when something has gone wrong.
+5. ~~**A5 means that log line can carry a narrative and an `unfall_uid`
+   verbatim**, precisely when something has gone wrong.~~ **Broken, 2026-09-24**
+   (`fix-a5-bound-parameters`): the engine hides bound parameters, so a driver
+   error no longer publishes the row it failed on. **The chain is weakened,
+   not cut.** Links 1, 2, 3 and 6 stand, and the diagnostic material a person
+   sends is not only the log — a screenshot of the record view, a description
+   typed out by hand, and the mismatch export (B2, `EXPORT_LEAVES_RA2`) all
+   still carry content, and none of them is a control anybody can fix. Item 31
+   is what closes this, and it is not code.
 6. The destination is a **public repository** (now a settled decision, §9.4) or
    an **agent transcript**, which leaves the host by construction (Do-NOT #13).
 
@@ -1602,7 +1610,8 @@ the operational phase.
 
 **A5 · A database error writes the narrative and the record key into
 `run.error`, and from there into the log** · Severity: **High** · Control
-status: **absent** · **Verified**
+status: ~~**absent**~~ → **present** · **Verified**, then **closed 2026-09-24**
+(`contracts/amendments/fix-a5-bound-parameters.md`, `SD39`)
 
 *Scenario.* Any exception raised beneath a run — a constraint violation, a
 validation error, a driver fault — is stringified into `run.error`, which is
@@ -1651,6 +1660,36 @@ the moment an agent is asked to look, and it is link 5 of §9.1.1's chain.
 3. Say in `data-handling.md` §5.1 that the "may never appear" list is enforced
    by the engine's configuration as well as by the call sites, because a call
    site is not where this one came from.
+
+*Resolution, 2026-09-24.* All three, in one commit. `create_engine` passes
+`hide_parameters=True` (`session.py`, one keyword argument);
+`tests/backend/persistence/test_engine_hides_parameters.py` provokes a real
+`IntegrityError` over the real migrated `record` table and asserts the planted
+narrative and key are absent from exactly `_error_text`'s expression, **with a
+sibling that runs the same insert through a default-built engine and fails if
+the narrative is not there**; and `data-handling.md` §5.1 now states the rule
+in two halves — what a line is given, at the call sites, and what an exception
+is allowed to say, at the engine.
+
+Two things the fix turned up that the finding had not.
+
+**The channel was wider than `record`.** The reproduction used an insert over
+`record`, so it named `text_raw` and `unfall_uid`. Re-provoked through the real
+service, the statement that actually fails first in a run is the insert over
+**`extraction`**, and its bound parameters include `raw_output_text` — the
+model's entire answer, which is on the same "may never appear" list. Logged at
+`WARNING`, on a failed run, which is the only kind anybody reads.
+
+**The false premise was written down.** The comment above the log call in
+`run_service.py` read *"…and never the model's words, so it is safe to repeat
+here"* — correct for every error that module **writes**, wrong for the ones it
+**catches**. It has been corrected rather than deleted; an assumption stated
+out loud is why this was findable at all.
+
+`test_run_log_carries_no_data.py` gained the case it structurally could not
+have: a `RAISE(ABORT)` trigger on `extraction` provokes a real driver error
+inside a real run, and both the persisted `run.error` and the log are asserted
+clean. Removing the keyword argument fails three tests across the two files.
 
 ---
 

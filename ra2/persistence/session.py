@@ -93,8 +93,20 @@ def _apply_pragmas(dbapi_connection: Any, _record: Any) -> None:
 
 
 def create_engine(database_url: str, *, echo: bool = False) -> AsyncEngine:
-    """One async engine, with the PRAGMAs bound to its connect event."""
-    engine = create_async_engine(database_url, echo=echo, future=True)
+    """One async engine, with the PRAGMAs bound to its connect event.
+
+    `hide_parameters=True` is a **data-handling** flag, not a tuning one. Its
+    default is `False`, which puts the bound parameters of a failing statement
+    into `str(exc)` — and for an insert over `record` those parameters are
+    `text_raw` and `unfall_uid`, both on `data-handling.md` §5.1's "may never
+    appear" list by name. `run_service._error_text` stringifies every
+    exception into `run.error`, which is persisted, shown by the runs table's
+    log action and written to stderr, so a constraint violation published the
+    narrative to the one artefact an operator is asked to paste into a bug
+    report (risk-assesment.md A5 §9.2, `SD39`). It covers `echo=` too: the
+    statement log goes through the same suppression.
+    """
+    engine = create_async_engine(database_url, echo=echo, future=True, hide_parameters=True)
     event.listen(engine.sync_engine, "connect", _apply_pragmas)
     return engine
 
