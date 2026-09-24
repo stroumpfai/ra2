@@ -32,6 +32,8 @@ import logging
 from collections.abc import Iterator
 
 import pytest
+import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 from tests.backend.services.run.conftest import answer
 from tests.fixtures.fake_llm import FakeLLMClient
 
@@ -153,4 +155,59 @@ async def test_the_reclaim_verdict_is_logged_loudly(
     assert await service.reclaim_orphans() == 1
     assert (await service.get(seeded.run_id)).status is RunStatus.INTERRUPTED
     assert any("left running by a process that died" in line for line in run_log), run_log
+    _assert_no_delivery_content(run_log, seeded.markers)
+
+
+async def test_a_database_error_under_a_run_logs_no_row_content(
+    seed, make_run_service, reporter, run_log, db_session_factory
+):
+    """The channel the three tests above cannot reach (risk-assesment.md A5).
+
+    Each of them drives a run that *works*. A database error is the one path
+    that puts a whole bound row into a string this module then logs:
+    `run_service._error_text` is `f"{type(exc).__name__}: {exc}"`, and
+    SQLAlchemy's `hide_parameters` defaults to `False`. So the guard was
+    correct and complete for what it inspected, and the defect lived one layer
+    below it — A1's shape.
+
+    The failure is provoked with a `RAISE(ABORT)` trigger on `extraction`
+    rather than with a mock session: what is under test is what a **real**
+    `IntegrityError` from the **real** driver says about the row it was given,
+    and a fake raises whatever it was told to.
+
+    `hide_parameters=True` on `create_engine` is what makes this pass;
+    `tests/backend/persistence/test_engine_hides_parameters.py` pins the flag
+    itself and carries the positive control.
+    """
+    seeded = await seed(records=3)
+    # Model output, and on §5.1's "may never appear" list alongside the
+    # narrative. It reaches `extraction.raw_output_text` and the `evidence`
+    # of every value row — which is precisely what the aborted INSERT binds.
+    evidence = "SYNTHETIC-EVIDENCE es regnete in Strengelbach"
+    service = make_run_service(FakeLLMClient(response=answer(evidence=evidence)))
+
+    async with db_session_factory() as session:
+        await session.execute(
+            sa.text(
+                "CREATE TRIGGER synthetic_extraction_guard "
+                "BEFORE INSERT ON extraction BEGIN "
+                "SELECT RAISE(ABORT, 'synthetic insert failure'); END"
+            )
+        )
+        await session.commit()
+
+    with pytest.raises(IntegrityError):
+        await service.execute_run(seeded.run_id, reporter)
+
+    view = await service.get(seeded.run_id)
+    assert view.status is RunStatus.FAILED
+    # The row is the other half of the same channel: `run.error` is persisted
+    # and rendered by the runs table's log action, not only written to stderr.
+    assert view.error is not None
+    assert evidence not in view.error, view.error
+
+    # The run said something before it failed, so absence below is a result.
+    assert run_log, "the run logged nothing at all"
+    assert any("failed" in line for line in run_log), run_log
+    assert evidence not in "\n".join(run_log), run_log
     _assert_no_delivery_content(run_log, seeded.markers)

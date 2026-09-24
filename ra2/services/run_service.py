@@ -881,6 +881,14 @@ class RunService:
         # is safe to repeat here. It is also the one thing worth having in the
         # terminal: the same text the "log" action shows, at the moment it was
         # decided rather than whenever somebody thinks to look.
+        #
+        # **That first sentence is only true of the errors this module writes.**
+        # `_error_text` also stringifies whatever `execute_run` caught, and a
+        # database error's string carries the bound parameters of the statement
+        # that failed — the whole row, model output included. The engine is what
+        # makes it true there: `create_engine` sets `hide_parameters=True`
+        # (risk-assesment.md A5, `SD39`). Asserted one layer up, against a real
+        # driver error, in `test_run_log_carries_no_data.py`.
         level = logging.INFO if status is RunStatus.DONE else logging.WARNING
         _log.log(level, "run %s: %s%s", run_id, status.value, f" — {error}" if error else "")
 

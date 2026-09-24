@@ -237,6 +237,25 @@ against a fixture whose narrative and keys it knows, and fails if either
 reaches a log record. It asserts lines *were* emitted first, so the guard
 cannot pass by the log having gone silent.
 
+**The list is enforced by the engine's configuration as well as by the call
+sites, because a call site is not where the breach came from.** `run.error` is
+on the "may appear" side as *this application's own sentence about a run* — a
+count of records, an endpoint status — and that is true of every error this
+code writes. It was not true of the ones it merely catches. `_error_text`
+stringifies any exception, and SQLAlchemy puts the bound parameters of a
+failing statement into `str(exc)` unless told not to: for an insert over
+`record` that is `text_raw` and `unfall_uid`, and for one over `extraction` it
+is the model's whole answer. No call site was at fault and no reviewer reading
+`run_service.py` would have seen it. `ra2/persistence/session.py` therefore
+passes **`hide_parameters=True`**, and
+`tests/backend/persistence/test_engine_hides_parameters.py` pins it against a
+real driver error, with a positive control proving the search can fail
+(risk-assesment.md A5).
+
+So the rule has two halves, and both are gates: **what a line is given**, at
+the call sites, and **what an exception is allowed to say**, at the engine. A
+`run.error` that came from a caught exception is only as safe as the second.
+
 **`OLLAMA_DEBUG` stays forbidden** (§5's table above). None of this touches it:
 the model server writes prompt content to its own log, outside all of this.
 
