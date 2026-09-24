@@ -54,7 +54,7 @@ import asyncio
 import json
 import logging
 import platform
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final
@@ -224,6 +224,36 @@ class _RunPlan:
     #: The constrained-decoding format, built once so two records of one run
     #: cannot be asked a differently-ordered question (§15.3).
     schema: type[BaseModel]
+
+
+@dataclass(slots=True)
+class _RecordLoop:
+    """What the workers of one `_extract_all` share (SD38).
+
+    Mutated only between awaits, on one event loop, so no lock. None of it is
+    derivable from committed rows, except `done`, which is re-read after every
+    commit and kept here only so it can be reported without going backwards.
+    """
+
+    done: int
+    total: int
+    #: Records this execution set out to extract; the denominator of the
+    #: per-record log lines.
+    pending: int
+    consecutive_endpoint_errors: int = 0
+    last_endpoint_error: str | None = None
+    #: Records that exhausted their attempts at the endpoint, and what those
+    #: attempts cost. Neither is derivable from anything committed: a record
+    #: that never answered writes **no** `extraction` row, so its attempts are
+    #: the one part of §10.4's "bounded, counted and visible" that had nowhere
+    #: to be counted (`plan-fix-evaluation-runs.md` §1.1 b). They ride out on
+    #: `run.error`, which is durable and — since the "log" action was opened
+    #: to any run carrying a reason — reachable.
+    endpoint_failures: int = 0
+    endpoint_attempts: int | None = 0
+    #: Set when the endpoint-error budget trips. Workers stop taking records;
+    #: calls already in flight finish.
+    stopped: bool = False
 
 
 class _OffsetReporter:
@@ -541,39 +571,96 @@ class RunService:
         _log.info("run %s: done, scoring submitted as task %s", run_id, task_id)
 
     async def _extract_all(self, plan: _RunPlan, reporter: ProgressReporter) -> None:
-        """The record loop. Every transaction in here is opened and closed
-        inside one iteration, and none of them spans the LLM call."""
+        """The record loop: `plan.parallel_calls` workers over one pending
+        list (sw-design.md §15.4, SD38).
+
+        **One code path for every N.** N=1 is one worker in the same pool, not
+        a serial loop kept beside it — two loops would be one tested and one
+        trusted (Do-NOT #12). Each worker resolves, calls and commits one record
+        at a time, every transaction opened and closed inside that record, and
+        none of them spans the LLM call (§15.3).
+
+        Dispatch order is scope order: the workers share one iterator. Commit
+        order is completion order, and nothing depends on the two agreeing —
+        resume keys on holes, not on a tail.
+        """
         pending = await self._pending(plan.run_id, plan.corpus_id, plan.limit)
         done = await self._count_done(plan.run_id)
         total = done + len(pending)
         reporter.report(done, total, plan.model_name)
-        # Ids, counts, a model tag and a bound. Nothing out of the delivery —
+        # Ids, counts, a model tag and two bounds. Nothing out of the delivery —
         # not the narrative, not `unfall_uid`, not the resolved prompt
         # (`infra/logging.py` states the rule, and a test drives a real run at
-        # it). The bound is here because it is the number that decides how long
-        # the next line can take to arrive.
+        # it). The bounds are here because they decide how long the next line
+        # can take to arrive: past what Ollama serves at once, a call waits in
+        # its queue, and the wait counts against the timeout (SD38).
         _log.info(
-            "run %s: %d pending, %d already done, model=%s, timeout=%ds",
+            "run %s: %d pending, %d already done, model=%s, timeout=%ds, parallel=%d",
             plan.run_id,
             len(pending),
             done,
             plan.model_name,
             self._settings.llm_timeout_s,
+            plan.parallel_calls,
         )
 
-        consecutive_endpoint_errors = 0
-        last_endpoint_error: str | None = None
-        #: Records that exhausted their attempts at the endpoint, and what
-        #: those attempts cost. Neither is derivable from anything committed:
-        #: a record that never answered writes **no** `extraction` row, so its
-        #: attempts are the one part of §10.4's "bounded, counted and visible"
-        #: that had nowhere to be counted (`plan-fix-evaluation-runs.md` §1.1
-        #: b). They ride out on `run.error`, which is durable and — since the
-        #: "log" action was opened to any run carrying a reason — reachable.
-        endpoint_failures = 0
-        endpoint_attempts: int | None = 0
+        loop = _RecordLoop(done=done, total=total, pending=len(pending))
+        queue = iter(enumerate(pending, start=1))
+        try:
+            async with asyncio.TaskGroup() as group:
+                for _ in range(min(plan.parallel_calls, len(pending))):
+                    group.create_task(self._extract_worker(plan, reporter, queue, loop))
+        except BaseExceptionGroup as failure:
+            # A worker raised something that is not an endpoint failure, so
+            # the `TaskGroup` cancelled its siblings. `execute_run` records one
+            # error on the row, as it did before there were workers: the first.
+            # The rest are logged by type only (`data-handling.md` §5.1).
+            first, *others = failure.exceptions
+            for other in others:
+                _log.error(
+                    "run %s: another worker also failed (%s)", plan.run_id, type(other).__name__
+                )
+            raise first from None
 
-        for index, record_id in enumerate(pending, start=1):
+        remaining = await self._pending(plan.run_id, plan.corpus_id, plan.limit)
+        if remaining:
+            # Not `failed`: the work that landed is good and the rest is
+            # resumable, which is what `interrupted` means (§15 F8). The
+            # missing records are named by count, never silently dropped
+            # (Do-NOT #6) — `pending_record_ids` re-derives exactly which.
+            reason = loop.last_endpoint_error or "the endpoint stopped answering"
+            cost = _endpoint_cost(loop.endpoint_failures, loop.endpoint_attempts)
+            await self._finish(
+                plan.run_id,
+                RunStatus.INTERRUPTED,
+                error=(
+                    f"interrupted with {len(remaining)} record(s) not extracted{cost}: {reason}"
+                ),
+            )
+        else:
+            await self._finish(plan.run_id, RunStatus.DONE, error=None)
+
+    async def _extract_worker(
+        self,
+        plan: _RunPlan,
+        reporter: ProgressReporter,
+        queue: Iterator[tuple[int, RecordId]],
+        loop: _RecordLoop,
+    ) -> None:
+        """One of `plan.parallel_calls` workers: take the next record, resolve,
+        call, commit, repeat, until the list is empty or the loop has stopped.
+
+        The shared state is mutated only between awaits, on one event loop, so
+        it needs no lock. `stopped` is checked **before** taking a record: once
+        the endpoint budget trips, nobody starts another, and calls already in
+        flight finish — and commit if they answered. That spends at most N−1
+        further calls, each counted.
+        """
+        while not loop.stopped:
+            taken = next(queue, None)
+            if taken is None:
+                return
+            index, record_id = taken
             prompt_text = await self._resolve_prompt(plan, record_id)
             # **Before** the call, not only after it. On the reporting host one
             # record is over two minutes, and a line that only ever appears on
@@ -582,7 +669,7 @@ class RunService:
                 "run %s: record %d/%d (%s) → %s",
                 plan.run_id,
                 index,
-                len(pending),
+                loop.pending,
                 record_id,
                 plan.model_name,
             )
@@ -599,9 +686,9 @@ class RunService:
                 # **No row.** The hole this leaves is exactly what
                 # `pending_record_ids` is specified to find; a placeholder row
                 # here would destroy resume (sw-design.md §15.3).
-                last_endpoint_error = str(exc)
-                consecutive_endpoint_errors += 1
-                endpoint_failures += 1
+                loop.last_endpoint_error = str(exc)
+                loop.consecutive_endpoint_errors += 1
+                loop.endpoint_failures += 1
                 # `exc.status` is the `EndpointStatus` code, not prose: the
                 # distinction between "nothing is listening" and "answered and
                 # did not finish in time" is the whole of item 1's reasoning,
@@ -610,7 +697,7 @@ class RunService:
                     "run %s: record %d/%d (%s) failed at the endpoint (%s) after %s attempt(s)",
                     plan.run_id,
                     index,
-                    len(pending),
+                    loop.pending,
                     record_id,
                     exc.status.value,
                     "an unknown number of" if exc.attempts is None else exc.attempts,
@@ -618,21 +705,25 @@ class RunService:
                 # `None` the moment one failure cannot say what it cost, and
                 # `None` from then on: a total that silently omits an unknown
                 # is worse than no total, because it reads as complete.
-                if exc.attempts is None or endpoint_attempts is None:
-                    endpoint_attempts = None
+                if exc.attempts is None or loop.endpoint_attempts is None:
+                    loop.endpoint_attempts = None
                 else:
-                    endpoint_attempts += exc.attempts
-                # `done` is the count of **committed rows for this run**, from
-                # this execution or any earlier one, so this reads "has this
-                # configuration ever worked" rather than "is this the first
-                # record I tried".
-                if consecutive_endpoint_errors >= _endpoint_error_budget(done):
-                    break
+                    loop.endpoint_attempts += exc.attempts
+                # "Consecutive" in **completion** order, which is the only order
+                # there is once calls overlap; any answer resets it. `done` is
+                # the count of committed rows for this run, from this execution
+                # or any earlier one, so this reads "has this configuration
+                # ever worked" rather than "is this the first record I tried".
+                if loop.consecutive_endpoint_errors >= _endpoint_error_budget(loop.done):
+                    loop.stopped = True
                 continue
-            consecutive_endpoint_errors = 0
+            loop.consecutive_endpoint_errors = 0
             await self._commit_record(plan, record_id, response)
-            done = await self._count_done(plan.run_id)
-            reporter.report(done, total, plan.model_name)
+            # Re-read from committed rows (§15 F6), and never allowed to go
+            # backwards: two workers' counts can resolve in either order, and a
+            # progress bar that steps back reads as lost work.
+            loop.done = max(loop.done, await self._count_done(plan.run_id))
+            reporter.report(loop.done, loop.total, plan.model_name)
             # `parse_ok` is a **datum**, not an error (§15.3), so this is INFO
             # whichever way it went. What the model actually said is the
             # `extraction` row's business and never this one's.
@@ -640,31 +731,13 @@ class RunService:
                 "run %s: record %d/%d answered in %s ms, parse_ok=%s, retries=%d (%d/%d done)",
                 plan.run_id,
                 index,
-                len(pending),
+                loop.pending,
                 response.latency_ms,
                 response.parse_ok,
                 response.retry_count,
-                done,
-                total,
+                loop.done,
+                loop.total,
             )
-
-        remaining = await self._pending(plan.run_id, plan.corpus_id, plan.limit)
-        if remaining:
-            # Not `failed`: the work that landed is good and the rest is
-            # resumable, which is what `interrupted` means (§15 F8). The
-            # missing records are named by count, never silently dropped
-            # (Do-NOT #6) — `pending_record_ids` re-derives exactly which.
-            reason = last_endpoint_error or "the endpoint stopped answering"
-            cost = _endpoint_cost(endpoint_failures, endpoint_attempts)
-            await self._finish(
-                plan.run_id,
-                RunStatus.INTERRUPTED,
-                error=(
-                    f"interrupted with {len(remaining)} record(s) not extracted{cost}: {reason}"
-                ),
-            )
-        else:
-            await self._finish(plan.run_id, RunStatus.DONE, error=None)
 
     async def _resolve_prompt(self, plan: _RunPlan, record_id: RecordId) -> str:
         """The resolved prompt for one record, in a transaction of its own

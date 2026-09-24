@@ -628,6 +628,10 @@ the recommended set (plan §9 Q5). The design is `sw-design.md` §15.4 and
 | `ra2/ui/views/results/ranking_tab.py` | + "Time / record" column (104px, after Median latency), the `×N` mark in the latency cell, and `PARALLEL_NOTE` under the table only when a row ran at N > 1. `COMPUTATION_RULES` rule 4 stays the design's copy verbatim |
 | `ra2/ui/views/evaluation_view.py` | `_provenance_line` gains `parallel calls N` after the reasoning effort |
 | `sw-design.md` | §10, §15.2, §15.4, §15.8, §16.5, `SD38` (Stage 1) |
+| `ra2/services/run_service.py` (Stage 3) | **The worker pool.** `_extract_all` starts `min(parallel_calls, pending)` workers in one `asyncio.TaskGroup`, pulling from one iterator in scope order; the per-record body is `_extract_worker`, and the counters it shares are `_RecordLoop`. N=1 is one worker, not a separate loop (Do-NOT #12). The endpoint budget counts consecutive failures in completion order and stops dispatch when it trips, while in-flight calls finish and commit. An unexpected exception cancels the siblings and re-raises the first, so `execute_run` records one error as before. `done` is `max(previous, re-read)`, so progress never steps back. The run-start log line gains `parallel=N` |
+| `tests/backend/services/run/test_parallel_calls.py` (new, Stage 3) | The plan's Stage 3 table, driven by `ScriptedCalls`, which scripts each call by the order it began, so ordering is controlled rather than timed |
+| `tests/backend/services/run/conftest.py` | `seed(parallel_calls=…)`: one number or `model -> N`, pinned on each run as the launch would |
+| `tests/backend/services/run/test_transaction_boundary.py` | `test_a_row_and_its_children_are_committed_together` parametrised over N = 1, 3; the N=1 commit-sequence test kept, with a docstring saying why |
 
 ---
 

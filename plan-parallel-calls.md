@@ -7,9 +7,10 @@ ran on 2026-09-24 (§1.2). `qwen3:8b` passes all three gate conditions.
 `ministral-3:8b` fails condition 2**, which is the plan's stop condition if
 it stays in use. **David answered Q5 with (a):** `granite4.1:8b` replaces
 `ministral-3:8b` as the second opinion. `gemma4:12b` then passed
-condition 2, so **Stages 1–4 go ahead.** **Stages 1 and 2 are done**: the design
-(SD38), the setting, the column, the pin, and the display. Nothing runs in
-parallel yet: Stage 3, the worker pool, is next. Branch `feat/parallel-calls`. Authority as always: `mvp-spec.md` on
+condition 2, so **Stages 1–4 go ahead.** **Stages 1–3 are done**: the design
+(SD38), the setting, the column, the pin, the display, and the worker pool.
+A model mapped above 1 now runs that many records at once. Stage 4, the
+end-to-end check against the real endpoint at the score level, is next. Branch `feat/parallel-calls`. Authority as always: `mvp-spec.md` on
 *what*, `sw-design.md` on *how* (CLAUDE.md). Stage 1 changed `sw-design.md`
 before any code, and every frozen file the code touches is named as an
 amendment (§6).
@@ -417,7 +418,40 @@ mark.
 
 `just lint` and `just test` must be green.
 
-### Stage 3 — the pool
+### Stage 3 — the pool ✅ (2026-09-24)
+
+**Done.** `_extract_all` now starts `min(parallel_calls, pending)` workers in
+one `TaskGroup`, and the loop body is `_extract_worker`. The shared counters
+live on a `_RecordLoop` dataclass. The table is green, and so are `just lint`
+(the old mypy error at `tests/e2e/conftest.py:97` is gone) and `just test`
+(2548 passed, twice). Where it differed from the plan:
+
+- **The N=1 commit-sequence test is kept, not replaced.**
+  `test_each_record_is_committed_before_the_next_model_call` states a
+  stricter property that is true at N=1, so it stays, with a docstring
+  pointing at the any-N form.
+- **`test_no_transaction_spans_a_model_call` holds all N calls, then counts
+  the pool's checked-out connections**, which must be 0. "No session open
+  while *any* call is awaited" can't be observed at N=3 in general, because a
+  sibling may be committing. With every worker inside `extract`, none can be.
+- **Deterministic ordering, not timing.** The tests use a scripted client
+  (`ScriptedCalls` in `test_parallel_calls.py`) where each call, by the order
+  it began, answers, fails, raises, or waits for the test to release it. The
+  budget test therefore pins the exact story: 6 calls, 2 rows, 4 counted
+  failures, 2 calls past the trip (N−1).
+- **Ceilings where only timing could prove a peak.** The unmapped-model and
+  resume tests assert at most 3 / exactly 1 and at most 2, with a 50 ms hold
+  so a wrong ceiling shows. That N is actually *reached* is proven by the
+  exact-N test with held calls. Exact peaks behind a 10 ms sleep failed once
+  under load.
+- **Progress is never allowed to go backwards.** Two workers' `COUNT` reads
+  can resolve in either order, so `done` is `max(previous, count)`.
+- **Mutation-checked.** With the code broken four ways (a session held across
+  the call, no stop check, the map read instead of the pin, always one
+  worker), the tests fail. That check found a real defect in the first draft
+  of the tests: a held test that failed hung teardown instead of failing.
+  Every held test now releases *and waits for the run* in a `finally`.
+- Added: `test_the_run_start_log_line_names_the_parallelism`.
 
 §4.2 in `run_service._extract_all`. Tests in `tests/backend/services/run/`,
 driven by the gated fake client `test_in_flight.py` already uses:

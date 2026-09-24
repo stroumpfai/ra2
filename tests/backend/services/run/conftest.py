@@ -26,7 +26,7 @@ at run *start*).
 """
 
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 
@@ -384,6 +384,7 @@ def seed(
         is_dev: bool = False,
         seed_value: int = 42,
         reasoning_effort: str | None = None,
+        parallel_calls: int | Mapping[str, int] = 1,
         suffix: str = "a",
         snapshot: bool = True,
         codelist_json: str | None = WEATHER_CODELIST,
@@ -394,6 +395,9 @@ def seed(
         :param codelist_json: what the snapshot carries for the `enum`
             feature. Anything but `{code: label}` means "no snapshot to check
             against", never a guess.
+        :param parallel_calls: what the launch pinned on each run (SD38) —
+            one number for every model, or `model -> N`, with an unnamed
+            model at 1 as the launch would leave it.
         :param reasoning_effort: what the launch pinned on each run. `None`
             reproduces a run queued **before** the effort was a
             per-evaluation input, which is the state `_start`'s fallback to
@@ -530,6 +534,11 @@ def seed(
                         temperature=0.0,
                         seed=seed_value,
                         llm_reasoning_effort=reasoning_effort,
+                        llm_parallel_calls=(
+                            parallel_calls
+                            if isinstance(parallel_calls, int)
+                            else parallel_calls.get(model, 1)
+                        ),
                         status=RunStatus.QUEUED,
                         # Blank on purpose: the host half of the provenance is
                         # the worker's to write, **at run start** (§15.4).
