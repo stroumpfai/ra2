@@ -1,19 +1,16 @@
 # plan-parallel-calls.md — more than one record in flight per run
 
-**Status.** Written 2026-09-23 against `12268ed`; **revised the same day**
-after Stage 0 and the eight-model comparison in
-[`docs/performance.md`](docs/performance.md). Nothing implemented. **Stage 0b
-ran on 2026-09-24 (§1.2). `qwen3:8b` passes all three gate conditions.
-`ministral-3:8b` fails condition 2**, which is the plan's stop condition if
-it stays in use. **David answered Q5 with (a):** `granite4.1:8b` replaces
-`ministral-3:8b` as the second opinion. `gemma4:12b` then passed
-condition 2, so **Stages 1–4 go ahead.** **Stages 1–3 are done**: the design
-(SD38), the setting, the column, the pin, the display, and the worker pool.
-A model mapped above 1 now runs that many records at once. Stage 4, the
-end-to-end check against the real endpoint at the score level, is next. Branch `feat/parallel-calls`. Authority as always: `mvp-spec.md` on
-*what*, `sw-design.md` on *how* (CLAUDE.md). Stage 1 changed `sw-design.md`
-before any code, and every frozen file the code touches is named as an
-amendment (§6).
+**Status.** Written 2026-09-23 against `12268ed` and revised the same day
+after Stage 0. **All stages done on 2026-09-24 on branch
+`feat/parallel-calls`, not yet merged.** Stage 0b (§1.2) passed `qwen3:8b` on
+all three gate conditions. It stopped `ministral-3:8b`, which David replaced
+with `granite4.1:8b` (§9 Q5). Stages 1–3 built the design (SD38), the
+setting, the column, the display and the worker pool. Stage 4 (§1.3) found
+identical scores and 2.38× on `qwen3:8b`. **Left for David:** merging, and
+the host change in §7 that makes it take effect outside a private server.
+Authority as always: `mvp-spec.md` on *what*, `sw-design.md` on *how*
+(CLAUDE.md). Every frozen file the code touches is named as an amendment
+(§6).
 
 **What the revision changed.** The first draft had one host-wide number for
 every model. Stage 0 showed the answer is **per model**: `qwen3:8b` gains ~2×
@@ -161,6 +158,53 @@ What this says:
 
 **Not measured:** condition 2 for `llama3.2:3b`. No recommendation uses it.
 If it comes back into use, it needs the same three serial passes first.
+
+### 1.3 Stage 4 results (2026-09-24)
+
+**Method.** A throwaway 200-record seed (`seed_dev.py --records 200`,
+synthetic codelist). Every model on 11434 was unloaded first. Both
+evaluations ran on a private `ollama serve` on `127.0.0.1:11435` at
+`NUM_PARALLEL=4`, which Stage 0b showed leaves both models' serial answers
+unchanged. Each was launched through `EvaluationService.launch` and
+`RunService.launch_runs` with an `InlineTaskRunner` and scored by the chained
+job. Numbers were read from `RunService.progress`, `RankingService` and
+`ResultsService`. They are identical except for `RA2_LLM_PARALLEL_CALLS`.
+
+| Evaluation | Model | Pinned | Run | Macro-F1 [Wilson 95 %] | Median latency | Time per record |
+|---|---|---|---|---|---|---|
+| `{}` | `qwen3:8b` | 1 | **348.8 s** | 0.895 [0.870–0.905] | 1.72 s | 1.72 s |
+| `{}` | `granite4.1:8b` | 1 | 641.0 s | 0.886 [0.861–0.897] | 3.12 s | 3.17 s |
+| `{"qwen3:8b": 4}` | `qwen3:8b` | 4 | **146.7 s (2.38×)** | 0.895 [0.870–0.905] | 2.76 s ×4 | **0.72 s** |
+| `{"qwen3:8b": 4}` | `granite4.1:8b` | 1 | 659.0 s | 0.886 [0.861–0.897] | 3.18 s | 3.25 s |
+
+Whole evaluation: 990 s → 806 s. The serial one reproduces the eight-model
+comparison exactly (`docs/performance.md` §4.1: 0.895 and 0.886).
+
+1. **Scores: identical.** Every one of the six scored features has the same
+   F1 and `n` in both evaluations, to four decimals, for both models. The
+   plan asked for "within the Wilson interval" and "macro within 0.01".
+2. **Answers: 5 of 200 raw outputs differ** for `qwen3:8b` between its run
+   at 1 and its run at 4, and none of them moved a score. That's 1.2 per 48,
+   inside Stage 0b's 0–2 band. Raw text is a stricter comparison than the
+   gate's canonical JSON. `granite4.1:8b`, serial in both, differs on 0.
+3. **Time per record checks against the wall clock.** 0.72 s × 200 = 144 s,
+   against 146.7 s measured. The gap is the ramp-down, when fewer than four
+   records are left.
+4. **Caveat, seen in the browser check: the first call of a run includes
+   loading the model**, so the mean, and with it time per record, is pulled
+   up on a small corpus. On 48 records `granite4.1:8b` showed 3.84 s against a
+   3.11 s median. On 200 it was 3.17 against 3.12, and at corpus scale it
+   vanishes. Both models pay it, so it doesn't change which is cheaper
+   unless one of them loads much more slowly. This is left as it is: it is
+   what the run cost.
+
+**Browser check** (`just dev-agent` with `RA2_LLM_BASE_URL` on the private
+server and `{"qwen3:8b": 4}`, a 48-record seed in the agent's own temp dir):
+the progress card read `8 / 48 · running`. Stop turned the row `interrupted`
+with 8 kept, and Resume took it to `done`. The provenance line ended
+`reasoning none · parallel calls 4`. The ranking showed `2.76 s ×4` and
+`0.95 s` for `qwen3:8b`, no mark for `granite4.1:8b`, and the note under the
+table.
 
 ## 2. What exists and what it means
 
@@ -473,7 +517,17 @@ driven by the gated fake client `test_in_flight.py` already uses:
 pre-existing mypy error at `tests/e2e/conftest.py:97` is unrelated; say so if
 it's still there.
 
-### Stage 4 — verify end to end, at the score level
+### Stage 4 — verify end to end, at the score level ✅ (2026-09-24)
+
+**Done**, on a private four-slot server (`127.0.0.1:11435`), so the system
+service was never reconfigured. The results are in §1.3 and
+`docs/performance.md` §5.3. Every per-feature F1 and both macro-F1s are
+**identical to four decimals**, not just inside their intervals. `qwen3:8b`
+took 349 s → 147 s for 200 records (2.38×). The browser check under
+`just dev-agent` passed: progress card, Stop at 8/48, Resume to done,
+`parallel calls 4` on the provenance line, `×4` and the note on the ranking.
+The Status line can't name a merge commit yet, because the branch isn't
+merged. That, and switching the system service, are David's (§7).
 
 Throwaway 200-record seed. The system service, or a private server, runs at
 the `OLLAMA_NUM_PARALLEL` Stage 0b approved, with all models unloaded first.
@@ -516,16 +570,23 @@ Results in the implementing wave (`plan-m0-m5.md` §4).
 Environment="OLLAMA_KEEP_ALIVE=-1"
 ```
 
-**After Stage 0b passes, and not before:**
+**Stage 0b passed, so this is the change that switches it on.** It is not
+applied; it needs `sudo` and a service restart, and it is David's to make:
 
 ```ini
 Environment="OLLAMA_NUM_PARALLEL=4"
 ```
 
-`-1` keeps a model loaded until another needs its VRAM. With a model
-pinned, a parallel run has to unload other models first (§4.5), so Stage 0b
-may argue for a finite keep-alive such as `30m` instead. Decide with its
-numbers.
+then `RA2_LLM_PARALLEL_CALLS='{"qwen3:8b": 4}'` in RA2's environment. Until
+both are set, nothing changes: the map defaults to `{}`.
+
+**Keep-alive can stay `-1`.** The contention in §1.1 point 3 was between
+*two* Ollama servers, the system service holding `gemma4:12b` while a private
+one loaded `qwen3:8b`, and neither could evict the other's model. One server
+evicts its own idle models when a new one needs the VRAM. Two models at four
+slots no longer fit together on 16 GB (§1.2 point 5), so eviction does that
+work. What to avoid is a second Ollama running beside the service during a
+parallel run.
 
 ## 8. Not in this plan
 

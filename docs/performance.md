@@ -27,7 +27,7 @@ named here. Re-measure rather than edit them (§7 says how).
 | Biggest lever | **Reasoning effort.** `none` vs the model's default: 6 s vs 190 s for one record |
 | Second biggest | **The model**, mostly through how much it *writes*, not through its size (§4.3) |
 | Recommended model | **`qwen3:8b`**. Tied for first on quality, fastest of the leaders. It captures no entities (§4.4) |
-| Parallel calls | **Not implemented.** Measured at ~2.4× for `qwen3:8b` without changing answers, but the server setting it needs changes `ministral-3:8b`'s answers (§5.3) |
+| Parallel calls | **Built, off by default.** `RA2_LLM_PARALLEL_CALLS='{"qwen3:8b": 4}'` plus `OLLAMA_NUM_PARALLEL=4` on the Ollama host: 2.4× for `qwen3:8b` with identical scores. The server setting changes `ministral-3:8b`'s answers, so it left the recommended set (§5.3) |
 
 ---
 
@@ -245,7 +245,7 @@ Ordered by effect. "Measured" means on this host, as described in §7.
 | 5 | **Number of models** | Linear, since runs are serial | Fewer runs, sooner | Fewer comparisons. The seed can't tell the leaders apart |
 | 6 | **Model fits in VRAM** | Spilling ~20 % of a model to CPU took `qwen3:8b` from 1.7 s to ~3 s per record (§6) | Keep the GPU free of other models during a run | Nothing to set in RA2; see lever 7 |
 | 7 | **Ollama keep-alive** (`OLLAMA_KEEP_ALIVE`, host setting) | Saves one model load per idle gap: 5.7 s cold vs 0.04 s warm (`qwen3.5:2b`) | Negligible per record; saves seconds per evaluation | A resident model holds VRAM until Ollama needs it for another |
-| 8 | **Parallel calls** (not implemented) | ~2.4× at 4 calls for `qwen3:8b` (§5.3) | Halves wall time on models that support it | See §5.3. Needs `plan-parallel-calls.md` Stages 1–4 and a migration |
+| 8 | **Parallel calls** (`RA2_LLM_PARALLEL_CALLS`, per model, default `{}`) | 2.38× for `qwen3:8b` at 4 calls: 200 records in 147 s instead of 349 s, identical scores (§5.3) | Less than half the wall time on a model that passed the gate | Needs `OLLAMA_NUM_PARALLEL` ≥ the largest entry, which is server-wide and grows every loaded model's KV cache. Only models measured through the gate belong in the map |
 | 9 | **Timeout** (`RA2_LLM_TIMEOUT_S`, 600) | No effect on a healthy run | Lower it to fail fast on a model known to be quick | Too low and every record of a slow model times out. A timeout is **not** retried |
 | 10 | **Retries** (`RA2_LLM_MAX_RETRIES`, 2) | No effect on a healthy run (0 retries in 1 600 records) | Survives a transient 5xx | Each retry of a failing endpoint costs another full call |
 
@@ -268,7 +268,7 @@ extraction is a question for an evaluation to answer: launch the same setup at
 - **Two models at once.** Refused (`RA2_RUN_CONCURRENCY` must be 1); on one GPU
   it's slower than two in sequence.
 
-### 5.3 Parallel calls (measured, not built)
+### 5.3 Parallel calls (built, off by default)
 
 Several records in flight against one model. Measured with a private Ollama
 server (`OLLAMA_NUM_PARALLEL=4`) and the same prompts RA2 sends, over the
@@ -317,6 +317,25 @@ Gate record, as `plan-parallel-calls.md` D6 requires: measured 2026-09-23
 `500a1f067a9f`, `ministral-3:8b` `1922accd5827`, `granite4.1:8b`
 `444af1c4b2fe`, `gemma3:4b` `a2af6cc3eb7f`, `gemma4:12b` `4eb23ef187e2`.
 Full counts are in `plan-parallel-calls.md` §1.1–1.2.
+
+**Built and verified end to end** (`plan-parallel-calls.md` §1.3). Two
+evaluations of `qwen3:8b` + `granite4.1:8b` on the 200-record seed, identical
+except for `RA2_LLM_PARALLEL_CALLS`:
+
+| | `{}` | `{"qwen3:8b": 4}` |
+|---|---|---|
+| `qwen3:8b` run | 349 s | **147 s (2.38×)** |
+| `qwen3:8b` macro-F1 | 0.895 | 0.895 |
+| `granite4.1:8b` run / macro-F1 | 641 s / 0.886 | 659 s / 0.886 |
+| Per-feature F1, both models | | identical to four decimals |
+| `qwen3:8b` raw answers differing | | 5 of 200, none moving a score |
+
+To use it: set `OLLAMA_NUM_PARALLEL=4` on the Ollama host, set
+`RA2_LLM_PARALLEL_CALLS='{"qwen3:8b": 4}'`, and unload other models before a
+run (§4.5 of the plan). The ranking then shows **time per record**
+(mean latency ÷ parallel calls) beside the median latency, which is marked
+`×4`, because per-call latency rises with parallelism and stops being
+comparable.
 
 The design, tests and risks are in
 [`plan-parallel-calls.md`](../plan-parallel-calls.md). Whatever it builds has to
