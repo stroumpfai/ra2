@@ -563,30 +563,21 @@ Results in the implementing wave (`plan-m0-m5.md` §4).
 
 ## 7. Host configuration (outside the repo)
 
-`/etc/systemd/system/ollama.service.d/override.conf`, **today**:
+**The steps are in [`docs/performance.md` §5.4](docs/performance.md)**, for
+Linux, Windows and macOS: `OLLAMA_NUM_PARALLEL=4` on Ollama,
+`RA2_LLM_PARALLEL_CALLS={"qwen3:8b": 4}` in RA2's `.env`, and how to check
+both took effect.
 
-```ini
-[Service]
-Environment="OLLAMA_KEEP_ALIVE=-1"
-```
-
-**Stage 0b passed, so this is the change that switches it on.** It is not
-applied; it needs `sudo` and a service restart, and it is David's to make:
-
-```ini
-Environment="OLLAMA_NUM_PARALLEL=4"
-```
-
-then `RA2_LLM_PARALLEL_CALLS='{"qwen3:8b": 4}'` in RA2's environment. Until
-both are set, nothing changes: the map defaults to `{}`.
-
-**Keep-alive can stay `-1`.** The contention in §1.1 point 3 was between
-*two* Ollama servers, the system service holding `gemma4:12b` while a private
-one loaded `qwen3:8b`, and neither could evict the other's model. One server
-evicts its own idle models when a new one needs the VRAM. Two models at four
-slots no longer fit together on 16 GB (§1.2 point 5), so eviction does that
-work. What to avoid is a second Ollama running beside the service during a
-parallel run.
+**Correction (2026-09-24).** An earlier version of this section said this
+host's `ollama.service` already had an `override.conf` setting
+`OLLAMA_KEEP_ALIVE=-1`. It has no drop-in at all. `systemctl cat ollama` shows
+the unit alone, and `/api/ps` reports models expiring 5 minutes after use,
+which is Ollama's default. §5.4 recommends keeping that default: reloading
+`qwen3:8b` costs seconds per run, and `-1` would hold GPU memory
+indefinitely. One Ollama server evicts its own idle models when a new one
+needs the room, so two models at four slots that no longer fit together
+(§1.2 point 5) are handled. The contention in §1.1 point 3 came from *two*
+servers sharing one GPU.
 
 ## 8. Not in this plan
 
