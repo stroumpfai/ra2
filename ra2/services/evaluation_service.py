@@ -792,6 +792,10 @@ class EvaluationService:
             # provenance reports, so re-pointing anything afterwards cannot
             # move an already-launched run (§19.8).
             llm_reasoning_effort=evaluation.reasoning_effort,
+            # SD38: this host's measured parallelism for *this* tag, pinned so
+            # Resume and the ranking read what the run executed at, not what
+            # the map says later. Unmapped means serial.
+            llm_parallel_calls=self._settings.llm_parallel_calls.get(model.tag, 1),
             status=RunStatus.QUEUED,
             host_platform=platform.platform()[:200],
             gpu_name=connection.gpu_name,
@@ -1047,6 +1051,7 @@ class EvaluationService:
             gpu_name=run.gpu_name,
             llm_endpoint=run.llm_endpoint,
             llm_reasoning_effort=run.llm_reasoning_effort,
+            llm_parallel_calls=run.llm_parallel_calls,
         )
 
 

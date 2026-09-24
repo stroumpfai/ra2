@@ -75,7 +75,12 @@ class ObservingClient:
 async def test_each_record_is_committed_before_the_next_model_call(
     seed, make_run_service, reporter, other_engine
 ):
-    """Nothing batches, and no transaction spans a call."""
+    """Nothing batches, and no transaction spans a call.
+
+    The serial form, and true only at N=1: with calls overlapping, a record's
+    commit can land after a sibling's call began. `test_parallel_calls.py`'s
+    `test_no_transaction_spans_a_model_call` states the property for any N.
+    """
     seeded = await seed(records=4)
     observer = ObservingClient(FakeLLMClient(response=answer()), other_engine(), seeded.run_id)
     service = make_run_service(observer)
@@ -85,16 +90,19 @@ async def test_each_record_is_committed_before_the_next_model_call(
     assert observer.committed_at_call == [0, 1, 2, 3]
 
 
+@pytest.mark.parametrize("parallel_calls", [1, 3])
 async def test_a_row_and_its_children_are_committed_together(
-    seed, make_run_service, reporter, extractions_of
+    parallel_calls, seed, make_run_service, reporter, extractions_of
 ):
-    seeded = await seed(records=2)
+    """At any N (SD38): three workers committing side by side still write each
+    record's row and its children in one transaction, never interleaved."""
+    seeded = await seed(records=4, parallel_calls=parallel_calls)
     service = make_run_service(FakeLLMClient(response=answer(weather="02", note="Glatteis")))
 
     await service.execute_run(seeded.run_id, reporter)
 
     rows = await extractions_of(seeded.run_id)
-    assert len(rows) == 2
+    assert len(rows) == 4
     for row in rows:
         assert {value.feature_id for value in row.values} == set(seeded.feature_ids.values())
         assert [(e.entity_kind, e.entity_ref) for e in row.entities] == [("vehicle", "B1")]

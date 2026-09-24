@@ -2057,6 +2057,9 @@ def _provenance_line(provenance: ProvenanceView) -> str:
             # the model to think and one that did not must not read the
             # same here.
             f"reasoning {provenance.llm_reasoning_effort or UNKNOWN_VALUE}",
+            # SD38. Always known (NOT NULL, 1 on every earlier run): how many
+            # records were in flight, which is what this run's latencies mean.
+            f"parallel calls {provenance.llm_parallel_calls}",
         )
     )
 

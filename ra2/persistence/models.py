@@ -1067,6 +1067,19 @@ class Run(Base):
     #: `None` on rows written before the column existed — an honest "this run
     #: did not record it", never a guessed default (`gpu_name`'s reasoning).
     llm_reasoning_effort: Mapped[str | None] = mapped_column(String(16), default=None)
+    #: sw-design.md §15.4, SD38 — records this run keeps in flight, pinned at
+    #: launch from `RA2_LLM_PARALLEL_CALLS[model_name]`, 1 when unmapped.
+    #: Resume executes at this value, never at the current map, so one run's
+    #: rows never mix two latency regimes. It is also the divisor in the
+    #: ranking's time per record (`mean latency ÷ parallel calls`), which is
+    #: why it's a column and not a log line.
+    #:
+    #: **NOT NULL, backfilled 1**, unlike `llm_reasoning_effort` above: every
+    #: run before this column executed one record at a time, because no code
+    #: could do anything else, so `1` records a fact rather than a guess. The
+    #: `server_default` is the migration's backfill, declared here too so
+    #: `alembic check` sees one truth (`Evaluation.reasoning_effort`'s rule).
+    llm_parallel_calls: Mapped[int] = mapped_column(default=1, server_default="1")
 
     evaluation: Mapped[Evaluation] = relationship(back_populates="runs")
     extractions: Mapped[list[Extraction]] = relationship(

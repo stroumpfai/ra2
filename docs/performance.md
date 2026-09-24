@@ -27,7 +27,7 @@ named here. Re-measure rather than edit them (§7 says how).
 | Biggest lever | **Reasoning effort.** `none` vs the model's default: 6 s vs 190 s for one record |
 | Second biggest | **The model**, mostly through how much it *writes*, not through its size (§4.3) |
 | Recommended model | **`qwen3:8b`**. Tied for first on quality, fastest of the leaders. It captures no entities (§4.4) |
-| Parallel calls | **Not implemented.** Measured at ~2× for `qwen3:8b` without changing answers (§5.3) |
+| Parallel calls | **Built, off by default.** `RA2_LLM_PARALLEL_CALLS='{"qwen3:8b": 4}'` plus `OLLAMA_NUM_PARALLEL=4` on the Ollama host: 2.4× for `qwen3:8b` with identical scores. The server setting changes `ministral-3:8b`'s answers, so it left the recommended set (§5.3). Setup: §5.4 |
 
 ---
 
@@ -222,7 +222,7 @@ matters for the report, `gemma4:12b` does it thoroughly at 6.6× the time of
 | Use | Model | Why |
 |---|---|---|
 | **Default for feature extraction** | **`qwen3:8b`** | Tied for first, best on Italian, fastest per record. 3 000 records in ~1.5 h |
-| Second opinion in the same evaluation | `ministral-3:8b` or `granite4.1:8b` | Different families and tokenisers, also tied for first. ~3 h each at 3 000 |
+| Second opinion in the same evaluation | `granite4.1:8b` | Different family and tokeniser, also tied for first. ~2.5 h at 3 000. `ministral-3:8b` ties too, but its answers change when Ollama is set for parallel calls (§5.3) |
 | When entities matter | `gemma4:12b` | The only model that fills `entities` on every record. ~10 h at 3 000 |
 | Fast iteration on a prompt | `qwen3:8b` on a dev-sized corpus | ~1.5 min per 50 records |
 | **Avoid** | `qwen3.5:2b`, `qwen3.5:9b` | Rank last or near-last; `9b` is also 5× slower than `qwen3:8b` |
@@ -245,7 +245,7 @@ Ordered by effect. "Measured" means on this host, as described in §7.
 | 5 | **Number of models** | Linear, since runs are serial | Fewer runs, sooner | Fewer comparisons. The seed can't tell the leaders apart |
 | 6 | **Model fits in VRAM** | Spilling ~20 % of a model to CPU took `qwen3:8b` from 1.7 s to ~3 s per record (§6) | Keep the GPU free of other models during a run | Nothing to set in RA2; see lever 7 |
 | 7 | **Ollama keep-alive** (`OLLAMA_KEEP_ALIVE`, host setting) | Saves one model load per idle gap: 5.7 s cold vs 0.04 s warm (`qwen3.5:2b`) | Negligible per record; saves seconds per evaluation | A resident model holds VRAM until Ollama needs it for another |
-| 8 | **Parallel calls** (not implemented) | ~2× at 4 calls for `qwen3:8b` (§5.3) | Halves wall time on models that support it | See §5.3. Needs `plan-parallel-calls.md` Stages 1–4 and a migration |
+| 8 | **Parallel calls** (`RA2_LLM_PARALLEL_CALLS`, per model, default `{}`) | 2.38× for `qwen3:8b` at 4 calls: 200 records in 147 s instead of 349 s, identical scores (§5.3) | Less than half the wall time on a model that passed the gate | Needs `OLLAMA_NUM_PARALLEL` ≥ the largest entry, which is server-wide and grows every loaded model's KV cache. Only models measured through the gate belong in the map |
 | 9 | **Timeout** (`RA2_LLM_TIMEOUT_S`, 600) | No effect on a healthy run | Lower it to fail fast on a model known to be quick | Too low and every record of a slow model times out. A timeout is **not** retried |
 | 10 | **Retries** (`RA2_LLM_MAX_RETRIES`, 2) | No effect on a healthy run (0 retries in 1 600 records) | Survives a transient 5xx | Each retry of a failing endpoint costs another full call |
 
@@ -268,35 +268,214 @@ extraction is a question for an evaluation to answer: launch the same setup at
 - **Two models at once.** Refused (`RA2_RUN_CONCURRENCY` must be 1); on one GPU
   it's slower than two in sequence.
 
-### 5.3 Parallel calls (measured, not built)
+### 5.3 Parallel calls (built, off by default)
 
 Several records in flight against one model. Measured with a private Ollama
 server (`OLLAMA_NUM_PARALLEL=4`) and the same prompts RA2 sends, over the
-48-record seed. "Differs" counts records whose JSON differs from the first
-serial pass.
+48-record seed. "Differs" counts records whose JSON differs from a serial pass
+on today's **one-slot** server. Repeated serial passes there differ on
+**0–2 of 48**, and that's the band a model is allowed.
 
-| Model | Architecture | Ollama allows it | 1 call | 2 calls | 4 calls | Differs at 2 / 4 |
-|---|---|---|---|---|---|---|
-| **`qwen3:8b`** | `qwen3` | yes | 83 s | 52 s (1.6×) | **43 s (1.96×)** | **2 / 0** of 48 |
-| `gemma3:4b` | `gemma3` | yes | 142 s | 89 s (1.6×) | 70 s (2.0×) | **27 / 29** of 48 |
-| `qwen3.5:2b` | `qwen35` | **no** | 111 s | 111 s | 111 s | 0 / 0 (requests queue) |
-| `qwen3.5:9b` | `qwen35` | **no** | not run | | | |
-| `llama3.2:3b`, `granite4.1:8b`, `ministral-3:8b`, `gemma4:12b` | `llama`, `granite`, `mistral3`, `gemma4` | yes | not run | | | |
+Raising the server setting has two separate effects, and a model has to
+survive both:
 
-For comparison, repeated **serial** passes differ on **0–2 of 48** on a
-one-slot server.
+- **Serial on 4 slots.** Nothing runs in parallel yet, but the server now has
+  four slots for every model. Do serial runs still give the same answers?
+- **Parallel calls.** Several records in flight at once for this model.
 
-- **`qwen3:8b` passes.** ~2× throughput, and answers change no more than
-  serial noise. At 3 000 records that's ~45 min instead of ~1.5 h.
-- **`gemma3:4b` fails.** The speedup is the same, but more than half of its
-  answers change. Parallelism would become part of the question it's asked.
+| Model | Architecture | Serial on 4 slots, differs | Parallel, differs at 2 / 4 | Throughput at 2 / 4 | Gate |
+|---|---|---|---|---|---|
+| **`qwen3:8b`** | `qwen3` | **0** | **0–1 / 0–1** | 1.5× / **2.3–2.5×** | **passes** |
+| `ministral-3:8b` | `mistral3` | **6** (the same 6 every pass) | 4 / 5 | 1.8× / 2.6× | **fails both** |
+| `granite4.1:8b` | `granite` | 0–2 | 15 / 14 | 1.8× / 2.7× | fails parallel |
+| `gemma3:4b` | `gemma3` | 0–2 | 27 / 29 | 1.6× / 2.0× | fails parallel |
+| `qwen3.5:2b`, `qwen3.5:9b` | `qwen35` | not run | Ollama refuses: requests queue, 1.0× | | cannot |
+| `gemma4:12b` | `gemma4` | 0–3, identical pass for pass to one slot | — / 4 (one pass) | — / 2.3× | fails parallel, narrowly |
+| `llama3.2:3b` | `llama` | not run | not run | | unknown |
+
+- **`qwen3:8b` passes.** ~2.4× throughput at 4 calls, and answers change no
+  more than serial noise. At 3 000 records that's ~35–40 min instead of
+  ~1.5 h. One N=4 pass out of five took 59 s instead of ~33 s, for reasons
+  not yet known.
+- **`ministral-3:8b` is the problem.** Raising the server setting changes 6
+  of its 48 answers even when it runs serially. The new answers are stable,
+  but runs from before the change won't reproduce after it. This is the
+  plan's stop condition while `ministral-3:8b` is in use (§4.5).
+- **`granite4.1:8b`, `gemma3:4b` and `gemma4:12b`** tolerate the server
+  setting but not parallel calls. They'd stay serial. `gemma4:12b`'s own
+  serial passes vary on up to 3 of 48, but they vary identically on one slot
+  and on four.
 - **Qwen 3.5 can't.** Ollama 0.34 serves the `qwen35` architecture one request
   at a time whatever the setting (ollama#14510).
+- **Memory.** Four slots reserve four KV caches in every loaded model.
+  `gemma4:12b` grows from 8.1 GB to 10.4 GB, `qwen3:8b` from 5.6 GB to 7.5 GB.
+  Each still fits in 16 GB on its own, but two of them loaded together no
+  longer do.
+
+Gate record, as `plan-parallel-calls.md` D6 requires: measured 2026-09-23
+(Stage 0) and 2026-09-24 (Stage 0b), Ollama 0.34.0, digests `qwen3:8b`
+`500a1f067a9f`, `ministral-3:8b` `1922accd5827`, `granite4.1:8b`
+`444af1c4b2fe`, `gemma3:4b` `a2af6cc3eb7f`, `gemma4:12b` `4eb23ef187e2`.
+Full counts are in `plan-parallel-calls.md` §1.1–1.2.
+
+**Built and verified end to end** (`plan-parallel-calls.md` §1.3). Two
+evaluations of `qwen3:8b` + `granite4.1:8b` on the 200-record seed, identical
+except for `RA2_LLM_PARALLEL_CALLS`:
+
+| | `{}` | `{"qwen3:8b": 4}` |
+|---|---|---|
+| `qwen3:8b` run | 349 s | **147 s (2.38×)** |
+| `qwen3:8b` macro-F1 | 0.895 | 0.895 |
+| `granite4.1:8b` run / macro-F1 | 641 s / 0.886 | 659 s / 0.886 |
+| Per-feature F1, both models | | identical to four decimals |
+| `qwen3:8b` raw answers differing | | 5 of 200, none moving a score |
+
+To turn it on, follow §5.4. The ranking then shows **time per record**
+(mean latency ÷ parallel calls) beside the median latency, which is marked
+`×4`, because per-call latency rises with parallelism and stops being
+comparable.
 
 The design, tests and risks are in
 [`plan-parallel-calls.md`](../plan-parallel-calls.md). Whatever it builds has to
 record the parallelism on each run, because per-call latency rises with it:
-median 1.7 s → 3.1 s for `qwen3:8b` at 4 calls, even as throughput doubles.
+median 1.7 s → 2.7 s for `qwen3:8b` at 4 calls, even as throughput more than doubles.
+
+
+### 5.4 Turning parallel calls on
+
+It takes two settings, and neither does anything without the other:
+
+- **Ollama** must accept four requests at once: `OLLAMA_NUM_PARALLEL=4`.
+- **RA2** must send four at once, and only for the model that passed the
+  gate: `RA2_LLM_PARALLEL_CALLS={"qwen3:8b": 4}`.
+
+If only Ollama is set, RA2 still sends one call at a time. If only RA2 is set,
+Ollama queues the extra calls, the run is no faster, and every queued call
+waits against `RA2_LLM_TIMEOUT_S`.
+
+#### Step 1: Set up Ollama
+
+`OLLAMA_NUM_PARALLEL` is read when Ollama starts, so set it where Ollama gets
+its environment, then restart Ollama.
+
+**Linux (Ollama as a systemd service, the standard install):**
+
+```bash
+sudo systemctl edit ollama
+```
+
+In the editor that opens, between the comment lines, add:
+
+```ini
+[Service]
+Environment="OLLAMA_NUM_PARALLEL=4"
+```
+
+Save, close, and restart:
+
+```bash
+sudo systemctl restart ollama
+```
+
+This writes `/etc/systemd/system/ollama.service.d/override.conf` and leaves the
+unit file itself alone.
+
+**Windows:** quit Ollama from the tray icon. Open *Edit environment variables
+for your account*, add a variable named `OLLAMA_NUM_PARALLEL` with the value
+`4`, click OK, and start Ollama again from the Start menu.
+
+**macOS:** run `launchctl setenv OLLAMA_NUM_PARALLEL 4`, then quit and restart
+the Ollama app.
+
+**Keep-alive:** leave it at Ollama's default (5 minutes). Reloading
+`qwen3:8b` after an idle gap costs a few seconds per run. `OLLAMA_KEEP_ALIVE=-1`
+would keep a model in GPU memory indefinitely, and there's nothing to gain
+from that here.
+
+#### Step 2: Check that Ollama took it
+
+Load `qwen3:8b` once and read its size. Each slot reserves its own cache, so
+the size shows the slot count directly:
+
+```bash
+curl -s http://127.0.0.1:11434/api/generate -d '{"model":"qwen3:8b","prompt":"hi","stream":false,"think":false}' > /dev/null
+curl -s http://127.0.0.1:11434/api/ps
+```
+
+- **`"size"` about 7.5 GB:** four slots. About 5.6 GB means one, so the
+  setting didn't take and Ollama needs restarting from where the variable was
+  set.
+- **`"size_vram"` equal to `"size"`:** the model is fully on the GPU. If it's
+  smaller, part of the model spilled to the CPU and the gain is gone (§6).
+  Close whatever else is using GPU memory.
+
+On Linux, `journalctl -u ollama -n 100 --no-pager | grep -o 'OLLAMA_NUM_PARALLEL:[0-9]*'`
+should also print `OLLAMA_NUM_PARALLEL:4`.
+
+#### Step 3: Set up RA2
+
+Add one line to the `.env` file in the folder RA2 is started from (create the
+file if it doesn't exist), then restart RA2:
+
+```
+RA2_LLM_PARALLEL_CALLS={"qwen3:8b": 4}
+```
+
+The value is a JSON map from model tag to calls in flight. A value outside
+1–8, or an empty tag, stops RA2 at startup with a message naming the setting.
+A model that isn't in the map runs one record at a time, as before.
+
+#### Step 4: Check that RA2 uses it
+
+Launch a new evaluation that includes `qwen3:8b`:
+
+- **The run's log line** reads `…, timeout=600s, parallel=4`.
+- **The Evaluation screen's reproducibility line** ends with
+  `parallel calls 4`.
+- **Results → Ranking:** `qwen3:8b`'s median latency carries a `×4` mark, and
+  its time per record is about 0.7 s instead of about 1.7 s. A note under the
+  table explains the mark.
+
+Only runs launched **after** the change use it. Each run records the value it
+was launched with, and Resume continues at that value, so runs from before
+the change stay at 1 and stay comparable with each other.
+
+#### What the Ollama setting does to other models
+
+`OLLAMA_NUM_PARALLEL` applies to **every** model Ollama loads, not only to the
+ones in RA2's map. Each loaded model reserves four caches:
+
+| Model | GPU memory, 1 slot → 4 | Answers when run one at a time on 4 slots |
+|---|---|---|
+| `qwen3:8b` | 5.6 → 7.5 GB | unchanged |
+| `granite4.1:8b` | 5.9 → 8.0 GB | unchanged |
+| `gemma3:4b` | 2.9 → 3.8 GB | unchanged |
+| `gemma4:12b` | 8.1 → 10.4 GB | unchanged |
+| `ministral-3:8b` | 5.6 → 7.5 GB | **6 of 48 change**, which is why it left the recommended set (§4.5) |
+| `llama3.2:3b`, `qwen3.5:2b`, `qwen3.5:9b` | not measured | not measured |
+
+Every model still fits in 16 GB on its own, but two of them loaded together
+don't. Ollama unloads an idle model when a new one needs the room, so this
+takes care of itself. Just don't run anything else on the GPU during an
+evaluation.
+
+#### Adding another model to the map
+
+Only `qwen3:8b` belongs in it today. `granite4.1:8b`, `gemma3:4b` and
+`gemma4:12b` change 4–29 of 48 answers when their calls overlap, and Qwen 3.5
+can't run in parallel at all in Ollama 0.34. Before adding a model, measure
+it through `plan-parallel-calls.md` §4.1's gate on the analyst's host, and
+record the result in §5.3 above: model, digest, Ollama version, date, and
+differ counts. A different GPU, Ollama version or model digest is a new
+measurement.
+
+#### Undoing it
+
+Linux: `sudo systemctl revert ollama`, then `sudo systemctl restart ollama`.
+Windows: delete the variable and restart Ollama. macOS:
+`launchctl unsetenv OLLAMA_NUM_PARALLEL`, then restart Ollama. In every case,
+remove the `RA2_LLM_PARALLEL_CALLS` line from `.env` and restart RA2. Runs
+already stored keep the value they recorded.
 
 ---
 

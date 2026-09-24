@@ -123,6 +123,8 @@ async def test_every_run_carries_its_full_provenance(
     # the run's copy is what the worker asks with and what provenance reports,
     # so editing a later draft cannot move an already-launched run (§19.8).
     assert run.llm_reasoning_effort == "none"
+    # An unmapped model runs serially, and says so (SD38).
+    assert run.llm_parallel_calls == 1
     assert run.host_platform != ""
     assert run.gpu_name == fixture_gpu.name
     assert run.llm_endpoint == eval_settings.llm_base_url
@@ -159,6 +161,49 @@ async def test_the_drafts_reasoning_effort_reaches_every_run_it_launches(
         runs = (await session.scalars(select(Run).where(Run.evaluation_id == evaluation_id))).all()
     assert len(runs) == 2
     assert {run.llm_reasoning_effort for run in runs} == {"high"}
+
+
+async def test_launch_pins_each_models_own_parallel_calls(
+    db_session_factory: async_sessionmaker[AsyncSession],
+    model_catalog: StaticModelCatalog,
+    endpoint_prober: StaticEndpointProber,
+    gpu_probe: StaticGpuProbe,
+    clock: FrozenClock,
+    ids: SeededFactory,
+    eval_settings: Settings,
+    launchable: Callable[..., Awaitable[tuple[CorpusId, FeatureConfigView, str]]],
+    fitting_model: str,
+    second_fitting_model: str,
+) -> None:
+    """SD38 — **per model**, unlike the effort above. The map names one of
+    the two models; the other was never measured, so it runs serially. The
+    value is pinned on the run so Resume and the ranking read what the run
+    executed at, not what the map says later."""
+    _, _, evaluation_id = await launchable(models=(fitting_model, second_fitting_model))
+    service = EvaluationService(
+        session_factory=db_session_factory,
+        model_catalog=model_catalog,
+        endpoint_prober=endpoint_prober,
+        gpu_probe=gpu_probe,
+        clock=clock,
+        ids=ids,
+        settings=eval_settings.model_copy(update={"llm_parallel_calls": {fitting_model: 4}}),
+    )
+
+    view = await service.launch(EvaluationId(evaluation_id))
+
+    async with db_session_factory() as session:
+        runs = (await session.scalars(select(Run).where(Run.evaluation_id == evaluation_id))).all()
+    assert {run.model_name: run.llm_parallel_calls for run in runs} == {
+        fitting_model: 4,
+        second_fitting_model: 1,
+    }
+    # The card renders one run's provenance; whichever it is, it reports
+    # that run's own pin, not the map's.
+    assert view.provenance is not None
+    assert view.provenance.llm_parallel_calls == (
+        4 if view.provenance.model_name == fitting_model else 1
+    )
 
 
 async def test_the_snapshot_carries_the_whole_mapped_code_table(

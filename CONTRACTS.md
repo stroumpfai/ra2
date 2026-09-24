@@ -589,6 +589,52 @@ design's own HTML is worth keeping where nothing data-shaped can reach it.
 
 ---
 
+## Parallel calls — records in flight per model, a slice
+
+`feat/parallel-calls`, by `plan-parallel-calls.md`. **One amendment, applied
+in the same commit as the code** (`contracts/amendments/feat-parallel-calls.md`),
+and **one revision**, `68c8b2a80ca9`, whose author is this branch's
+implementer. Stage 0b measured the gate on this host first: `qwen3:8b` changed
+0–2 of 48 answers at four calls in flight and ran 2.3–2.5× faster, while the
+server-wide setting moved `ministral-3:8b`'s serial answers by 6, so it left
+the recommended set (plan §9 Q5). The design is `sw-design.md` §15.4 and
+`SD38`.
+
+### Amended files (already frozen)
+
+| File | Change | Amendment |
+|---|---|---|
+| `ra2/infra/config.py` | + `llm_parallel_calls: dict[str, int]` (default `{}`), `MAX_PARALLEL_CALLS = 8`, `_check_parallel_calls`: an empty tag or a value outside `1..8` is refused at construction, for `_check_reasoning_effort`'s reason. The docstring carries the rule that an entry is a gate measurement recorded in `docs/performance.md` §5.3, and the two things RA2 can't read (Ollama's slot count and its per-architecture refusals) | `feat-parallel-calls` |
+| `ra2/persistence/models.py` | + `Run.llm_parallel_calls`, NOT NULL, `server_default="1"` so `alembic check` sees the backfill | `feat-parallel-calls` |
+| `ra2/services/readmodels.py` | + `ProvenanceView.llm_parallel_calls`; + `RankingRow.ms_per_record`, `RankingRow.parallel_calls`, both reported, never scored. All defaulted | `feat-parallel-calls` |
+| `ra2/api/schemas.py` | The same three on `ProvenanceResponse` and `RankingRowResponse`. Three additive properties in `tests/api/openapi_snapshot.json` | `feat-parallel-calls` |
+| `tests/conftest.py` | + `RA2_LLM_PARALLEL_CALLS` in the environment scrub. `RA2_LLM_REASONING_EFFORT` is missing from the same list; that is recorded in the amendment and not fixed here | `feat-parallel-calls` |
+
+### New files
+
+| Path | What |
+|---|---|
+| `ra2/persistence/migrations/versions/…68c8b2a80ca9…` | `run.llm_parallel_calls`, additive, NOT NULL, backfilled `1`. Unlike `090e7fdc12c5`'s nullable column, the backfill is a fact: no code before it could put two records of one run in flight. Registered in `tests/test_p5_contract.py`'s `POST_PHASE_5_REVISIONS` |
+| `tests/backend/infra/test_config_parallel_calls.py` | The refusals, the bounds, the empty default and the JSON environment form |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/services/evaluation_service.py` | `_new_run` pins `settings.llm_parallel_calls.get(tag, 1)`; `_provenance` reports it |
+| `ra2/services/run_service.py` | `_RunPlan.parallel_calls`, read from the run, never from `Settings`, so Resume executes at the pin |
+| `ra2/services/ranking_service.py` | `ms_per_record = mean(latency_ms) ÷ llm_parallel_calls` (Little's law, `SD38`), over the rows the median already reads. Wall clock is refused because every Resume restamps `started_at` |
+| `ra2/api/v1/evaluations.py`, `ra2/api/v1/ranking.py` | Map the new fields |
+| `ra2/ui/views/results/ranking_tab.py` | + "Time / record" column (104px, after Median latency), the `×N` mark in the latency cell, and `PARALLEL_NOTE` under the table only when a row ran at N > 1. `COMPUTATION_RULES` rule 4 stays the design's copy verbatim |
+| `ra2/ui/views/evaluation_view.py` | `_provenance_line` gains `parallel calls N` after the reasoning effort |
+| `sw-design.md` | §10, §15.2, §15.4, §15.8, §16.5, `SD38` (Stage 1) |
+| `ra2/services/run_service.py` (Stage 3) | **The worker pool.** `_extract_all` starts `min(parallel_calls, pending)` workers in one `asyncio.TaskGroup`, pulling from one iterator in scope order; the per-record body is `_extract_worker`, and the counters it shares are `_RecordLoop`. N=1 is one worker, not a separate loop (Do-NOT #12). The endpoint budget counts consecutive failures in completion order and stops dispatch when it trips, while in-flight calls finish and commit. An unexpected exception cancels the siblings and re-raises the first, so `execute_run` records one error as before. `done` is `max(previous, re-read)`, so progress never steps back. The run-start log line gains `parallel=N` |
+| `tests/backend/services/run/test_parallel_calls.py` (new, Stage 3) | The plan's Stage 3 table, driven by `ScriptedCalls`, which scripts each call by the order it began, so ordering is controlled rather than timed |
+| `tests/backend/services/run/conftest.py` | `seed(parallel_calls=…)`: one number or `model -> N`, pinned on each run as the launch would |
+| `tests/backend/services/run/test_transaction_boundary.py` | `test_a_row_and_its_children_are_committed_together` parametrised over N = 1, 3; the N=1 commit-sequence test kept, with a docstring saying why |
+
+---
+
 ## Phase 5 — owner: M35 (Wave 0), amendment only
 
 Re-established at tag `p5-frozen`, the same way M27 established the phase-4

@@ -831,6 +831,8 @@ class ProvenanceResponse(_Schema):
     #: `None` on a run written before the field existed — "not
     #: recorded", never a guessed default.
     llm_reasoning_effort: str | None = None
+    #: Records this run kept in flight (SD38); `1` on every earlier run.
+    llm_parallel_calls: int = 1
 
 
 class EvaluationResponse(_Schema):
@@ -1071,6 +1073,9 @@ class RankingRowResponse(_Schema):
     median_latency_ms: int
     prompt_tokens: int
     vram_bytes: int
+    #: Reported, never scored (SD38): mean latency ÷ parallel calls.
+    ms_per_record: int = 0
+    parallel_calls: int = 1
 
 
 class SeparatingRowResponse(_Schema):

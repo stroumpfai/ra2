@@ -132,6 +132,53 @@ async def test_latency_and_tokens_are_reported(
 
 
 @pytest.mark.asyncio
+async def test_ranking_reports_time_per_record_and_parallel_calls(
+    ranking_service: RankingService,
+    scored: ScoredCorpus,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """**SD38.** One run at 4 calls in flight, the rest at 1.
+
+    Time per record is `mean latency ÷ parallel calls` (Little's law), read
+    off the same rows as the median, and like the other reported columns it
+    doesn't move the ranking. The expectation is computed here from the
+    stored latencies, not copied from the service.
+    """
+    import statistics
+
+    from sqlalchemy import select, update
+
+    from ra2.persistence.models import Extraction, Run
+
+    before = await ranking_service.ranking_tab(scored.evaluation_id)
+    parallel = before.rows[0].model_id
+    async with db_session_factory() as session:
+        await session.execute(update(Run).where(Run.id == parallel).values(llm_parallel_calls=4))
+        await session.commit()
+        latencies = {
+            row.model_id: [
+                value
+                for value in (
+                    await session.scalars(
+                        select(Extraction.latency_ms).where(Extraction.run_id == row.model_id)
+                    )
+                )
+                if value is not None
+            ]
+            for row in before.rows
+        }
+    after = await ranking_service.ranking_tab(scored.evaluation_id)
+
+    for row in after.rows:
+        calls = 4 if row.model_id == parallel else 1
+        assert row.parallel_calls == calls
+        assert row.ms_per_record == round(statistics.fmean(latencies[row.model_id]) / calls)
+    assert [(r.model_id, r.rank) for r in before.rows] == [(r.model_id, r.rank) for r in after.rows]
+    # The median is what the ×N mark qualifies; it is reported as measured.
+    assert [r.median_latency_ms for r in before.rows] == [r.median_latency_ms for r in after.rows]
+
+
+@pytest.mark.asyncio
 async def test_an_unscoreable_run_returns_a_well_formed_nothing_scoreable_payload(
     ranking_service: RankingService,
     scored: ScoredCorpus,

@@ -3,10 +3,13 @@
 (sw-design.md §11.2, §12.10, plan-m0-m5.md X3)."""
 
 import ast
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
+from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
@@ -109,3 +112,41 @@ def test_no_metadata_create_all_in_persistence_or_tests() -> None:
                 ):
                     offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
     assert offenders == []
+
+
+def test_migration_backfills_parallel_calls_as_one(
+    alembic_config: Config, backend_settings: Settings
+) -> None:
+    """`68c8b2a80ca9` (SD38): a run from before the column executed one record
+    at a time, because no code could do otherwise, so the backfill is `1` and
+    not `NULL`. Asserted on a row that existed **before** the upgrade, which
+    is the only row a backfill is about.
+
+    The row is written with stdlib `sqlite3`, which leaves foreign keys off, so
+    the run needs no parents. Every NOT NULL column without a default gets a
+    placeholder of its declared type, read off the table rather than listed
+    here, so the test doesn't need editing the next time `run` grows.
+    """
+    backend_settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    command.upgrade(alembic_config, "3b7c1d5a92e4")
+
+    with closing(sqlite3.connect(backend_settings.database_path)) as conn, conn:
+        columns = conn.execute("PRAGMA table_info(run)").fetchall()
+        assert "llm_parallel_calls" not in {column[1] for column in columns}
+        required = {
+            name: (0 if "INT" in kind.upper() or kind.upper() in {"FLOAT", "REAL"} else "x")
+            for _, name, kind, notnull, default, _ in columns
+            if notnull and default is None
+        }
+        required["id"] = "run-before-the-column"
+        names = ", ".join(required)
+        marks = ", ".join("?" for _ in required)
+        conn.execute(f"INSERT INTO run ({names}) VALUES ({marks})", tuple(required.values()))
+
+    command.upgrade(alembic_config, "head")
+
+    with closing(sqlite3.connect(backend_settings.database_path)) as conn:
+        backfilled = conn.execute(
+            "SELECT llm_parallel_calls FROM run WHERE id = 'run-before-the-column'"
+        ).fetchone()
+    assert backfilled == (1,)

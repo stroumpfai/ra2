@@ -1039,6 +1039,8 @@ async def test_the_progress_column_places_a_card_per_run_and_the_reproducibility
         "host win11-x64",
         "gpu RTX 4090",
         "endpoint 127.0.0.1:11434/v1",
+        # SD38: always known, and 1 for a model nobody mapped.
+        "parallel calls 1",
     ):
         assert expected in line, expected
     # The card renders the provenance and **no explainer paragraph** — the
