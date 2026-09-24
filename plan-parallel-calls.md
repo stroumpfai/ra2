@@ -7,11 +7,12 @@ ran on 2026-09-24 (§1.2). `qwen3:8b` passes all three gate conditions.
 `ministral-3:8b` fails condition 2**, which is the plan's stop condition if
 it stays in use. **David answered Q5 with (a):** `granite4.1:8b` replaces
 `ministral-3:8b` as the second opinion. `gemma4:12b` then passed
-condition 2, so **Stages 1–4 go ahead.**
-Branch `feat/parallel-calls`. Authority as always: `mvp-spec.md`
-on *what*, `sw-design.md` on *how* (CLAUDE.md). This plan changes
-`sw-design.md` §15.4 first, in the same commit as the code, and names every
-frozen file it touches as an amendment (§6).
+condition 2, so **Stages 1–4 go ahead.** **Stage 1 is done**: the design
+(SD38) and the amendment are written, and no code has changed yet. Stage 2 is
+next. Branch `feat/parallel-calls`. Authority as always: `mvp-spec.md` on
+*what*, `sw-design.md` on *how* (CLAUDE.md). Stage 1 changed `sw-design.md`
+before any code, and every frozen file the code touches is named as an
+amendment (§6).
 
 **What the revision changed.** The first draft had one host-wide number for
 every model. Stage 0 showed the answer is **per model**: `qwen3:8b` gains ~2×
@@ -200,12 +201,22 @@ pinned value**, not at the current map, so one run's rows never mix two
 latency regimes. The migration backfills `1` onto existing rows: every run so
 far executed serially, so this records a fact and repairs nothing.
 
-**D3. Throughput joins latency in the ranking.** `RankingRow` gains
-`records_per_minute` (committed rows over run elapsed time) and
-`parallel_calls`, both **reported, never scored** (SD20). They render beside
-median latency, and a latency cell whose run had `parallel_calls > 1` is
-marked "×N". Throughput is what the analyst actually pays for, and it stays
-comparable across parallelism; latency doesn't (§2 i).
+**D3. Time per record joins latency in the ranking.** `RankingRow` gains
+`ms_per_record` and `parallel_calls`, both **reported, never scored** (SD20).
+They render beside median latency, and a latency cell whose run had
+`parallel_calls > 1` is marked "×N". The cost per record is what the analyst
+actually pays for, and it stays comparable across parallelism; latency
+doesn't (§2 i).
+
+*Revised in Stage 1.* The first draft had `records_per_minute`, committed rows
+over run elapsed time. That figure is wrong for any resumed run:
+`RunService._start` restamps `started_at` on every start, and `extraction` has no
+timestamp, so it divides all of a run's rows by its last stretch. The figure
+is now `mean(latency_ms) ÷ llm_parallel_calls`, which is Little's law with N
+calls kept in flight. It reads only rows the median already reads, survives
+Resume, and stays honest where Ollama queues rather than batches, because the
+wait is inside each latency. Checked against §1.2: 48 × 2.72 s ÷ 4 = 32.6 s
+predicted, 32.4 s measured. SD38 has the full argument.
 
 **D4. One code path.** N workers pull from the pending list. N=1 is the same
 code with one worker, not a separate serial branch. There's no test-only
@@ -343,7 +354,15 @@ any model that stays in use: a server-wide setting that changes serial runs
 costs more reproducibility than the time it saves. §8 lists the fallback
 (a second endpoint) as a separate plan.
 
-### Stage 1 — the contract, first
+### Stage 1 — the contract, first ✅ (2026-09-24)
+
+**Done.** `sw-design.md` §10, §15.2, §15.4, §15.8, §16.5 and **SD38**, plus
+`contracts/amendments/feat-parallel-calls.md`. Two things changed from the
+plan: D3's figure (see D3), and the pin is shown on the provenance card only,
+not on `RunView`, because it is an input and the runs table shows no inputs.
+The amendment also records a gap it doesn't fix: `RA2_LLM_REASONING_EFFORT`
+is missing from `tests/conftest.py`'s scrub list.
+
 
 - `sw-design.md` §15.4: the "Serial" bullet splits into *models serial*
   (unchanged) and *records: up to the model's `RA2_LLM_PARALLEL_CALLS` entry
@@ -366,10 +385,11 @@ costs more reproducibility than the time it saves. §8 lists the fallback
   heads.
 - `EvaluationService._new_run` pins `map.get(tag, 1)`. `_RunPlan` carries it
   from the row.
-- The run view, API schema and provenance panel show it beside temperature
-  and seed.
-- `RankingRow` gains `records_per_minute` and `parallel_calls` (D3); the
-  ranking tab renders them and the "×N" latency mark.
+- `ProvenanceView`, `ProvenanceResponse` and the reproducibility card show it
+  beside temperature and seed.
+- `RankingRow` and `RankingRowResponse` gain `ms_per_record` and
+  `parallel_calls` (D3). The ranking tab renders time per record with
+  `format_latency_ms` (SD37) and the "×N" latency mark.
 
 **Done when** these pass:
 
@@ -378,7 +398,8 @@ costs more reproducibility than the time it saves. §8 lists the fallback
 - `test_launch_pins_each_models_own_parallel_calls` (one evaluation, a mapped
   model and an unmapped one: 4 and 1)
 - `test_migration_backfills_parallel_calls_as_one`
-- `test_ranking_reports_throughput_and_parallel_calls`
+- `test_ranking_reports_time_per_record_and_parallel_calls` (a run at 1 and a
+  run at 4: `ms_per_record` is mean latency ÷ N, and neither moves `rank`)
 - `tests/ui` assertions for the provenance value and the ranking's "×N" mark
 
 `just lint` and `just test` must be green.
@@ -431,7 +452,7 @@ commit.
 |---|---|
 | `ra2/infra/config.py` | `+ llm_parallel_calls: dict[str, int]` and its validator |
 | `ra2/persistence/models.py` | `+ Run.llm_parallel_calls` |
-| `ra2/services/readmodels.py`, `ra2/api/schemas.py` | `+ llm_parallel_calls` on the run and provenance views; `+ records_per_minute`, `parallel_calls` on `RankingRow` |
+| `ra2/services/readmodels.py`, `ra2/api/schemas.py` | `+ llm_parallel_calls` on the provenance view and response; `+ ms_per_record`, `parallel_calls` on `RankingRow` and its response |
 | `tests/conftest.py` | `+ "RA2_LLM_PARALLEL_CALLS"` in the env scrub |
 
 All go in `contracts/amendments/feat-parallel-calls.md`, and each is listed

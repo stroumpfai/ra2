@@ -449,6 +449,7 @@ runs, which additionally persist to the `run` table and must be restart-safe.
 | `RA2_MIN_CELL_COUNT` | `20` | D3, unused until scoring |
 | `RA2_LLM_TIMEOUT_S` / `RA2_LLM_MAX_RETRIES` | `600` / `2` | §15.5. 600 is measured, not chosen — a thinking model answered one record in 136 s on the reporting host |
 | `RA2_LLM_REASONING_EFFORT` | `none` | §15.5. How hard the model is asked to think, pinned on the `run` row. `none` is measured, not preferred: 190 s → 6 s on the same record |
+| `RA2_LLM_PARALLEL_CALLS` | `{}` | §15.4, SD38. JSON map of model tag → records in flight (`1..8`), pinned on the `run` row at launch; an unmapped model runs serially. An entry is a measurement: add one only after the model passes `plan-parallel-calls.md` §4.1's gate, recorded in `docs/performance.md` §5.3 |
 | `RA2_LOG_LEVEL` | `INFO` | §5.1 of `data-handling.md` — the level of the `ra2` stderr logger. A level, **not** a switch on what may be logged: no level puts narrative in a log record |
 
 - **Every file operation specifies `encoding=`** (N4). Enforced by ruff `PLW1514`
@@ -686,6 +687,7 @@ Each is additive and cheap to reverse; none should change silently.
 | SD35 | **The evaluation-scoped discard is the runs card's header control, not a toolbar button; it stays on screen while a run is active; and Export before it is one pair of files per run, never one merged file** (§18.5, §18.2, `SD32`, Do-NOT #7) | §18 specified whole-object discard for a `run`, an `evaluation` and a `delivery`, and for the evaluation the service, the route and the read model all shipped — `evaluation_preview`, `DELETE /api/v1/evaluations/{id}`, `DiscardPreviewView.runs` summing the counts across an evaluation's runs. **Nothing in `ra2/ui/` ever called them.** §18.6 names the *delivery* affordance as deliberately deferred and says nothing about this one, so the gap read as an oversight rather than a decision, and it was: the analyst's only route to clearing an evaluation was the per-run `discard`, one row at a time, which leaves the `evaluation` row itself behind permanently — with no switcher anywhere in the view (`SD32`), a debris row that `_current_evaluation` can fall back to forever. **Placement is the decision, so containment is the assertion.** `SD32` settled that the toolbar's right group holds exactly one secondary button in every state and that the one it holds is the *creation* affordance — “Save draft” or “New evaluation” — pressed routinely and by habit. A destructive verb one gap from a habitual one is a mis-click, and §18 gave this pipeline exactly one destructive verb without giving it an undo. The runs card's header is also the one place the **scope** reads off the screen without a sentence explaining it: the card whose every row carries a bare `discard` gets, in its header, the one that takes the whole list. Two alternatives are rejected. A row-level “discard all” is a bulk verb over a destructive operation, which §18.6 already refuses. A toolbar button behind an extra confirm guards the second press instead of removing it — the same move `SD32` rejected for the duplicate-draft problem, and for the same reason. **It stays on screen while a run is active, which is the one place it departs from the row version.** A row hides its `discard` while `queued` or `running` because *that row is the obstacle* and there is nothing further to say. An evaluation's obstacle is a different row in the same table, so hiding the action would remove the only route to it and explain nothing; instead the action opens and the dialog renders G1's refusal naming the run that caused it (`DiscardPreviewView.active_detail`, §18.2). That is §15.5's argument about an unreachable endpoint applied one scope up: a state the UI can only discover by provoking an error is not a state it can render. **Export stays per run, and the dialog says so rather than apologising afterwards.** `LifecycleService.run_export` is per run and there is no evaluation-wide export. Merging several runs' rows into one file needs a `run_id` column, a rule for how two runs' score rows sit beside each other, and a header naming an evaluation rather than a run — three decisions about what the data *means*, which is `export_service`'s business and not this layer's (Do-NOT #7). Making them in the view would also give the CSV obtained from the header a different shape from the one the same analyst gets from a row, for no reason but which button was pressed. So the honest answer is N pairs, and `EXPORT_PER_RUN` states it while the dialog is still open instead of after N downloads have started. It renders only when `preview.runs > 1` — read off the view's own count, not a judgement made in `ui/` — and a run that recorded neither a score nor a mismatch is skipped rather than written as two header-only files, the rule `loss_line` and `has_exportable` already apply to their zero counts. The downloaded name is taken from `RunExportView.run_id` rather than the id the caller asked for: identical for a row press, and the only correct one for a bundle, so a set of files from one evaluation is still self-describing once it is on disk |
 | SD36 | **The reasoning effort is a per-evaluation pinned input — `evaluation.reasoning_effort`, step 5's third control — and `LLMClient.extract` takes it per call** (§15.2, §15.5, mvp-spec.md §19.8) | `090e7fdc12c5` pinned `RA2_LLM_REASONING_EFFORT` on the `run` row because two runs that asked different questions must not record identical provenance: measured on the reporting host, the same record costs **190 s** at the model's own default and **6 s** at `none`, and both answer correctly. It left the *choice* in the environment, so the comparison that column exists for — its own docstring's "set `high` and launch a second evaluation to compare" — meant editing an environment variable and restarting the app between two evaluations that are meant to be comparable. An input that decides the answer as much as the temperature does, and that the analyst is expected to vary *between* evaluations, is a column and a control. **The vocabulary moves to `domain/llm.py`** (`REASONING_EFFORTS`, ordered): `ui/` may not import `infra` and the select needs the list, while `Settings` still needs it to refuse an unmappable value at construction — `domain` is the one package all three may read, the move `is_loopback_url` already made. **`extract` grows a keyword rather than the client growing a second instance:** the effort now varies between two runs executing in one process, and a constructed value could only express that with a client per run — a second loopback guard, a second connection pool, constructed inside the record loop. `None` means "the client's default", so `main.py`'s wiring is unchanged and a run queued before the column existed still asks what `Settings` says. **NOT NULL with a `none` backfill, where the run column is nullable with none:** a `run` written before that revision genuinely does not know what it asked, and a guess would be invented provenance; an `evaluation` is a *setup*, and every row that predates the column ran under the process default, so `none` is a fact about them. The choice is refused in the **service**, not by a `Literal` on the request schema: the repair is "pick one of these four" and the sentence that says so is `EVAL_ERROR_UNKNOWN_REASONING_EFFORT`'s, where a schema error would name the field instead |
 | SD37 | **Three presentation rules the design files state differently: a latency renders in seconds to two decimals, every timestamp renders in the host's zone, and two explanatory paragraphs on the Evaluation screen are not rendered at all** (§8.2) | All three are `plan-evaluation-view-improvements.md`, and each is a case where the drawn copy was right about the fact and wrong about the rendering. **Latency in seconds** (`primitives.format_latency_ms`, one formatter for the progress card's metrics line, Ranking's Median latency column and the connection probe): the design writes `812 ms` and `1 340 ms`, but the figure is a *measurement compared between models*, and the range it has to span on real hosts is 0.4 s to 190 s. One unit and one precision is what makes a column of them comparable; `_format_duration_ms` is deliberately **not** reused, because it is for spans a person waits out and renders a sub-second value as `0 s`. A value above zero that rounds to `0.00` renders `< 0.01 s` — a probe answers in single-digit milliseconds, and `0.00 s` there reads as *zero* rather than as *instant*, which is `SuppressedCell`'s rule one layer down. **Local time** (`primitives.format_local`, at all eight render sites): every stored instant is aware UTC and stays that way in the database, the exports and the API — the only thing a shared instant can mean across two hosts — while the screen is read by a person sitting at *this* host. RA2 is loopback-only (N1), so `astimezone()` with no argument is that person's zone and no setting, browser round trip or `Settings` field is needed to find it. A naive value is read as UTC, which is what `UtcDateTime` and `Clock.now()` both guarantee; reading it as local would shift it silently. **The two paragraphs** — step 2's "already frozen" note and the reproducibility card's prompt-template explainer — were true, stayed true, and stopped being *new* on the twentieth viewing, in a 430px column six steps deep where every line pushes Launch further down. What made each load-bearing survives elsewhere: `launch` refuses an unfrozen config (`EVAL_ERROR_CONFIG_NOT_FROZEN`), and the card still renders the template version and fingerprint the explainer was describing. The design READMEs are left as the drawn board — they are the handoff record, not a live spec — and the argument against reinstating each from the mock lives in `evaluation_view`'s own docstring, where the next reader of that file will meet it |
+| SD38 | **Records run in parallel per model, by a measured map; the run pins its value; and the ranking reports time per record beside a marked latency** — `RA2_LLM_PARALLEL_CALLS`, `run.llm_parallel_calls`, `RankingRow.ms_per_record` (§15.4, §16.5, `plan-parallel-calls.md`) | An evaluation's wall time is `records × models × time per call`, and every call was awaited one record at a time. Scoring 48 records × 7 features takes 0.14 s, so the calls are the whole cost. `plan-parallel-calls.md` §1 measured the alternative on this host's own prompts. `qwen3:8b` runs **2.3–2.5× faster at four calls in flight, with answers inside serial noise**, while `gemma3:4b` and `granite4.1:8b` get the same speed-up and change 14–29 of 48 answers. So the answer is **per model, and a setting, not an evaluation input**. Whether a model tolerates batching is a calibration of this host, this Ollama build and this model, measured once. It isn't a question an analyst asks per evaluation, and an input would let two evaluations of one model differ by a number nobody chose on evidence. **A JSON map from tag to count, default `{}`**, values `1..8`, refused at construction like `RA2_LLM_REASONING_EFFORT`. The tag is the key because it's what the analyst selects. The run already records the digest, so a re-pull is visible in provenance, and enforcing it is left out. **Pinned on the run, NOT NULL, backfilled `1`.** Unlike `llm_reasoning_effort`'s nullable column, the backfill is a fact: no code before this revision ever put two records in flight. Resume reads the pin, not the map, so one run's rows never mix two latency regimes. It rides on `ProvenanceView` beside temperature and seed, not on `RunView`: it's a pinned input, and the runs table has no column for inputs. **One code path.** N=1 is one worker in the same pool, not a surviving serial loop kept for safety. Two loops would be one tested and one trusted, and a branch that exists only because tests drive N=1 is Do-NOT #12. **The ranking can't keep median latency as the only cost column.** Per-call latency *rises* with parallelism, 1.7 → 2.7 s for `qwen3:8b` at four, even as throughput doubles, so in a table mixing one run at 1 and one at 4, the faster model reads as the slower one. Wall-clock throughput was the first answer and is refused: `started_at` is restamped by every Resume and `extraction` carries no timestamp, so committed rows over `finished_at − started_at` divides a whole run's rows by its *last* stretch and overstates any resumed run. **Little's law** gives the figure without either: with N calls kept in flight, throughput is N ÷ mean latency, so time per record is `mean(latency_ms) ÷ llm_parallel_calls`. It's computed over the same rows the median already reads and survives Resume by construction. It is also honest where Ollama queues instead of batching: the queue wait is inside each call's latency, so a refused architecture at N=4 reports its serial rate, not a quarter of it. Checked against measurement: 48 × 2.72 s ÷ 4 = 32.6 s predicted, 32.4 s measured. Reported, never scored (`SD20`), and the median latency cell carries `×N` when N > 1, because the number is true but no longer comparable down its column |
 
 **Note on the design's fixture column names.** `UnfallTypAusw`, `WitterungAusw`,
 `LichtverhaeltnisAusw` and `UnfallDatumFeld` do not exist in the delivery; the real
@@ -899,9 +901,12 @@ evaluation(id, name, corpus_id, feature_config_id, prompt_template_id,
           -- editable while launched_at IS NULL; immutable after
           -- prompt_template_id is NULLABLE: "Save draft" means the row can
           -- exist before any template does; the launch transaction requires one
-run(... , prompt_template_id, prompt_template_fingerprint, status, error)
+run(... , prompt_template_id, prompt_template_fingerprint, status, error,
+     llm_parallel_calls)
           -- status: queued | running | done | failed | interrupted
           -- no records_done column (§15.4); `error` is the design's "log" action
+          -- llm_parallel_calls (SD38): records in flight, pinned at launch
+          -- from RA2_LLM_PARALLEL_CALLS[model tag], 1 when unmapped; NOT NULL
 ```
 
 `prompt_template_fingerprint` is stored on the run although it is reachable
@@ -1025,16 +1030,42 @@ submitted job per `run`, `ProgressReporter` for the UI, and the `run` /
 `GET /api/v1/tasks/{id}` (§9) is unchanged; the UI polls it with `ui.timer`
 exactly as Import does. No streaming, no websocket push.
 
-- **Serial.** One model at a time, `RA2_RUN_CONCURRENCY` defaulting to 1. The
-  GPU is the bottleneck; two models sharing 24 GB is slower than two in
-  sequence, and it is what the design draws (one `running`, the rest
-  `queued`).
+- **Models serial.** One model at a time, `RA2_RUN_CONCURRENCY` defaulting to
+  1 and refused above it. The GPU is the bottleneck; two models sharing 24 GB
+  is slower than two in sequence, and it is what the design draws (one
+  `running`, the rest `queued`).
+- **Records: up to the run's pinned `llm_parallel_calls` in flight** (**SD38**).
+  `RA2_LLM_PARALLEL_CALLS` maps a model tag to a call count, and it defaults
+  to `{}`, so every model runs serially. The launch pins
+  `map.get(tag, 1)` on the run, and **Resume executes at the pinned value**,
+  never at the current map. One code path serves every N: N worker
+  coroutines in one `TaskGroup` pull from the pending list, so N=1 is one
+  worker, not a separate serial branch (Do-NOT #12). Each worker resolves in
+  its own closed transaction, calls, and commits one record in its own
+  transaction. §15.3's boundary is unchanged: nothing batches across
+  records, and no transaction spans a call. Dispatch order is scope order,
+  commit order is completion order, and resume keys on holes, so nothing
+  depends on the two agreeing. The endpoint-error budget counts
+  *consecutive* failures in completion order. When it trips, workers stop
+  taking records and in-flight calls finish, so at most N−1 more calls are
+  spent, and they're counted. An unexpected exception cancels the siblings
+  and fails the run with the first error. Cancel cancels every in-flight
+  call. Committed rows survive both.
+- **An entry in the map is a measurement, not a preference.** Batched decoding
+  is not guaranteed bit-identical to batch size 1, and
+  `OLLAMA_NUM_PARALLEL` is server-wide, so raising it can move *other*
+  models' serial answers too. A model enters the map only after passing
+  `plan-parallel-calls.md` §4.1's gate on this host, recorded in
+  `docs/performance.md` §5.3. RA2 can't read Ollama's slot count or its
+  per-architecture refusals, so a wrong entry queues rather than fails, and
+  the queue wait runs against `RA2_LLM_TIMEOUT_S`. The run-start log line
+  prints `parallel=N` beside `timeout=`.
 - **Retries bounded and counted.** `RA2_LLM_MAX_RETRIES`, the count carried
   back on the `Extraction` and rendered in the progress card's metrics line —
   never a retry-until-quiet loop (`mvp-spec.md` §10.4).
 - **Provenance written at run start**, not at completion: model + digest,
   template version + fingerprint, temperature, seed, **reasoning effort**,
-  config id, corpus id + version, host platform, GPU name, endpoint. A run
+  **parallel calls**, config id, corpus id + version, host platform, GPU name, endpoint. A run
   that dies mid-corpus is still a reproducible run (`mvp-spec.md` §19.8).
 - **Interrupted, then resumed explicitly.** A process death leaves the run
   `interrupted` and the view offers **Resume**. N6 asks for restart-*safe* and
@@ -1250,9 +1281,11 @@ callers are the ones holding sessions and sockets.
 - **Scoring, Results and Mismatches** (`mvp-spec.md` F7–F11). Runs produce
   `extraction*` rows and stop there; nothing reads them yet. The `score` and
   `mismatch` tables stay unbuilt.
-- **Concurrency above 1, and streaming progress.** Both are config lines or
-  additive endpoints on top of what §15.4 fixes, and neither is worth
-  designing before one real corpus has been run end to end.
+- **Run concurrency above 1, and streaming progress.** Both are config lines
+  or additive endpoints on top of what §15.4 fixes, and neither is worth
+  designing before one real corpus has been run end to end. *Records* in
+  flight within one run are decided (§15.4, SD38); *models* in parallel stay
+  refused for the VRAM reason above.
 - **Batched feature prompts** — `mvp-spec.md` §10.1's named fallback if
   adherence proves poor. The batch composition would be part of the template
   version, so this section's copy-on-write already accommodates it.
@@ -1530,7 +1563,12 @@ rule was drawn in the right place.
 
 Three columns on that tab are **reported, never scored** — median latency,
 prompt tokens and VRAM, per §3d's own rule 4: "the tie-breaker you apply, not
-one the tool applies". **The presence figure joins them** (**SD20**). The
+one the tool applies". **Time per record and parallel calls join them**
+(**SD38**). A model whose run had `llm_parallel_calls > 1` answers each call
+more slowly and gets through the corpus faster, so its median latency is
+marked `×N` and stops being comparable down the column. Time per record,
+`mean latency ÷ parallel calls`, stays comparable, and it is what the analyst
+actually pays for. **The presence figure joins them** (**SD20**). The
 design renders it as `0.907` in a ranking table, where it reads as a quality
 score; `mvp-spec.md` §11.2 is unambiguous that presence has no independent gold
 label, and §11.3's reasoning applies to it directly — a model that flags
