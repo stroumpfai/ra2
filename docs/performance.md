@@ -27,7 +27,7 @@ named here. Re-measure rather than edit them (§7 says how).
 | Biggest lever | **Reasoning effort.** `none` vs the model's default: 6 s vs 190 s for one record |
 | Second biggest | **The model**, mostly through how much it *writes*, not through its size (§4.3) |
 | Recommended model | **`qwen3:8b`**. Tied for first on quality, fastest of the leaders. It captures no entities (§4.4) |
-| Parallel calls | **Not implemented.** Measured at ~2× for `qwen3:8b` without changing answers (§5.3) |
+| Parallel calls | **Not implemented.** Measured at ~2.4× for `qwen3:8b` without changing answers, but the server setting it needs changes `ministral-3:8b`'s answers (§5.3) |
 
 ---
 
@@ -222,7 +222,7 @@ matters for the report, `gemma4:12b` does it thoroughly at 6.6× the time of
 | Use | Model | Why |
 |---|---|---|
 | **Default for feature extraction** | **`qwen3:8b`** | Tied for first, best on Italian, fastest per record. 3 000 records in ~1.5 h |
-| Second opinion in the same evaluation | `ministral-3:8b` or `granite4.1:8b` | Different families and tokenisers, also tied for first. ~3 h each at 3 000 |
+| Second opinion in the same evaluation | `granite4.1:8b` | Different family and tokeniser, also tied for first. ~2.5 h at 3 000. `ministral-3:8b` ties too, but its answers change when Ollama is set for parallel calls (§5.3) |
 | When entities matter | `gemma4:12b` | The only model that fills `entities` on every record. ~10 h at 3 000 |
 | Fast iteration on a prompt | `qwen3:8b` on a dev-sized corpus | ~1.5 min per 50 records |
 | **Avoid** | `qwen3.5:2b`, `qwen3.5:9b` | Rank last or near-last; `9b` is also 5× slower than `qwen3:8b` |
@@ -245,7 +245,7 @@ Ordered by effect. "Measured" means on this host, as described in §7.
 | 5 | **Number of models** | Linear, since runs are serial | Fewer runs, sooner | Fewer comparisons. The seed can't tell the leaders apart |
 | 6 | **Model fits in VRAM** | Spilling ~20 % of a model to CPU took `qwen3:8b` from 1.7 s to ~3 s per record (§6) | Keep the GPU free of other models during a run | Nothing to set in RA2; see lever 7 |
 | 7 | **Ollama keep-alive** (`OLLAMA_KEEP_ALIVE`, host setting) | Saves one model load per idle gap: 5.7 s cold vs 0.04 s warm (`qwen3.5:2b`) | Negligible per record; saves seconds per evaluation | A resident model holds VRAM until Ollama needs it for another |
-| 8 | **Parallel calls** (not implemented) | ~2× at 4 calls for `qwen3:8b` (§5.3) | Halves wall time on models that support it | See §5.3. Needs `plan-parallel-calls.md` Stages 1–4 and a migration |
+| 8 | **Parallel calls** (not implemented) | ~2.4× at 4 calls for `qwen3:8b` (§5.3) | Halves wall time on models that support it | See §5.3. Needs `plan-parallel-calls.md` Stages 1–4 and a migration |
 | 9 | **Timeout** (`RA2_LLM_TIMEOUT_S`, 600) | No effect on a healthy run | Lower it to fail fast on a model known to be quick | Too low and every record of a slow model times out. A timeout is **not** retried |
 | 10 | **Retries** (`RA2_LLM_MAX_RETRIES`, 2) | No effect on a healthy run (0 retries in 1 600 records) | Survives a transient 5xx | Each retry of a failing endpoint costs another full call |
 
@@ -272,31 +272,56 @@ extraction is a question for an evaluation to answer: launch the same setup at
 
 Several records in flight against one model. Measured with a private Ollama
 server (`OLLAMA_NUM_PARALLEL=4`) and the same prompts RA2 sends, over the
-48-record seed. "Differs" counts records whose JSON differs from the first
-serial pass.
+48-record seed. "Differs" counts records whose JSON differs from a serial pass
+on today's **one-slot** server. Repeated serial passes there differ on
+**0–2 of 48**, and that's the band a model is allowed.
 
-| Model | Architecture | Ollama allows it | 1 call | 2 calls | 4 calls | Differs at 2 / 4 |
-|---|---|---|---|---|---|---|
-| **`qwen3:8b`** | `qwen3` | yes | 83 s | 52 s (1.6×) | **43 s (1.96×)** | **2 / 0** of 48 |
-| `gemma3:4b` | `gemma3` | yes | 142 s | 89 s (1.6×) | 70 s (2.0×) | **27 / 29** of 48 |
-| `qwen3.5:2b` | `qwen35` | **no** | 111 s | 111 s | 111 s | 0 / 0 (requests queue) |
-| `qwen3.5:9b` | `qwen35` | **no** | not run | | | |
-| `llama3.2:3b`, `granite4.1:8b`, `ministral-3:8b`, `gemma4:12b` | `llama`, `granite`, `mistral3`, `gemma4` | yes | not run | | | |
+Raising the server setting has two separate effects, and a model has to
+survive both:
 
-For comparison, repeated **serial** passes differ on **0–2 of 48** on a
-one-slot server.
+- **Serial on 4 slots.** Nothing runs in parallel yet, but the server now has
+  four slots for every model. Do serial runs still give the same answers?
+- **Parallel calls.** Several records in flight at once for this model.
 
-- **`qwen3:8b` passes.** ~2× throughput, and answers change no more than
-  serial noise. At 3 000 records that's ~45 min instead of ~1.5 h.
-- **`gemma3:4b` fails.** The speedup is the same, but more than half of its
-  answers change. Parallelism would become part of the question it's asked.
+| Model | Architecture | Serial on 4 slots, differs | Parallel, differs at 2 / 4 | Throughput at 2 / 4 | Gate |
+|---|---|---|---|---|---|
+| **`qwen3:8b`** | `qwen3` | **0** | **0–1 / 0–1** | 1.5× / **2.3–2.5×** | **passes** |
+| `ministral-3:8b` | `mistral3` | **6** (the same 6 every pass) | 4 / 5 | 1.8× / 2.6× | **fails both** |
+| `granite4.1:8b` | `granite` | 0–2 | 15 / 14 | 1.8× / 2.7× | fails parallel |
+| `gemma3:4b` | `gemma3` | 0–2 | 27 / 29 | 1.6× / 2.0× | fails parallel |
+| `qwen3.5:2b`, `qwen3.5:9b` | `qwen35` | not run | Ollama refuses: requests queue, 1.0× | | cannot |
+| `gemma4:12b` | `gemma4` | 0–3, identical pass for pass to one slot | — / 4 (one pass) | — / 2.3× | fails parallel, narrowly |
+| `llama3.2:3b` | `llama` | not run | not run | | unknown |
+
+- **`qwen3:8b` passes.** ~2.4× throughput at 4 calls, and answers change no
+  more than serial noise. At 3 000 records that's ~35–40 min instead of
+  ~1.5 h. One N=4 pass out of five took 59 s instead of ~33 s, for reasons
+  not yet known.
+- **`ministral-3:8b` is the problem.** Raising the server setting changes 6
+  of its 48 answers even when it runs serially. The new answers are stable,
+  but runs from before the change won't reproduce after it. This is the
+  plan's stop condition while `ministral-3:8b` is in use (§4.5).
+- **`granite4.1:8b`, `gemma3:4b` and `gemma4:12b`** tolerate the server
+  setting but not parallel calls. They'd stay serial. `gemma4:12b`'s own
+  serial passes vary on up to 3 of 48, but they vary identically on one slot
+  and on four.
 - **Qwen 3.5 can't.** Ollama 0.34 serves the `qwen35` architecture one request
   at a time whatever the setting (ollama#14510).
+- **Memory.** Four slots reserve four KV caches in every loaded model.
+  `gemma4:12b` grows from 8.1 GB to 10.4 GB, `qwen3:8b` from 5.6 GB to 7.5 GB.
+  Each still fits in 16 GB on its own, but two of them loaded together no
+  longer do.
+
+Gate record, as `plan-parallel-calls.md` D6 requires: measured 2026-09-23
+(Stage 0) and 2026-09-24 (Stage 0b), Ollama 0.34.0, digests `qwen3:8b`
+`500a1f067a9f`, `ministral-3:8b` `1922accd5827`, `granite4.1:8b`
+`444af1c4b2fe`, `gemma3:4b` `a2af6cc3eb7f`, `gemma4:12b` `4eb23ef187e2`.
+Full counts are in `plan-parallel-calls.md` §1.1–1.2.
 
 The design, tests and risks are in
 [`plan-parallel-calls.md`](../plan-parallel-calls.md). Whatever it builds has to
 record the parallelism on each run, because per-call latency rises with it:
-median 1.7 s → 3.1 s for `qwen3:8b` at 4 calls, even as throughput doubles.
+median 1.7 s → 2.7 s for `qwen3:8b` at 4 calls, even as throughput more than doubles.
 
 ---
 

@@ -3,8 +3,12 @@
 **Status.** Written 2026-09-23 against `12268ed`; **revised the same day**
 after Stage 0 and the eight-model comparison in
 [`docs/performance.md`](docs/performance.md). Nothing implemented. **Stage 0b
-(§5) is the next step and is a go/no-go; deferred by David on 2026-09-23.** Stages 1–4 also wait on the §9
-decisions. Branch `feat/parallel-calls`. Authority as always: `mvp-spec.md`
+ran on 2026-09-24 (§1.2). `qwen3:8b` passes all three gate conditions.
+`ministral-3:8b` fails condition 2**, which is the plan's stop condition if
+it stays in use. **David answered Q5 with (a):** `granite4.1:8b` replaces
+`ministral-3:8b` as the second opinion. `gemma4:12b` then passed
+condition 2, so **Stages 1–4 go ahead.**
+Branch `feat/parallel-calls`. Authority as always: `mvp-spec.md`
 on *what*, `sw-design.md` on *how* (CLAUDE.md). This plan changes
 `sw-design.md` §15.4 first, in the same commit as the code, and names every
 frozen file it touches as an amendment (§6).
@@ -77,6 +81,84 @@ What this says:
    system service for every model (§4.5).
 5. **Not yet explained:** `qwen3:8b`'s closing serial pass took 110 s against
    83 s for the opening one. Stage 0b re-measures it.
+
+### 1.2 Stage 0b results (2026-09-24)
+
+**Method.** As in §1.1, with the script rebuilt from that description. A
+fresh throwaway seed (48 records, synthetic codelist). Every model on 11434
+was unloaded before each model under test, and `/api/ps` confirmed
+`size_vram == size` before every pass (the script refuses to measure
+otherwise). "Differ" is now always counted against the **first one-slot
+serial pass** (§4.1 condition 1), not the same server's own first pass.
+Retries and parse failures were 0 on every pass. Ollama 0.34.0. Digests:
+`qwen3:8b` `500a1f067a9f`, `ministral-3:8b` `1922accd5827`, `granite4.1:8b`
+`444af1c4b2fe`, `gemma3:4b` `a2af6cc3eb7f`, `gemma4:12b` `4eb23ef187e2`.
+
+**Serial noise band (step 1).** Three serial passes on the one-slot system
+service, which differed from the first pass by:
+
+| Model | 1 call | Differ, passes 2 / 3 |
+|---|---|---|
+| `qwen3:8b` | 81.4 s | 0 / 0 |
+| `ministral-3:8b` | 166.0 s | 0 / 0 |
+| `granite4.1:8b` | 146.1 s | 1 / 2 |
+| `gemma3:4b` | 153.9 s | 2 / 0 |
+| `gemma4:12b` | 482.8 s | 3 / 2 |
+
+**The gate, per model (steps 2 and 3).** Condition 2 was measured first, on a
+fresh four-slot server that had served no parallel request yet. Condition 1
+was measured after it.
+
+| Model | Cond. 2: serial on 4 slots, differ ×3 | Cond. 1: differ at 2 / 4 calls | Throughput at 2 / 4 calls | Verdict |
+|---|---|---|---|---|
+| **`qwen3:8b`** | **0 / 0 / 0** | **0–1 / 0–1** | 1.5× / 2.3–2.5× | **passes** |
+| `ministral-3:8b` | **6 / 6 / 6** | 4 / 5 | 1.77× / 2.57× | **fails 2 and 1** |
+| `granite4.1:8b` | 0 / 1 / 2 | **15 / 14** | 1.78× / 2.65× | fails 1 |
+| `gemma3:4b` | 0 / 2 / 0 | not re-run (27 / 29 in §1.1) | | fails 1 |
+| `gemma4:12b` | 0 / 3 / 2, **identical pass for pass** to the one-slot passes | — / 4 (one pass) | — / 2.26× | passes 2; fails 1 narrowly |
+
+What this says:
+
+1. **`qwen3:8b` passes all three conditions.** Eight parallel passes (N = 2,
+   3 and 4) differed from the one-slot baseline on 0–2 records, which is
+   inside the band. Two further N=4 passes have times only, because a
+   later pass with the same label overwrote their hash files. At N=3 it
+   measured 2.14× (38 s), and at N=4 four of five passes took 32–36 s
+   (2.3–2.5×).
+2. **`ministral-3:8b` fails condition 2, and the failure is deterministic.**
+   Its three serial passes on the four-slot server are identical to *each
+   other* and differ from the one-slot baseline on **the same 6 records** each
+   time. This is not extra noise. A four-slot server gives it a different,
+   stable answer on 12.5 % of records. Serial runs made before the setting
+   changed would not reproduce after it. Runs made after it would reproduce
+   among themselves. Its parallel passes then differ from that four-slot
+   serial answer on 7 and 6 records, so it fails condition 1 as well.
+3. **`granite4.1:8b` is the opposite case.** Serial on four slots stays in
+   its band, but parallel calls change 14–15 records. It can't join the map,
+   but the server setting doesn't disturb it.
+4. **§1.1 point 5 did not reproduce.** A closing serial `qwen3:8b` pass after
+   all the parallel passes took 81.6 s on the four-slot server and 81.3 s on
+   the one-slot one. The likeliest cause of the 110 s was the VRAM contention
+   in §1.1 point 3. **A new outlier appeared instead:** the first N=4 pass of
+   `qwen3:8b` took 59.1 s (1.38×), and four later N=4 passes took 32–36 s.
+   None of them offloaded. This is unexplained, and the gate's 1.3× floor
+   still holds for it.
+5. **Loaded size, 1 → 4 slots (step 5):** `qwen3:8b` 5.58 → 7.50 GB,
+   `ministral-3:8b` 5.64 → 7.47, `granite4.1:8b` 5.89 → 8.01, `gemma3:4b`
+   2.88 → 3.75, **`gemma4:12b` 8.06 → 10.38 GB**. Each still fits in 16 GB on
+   its own. Two of them together no longer do, which makes §4.5's unload
+   step mandatory, not advisory.
+
+6. **`gemma4:12b` is untouched by the server setting** (measured after Q5).
+   Its one-slot noise is 0–3, not 0–2, but the *n*-th serial pass on four
+   slots matches the *n*-th pass on one slot record for record (0 / 0 / 0).
+   Whatever makes its passes wobble repeats the same way on both servers.
+   At 4 calls it differs on 4 records from the first one-slot pass, and on
+   at least 2 from every serial pass. That is just outside its band, from a
+   single pass. It stays serial, and nothing in this plan needs more.
+
+**Not measured:** condition 2 for `llama3.2:3b`. No recommendation uses it.
+If it comes back into use, it needs the same three serial passes first.
 
 ## 2. What exists and what it means
 
@@ -218,8 +300,8 @@ not just those in RA2's map. Raising it has three effects:
 
 | Effect | Measured | Consequence |
 |---|---|---|
-| Serial runs of *other* models may change | `gemma3:4b` serial on the four-slot server: 9 of 48 differ (once, after parallel passes) | **Unquantified. Stage 0b condition 2.** If serial runs of models outside the map leave the noise band, the plan stops here (§9 Q3) |
-| Every loaded model reserves N KV caches | `qwen3:8b` 5.6 → 7.5 GB at 4 slots | Larger models spill to CPU sooner. On 16 GB, `gemma4:12b` (8.1 GB at 1 slot) is the one to check |
+| Serial runs of *other* models may change | `gemma3:4b` serial on the four-slot server: 9 of 48 differ (once, after parallel passes) | **Measured in §1.2:** `ministral-3:8b` moves by 6 of 48 (deterministic); `qwen3:8b`, `granite4.1:8b`, `gemma3:4b` and `gemma4:12b` stay in band. §9 Q5 |
+| Every loaded model reserves N KV caches | `qwen3:8b` 5.6 → 7.5 GB, `gemma4:12b` 8.1 → 10.4 GB at 4 slots (§1.2 point 5) | Larger models spill to CPU sooner. On 16 GB, `gemma4:12b` (8.1 GB at 1 slot) is the one to check |
 | Other models left in VRAM squeeze the next | §1.1 point 3: the gain vanished | Ollama's `keep_alive` decides residency. Stage 4's runbook note says to unload before a parallel run; §8 lists a residency check |
 
 ## 5. Stages
@@ -229,7 +311,13 @@ not just those in RA2's map. Raising it has three effects:
 Done. The results are in §1.1. The go-ahead for `qwen3:8b` is conditional on
 Stage 0b.
 
-### Stage 0b — measure the side effects (no repo changes) · **go/no-go**
+### Stage 0b — measure the side effects (no repo changes) · **go/no-go** ✅ (2026-09-24)
+
+**Done.** Results are in §1.2 and `docs/performance.md` §5.3. The gate result
+for each model is recorded there, as D6 asks. **Outcome:** condition 2 fails
+for `ministral-3:8b` only, so go/no-go depended on whether it stays in use.
+**Go**, by §9 Q5 (a): `granite4.1:8b` replaces it, and `gemma4:12b` passed
+condition 2 afterwards (§1.2 point 6).
 
 Private `ollama serve` on `127.0.0.1:11435` as in Stage 0, so the system
 service stays untouched. **Unload every model on 11434 first** (§1.1 point 3),
@@ -324,7 +412,7 @@ the `OLLAMA_NUM_PARALLEL` Stage 0b approved, with all models unloaded first.
 `RA2_LLM_PARALLEL_CALLS='{"qwen3:8b": 4}'`.
 
 1. **Two evaluations**, identical except the map: `{}` and
-   `{"qwen3:8b": 4}`. Both use `qwen3:8b` and `ministral-3:8b`. Every
+   `{"qwen3:8b": 4}`. Both use `qwen3:8b` and `granite4.1:8b` (§9 Q5). Every
    per-feature F1 must match within its Wilson interval, and macro-F1 within
    0.01. This checks at the *score* level what Stage 0b checked at the
    JSON level.
@@ -404,3 +492,17 @@ numbers.
 **Answered 2026-09-23:** Q1 **yes**, `qwen3:8b` is adopted. Q2 **yes**, a
 per-model map. Q4 **no, not now**: Stage 0b is deferred, so Stages 1–4 stay
 blocked behind it. Q3 is open and is explained in plain terms to David.
+
+**2026-09-24:** Stage 0b ran at David's request, so Q4 is settled. It raised a new
+question:
+
+| # | Question | Recommendation |
+|---|---|---|
+| Q5 | `ministral-3:8b` fails condition 2. Raising `OLLAMA_NUM_PARALLEL` to 4 gives it a different but stable answer on 6 of 48 records (§1.2 point 2). Which applies: (a) drop `ministral-3:8b` and make `granite4.1:8b` the second opinion, which is unaffected by the server setting (point 3), then go ahead; (b) keep `ministral-3:8b` and accept a one-time break in its reproducibility; or (c) stop, as Q3's recommendation says? | **(a)**. `docs/performance.md` §4.5 already names either model as the second opinion. With `granite4.1:8b`, every measured model that stays in use passes condition 2, and `qwen3:8b` passes all three. Before the system service changes, condition 2 still has to be measured for `gemma4:12b` if it stays in use (§1.2, "Not measured") |
+
+**Answered 2026-09-24:** Q5 **(a)**. `granite4.1:8b` replaces
+`ministral-3:8b` as the second opinion, and `ministral-3:8b` leaves the
+recommended set. Whether it can stay on the host is a separate question: it
+can be pulled, but any evaluation that uses it after the server setting
+changes won't reproduce one from before. `gemma4:12b`'s condition 2 was
+measured afterwards and passes (§1.2 point 6).
