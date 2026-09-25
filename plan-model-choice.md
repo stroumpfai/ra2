@@ -12,8 +12,9 @@ and its repository. **Stage 3 done on 2026-09-25**: `just qualify-model`,
 2026-09-25**: the launch enforces the gate. **Stage 5 done on 2026-09-25**: the
 Models card shows each model's qualification. **Stage 6 done on 2026-09-25**:
 three models qualified against real Ollama reproduce every figure and verdict
-on record (§1.4). All stages are done on `feat/model-choice`; it isn't merged
-yet. Authority as always:
+on record (§1.4). **All stages done; merged into `main` as `621bfbd`.**
+**Left for the host:** turning parallel calls on is `docs/performance.md`
+§5.4, starting with Step 0 against the real `RA2_DATA_DIR`. Authority as always:
 `mvp-spec.md` on *what*, `sw-design.md` on *how* (CLAUDE.md). Every frozen
 file the code touches is named as an amendment (§6).
 
@@ -611,8 +612,7 @@ table.
 private server was stopped by PID (checked against its command line first).
 The system service was never reconfigured.
 
-**Not done:** the Status line should name the merge commit, and there is
-none yet.
+Merged as `621bfbd`; the Status line names it.
 
 Throwaway everything, as plan-parallel-calls.md Stage 0b did. Unload every
 model on 11434 first. The N-slot server is a private `ollama serve` on
