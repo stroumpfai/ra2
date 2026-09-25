@@ -83,7 +83,7 @@ def format_count(value: int) -> str:
 def format_latency_ms(ms: int) -> str:
     """`812` -> `"0.81 s"`. Seconds, two decimals, one rule everywhere.
 
-    **Not `progress_card._format_duration_ms`**, which renders `1 min 40 s`.
+    **Not `progress_card.format_duration_ms`**, which renders `1 min 40 s`.
     That one is for a span a person waits out — elapsed, ETA — where minutes
     are the unit and a sub-second value honestly reads `0 s`. A latency is a
     *measurement being compared between models*, which is what the Ranking

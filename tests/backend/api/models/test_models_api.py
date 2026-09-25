@@ -6,16 +6,23 @@ endpoint line and disables Launch (C3), and an error status would force
 exactly the toast the design rejects.
 """
 
+from datetime import UTC, datetime
+
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.fixtures.fake_llm import (
     DEFAULT_MODELS,
     StaticEndpointProber,
     StaticModelCatalog,
 )
 
+from ra2.domain.ids import QualificationId
 from ra2.domain.llm import EndpointStatus, ProbeCode, ProbeResult
+from ra2.domain.qualification import Qualification, QualitySummary
 from ra2.infra.config import Settings
+from ra2.persistence.repositories.qualification_repo import QualificationRepository
+from ra2.persistence.session import session_scope
 from ra2.services.evaluation_service import CONNECTION_REASON_UNREACHABLE
 
 
@@ -172,3 +179,53 @@ async def test_test_connection_does_not_ask_the_catalogue(
     await api_client.post("/api/v1/models/test", json={"endpoint": "http://127.0.0.1:11434/v1"})
 
     assert api_model_catalog.reachable_calls == 0
+
+
+async def test_models_api_carries_the_qualification(
+    api_client: AsyncClient, db_session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """SD40: the card's third line, over the wire. A measured model carries
+    its numbers and state; an unmeasured one carries `null`, never zeros."""
+    measured = DEFAULT_MODELS[0]
+    async with session_scope(db_session_factory) as session:
+        await QualificationRepository(session).add(
+            QualificationId("q-1"),
+            Qualification(
+                model_tag=measured.tag,
+                model_digest=measured.digest,
+                ollama_version="0.34.0",
+                gpu_name=None,
+                ra2_version=None,
+                measured_at=datetime(2026, 9, 25, 10, 0, tzinfo=UTC),
+                seed_records=200,
+                quality=QualitySummary(
+                    records=200,
+                    reasoning_effort="none",
+                    macro_f1=0.895,
+                    macro_f1_low=0.870,
+                    macro_f1_high=0.905,
+                    f1_by_language={"de": 0.91},
+                    median_latency_ms=1710,
+                    ms_per_record=1745.0,
+                    median_completion_tokens=121,
+                    entity_fill=0.0,
+                    parse_failures=0,
+                ),
+            ),
+        )
+
+    resp = await api_client.get("/api/v1/models")
+
+    assert resp.status_code == 200, resp.text
+    by_tag = {m["tag"]: m for m in resp.json()["models"]}
+    assert by_tag[measured.tag]["qualification"] == {
+        "state": "qualified",
+        "measured_digest": measured.digest,
+        "seed_macro_f1": 0.895,
+        "ms_per_record": 1745.0,
+        "entity_fill": 0.0,
+        "parallel_calls": 1,
+        "launch_ms_per_record": 1745.0,
+        "estimated_ms": None,
+    }
+    assert by_tag[DEFAULT_MODELS[1].tag]["qualification"] is None

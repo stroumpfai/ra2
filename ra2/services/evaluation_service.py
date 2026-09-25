@@ -27,6 +27,7 @@ Hence key-sorted, compact, `ensure_ascii=False`, and the codes ordered by
 `code` — the M0-D8 convention `matching_rule_json` already follows.
 """
 
+import dataclasses
 import json
 import logging
 import platform
@@ -60,7 +61,11 @@ from ra2.domain.llm import (
     ModelCatalog,
     ModelInfo,
 )
-from ra2.domain.qualification import parallel_decision
+from ra2.domain.qualification import (
+    Qualification,
+    QualificationState,
+    parallel_decision,
+)
 from ra2.infra.clock import Clock
 from ra2.infra.config import Settings
 from ra2.infra.gpu import GpuProbe
@@ -98,6 +103,7 @@ from ra2.services.readmodels import (
     ModelChoiceView,
     Page,
     ProvenanceView,
+    QualificationCardView,
     RunProgressView,
     RunView,
     SortDir,
@@ -718,13 +724,33 @@ class EvaluationService:
         connection: ConnectionView | None = None,
         *,
         selected: Sequence[str] = (),
+        qualified: bool = True,
     ) -> tuple[ModelChoiceView, ...]:
         """The catalogue, judged and flagged. An unreachable endpoint returns
         **an empty tuple**: `ModelCatalog.models()` is documented to return
-        `()` rather than raise, so nothing here catches anything (§15.5)."""
+        `()` rather than raise, so nothing here catches anything (§15.5).
+
+        Each row carries what this host has measured about it (SD40), unless
+        `qualified=False`, for a caller that only needs the VRAM judgement.
+        This is the one place the card's qualification is read, and it is only
+        reached from a view load or a refresh, never from the progress timer,
+        which hands its models back to `get()` instead. The Ollama version is
+        asked here, and only when the map has an entry above 1.
+        """
         connection = connection or await self.connection_status()
         catalogue = await self._model_catalog.models()
         chosen = set(selected)
+        cards: dict[str, QualificationCardView | None] = {}
+        if qualified and catalogue:
+            ollama_version = (
+                await self._model_catalog.version()
+                if any(calls > 1 for calls in self._settings.llm_parallel_calls.values())
+                else None
+            )
+            async with self._session_factory() as session:
+                repo = QualificationRepository(session)
+                for model in catalogue:
+                    cards[model.tag] = await self._card(repo, model, ollama_version)
         return tuple(
             ModelChoiceView(
                 tag=choice.tag,
@@ -732,8 +758,45 @@ class EvaluationService:
                 size_bytes=choice.size_bytes,
                 fits_vram=choice.fits_vram,
                 selected=choice.tag in chosen,
+                qualification=cards.get(choice.tag),
             )
             for choice in self._judge(catalogue, connection)
+        )
+
+    async def _card(
+        self, repo: QualificationRepository, model: ModelInfo, ollama_version: str | None
+    ) -> QualificationCardView | None:
+        """One row's third line (SD40). The numbers are the newest
+        qualification of **this digest**; failing that, the newest of any
+        digest, flagged stale. `parallel_calls` is what the launch would pin,
+        through the same `parallel_decision` it calls."""
+        current = await repo.latest_for(model.tag, model.digest)
+        shown = current or await repo.latest_for(model.tag)
+        if shown is None:
+            return None
+        gated = await repo.latest_for(model.tag, model.digest, gated=True) or await repo.latest_for(
+            model.tag, gated=True
+        )
+        decision = parallel_decision(
+            mapped=self._settings.llm_parallel_calls.get(model.tag),
+            qualification=gated,
+            digest=model.digest,
+            ollama_version=ollama_version,
+        )
+        if current is None:
+            state = QualificationState.STALE_DIGEST
+        elif gated is not None and gated.model_digest == model.digest and gated.server_sensitive:
+            state = QualificationState.SERVER_SENSITIVE
+        else:
+            state = QualificationState.QUALIFIED
+        return QualificationCardView(
+            state=state,
+            measured_digest=shown.model_digest,
+            seed_macro_f1=shown.quality.macro_f1,
+            ms_per_record=shown.quality.ms_per_record,
+            entity_fill=shown.quality.entity_fill,
+            parallel_calls=decision.n,
+            launch_ms_per_record=_launch_rate(shown, gated, decision.n),
         )
 
     async def _reject_infeasible(self, tags: Sequence[str]) -> None:
@@ -744,7 +807,9 @@ class EvaluationService:
         because that is ignorance, not a verdict. Same for an unknown VRAM.
         """
         connection = await self.connection_status()
-        choices = {choice.tag: choice for choice in await self._model_choices(connection)}
+        choices = {
+            choice.tag: choice for choice in await self._model_choices(connection, qualified=False)
+        }
         # Named `validation_errors`, not `errors`: `tests/unit/parsing/
         # test_no_lenient_decoding.py` bans the token `errors =` anywhere
         # under `ra2/` (N4's strictest form — the keyword must not appear at
@@ -1027,6 +1092,7 @@ class EvaluationService:
                     size_bytes=choice.size_bytes,
                     fits_vram=choice.fits_vram,
                     selected=choice.tag in set(selected),
+                    qualification=_scoped(choice.qualification, total),
                 )
                 for choice in models
             ),
@@ -1237,3 +1303,21 @@ async def _feature_keys(session: AsyncSession, feature_ids: Sequence[str]) -> di
         select(Feature.id, Feature.key).where(Feature.id.in_(list(feature_ids)))
     )
     return {str(feature_id): str(key) for feature_id, key in rows.all()}
+
+
+def _launch_rate(shown: Qualification, gated: Qualification | None, parallel_calls: int) -> float:
+    """Milliseconds per record at the parallelism the launch would pin: the
+    serial rate, divided by the speedup the gate measured at that N."""
+    if parallel_calls <= 1 or gated is None:
+        return shown.quality.ms_per_record
+    speedup = next((g.speedup for g in gated.gates if g.n == parallel_calls), 1.0)
+    return shown.quality.ms_per_record / max(speedup, 1.0)
+
+
+def _scoped(card: QualificationCardView | None, records: int) -> QualificationCardView | None:
+    """The card with its estimate for this evaluation's scope. Arithmetic
+    only: nothing here asks the endpoint or the database, so it is safe on
+    the progress timer's path."""
+    if card is None:
+        return None
+    return dataclasses.replace(card, estimated_ms=round(card.launch_ms_per_record * records))

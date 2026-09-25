@@ -9,7 +9,8 @@ SD40 in `sw-design.md`, the Models card in the design README, and
 `feat/model-choice`: the pure gate, the table, its revision `7d084d5a7dc6`
 and its repository. **Stage 3 done on 2026-09-25**: `just qualify-model`,
 `QualificationService` and the two new catalogue calls. **Stage 4 done on
-2026-09-25**: the launch enforces the gate. Stage 5 is next. Authority as always:
+2026-09-25**: the launch enforces the gate. **Stage 5 done on 2026-09-25**: the
+Models card shows each model's qualification. Stage 6 (real Ollama) is next. Authority as always:
 `mvp-spec.md` on *what*, `sw-design.md` on *how* (CLAUDE.md). Every frozen
 file the code touches is named as an amendment (§6).
 
@@ -329,7 +330,7 @@ which is one more reason for Stage 3.
 
 Four decisions Stage 1 made that the plan hadn't:
 
-- **The models well grows from 196px to 252px.** The design's rule is "4
+- **The models well grows from 196px to 252px** (260px in Stage 5, measured). The design's rule is "4
   visible rows", and the third line makes a row 63px instead of 49px.
   Keeping 196px would quietly show three rows. `test_scroll_well_caps_height…`
   in `tests/ui/test_components.py` passes its own 196 to the component and
@@ -509,7 +510,30 @@ because this is when a host's existing map starts depending on a gate:
 | `test_resume_keeps_the_pin_even_after_a_new_qualification` | backend | SD38 unchanged |
 | `test_launch_pins_parallel_calls` (existing) | backend | Updated to give its fake a passing qualification. **No other existing test is weakened** |
 
-### Stage 5 — the Models card and the API (D7, D8)
+### Stage 5 — the Models card and the API (D7, D8) ✅ (2026-09-25)
+
+**Done.** Amendment §4 and §7 are applied, so the amendment is fully applied.
+`just lint` is clean. `just test`: 2650 passed, 1 skipped. `just e2e`: 93
+passed, 1 skipped. Where it differed:
+
+- **260px, not 252px.** The measured row is 64.8px in Chromium, not the
+  63px the arithmetic gave, so 252px showed 3.9 rows. The E2E assertion
+  measures the row and requires `4 × row ≤ well < 5 × row`, which is how it
+  caught this. The README, the view constant and the amendment say 260.
+- **The card is built where the endpoint may be asked, and only there.**
+  The progress timer hands `get()` the models it already holds. So
+  `_model_choices` (view load, refresh) reads the qualifications and asks
+  the Ollama version, and `_view` only multiplies in the evaluation's scope.
+  `test_the_progress_timer_reads_no_qualification_and_asks_no_version`
+  pins it. That's why the card carries **`launch_ms_per_record`**, one field
+  more than the amendment proposed.
+- **No estimate without an evaluation.** The catalogue has no scope, and a
+  corpus-size guess would name records nobody chose. The README says so.
+- **The estimate reads "~1 h 27 m"**, not "~1 h 27 m for 3 000": the row is
+  narrow, and the evaluation above it already says its size.
+  `progress_card`'s duration formatter became public, so the estimate and the
+  ETA read alike.
+- `_reject_infeasible` asks for no card: it needs only the VRAM judgement.
 
 `ModelChoiceView` gains `qualification: QualificationCardView | None`
 (numbers, the enum state and the D6 decision). `ModelChoiceResponse` mirrors

@@ -61,6 +61,12 @@ from ra2.domain.ids import (
     TaskId,
 )
 from ra2.domain.llm import REASONING_EFFORTS, EndpointStatus
+from ra2.domain.qualification import (
+    GateResult,
+    GateVerdict,
+    Qualification,
+    QualitySummary,
+)
 from ra2.infra.config import Settings
 from ra2.persistence.models import Corpus, Evaluation, Feature, Mismatch, Record, Run
 from ra2.services.container import Services
@@ -1940,3 +1946,109 @@ async def test_the_poll_never_stops_on_a_tick_that_read_across_a_commit(
 
     await _poll_stops(user)
     assert _statuses(user) == {RunStatus.DONE.value}, "the poll stopped on a stale row"
+
+
+# --- step 4: the qualification line (SD40) -------------------------------------
+
+
+def _qualification(
+    tag: str,
+    digest: str,
+    *,
+    gate: GateVerdict | None = None,
+) -> Qualification:
+    return Qualification(
+        model_tag=tag,
+        model_digest=digest,
+        ollama_version="0.34.0",
+        gpu_name=None,
+        ra2_version=None,
+        measured_at=FROZEN_NOW,
+        seed_records=200,
+        quality=QualitySummary(
+            records=200,
+            reasoning_effort="none",
+            macro_f1=0.895,
+            macro_f1_low=0.870,
+            macro_f1_high=0.905,
+            f1_by_language={"de": 0.91},
+            median_latency_ms=1710,
+            ms_per_record=1745.0,
+            median_completion_tokens=121,
+            entity_fill=0.25,
+            parse_failures=0,
+        ),
+        gates=()
+        if gate is None
+        else (
+            GateResult(
+                n=4,
+                records=48,
+                noise_band=2,
+                serial_on_n_slot_differ=0,
+                parallel_differ=0,
+                speedup=2.4,
+                verdict=gate,
+            ),
+        ),
+    )
+
+
+def _qualification_line(user: User, tag: str) -> Element:
+    return next(
+        d
+        for d in _model_row(user, tag).descendants()
+        if d._props.get("data-testid") == "model-qualification"
+    )
+
+
+@pytest.mark.parametrize(
+    ("recorded", "state", "warn"),
+    [
+        (None, "unmeasured", False),
+        ("current", "qualified", False),
+        ("other-weights", "stale-digest", True),
+        ("server-sensitive", "server-sensitive", True),
+    ],
+)
+async def test_each_qualification_state_renders_its_line(
+    seeded: Seeded, recorded: str | None, state: str, warn: bool
+) -> None:
+    """README §2 step 4: one line per row, its state carried as `data-state`
+    so this asserts the state and never the wording. The two states that ask
+    for action are in `--warn`."""
+    digest = DEFAULT_MODELS[0].digest
+    if recorded == "current":
+        await seeded.services.qualification.record(_qualification(FITS_A, digest))
+    elif recorded == "other-weights":
+        await seeded.services.qualification.record(_qualification(FITS_A, "00aa11bb"))
+    elif recorded == "server-sensitive":
+        await seeded.services.qualification.record(
+            _qualification(FITS_A, digest, gate=GateVerdict.FAILS_SERVER)
+        )
+
+    await seeded.user.open("/evaluation")
+
+    line = _qualification_line(seeded.user, FITS_A)
+    assert line._props["data-state"] == state
+    assert ("warn" in line._classes) is warn
+    assert ("title" in line._props) is (recorded is not None)
+    if state in {"qualified", "server-sensitive"}:
+        # The service's numbers, formatted here: F1 to three places, the rate
+        # as SD37's latency, the fill as a percentage.
+        text = _own_text(line)
+        assert "0.895" in text and "1.75 s" in text and "25%" in text
+    for other in (FITS_B, OVER_VRAM):
+        assert _qualification_line(seeded.user, other)._props["data-state"] == "unmeasured"
+
+
+async def test_an_unmeasured_model_is_still_selectable(seeded: Seeded) -> None:
+    """ "Not measured" is information, not a refusal: the tick still works."""
+    user = seeded.user
+    await user.open("/evaluation")
+    assert _qualification_line(user, FITS_A)._props["data-state"] == "unmeasured"
+
+    _one(user, _model_tick(user, FITS_A)).click()
+    await asyncio.sleep(0.05)
+
+    assert _all_text(user, "models-count").endswith("1 selected")

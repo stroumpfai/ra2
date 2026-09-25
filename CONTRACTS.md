@@ -654,6 +654,8 @@ author is this branch's implementer. The design is `sw-design.md` `SD40`.
 | `ra2/main.py` | Wires `QualificationService(session_factory, ranking, results, ids)` | 3 | `feat-model-choice` §6 |
 | `justfile` | + `qualify-model tag *args` | 3 | `feat-model-choice` §8 |
 | `ra2/infra/config.py` | Docstring only: "this sentence is the check" becomes "the launch checks it". No field, default or validator changes | 4 | `feat-model-choice` §9 |
+| `ra2/services/readmodels.py` | + `QualificationCardView` (state, measured digest, seed F1, serial and launch rate per record, entity fill, the parallelism the launch would pin, the scoped estimate); + `ModelChoiceView.qualification`, defaulted `None` | 5 | `feat-model-choice` §4 |
+| `ra2/api/schemas.py` | + `QualificationCardResponse`; + `ModelChoiceResponse.qualification`, defaulted `None`. Additive in `tests/api/openapi_snapshot.json` | 5 | `feat-model-choice` §7 |
 
 ### New files
 
@@ -681,6 +683,11 @@ author is this branch's implementer. The design is `sw-design.md` `SD40`.
 | `tests/backend/services/evaluation/test_launch_gate.py` (new) | Every way of having or not having a gate, the log reason, the unmapped model asking no version, and a static check that `ra2/api/` and `ra2/ui/` never pass `measuring=` |
 | `tests/backend/services/evaluation/conftest.py` | `record_gate`, a qualification on record as the qualifier would leave it |
 | `tests/backend/services/evaluation/test_launch.py` | `test_launch_pins_each_models_own_parallel_calls` records a passing gate first; its assertions are unchanged |
+| `ra2/services/evaluation_service.py` (Stage 5) | `_model_choices` attaches each row's card, reading qualifications and asking the Ollama version only there (view load, refresh), never on the progress timer's path; `_view` only scopes the estimate. `_reject_infeasible` asks for no card |
+| `ra2/api/v1/evaluations.py`, `ra2/api/v1/models.py` | Map the card |
+| `ra2/ui/views/evaluation_view.py` (Stage 5) | The row's third line (`model-qualification`, `data-state`, `--warn` for stale and server-sensitive, a tooltip), its wording in one `QUALIFICATION_*` table; `MODELS_WELL_PX` 196 → 260, because the measured row is 64.8px and the rule is four visible rows |
+| `ra2/ui/components/progress_card.py` | `_format_duration_ms` → public `format_duration_ms`, so the estimate and the ETA read alike |
+| `tests/backend/services/evaluation/test_model_card.py` (new), `tests/backend/api/models/test_models_api.py`, `tests/ui/test_evaluation_view.py`, `tests/e2e/test_j10_evaluation.py` | The card per state, the parallelism it shows, the scoped estimate, the timer asking nothing; the wire shape; the four `data-state`s and the tick of an unmeasured model; and, in Chromium, that four measured rows fit the well and five don't |
 | `docs/performance.md`, `docs/choosing-models.md` | §5.4 starts with the gate (Step 0, before Ollama changes) and gains "After a re-pull or an Ollama upgrade"; §6 uses `just qualify-model` |
 
 ---

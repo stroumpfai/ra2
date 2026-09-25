@@ -41,6 +41,7 @@ from ra2.domain.ids import (
 from ra2.domain.llm import DEFAULT_REASONING_EFFORT, EndpointStatus, ProbeCode
 from ra2.domain.mismatch import MismatchTag, ReviewTally, TagFilter, TagState
 from ra2.domain.prompt import PromptValidationError, SlotName
+from ra2.domain.qualification import QualificationState
 from ra2.domain.stats import TieMark
 
 __all__ = [
@@ -89,6 +90,7 @@ __all__ = [
     "PresenceTabView",
     "PromptTemplateView",
     "ProvenanceView",
+    "QualificationCardView",
     "RankingRow",
     "RankingTabView",
     "ResolvedPromptView",
@@ -463,6 +465,30 @@ class ResolvedPromptView:
 
 
 @dataclass(frozen=True, slots=True)
+class QualificationCardView:
+    """The third line of a Models card row (sw-design.md SD40, design README
+    §2 step 4). Numbers and a state; the wording lives in `ui/`'s rendering
+    table.
+
+    `ms_per_record` is the serial rate the qualification measured.
+    `launch_ms_per_record` is the rate at `parallel_calls`, the value the
+    launch would pin today (`domain.qualification.parallel_decision`, not the
+    map's value): the serial rate divided by the gate's measured speedup when
+    that is above 1. `estimated_ms` is `launch_ms_per_record` times the
+    evaluation's scope, and `None` when there is no evaluation to scope.
+    """
+
+    state: QualificationState
+    measured_digest: str
+    seed_macro_f1: float
+    ms_per_record: float
+    entity_fill: float
+    parallel_calls: int
+    launch_ms_per_record: float
+    estimated_ms: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ModelChoiceView:
     """One row of the Models card (the design's step 4).
 
@@ -477,6 +503,8 @@ class ModelChoiceView:
     size_bytes: int
     fits_vram: bool | None
     selected: bool = False
+    #: SD40. `None` means never qualified on this host: the row still ticks.
+    qualification: QualificationCardView | None = None
 
     @property
     def disabled(self) -> bool:

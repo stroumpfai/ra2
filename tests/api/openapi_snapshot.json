@@ -2832,6 +2832,16 @@
             ],
             "title": "Fits Vram"
           },
+          "qualification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualificationCardResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "selected": {
             "default": false,
             "title": "Selected",
@@ -3326,6 +3336,71 @@
         ],
         "title": "ProvenanceResponse",
         "type": "object"
+      },
+      "QualificationCardResponse": {
+        "additionalProperties": false,
+        "description": "What this host measured about one model (SD40): the Models card's\nthird line. **Read-only.** There is no endpoint that records a\nqualification: that's `just qualify-model`'s job, and a `POST` taking\nnumbers would let anything claim a measurement.\n\n`parallel_calls` is what a launch would pin today, not the map's value.\n`estimated_ms` is `null` without an evaluation to scope it.",
+        "properties": {
+          "entity_fill": {
+            "title": "Entity Fill",
+            "type": "number"
+          },
+          "estimated_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Ms"
+          },
+          "launch_ms_per_record": {
+            "title": "Launch Ms Per Record",
+            "type": "number"
+          },
+          "measured_digest": {
+            "title": "Measured Digest",
+            "type": "string"
+          },
+          "ms_per_record": {
+            "title": "Ms Per Record",
+            "type": "number"
+          },
+          "parallel_calls": {
+            "title": "Parallel Calls",
+            "type": "integer"
+          },
+          "seed_macro_f1": {
+            "title": "Seed Macro F1",
+            "type": "number"
+          },
+          "state": {
+            "$ref": "#/components/schemas/QualificationState"
+          }
+        },
+        "required": [
+          "state",
+          "measured_digest",
+          "seed_macro_f1",
+          "ms_per_record",
+          "entity_fill",
+          "parallel_calls",
+          "launch_ms_per_record"
+        ],
+        "title": "QualificationCardResponse",
+        "type": "object"
+      },
+      "QualificationState": {
+        "description": "The Models card's third line (SD40, design README \u00a72 step 4).\n\n\"Not measured\" isn't a value here. It's the absence of a qualification,\nso it can't be constructed with numbers attached.",
+        "enum": [
+          "qualified",
+          "stale-digest",
+          "server-sensitive"
+        ],
+        "title": "QualificationState",
+        "type": "string"
       },
       "RankingRowResponse": {
         "additionalProperties": false,

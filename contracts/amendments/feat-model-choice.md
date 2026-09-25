@@ -11,7 +11,9 @@
 > | 3 | `ra2/persistence/models.py` | Stage 2, plus `QualificationId: String(36)` in the type map, which SQLAlchemy requires for a `NewType` |
 > | 2, 5, 6, 8 | `domain/llm.py`, `container.py`, `main.py`, `justfile` | Stage 3 |
 > | 9 | `ra2/infra/config.py` | Stage 4 |
-> | 4, 7 | `readmodels.py`, `schemas.py` | Stage 5 |
+> | 4, 7 | `readmodels.py`, `schemas.py` | Stage 5, with one field more than proposed: `launch_ms_per_record` (below) |
+>
+> **Fully applied as of Stage 5.**
 
 The design is `sw-design.md` **SD40** (§15.2, §15.4, §15.5, §15.7). In short:
 a model's fitness on this host becomes a stored, append-only
@@ -124,6 +126,9 @@ and `QualificationId` added to the `ra2.domain.ids` import.
 +    ms_per_record: float
 +    entity_fill: float
 +    parallel_calls: int
++    #: The rate at `parallel_calls`: `_view` scopes the estimate with it on
++    #: the progress timer's path, which must not ask the endpoint again.
++    launch_ms_per_record: float
 +    estimated_ms: int | None = None
 +
 +
@@ -183,6 +188,7 @@ already holds the `ModelCatalog` that `version()` is asked of (SD40).
 +    ms_per_record: float
 +    entity_fill: float
 +    parallel_calls: int
++    launch_ms_per_record: float
 +    estimated_ms: int | None = None
 +
 +
@@ -232,6 +238,6 @@ Documentation only. No field, default or validator changes.
 | `ra2/services/qualification_service.py` | New |
 | `ra2/services/evaluation_service.py` | `_new_run` pins `parallel_decision(...).n`; `_model_choices` attaches the card |
 | `ra2/infra/ollama_client.py` | `OllamaModelCatalog.version()`, `.loaded()` |
-| `ra2/ui/views/evaluation_view.py` | The third line; `MODELS_WELL_PX` 196 → 252 |
+| `ra2/ui/views/evaluation_view.py` | The third line; `MODELS_WELL_PX` 196 → 260 |
 | `scripts/qualify_model.py` | New. Wiring |
 | `tests/fixtures/fake_llm.py` | `StaticModelCatalog.version()`, `.loaded()` |

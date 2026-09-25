@@ -20,6 +20,7 @@ from ra2.api.schemas import (
     ConnectionResponse,
     ModelCatalogResponse,
     ModelChoiceResponse,
+    QualificationCardResponse,
     TestConnectionRequest,
 )
 from ra2.services.readmodels import ConnectionView, ModelChoiceView
@@ -42,12 +43,25 @@ def _connection_response(view: ConnectionView) -> ConnectionResponse:
 
 
 def _model_choice_response(view: ModelChoiceView) -> ModelChoiceResponse:
+    card = view.qualification
     return ModelChoiceResponse(
         tag=view.tag,
         digest=view.digest,
         size_bytes=view.size_bytes,
         fits_vram=view.fits_vram,
         selected=view.selected,
+        qualification=None
+        if card is None
+        else QualificationCardResponse(
+            state=card.state,
+            measured_digest=card.measured_digest,
+            seed_macro_f1=card.seed_macro_f1,
+            ms_per_record=card.ms_per_record,
+            entity_fill=card.entity_fill,
+            parallel_calls=card.parallel_calls,
+            launch_ms_per_record=card.launch_ms_per_record,
+            estimated_ms=card.estimated_ms,
+        ),
     )
 
 
