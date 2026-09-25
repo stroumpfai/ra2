@@ -87,6 +87,9 @@ DEFAULT_GATE_RECORDS: Final = 48
 #: Three one-slot serial passes: the 2nd and 3rd against the 1st give the
 #: noise band (plan-model-choice.md D5).
 BASELINE_PASSES: Final = 3
+#: How long an unload may take to show in `/api/ps`, and how often to look.
+RELEASE_WAIT_S: Final = 30.0
+RELEASE_POLL_S: Final = 0.2
 
 #: Builds the adapter for one endpoint. Injected so the tests can drive fakes
 #: through the same wiring. Production passes nothing (Do-NOT #12).
@@ -221,18 +224,42 @@ class _Qualifier:
 
     async def _nothing_else_loaded(self, url: str) -> None:
         """A model left resident squeezes the one being measured out of VRAM,
-        and the speedup vanishes (`plan-parallel-calls.md` §1.1 point 3)."""
-        others = sorted(
-            tag
-            for tag in await self._catalog_for(url, self._target).loaded()
-            if tag != self._plan.tag
+        and the speedup vanishes (`plan-parallel-calls.md` §1.1 point 3).
+
+        **Both servers share one GPU**, so both are checked. The model being
+        measured is released from the server this pass *doesn't* use: its
+        copy there would otherwise sit out Ollama's keep-alive beside the
+        copy being loaded here. Any *other* model, on either server, is the
+        operator's, so it's refused rather than unloaded.
+        """
+        endpoints = [self._plan.one_slot] + ([self._plan.n_slot] if self._plan.n_slot else [])
+        for endpoint in dict.fromkeys(endpoints):
+            catalog = self._catalog_for(endpoint, self._target)
+            if endpoint != url:
+                await self._release(catalog)
+            others = sorted(tag for tag in await catalog.loaded() if tag != self._plan.tag)
+            if others:
+                raise QualifyRefused(
+                    f"{endpoint} has other models loaded ({', '.join(others)}). Unload them "
+                    "(`ollama stop <tag>`) and run this again: a resident model distorts "
+                    "every timing this measures."
+                )
+
+    async def _release(self, catalog: ModelCatalog) -> None:
+        """Unload the measured model from `catalog` and wait until it's gone.
+        Ollama answers the unload before the memory is free, so `loaded()` is
+        polled; after `RELEASE_WAIT_S` it's refused rather than measured."""
+        if self._plan.tag not in await catalog.loaded():
+            return
+        await catalog.release(self._plan.tag)
+        for _ in range(int(RELEASE_WAIT_S / RELEASE_POLL_S)):
+            if self._plan.tag not in await catalog.loaded():
+                return
+            await asyncio.sleep(RELEASE_POLL_S)
+        raise QualifyRefused(
+            f"{self._plan.tag} stayed loaded after an unload request; the other server "
+            "would be measured short of VRAM"
         )
-        if others:
-            raise QualifyRefused(
-                f"{url} has other models loaded ({', '.join(others)}). Unload them "
-                "(`ollama stop <tag>`) and run this again: a resident model distorts "
-                "every timing this measures."
-            )
 
     async def seed(self) -> _Seeded:
         seed_dev = _sibling("seed_dev")

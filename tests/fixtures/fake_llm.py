@@ -328,6 +328,8 @@ class StaticModelCatalog:
         self.models_calls = 0
         self.reachable_calls = 0
         self.version_calls = 0
+        #: Every tag `release()` was asked to unload, in order.
+        self.released: list[str] = []
 
     def set_status(
         self,
@@ -361,6 +363,10 @@ class StaticModelCatalog:
         if self._status is not EndpointStatus.REACHABLE:
             return ()
         return self.loaded_tags
+
+    async def release(self, tag: str) -> None:
+        self.released.append(tag)
+        self.loaded_tags = tuple(t for t in self.loaded_tags if t != tag)
 
 
 class StaticEndpointProber:

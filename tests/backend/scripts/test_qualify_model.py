@@ -402,6 +402,45 @@ def test_another_loaded_model_refuses_the_pass(qualify_model: ModuleType, target
     assert _recorded(target) == []
 
 
+def test_the_measured_model_is_released_from_the_other_server(
+    qualify_model: ModuleType, target: Settings
+) -> None:
+    """Both servers share one GPU. The model's copy on the server a pass
+    doesn't use is unloaded first, not left to sit out its keep-alive beside
+    the copy being measured (the contention `plan-parallel-calls.md` §1.1
+    point 3 measured)."""
+    endpoints = Endpoints()
+    endpoints.catalogs[N_SLOT].loaded_tags = (TAG,)
+
+    code = _run(qualify_model, target, endpoints, [TAG, *SMALL, "--gate", "4", "--n-slot", N_SLOT])
+
+    assert code == 0
+    assert TAG in endpoints.catalogs[N_SLOT].released
+    assert endpoints.catalogs[ONE_SLOT].released == []
+
+
+def test_another_model_on_the_other_server_refuses_the_pass(
+    qualify_model: ModuleType, target: Settings
+) -> None:
+    """Someone else's model is refused, never unloaded, on either server."""
+    endpoints = Endpoints()
+    endpoints.catalogs[N_SLOT].loaded_tags = ("gemma4:12b",)
+    lines: list[str] = []
+
+    code = _run(
+        qualify_model,
+        target,
+        endpoints,
+        [TAG, *SMALL, "--gate", "4", "--n-slot", N_SLOT],
+        lines,
+    )
+
+    assert code == 2
+    assert endpoints.calls == 0
+    assert "gemma4:12b" in lines[-1] and N_SLOT in lines[-1]
+    assert endpoints.catalogs[N_SLOT].released == []
+
+
 @pytest.mark.parametrize("gate", ["1", "x", "4,0"])
 def test_a_gate_value_below_two_is_refused(
     qualify_model: ModuleType, target: Settings, gate: str

@@ -2049,6 +2049,11 @@ async def test_an_unmeasured_model_is_still_selectable(seeded: Seeded) -> None:
     assert _qualification_line(user, FITS_A)._props["data-state"] == "unmeasured"
 
     _one(user, _model_tick(user, FITS_A)).click()
-    await asyncio.sleep(0.05)
+    # Waited on the Launch label, as the other selection tests do: it changes
+    # only once the save and the redraw are done, so no save is still holding
+    # a connection when the test ends (a fixed sleep left one, now and then).
+    await _until(lambda: _all_text(user, "launch") == "Launch 1 run")
 
     assert _all_text(user, "models-count").endswith("1 selected")
+    drafts = await seeded.services.evaluation.list_evaluations()
+    assert any(draft.selected_models == (FITS_A,) for draft in drafts)

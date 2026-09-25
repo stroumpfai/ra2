@@ -649,7 +649,7 @@ author is this branch's implementer. The design is `sw-design.md` `SD40`.
 |---|---|---|---|
 | `ra2/domain/ids.py` | + `QualificationId` | 2 | `feat-model-choice` §1 |
 | `ra2/persistence/models.py` | + `ModelQualification` (`model_qualification`): append-only, numbers only, referenced by nothing; `QualificationId` in the type map as `String(36)` like every id | 2 | `feat-model-choice` §3 |
-| `ra2/domain/llm.py` | + `ModelCatalog.version() -> str \| None` (`/api/version`) and `loaded() -> tuple[str, ...]` (`/api/ps`). Both answer `None`/empty when the endpoint doesn't, never raise | 3 | `feat-model-choice` §2 |
+| `ra2/domain/llm.py` | + `ModelCatalog.version() -> str \| None` (`/api/version`) and `loaded() -> tuple[str, ...]` (`/api/ps`). Both answer `None`/empty when the endpoint doesn't, never raise. Stage 6 added `release(tag)` (`keep_alive: 0`), never raising, which the qualifier uses only on the model it's measuring | 3, 6 | `feat-model-choice` §2 |
 | `ra2/services/container.py` | + `Services.qualification: QualificationService` | 3 | `feat-model-choice` §5 |
 | `ra2/main.py` | Wires `QualificationService(session_factory, ranking, results, ids)` | 3 | `feat-model-choice` §6 |
 | `justfile` | + `qualify-model tag *args` | 3 | `feat-model-choice` §8 |

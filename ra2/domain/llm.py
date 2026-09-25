@@ -196,6 +196,14 @@ class ModelCatalog(Protocol):
         model is resident, because that hides the speedup (SD40)."""
         ...
 
+    async def release(self, tag: str) -> None:
+        """Ask the endpoint to unload `tag` now, not at its keep-alive.
+        **Never raises.** The qualifier moves one model between two servers
+        on one GPU, and the copy left resident on the first squeezes the
+        second out of VRAM (SD40). It releases only the model it is
+        measuring, never another."""
+        ...
+
 
 class LlmEndpointError(Exception):
     """The configured endpoint cannot be used.

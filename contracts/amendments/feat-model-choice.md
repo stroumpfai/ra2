@@ -61,6 +61,14 @@ and `"QualificationId"` in `__all__`.
 +        never an exception. The qualifier refuses to measure while another
 +        model is resident, because that hides the speedup (SD40)."""
 +        ...
++
++    async def release(self, tag: str) -> None:
++        """Ask the endpoint to unload `tag` now, not at its keep-alive.
++        **Never raises.** Added in Stage 6: the qualifier moves one model
++        between two servers on one GPU, and the copy left resident on the
++        first squeezes the second out of VRAM. It releases only the model it
++        is measuring, never another."""
++        ...
 ```
 
 ## 3. `ra2/persistence/models.py` — `ModelQualification`

@@ -151,6 +151,8 @@ _NATIVE_TAGS_PATH = "/api/tags"
 #: models resident right now. Both native, like the tags.
 _NATIVE_VERSION_PATH = "/api/version"
 _NATIVE_PS_PATH = "/api/ps"
+#: `keep_alive: 0` on a generate with no prompt is Ollama's documented unload.
+_NATIVE_GENERATE_PATH = "/api/generate"
 
 #: The SDK refuses to construct without a key. Ollama ignores it entirely, and
 #: no credential of the user's is ever put on the wire (N1/N2).
@@ -189,6 +191,12 @@ class _OllamaTag(openai.BaseModel):
 
 class _OllamaTags(openai.BaseModel):
     models: list[_OllamaTag] | None = None
+
+
+class _OllamaDone(openai.BaseModel):
+    """The unload's answer. Read for its status only."""
+
+    done: bool | None = None
 
 
 class _OllamaVersion(openai.BaseModel):
@@ -517,6 +525,7 @@ class OllamaModelCatalog:
         self._tags_url = native_api_url(base_url, _NATIVE_TAGS_PATH)
         self._version_url = native_api_url(base_url, _NATIVE_VERSION_PATH)
         self._ps_url = native_api_url(base_url, _NATIVE_PS_PATH)
+        self._generate_url = native_api_url(base_url, _NATIVE_GENERATE_PATH)
         self._client = _build_client(
             base_url=base_url, timeout_s=timeout_s, http_client=http_client
         )
@@ -566,6 +575,17 @@ class OllamaModelCatalog:
         if not isinstance(payload.models, list):
             return ()
         return tuple(tag for tag in (entry.name or entry.model for entry in payload.models) if tag)
+
+    async def release(self, tag: str) -> None:
+        """Unload `tag` now (`keep_alive: 0`, no prompt). Swallows every
+        failure: the caller checks `loaded()` afterwards, which is the only
+        answer that matters, and an unreachable endpoint holds nothing."""
+        try:
+            await self._client.post(
+                self._generate_url, body={"model": tag, "keep_alive": 0}, cast_to=_OllamaDone
+            )
+        except openai.APIConnectionError, openai.APIStatusError, ValueError, TypeError:
+            return
 
     async def _fetch_tags(self) -> _OllamaTags | None:
         """`None` for every failure — connection refused, a timeout, a 500, a
