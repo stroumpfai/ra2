@@ -150,3 +150,29 @@ def test_migration_backfills_parallel_calls_as_one(
             "SELECT llm_parallel_calls FROM run WHERE id = 'run-before-the-column'"
         ).fetchone()
     assert backfilled == (1,)
+
+
+def test_migration_creates_model_qualification(
+    alembic_config: Config, backend_settings: Settings
+) -> None:
+    """`7d084d5a7dc6` (SD40) adds one table and touches nothing that exists,
+    and it comes off again cleanly: upgrade, downgrade, re-upgrade."""
+    backend_settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def tables() -> set[str]:
+        with closing(sqlite3.connect(backend_settings.database_path)) as conn:
+            rows = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+            return {name for (name,) in rows}
+
+    command.upgrade(alembic_config, "68c8b2a80ca9")
+    before = tables()
+    assert "model_qualification" not in before
+
+    command.upgrade(alembic_config, "7d084d5a7dc6")
+    assert tables() == before | {"model_qualification"}
+
+    command.downgrade(alembic_config, "68c8b2a80ca9")
+    assert tables() == before
+
+    command.upgrade(alembic_config, "head")
+    assert "model_qualification" in tables()

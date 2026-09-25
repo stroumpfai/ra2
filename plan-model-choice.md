@@ -2,8 +2,18 @@
 
 **Status.** Written 2026-09-24 against `ecc4db4`. **Stage 0 done on
 2026-09-25**: `docs/choosing-models.md` now holds model choice, and
-`docs/performance.md` keeps time and cost. §9 Q1, Q3, Q5 and Q6 were answered
-on 2026-09-25. Q2 and Q4 are still open, and Stage 1 waits on them. Authority as always:
+`docs/performance.md` keeps time and cost. **Stage 1 done on 2026-09-25**:
+SD40 in `sw-design.md`, the Models card in the design README, and
+`contracts/amendments/feat-model-choice.md` (proposed, not yet applied). Every
+§9 question is answered. **Stage 2 done on 2026-09-25** on
+`feat/model-choice`: the pure gate, the table, its revision `7d084d5a7dc6`
+and its repository. **Stage 3 done on 2026-09-25**: `just qualify-model`,
+`QualificationService` and the two new catalogue calls. **Stage 4 done on
+2026-09-25**: the launch enforces the gate. **Stage 5 done on 2026-09-25**: the
+Models card shows each model's qualification. **Stage 6 done on 2026-09-25**:
+three models qualified against real Ollama reproduce every figure and verdict
+on record (§1.4). All stages are done on `feat/model-choice`; it isn't merged
+yet. Authority as always:
 `mvp-spec.md` on *what*, `sw-design.md` on *how* (CLAUDE.md). Every frozen
 file the code touches is named as an amendment (§6).
 
@@ -52,6 +62,47 @@ is usable. It can't say which leader is best.** Everything this plan puts on
 screen has to be worded that way, or the Models card turns into a ranking the
 data doesn't support.
 
+### 1.4 Stage 6 results (2026-09-25)
+
+`just qualify-model <tag> --gate 4 --n-slot http://127.0.0.1:11435/v1` on
+this host (RTX 5060 Ti 16 GB, Ollama 0.34.0). The system service was
+one-slot, a private four-slot `ollama serve` ran on 11435 over the same model
+store, and the target was a throwaway data dir. It took 1 h 45 min for all
+three.
+
+| Model | Figure | On record (`docs/choosing-models.md`, `plan-parallel-calls.md` §1.2) | Stage 6 |
+|---|---|---|---|
+| `qwen3:8b` | macro-F1 | 0.895 (0.870–0.905) | **0.895 (0.870–0.905)** |
+| | per record | 1.71 s | 1.77 s |
+| | entities | 0 / 20 | 0 % |
+| | gate ×4 | passes: parallel 0–1, serial on 4 slots 0, 2.3–2.5× | **passes**: 1, 0, 2.53× |
+| `granite4.1:8b` | macro-F1 | 0.886 (0.861–0.897) | **0.886 (0.861–0.897)** |
+| | per record | 3.07 s | 3.11 s |
+| | entities | 0 / 20 | 0 % |
+| | gate ×4 | fails parallel: 14–15, 0–2, 2.7× | **fails parallel**: 10, 1, 2.62× |
+| `gemma4:12b` | macro-F1 | 0.899 (0.874–0.909) | **0.899 (0.874–0.909)** |
+| | per record | 11.28 s | 10.24 s |
+| | entities | 20 / 20 | 99.5 % |
+| | gate ×4 | fails parallel, narrowly: 4 (one pass), serial 0–3 | **fails parallel**: 9, 1, 2.39× |
+
+What this says:
+
+1. **Every macro-F1 and interval is identical**, and **every verdict
+   matches** D5's historical table. The command reproduces the hand
+   measurements it replaces.
+2. **Differ counts move between sessions, verdicts don't.** `granite4.1:8b`
+   went 14–15 → 10 and `gemma4:12b` 4 → 9. Both stay far above the band.
+   This is expected of a count taken from one pass per N, and it's why the
+   band is a floor rather than a tolerance.
+3. **`gemma4:12b` ran 9 % faster** than on record (10.24 vs 11.28 s). Not
+   investigated. The dev host had a second GPU-enabled Ollama in Docker when
+   the record was made (see the parallel-calls memory), which may explain it.
+4. **The card agrees with the launch.** Read headless through the real
+   services with `RA2_LLM_PARALLEL_CALLS={"qwen3:8b": 4, "granite4.1:8b": 4}`,
+   `qwen3:8b` showed `qualified · parallel ×4` at 0.70 s per record, and
+   `granite4.1:8b` showed `qualified` with **parallel 1**, despite its map
+   entry. An unmeasured model showed no card.
+
 ---
 
 ## 2. What exists and what it means
@@ -74,7 +125,7 @@ data doesn't support.
 
 **D1. A qualification is a measurement of a (tag, digest) on this host.**
 It records the tag, digest, Ollama version, GPU name (or `null`), date, seed
-size and RA2 commit, plus two optional parts:
+size and RA2's installed version, plus two optional parts:
 
 - **Quality and cost** (always): macro-F1 with its interval, per-language
   mean F1, median and mean latency, median completion tokens, time per record
@@ -237,7 +288,7 @@ model_qualification
   model_digest       TEXT NOT NULL
   ollama_version     TEXT NULL
   gpu_name           TEXT NULL
-  ra2_commit         TEXT NULL
+  ra2_version        TEXT NULL
   measured_at        TIMESTAMP NOT NULL
   seed_records       INTEGER NOT NULL
   quality_json       TEXT NOT NULL     -- QualitySummary
@@ -257,10 +308,13 @@ or delete** (D2).
   `RankingService`, then hands the raw outputs to the domain functions. Raw
   text never leaves the service.
 - `record(q: Qualification) -> None`: used on the target app.
-- `latest(tags) -> dict[str, Qualification]`: used by `EvaluationService`
-  for the Models card and by `_new_run` for D6.
-
 It joins the `Services` bundle (`container.py`, frozen → amendment).
+
+`EvaluationService` doesn't call it. For the Models card and for `_new_run`
+(D6), it reads `QualificationRepository.latest_for` with its own session
+factory, the same way it reads every other table it needs. That avoids
+adding a cross-service protocol to the frozen `protocols.py` (Stage 1
+decision).
 
 ### 4.4 The launch (D6)
 
@@ -303,22 +357,67 @@ nowhere**, not on any screen and not in the API. An analyst trying a new
 model can't check entity fill from the app. D1's qualification reports it,
 which is one more reason for Stage 3.
 
-### Stage 1 — the contract, first
+### Stage 1 — the contract, first ✅ (2026-09-25)
 
-- `sw-design.md`: **SD40** (D1–D8). SD38's "enforcing it is left out"
-  sentence becomes a pointer to SD40. §10 adds no setting. §15.4 describes
-  the launch's decision. §15.7 lists the new module, service and table.
-- `design/prompt-evaluation/README.md` step 4: the third line and its four
-  states (D7). The state model on l.320 gains `qualification`.
-- `docs/choosing-models.md` §6: the manual procedure becomes
-  `just qualify-model`, and §6.4 ("Planned") goes.
-- `docs/performance.md` §5.4: the reordered steps (§4.5), with the old
-  "record the result in §5.3" replaced by "run `just qualify-model`".
-- `contracts/amendments/feat-model-choice.md` for §6's files.
+**Done.**
 
-**Done when** the design says what Stages 2–5 build, before they build it.
+- `sw-design.md`: **SD40** (D1–D8, with Q2–Q5's answers). SD38's
+  "enforcing it is left out" now points to SD40. The §10 row for
+  `RA2_LLM_PARALLEL_CALLS` says an entry needs a gate on record. §15.2 lists
+  `model_qualification`, §15.4 describes the launch's decision, §15.5 the
+  two new `ModelCatalog` calls, and §15.7 the new module, repository,
+  service and script.
+- `design/prompt-evaluation/README.md` step 4: the third line, its four
+  states as `data-state`, the no-badge rule, and the state model.
+- `contracts/amendments/feat-model-choice.md`: proposed diffs for §6's
+  files. It's applied in Stage 2.
 
-### Stage 2 — domain and persistence
+Four decisions Stage 1 made that the plan hadn't:
+
+- **The models well grows from 196px to 252px** (260px in Stage 5, measured). The design's rule is "4
+  visible rows", and the third line makes a row 63px instead of 49px.
+  Keeping 196px would quietly show three rows. `test_scroll_well_caps_height…`
+  in `tests/ui/test_components.py` passes its own 196 to the component and
+  doesn't change. Stage 5's E2E measures the rendered row height.
+- **`EvaluationService` reads the repository, not `QualificationService`**
+  (§4.3), so the frozen `protocols.py` isn't touched.
+- **`ra2_version` instead of `ra2_commit`.** It comes from
+  `importlib.metadata`. A commit would need a `git` shell-out from `ra2/`
+  (N3), and an installed copy has no `.git`.
+- The amendment names **`ra2/domain/ids.py`** too (`QualificationId`), so
+  §6 lists nine frozen files, not seven.
+
+**Moved out of Stage 1:** the analyst-facing docs
+(`docs/choosing-models.md` §6 and `docs/performance.md` §5.4). They would
+describe a command that doesn't exist yet, so they change in Stage 4, when
+the command and the enforcement both do.
+
+### Stage 2 — domain and persistence ✅ (2026-09-25)
+
+**Done.** `ra2/domain/qualification.py`, `model_qualification` with revision
+`7d084d5a7dc6` (autogenerated against a scratch database, then hand-adjusted
+as `e5145f27bf8c` explains), and `QualificationRepository`. Amendment §1
+(`ids.py`) and §3 (`models.py`) are applied and recorded in `CONTRACTS.md`
+under "Model choice". The revision is registered in
+`tests/test_p5_contract.py`'s `POST_PHASE_5_REVISIONS`. `just lint` is clean.
+`just test`: 2595 passed, 1 skipped (the existing empty nav parameter set).
+Where it differed from the table below:
+
+- **`QualificationId` needed a type-map entry**, `String(36)` like every
+  other id. SQLAlchemy warns on an unmapped `NewType`, and the suite turns
+  warnings into errors. The amendment's status table records it.
+- **`latest_for` gained `gated=True`.** Without it, re-measuring a model's
+  quality alone would hide its gate and take it back to serial. The launch
+  asks for the newest *gated* qualification, and
+  `test_a_later_quality_only_run_does_not_hide_the_gate` pins that.
+- **The repository speaks domain, not ORM.** It takes and returns
+  `Qualification`, so the JSON columns are encoded in one place.
+- **Ties on `measured_at` resolve by id** (uuid7, so time-ordered), not by
+  whatever SQLite returns.
+- The historical-verdict test also covers `qwen3.5:2b` (1.0×, fails
+  condition 3) and `FAILS_SERVER` on its own.
+- Test names follow the table, except `test_noise_band_is_floored_at_two_of_48`,
+  which became `…_scaled_to_seed_size` and gained the 200-record case.
 
 §4.1 and §4.2. **One Alembic revision**, written by this plan's implementer
 and nobody else, with no parallel heads. Phase 5 expected no revision, and
@@ -337,7 +436,53 @@ single author. `metadata.create_all()` is never used (Do-NOT #10).
 | `test_qualifications_are_appended_never_updated` | backend | Two `add`s for one (tag, digest), `latest_for` returns the newer, the older is still there |
 | `test_migration_creates_model_qualification` | backend | Upgrade, downgrade, re-upgrade on a temp DB |
 
-### Stage 3 — the command
+### Stage 3 — the command ✅ (2026-09-25)
+
+**Done**, against fake endpoints only. Stage 6 is the first run against real
+Ollama. Amendment §2 (`llm.py`), §5 (`container.py`), §6 (`main.py`) and §8
+(`justfile`) are applied and recorded in `CONTRACTS.md`. `just lint` is clean.
+`just test`: 2622 passed, 1 skipped. The 15 script tests take ~29 s serially.
+Where it differed from the plan:
+
+- **`summarise` became three readers:** `quality(evaluation_id)`,
+  `answer_fingerprints(run_id)` and `pass_wall_ms(run_id)`. The gate's
+  arithmetic went to the domain as **`gate_result(...)`**, so the script
+  passes fingerprints to a pure function and holds no logic of its own.
+- **Fingerprints, not answers.** The service returns the SHA-256 of each
+  canonical answer, which keeps equality and drops the text. The seed is
+  synthetic, but the rule then holds wherever the service is pointed.
+- **The gate reuses the one seed.** The throwaway `Settings` set
+  `dev_record_max` to `--gate-records` (48), and gate passes use the Dev
+  scope, so a single 200-record seed serves both measurements.
+- **`QualitySummary` gained `reasoning_effort`.** The effort moves time per
+  record by 30× on a thinking model, so a figure without it can't be
+  compared. It's a JSON field, so no migration.
+- **The throwaway migration runs before the event loop.** Alembic's
+  `env.py` calls `asyncio.run` itself. Every app's engine is disposed
+  before its loop ends, or aiosqlite warns and the suite fails.
+- **Refusals the plan didn't list:** a tag the endpoint doesn't offer, and
+  two servers that disagree on digest or Ollama version.
+- **Tests:** named as in the table. `test_catalog_version_is_none_when_unreachable`
+  became `…_when_it_cannot_be_read`, parametrised over refused, 500, an empty
+  version and a missing one. Added: pass order, the resident-model refusal,
+  the server-disagreement refusal, `--gate` values below 2, and `/api/ps`.
+  "Hand-computed" F1 became "the ranking's own figures, copied". The quality
+  test pins records, parse failures, entity fill, effort and latency exactly.
+
+**Found, not fixed (outside this plan):** `stats.macro_interval` (P4-D1)
+centres the macro interval on the mean of the Wilson *centres*, not on the
+macro point. Near 0 a Wilson centre sits above its point, so the interval can
+lie entirely above the reported macro-F1: on a fake scoring 0.083 it read
+0.091–…. At the leaders' ~0.9 it errs the other way, and for "tied or not"
+it's harmless. But a printed interval that excludes its own point will look
+like a bug to a reader.
+
+**Stage 4 must solve one thing first.** Once the launch enforces D6, the
+qualifier's own parallel passes would be pinned to 1, because the throwaway
+database has no gate on record. The gate can't be measured if measuring it
+needs a gate. Stage 4 adds an explicit launch option for measurement passes,
+reachable in-process only and passed by no adapter, and SD40 gets a sentence
+naming it as the one launch that pins the map without a gate.
 
 `QualificationService`, `scripts/qualify_model.py` and the `qualify-model`
 recipe in `justfile` (frozen → amendment). `ModelCatalog.version()` in the
@@ -358,7 +503,46 @@ The script is wiring. What it does is tested through the service and a
 `main(argv)` entry point with injected settings, the way `ra2/cli.py` is
 tested. There's no test-only branch (Do-NOT #12).
 
-### Stage 4 — enforcement at launch (D6)
+### Stage 4 — enforcement at launch (D6) ✅ (2026-09-25)
+
+**Done.** Amendment §9 (`config.py`, docstring only) is applied. That leaves
+only §4 and §7 (`readmodels.py`, `schemas.py`) for Stage 5. `just lint` is
+clean. `just test`: 2636 passed, 1 skipped. Where it differed:
+
+- **The measurement exception.** The qualifier's passes would otherwise be
+  pinned to 1 in a database that can't hold a gate yet. It's
+  `ParallelReason.MEASURING`, inside `parallel_decision(…, measuring=True)`,
+  so the rule keeps one home. `EvaluationService.launch(…, measuring=True)`
+  is the only way in, and the qualifier the only caller.
+  `test_no_adapter_launches_as_a_measurement` fails if `ra2/api/` or
+  `ra2/ui/` ever passes it. SD40 names it.
+- **The reason is logged at launch, not at run start.** The run worker
+  knows the pin but not why, and the launch is where the decision is made.
+  SD40 and §15.4 say so. The run-start line still prints `parallel=N`.
+- **The version is asked only when the map has an entry above 1**, so an
+  empty map (every host today) costs no extra round trip.
+  `test_an_unmapped_model_is_unaffected` pins `version_calls == 0`.
+- **The docs' order is the gate first.** `performance.md` §5.4 now opens with
+  Step 0: run the gate *before* changing the system Ollama. At that point it's
+  still the one-slot server the gate needs, beside a private four-slot one
+  started from the same model store. A new "After a re-pull or an Ollama
+  upgrade" section gives the swapped-roles command for later, when the system
+  server is already four-slot.
+- **Tests beyond the table:** a gate for other weights that's newer doesn't
+  shadow the current digest's; a failed gate; a map above the gated N; a
+  later quality-only qualification keeping the gate; and a measuring launch.
+  `test_resume_keeps_the_pin_even_after_a_new_qualification` wasn't written.
+  Resume reads only the run's pin and never a qualification (`run_service`
+  doesn't import one), so `test_resume_runs_at_the_pinned_parallelism`
+  already covers it.
+
+The analyst-facing docs change here, in the same commit as the enforcement,
+because this is when a host's existing map starts depending on a gate:
+
+- `docs/choosing-models.md` §6: the manual procedure becomes
+  `just qualify-model`, and §6.4 ("Planned") goes.
+- `docs/performance.md` §5.4: the reordered steps (§4.5), with the old
+  "record the result in §5.3" replaced by "run `just qualify-model`".
 
 | Test | Layer | Asserts |
 |---|---|---|
@@ -370,7 +554,30 @@ tested. There's no test-only branch (Do-NOT #12).
 | `test_resume_keeps_the_pin_even_after_a_new_qualification` | backend | SD38 unchanged |
 | `test_launch_pins_parallel_calls` (existing) | backend | Updated to give its fake a passing qualification. **No other existing test is weakened** |
 
-### Stage 5 — the Models card and the API (D7, D8)
+### Stage 5 — the Models card and the API (D7, D8) ✅ (2026-09-25)
+
+**Done.** Amendment §4 and §7 are applied, so the amendment is fully applied.
+`just lint` is clean. `just test`: 2650 passed, 1 skipped. `just e2e`: 93
+passed, 1 skipped. Where it differed:
+
+- **260px, not 252px.** The measured row is 64.8px in Chromium, not the
+  63px the arithmetic gave, so 252px showed 3.9 rows. The E2E assertion
+  measures the row and requires `4 × row ≤ well < 5 × row`, which is how it
+  caught this. The README, the view constant and the amendment say 260.
+- **The card is built where the endpoint may be asked, and only there.**
+  The progress timer hands `get()` the models it already holds. So
+  `_model_choices` (view load, refresh) reads the qualifications and asks
+  the Ollama version, and `_view` only multiplies in the evaluation's scope.
+  `test_the_progress_timer_reads_no_qualification_and_asks_no_version`
+  pins it. That's why the card carries **`launch_ms_per_record`**, one field
+  more than the amendment proposed.
+- **No estimate without an evaluation.** The catalogue has no scope, and a
+  corpus-size guess would name records nobody chose. The README says so.
+- **The estimate reads "~1 h 27 m"**, not "~1 h 27 m for 3 000": the row is
+  narrow, and the evaluation above it already says its size.
+  `progress_card`'s duration formatter became public, so the estimate and the
+  ETA read alike.
+- `_reject_infeasible` asks for no card: it needs only the VRAM judgement.
 
 `ModelChoiceView` gains `qualification: QualificationCardView | None`
 (numbers, the enum state and the D6 decision). `ModelChoiceResponse` mirrors
@@ -386,7 +593,26 @@ table.
 | `test_an_unmeasured_model_is_still_selectable` | ui | "Not measured" never disables a tick |
 | E2E: the row's third line exists, 10.5px mono, and the row still fits `MODELS_WELL_PX` | e2e | Design fidelity §8.2 |
 
-### Stage 6 — verify on this host
+### Stage 6 — verify on this host ✅ (2026-09-25)
+
+**Done.** Results are in §1.4. Two things came up first:
+
+- **A bug the fakes couldn't show.** Moving from the one-slot server to the
+  four-slot one left the measured model resident on the first for its
+  keep-alive while the second loaded a copy: 8.1 + 10.4 GB for `gemma4:12b`
+  on 16 GB. `ModelCatalog.release(tag)` (Ollama's `keep_alive: 0`) now
+  unloads it from the server a pass doesn't use, and the qualifier waits for
+  `/api/ps` to confirm. Other models are still refused and never unloaded.
+  Committed as `63af2ae`, with tests, before the run.
+- **A flaky UI test of this branch's own**, found by the gate, fixed in the
+  same commit.
+
+`just qualify-model` printed only counts, times, scores and verdicts. The
+private server was stopped by PID (checked against its command line first).
+The system service was never reconfigured.
+
+**Not done:** the Status line should name the merge commit, and there is
+none yet.
 
 Throwaway everything, as plan-parallel-calls.md Stage 0b did. Unload every
 model on 11434 first. The N-slot server is a private `ollama serve` on
@@ -415,19 +641,20 @@ names the merge commit.
 
 | File | Change |
 |---|---|
+| `ra2/domain/ids.py` | `+ QualificationId` |
 | `ra2/domain/llm.py` | `+ ModelCatalog.version() -> str \| None` and `+ ModelCatalog.loaded() -> tuple[str, ...]` (`/api/ps`, empty when unreachable) |
 | `ra2/persistence/models.py` | `+ ModelQualification` |
 | `ra2/services/readmodels.py` | `+ QualificationCardView`; `+ ModelChoiceView.qualification` |
-| `ra2/services/container.py` | `+ qualifications: QualificationService` |
+| `ra2/services/container.py` | `+ qualification: QualificationService` |
 | `ra2/api/schemas.py` | `+ ModelChoiceResponse.qualification` |
 | `justfile` | `+ qualify-model` |
 | `ra2/main.py` | Wiring `QualificationService` into `Services` |
 
-All go in `contracts/amendments/feat-model-choice.md` and into
-`CONTRACTS.md`'s change log. `ra2/infra/config.py` is **not** touched: D6
-changes what the map *means*, not its shape, and its docstring's
-"this sentence is the check" moves to SD40 in Stage 1 (that one docstring edit
-is part of the amendment).
+| `ra2/infra/config.py` | Docstring only: "this sentence is the check" becomes "the launch checks it" (SD40). No field, default or validator changes |
+
+All nine are in `contracts/amendments/feat-model-choice.md` with their exact
+diffs, and they go into `CONTRACTS.md`'s change log when Stage 2 applies
+them.
 
 ---
 
@@ -485,8 +712,10 @@ is part of the amendment).
 - **Q5: 1.** A map entry above the gated N pins 1, with reason `FAILED`.
 - **Q6 yes.** Done, as a separate document (Stage 0).
 
-**Still open:** Q2 and Q4. Both are recommended **yes**, and Stage 1 writes
-SD40 from the answers. Here is what each one decides.
+**Answered 2026-09-25, later:** Q3 confirmed as "don't keep". **Q2 yes**
+(floor at 2 of 48) and **Q4 yes** (digest and Ollama version compared, GPU
+name recorded only). Both are in SD40. For the record, here is what each one
+decided.
 
 ### Q2 in detail: the noise-band floor
 

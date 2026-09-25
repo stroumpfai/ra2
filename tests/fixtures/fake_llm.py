@@ -90,6 +90,7 @@ from ra2.infra.ollama_client import LlmEndpointError
 __all__ = [
     "DEFAULT_ENDPOINT",
     "DEFAULT_MODELS",
+    "DEFAULT_OLLAMA_VERSION",
     "FakeLLMClient",
     "StaticEndpointProber",
     "StaticModelCatalog",
@@ -106,6 +107,8 @@ DEFAULT_MODELS: tuple[ModelInfo, ...] = (
 #: `Settings.llm_base_url`'s default, repeated here so an injected failure
 #: carries a plausible endpoint without the double importing `Settings`.
 DEFAULT_ENDPOINT = "http://127.0.0.1:11434/v1"
+#: What `StaticModelCatalog.version()` reports unless told otherwise (SD40).
+DEFAULT_OLLAMA_VERSION = "0.34.0"
 
 #: `wait_until_called`'s poll interval and its patience. A test that waits for
 #: a call which never arrives has a real defect, and failing it in five seconds
@@ -314,11 +317,19 @@ class StaticModelCatalog:
         models: Sequence[ModelInfo] = DEFAULT_MODELS,
         *,
         status: EndpointStatus = EndpointStatus.REACHABLE,
+        version: str | None = DEFAULT_OLLAMA_VERSION,
+        loaded: Sequence[str] = (),
     ) -> None:
         self._models = tuple(models)
         self._status = status
+        self._version = version
+        #: Mutable, so a test can leave a model resident between passes.
+        self.loaded_tags: tuple[str, ...] = tuple(loaded)
         self.models_calls = 0
         self.reachable_calls = 0
+        self.version_calls = 0
+        #: Every tag `release()` was asked to unload, in order.
+        self.released: list[str] = []
 
     def set_status(
         self,
@@ -340,6 +351,22 @@ class StaticModelCatalog:
     async def reachable(self) -> EndpointStatus:
         self.reachable_calls += 1
         return self._status
+
+    async def version(self) -> str | None:
+        """`None` when unreachable, like the real adapter (SD40)."""
+        self.version_calls += 1
+        if self._status is not EndpointStatus.REACHABLE:
+            return None
+        return self._version
+
+    async def loaded(self) -> tuple[str, ...]:
+        if self._status is not EndpointStatus.REACHABLE:
+            return ()
+        return self.loaded_tags
+
+    async def release(self, tag: str) -> None:
+        self.released.append(tag)
+        self.loaded_tags = tuple(t for t in self.loaded_tags if t != tag)
 
 
 class StaticEndpointProber:

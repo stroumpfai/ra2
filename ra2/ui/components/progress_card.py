@@ -31,15 +31,15 @@ from ra2.domain.extraction import RunStatus
 from ra2.services.readmodels import RunProgressView
 from ra2.ui.components.primitives import bar, card, format_count, format_latency_ms
 
-__all__ = ["progress_card"]
+__all__ = ["format_duration_ms", "progress_card"]
 
-#: Milliseconds thresholds for `_format_duration_ms`.
+#: Milliseconds thresholds for `format_duration_ms`.
 _MS_PER_SECOND = 1_000
 _MS_PER_MINUTE = 60_000
 _MS_PER_HOUR = 3_600_000
 
 
-def _format_duration_ms(ms: int) -> str:
+def format_duration_ms(ms: int) -> str:
     """`72 * 60_000` -> `"1 h 12 m"`; `38 * 60_000` -> `"38 m"`; anything
     under a minute -> `"N s"` — the design's own two examples plus the
     obvious short case."""
@@ -75,15 +75,15 @@ def _status_text(progress: RunProgressView) -> str:
         # first record is still in flight. The number was in the read model the
         # whole time; only the `done`/`failed` branch below ever rendered it.
         if progress.elapsed_ms is not None:
-            text += f" · {_format_duration_ms(progress.elapsed_ms)}"
+            text += f" · {format_duration_ms(progress.elapsed_ms)}"
         if progress.eta_ms is not None:
-            text += f" · ETA {_format_duration_ms(progress.eta_ms)}"
+            text += f" · ETA {format_duration_ms(progress.eta_ms)}"
         return text
     # DONE, FAILED, INTERRUPTED — a finished-or-stopped run reports what it
     # got through and how long that took.
     text = f"{counts} · {progress.status.value}"
     if progress.elapsed_ms is not None:
-        text += f" · {_format_duration_ms(progress.elapsed_ms)}"
+        text += f" · {format_duration_ms(progress.elapsed_ms)}"
     return text
 
 

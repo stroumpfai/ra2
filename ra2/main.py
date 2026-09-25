@@ -51,6 +51,7 @@ from ra2.services.lifecycle_service import LifecycleService
 from ra2.services.mismatch_service import MismatchService
 from ra2.services.prompt_service import PromptService
 from ra2.services.protocols import CensusMaterialiser, GroundTruthProvider, PromptResolver
+from ra2.services.qualification_service import QualificationService
 from ra2.services.ranking_service import RankingService
 from ra2.services.results_service import ResultsService
 from ra2.services.run_service import RunService
@@ -247,6 +248,15 @@ def create_app(
         upload_store=upload_store,
         settings=settings,
     )
+    # --- model choice (SD40) -----------------------------------------------
+    # Reads a pass through the same two read services the Results screens use,
+    # so a qualification scores a model exactly as an evaluation would.
+    qualification_service = QualificationService(
+        session_factory=session_factory,
+        ranking=ranking_service,
+        results=results_service,
+        ids=ids,
+    )
     services = Services(
         delivery=delivery_service,
         corpus=corpus_service,
@@ -262,6 +272,7 @@ def create_app(
         ranking=ranking_service,
         mismatch=mismatch_service,
         lifecycle=lifecycle_service,
+        qualification=qualification_service,
     )
 
     @asynccontextmanager

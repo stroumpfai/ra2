@@ -122,6 +122,15 @@ revision message:
 census-export corpus_id out:
     uv run python -m ra2.cli census-export --corpus-id {{corpus_id}} --out {{out}}
 
+# SD40. Runs over the synthetic seed in a throwaway data dir, and records only
+# the numbers in RA2_DATA_DIR's database. `--gate 2,4 --n-slot URL` adds the
+# parallel-calls gate against a second, N-slot Ollama the operator started
+# (docs/performance.md §5.4). Never starts or stops Ollama.
+#
+# Measure one model on this host and record it: `just qualify-model qwen3:8b`.
+qualify-model tag *args:
+    uv run python scripts/qualify_model.py {{tag}} {{args}}
+
 # Install the Chromium the E2E layer drives. Chromium only, no other browser.
 setup-e2e:
     uv run playwright install chromium

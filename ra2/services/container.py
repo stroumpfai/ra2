@@ -18,6 +18,7 @@ from ra2.services.feature_service import FeatureService
 from ra2.services.lifecycle_service import LifecycleService
 from ra2.services.mismatch_service import MismatchService
 from ra2.services.prompt_service import PromptService
+from ra2.services.qualification_service import QualificationService
 from ra2.services.ranking_service import RankingService
 from ra2.services.results_service import ResultsService
 from ra2.services.run_service import RunService
@@ -50,3 +51,8 @@ class Services:
     #: The one destructive verb, and the header's data-directory chip. Both
     #: adapters reach it through here; neither constructs it.
     lifecycle: LifecycleService
+    # --- model choice (SD40) ---
+    #: `quality` and the pass readers in the qualifier's throwaway app,
+    #: `record` on the target. Neither adapter serves a write; the Models
+    #: card reads qualifications through `evaluation`.
+    qualification: QualificationService

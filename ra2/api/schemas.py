@@ -20,6 +20,7 @@ from ra2.domain.findings import FindingCode, Severity
 from ra2.domain.llm import DEFAULT_REASONING_EFFORT, EndpointStatus, ProbeCode
 from ra2.domain.mismatch import MismatchTag, TagFilter
 from ra2.domain.prompt import PromptValidationCode, SlotName
+from ra2.domain.qualification import QualificationState
 from ra2.infra.tasks import TaskStatus
 from ra2.services.readmodels import SortDir
 
@@ -93,6 +94,7 @@ __all__ = [
     "PromptValidationErrorResponse",
     "PromptValidationIssueResponse",
     "ProvenanceResponse",
+    "QualificationCardResponse",
     "RankingRowResponse",
     "RankingTabResponse",
     "RegisterDeliveryRequest",
@@ -648,6 +650,26 @@ class ResolvedPromptResponse(_Schema):
 # ===========================================================================
 
 
+class QualificationCardResponse(_Schema):
+    """What this host measured about one model (SD40): the Models card's
+    third line. **Read-only.** There is no endpoint that records a
+    qualification: that's `just qualify-model`'s job, and a `POST` taking
+    numbers would let anything claim a measurement.
+
+    `parallel_calls` is what a launch would pin today, not the map's value.
+    `estimated_ms` is `null` without an evaluation to scope it.
+    """
+
+    state: QualificationState
+    measured_digest: str
+    seed_macro_f1: float
+    ms_per_record: float
+    entity_fill: float
+    parallel_calls: int
+    launch_ms_per_record: float
+    estimated_ms: int | None = None
+
+
 class ModelChoiceResponse(_Schema):
     """One row of the Models card.
 
@@ -660,6 +682,7 @@ class ModelChoiceResponse(_Schema):
     size_bytes: int
     fits_vram: bool | None = None
     selected: bool = False
+    qualification: QualificationCardResponse | None = None
 
 
 class ConnectionResponse(_Schema):

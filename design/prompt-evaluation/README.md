@@ -199,7 +199,20 @@ border:1px solid --rule; radius 3px; padding:7px 10px; surface; mono 11.5px`, wi
 4. **Models** — a `.card` holding a scroll well **capped at 4 visible rows (`max-height:196px`,
    `overflow-y:auto`)** over a footer strip. Each row: a 13×13 `.tick` checkbox (checked = `--ink` fill),
    then mono 12px model tag over mono 10.5px `--ink3` "digest … · size". A model that cannot fit VRAM is
-   `opacity:.55` with its size line in `--warn` ("42.5 GB — exceeds 24 GB VRAM"). Footer: mono 10.5px
+   `opacity:.55` with its size line in `--warn` ("42.5 GB — exceeds 24 GB VRAM").
+   **Since SD40, a third line** under the size line, mono 10.5px, says what this host has measured about
+   the model (`just qualify-model`). Four states, each carried as `data-state` on the line:
+   `qualified` in `--ink3` "seed F1 0.895 · 1.75 s/rec · entities 0% · ~1 h 27 m", the duration being this evaluation's scope at the
+   rate the launch would run, plus
+   " · parallel ×4" when the launch would honour the map, with a tooltip "seed-sized narratives; real ones
+   are longer"; `stale-digest` in `--warn` "measured on digest 500a1f06 — re-qualify";
+   `server-sensitive` in `--warn`, the qualified line plus " · changes when Ollama runs >1 slot";
+   `unmeasured` in `--ink3` "not measured on this host". "Not measured" never disables the tick. The
+   duration is left out before an evaluation exists, because only an evaluation has a scope. **No "recommended"
+   badge** — the seed can't separate the leaders (`docs/choosing-models.md` §3). The row grows from 49px
+   to ~65px (64.8px measured in Chromium), so the well that shows **4 visible rows** grows from 196px
+   to **260px**; the rule is the row
+   count, and E2E measures the rendered row rather than trusting the arithmetic. Footer: mono 10.5px
    `--ink3` "6 available · 3 selected" (truncating) + a 24×24 gear icon button on the right opening
    **Ollama connection settings**. Below the card, mono 10.5px `--ink3`
    "endpoint http://127.0.0.1:11434/v1 · reachable".
@@ -317,7 +330,9 @@ Data: list versions; POST a new version (copy-on-write, never PATCH a cited one)
 ```
 setup: { corpusId, featureSetId, promptTemplateId,
          modelIds: string[], temperature, seed, size:'full'|'dev' }
-models: OllamaModel[] { tag, digest, sizeBytes, fitsVram, selected }
+models: OllamaModel[] { tag, digest, sizeBytes, fitsVram, selected,
+                        qualification?: { state:'qualified'|'stale-digest'|'server-sensitive'|'unmeasured',
+                          seedF1, msPerRecord, entityFill, estimatedMs?, parallelCalls, measuredDigest } }
 connection: { endpoint, reachable }
 progress: RunProgress[]
   { runId, modelTag, done, total, state:'queued'|'running'|'done'|'failed',
@@ -346,7 +361,7 @@ scale — `.th` mono 10px uppercase, `.td` 12.5px, 9px×12px padding, ~37px rows
 buttons, 42–46px card headers. Do not introduce a second table scale.
 
 Fixed sizes that matter here: setup column basis 430px (min 320); detail/progress basis 520px (min 360);
-version list well 530px = 10 × 53px rows; models well 196px = 4 rows; resolved-prompt body 210px;
+version list well 530px = 10 × 53px rows; models well 260px = 4 rows (196px before SD40 added the qualification line); resolved-prompt body 210px;
 runs table min-width 508px.
 
 ## Assets

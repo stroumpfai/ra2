@@ -183,6 +183,27 @@ class ModelCatalog(Protocol):
         settings dialog's "refresh" is pressed — never on a timer."""
         ...
 
+    async def version(self) -> str | None:
+        """The endpoint's Ollama version (`/api/version`), verbatim, or `None`
+        when it does not answer. **Never raises.** Asked once per launch
+        (SD40): a parallel-calls gate holds only on the Ollama version it was
+        measured on, and `None` matches nothing."""
+        ...
+
+    async def loaded(self) -> tuple[str, ...]:
+        """The tags currently loaded (`/api/ps`). **Empty when unreachable**,
+        never an exception. The qualifier refuses to measure while another
+        model is resident, because that hides the speedup (SD40)."""
+        ...
+
+    async def release(self, tag: str) -> None:
+        """Ask the endpoint to unload `tag` now, not at its keep-alive.
+        **Never raises.** The qualifier moves one model between two servers
+        on one GPU, and the copy left resident on the first squeezes the
+        second out of VRAM (SD40). It releases only the model it is
+        measuring, never another."""
+        ...
+
 
 class LlmEndpointError(Exception):
     """The configured endpoint cannot be used.

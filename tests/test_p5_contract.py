@@ -134,6 +134,12 @@ POST_PHASE_5_REVISIONS = {
     # ranking's time per record read what the run executed at. Additive, NOT
     # NULL, backfilled `1` — no code before it could run two records at once.
     "20260924_0900_68c8b2a80ca9_pin_the_parallel_calls_on_the_run.py",
+    # `feat/model-choice` — `model_qualification` (SD40). This host's measurement
+    # of one model (tag, digest) over the synthetic seed, so the launch can
+    # check a parallel-calls entry against a gate instead of trusting a
+    # docstring. A new table, append-only, referenced by nothing; no existing
+    # row is touched.
+    "20260925_1044_7d084d5a7dc6_record_what_this_host_measured_about_a_model.py",
 }
 
 

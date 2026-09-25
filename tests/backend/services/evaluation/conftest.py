@@ -21,7 +21,12 @@ from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from tests.fixtures.fake_llm import DEFAULT_MODELS, StaticEndpointProber, StaticModelCatalog
+from tests.fixtures.fake_llm import (
+    DEFAULT_MODELS,
+    DEFAULT_OLLAMA_VERSION,
+    StaticEndpointProber,
+    StaticModelCatalog,
+)
 
 from ra2.domain.codelist_coverage import ColumnCoverage, CoverageStatus
 from ra2.domain.feature import Grain, Kind, MatchingRule, MatchingRuleKind, ValueType
@@ -31,7 +36,14 @@ from ra2.domain.ids import (
     ColumnMappingId,
     CorpusId,
     PromptTemplateId,
+    QualificationId,
     RecordId,
+)
+from ra2.domain.qualification import (
+    GateResult,
+    GateVerdict,
+    Qualification,
+    QualitySummary,
 )
 from ra2.infra.clock import FrozenClock
 from ra2.infra.config import Settings
@@ -46,6 +58,8 @@ from ra2.persistence.models import (
     PromptTemplate,
     Record,
 )
+from ra2.persistence.repositories.qualification_repo import QualificationRepository
+from ra2.persistence.session import session_scope
 from ra2.services.evaluation_service import EvaluationService
 from ra2.services.feature_service import FeatureService
 from ra2.services.readmodels import FeatureConfigView
@@ -534,3 +548,64 @@ __all__ = [
     "enum_feature",
     "text_feature",
 ]
+
+
+@pytest.fixture
+def record_gate(
+    db_session_factory: async_sessionmaker[AsyncSession], ids: SeededFactory
+) -> Callable[..., Awaitable[None]]:
+    """Put a qualification on record, as `just qualify-model` would (SD40).
+
+    `gated_at=()` records a quality-only qualification. Each call adds a row
+    measured one minute after the last, so "the newest" is unambiguous.
+    """
+    measured = [datetime(2026, 9, 25, 10, 0, tzinfo=UTC)]
+
+    async def record(
+        tag: str,
+        digest: str,
+        *,
+        gated_at: Sequence[int] = (4,),
+        verdict: GateVerdict = GateVerdict.PASSES,
+        ollama_version: str | None = DEFAULT_OLLAMA_VERSION,
+    ) -> None:
+        at = measured[-1].replace(minute=len(measured))
+        measured.append(at)
+        qualification = Qualification(
+            model_tag=tag,
+            model_digest=digest,
+            ollama_version=ollama_version,
+            gpu_name=None,
+            ra2_version=None,
+            measured_at=at,
+            seed_records=200,
+            quality=QualitySummary(
+                records=200,
+                reasoning_effort="none",
+                macro_f1=0.895,
+                macro_f1_low=0.870,
+                macro_f1_high=0.905,
+                f1_by_language={"de": 0.91},
+                median_latency_ms=1710,
+                ms_per_record=1745.0,
+                median_completion_tokens=121,
+                entity_fill=0.0,
+                parse_failures=0,
+            ),
+            gates=tuple(
+                GateResult(
+                    n=n,
+                    records=48,
+                    noise_band=2,
+                    serial_on_n_slot_differ=0,
+                    parallel_differ=0,
+                    speedup=2.4,
+                    verdict=verdict,
+                )
+                for n in gated_at
+            ),
+        )
+        async with session_scope(db_session_factory) as session:
+            await QualificationRepository(session).add(QualificationId(ids.new_id()), qualification)
+
+    return record

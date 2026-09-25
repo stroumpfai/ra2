@@ -115,6 +115,7 @@ from ra2.domain.ids import (
     RunId,
 )
 from ra2.domain.llm import REASONING_EFFORTS, EndpointStatus
+from ra2.domain.qualification import QualificationState
 from ra2.services.container import Services
 from ra2.services.errors import ServiceError
 from ra2.services.readmodels import (
@@ -127,6 +128,7 @@ from ra2.services.readmodels import (
     Page,
     PromptTemplateView,
     ProvenanceView,
+    QualificationCardView,
     RunExportView,
     RunProgressView,
     RunView,
@@ -139,6 +141,7 @@ from ra2.ui.components import (
     data_table,
     dialog_card,
     format_count,
+    format_latency_ms,
     format_local,
     icon_button,
     pagination_row,
@@ -155,7 +158,7 @@ from ra2.ui.components.primitives import (
     scroll_well,
     step_label,
 )
-from ra2.ui.components.progress_card import progress_card
+from ra2.ui.components.progress_card import format_duration_ms, progress_card
 from ra2.ui.components.prompt_preview import prompt_preview_panel
 from ra2.ui.shell import NAV_ITEMS, shell
 from ra2.ui.state import (
@@ -189,6 +192,14 @@ __all__ = [
     "PROGRESS_TITLE_SETTLED",
     "PROMPT_NOTE",
     "PROVENANCE_TITLE",
+    "QUALIFICATION_ESTIMATE",
+    "QUALIFICATION_LINE",
+    "QUALIFICATION_PARALLEL",
+    "QUALIFICATION_SERVER_SENSITIVE",
+    "QUALIFICATION_STALE",
+    "QUALIFICATION_TOOLTIP",
+    "QUALIFICATION_UNMEASURED",
+    "QUALIFICATION_UNMEASURED_STATE",
     "REASONING_LABEL",
     "RESULTS_LINK_LABEL",
     "RUNS_TABLE",
@@ -221,8 +232,28 @@ PAGE_SIZE: Final = 10
 #: reasoning as `features_view.CORPUS_CHOICES`.
 RUNS_SUMMARY_CAP: Final = 500
 
-#: README §2, "Fixed sizes that matter here": models well 196px = 4 rows.
-MODELS_WELL_PX: Final = 196
+#: README §2, "Fixed sizes that matter here": models well 260px = 4 rows. It
+#: was 196px (4 × 49px) until SD40 gave each row a third line. The rendered
+#: row measures 64.8px in Chromium with the vendored fonts, so 4 × 65. The
+#: design's rule is the row count, and J10 measures the row to hold it there.
+MODELS_WELL_PX: Final = 260
+
+#: SD40, README §2 step 4: the row's third line, one entry per state, and the
+#: one place its wording lives. The service hands over numbers and a
+#: `QualificationState`; nothing below reads a sentence back.
+QUALIFICATION_UNMEASURED: Final = "not measured on this host"
+QUALIFICATION_STALE: Final = "measured on digest {digest} — re-qualify"
+QUALIFICATION_LINE: Final = "seed F1 {f1:.3f} · {rate}/rec · entities {fill:.0%}"
+QUALIFICATION_ESTIMATE: Final = " · ~{duration}"
+QUALIFICATION_PARALLEL: Final = " · parallel ×{n}"
+QUALIFICATION_SERVER_SENSITIVE: Final = " · changes when Ollama runs >1 slot"
+#: The seed's narratives are short and generated (docs/performance.md §3.2).
+QUALIFICATION_TOOLTIP: Final = (
+    "Measured by `just qualify-model` on the synthetic seed. Its narratives "
+    "are short; real ones take longer."
+)
+#: `data-state` on the line, so a test asserts the state and never the words.
+QUALIFICATION_UNMEASURED_STATE: Final = "unmeasured"
 #: README §2, "Runs table": four columns at the design's widths, plus a Status
 #: column this implementation widens — `STATUS_COLUMN_PX` says why. The well is
 #: `overflow:auto`, so the table scrolls horizontally rather than collapsing a
@@ -912,6 +943,28 @@ class _EvaluationPage:
                 ui.label(self._size_line(choice)).classes(
                     "mono warn" if choice.disabled else "mono ink3"
                 ).props('data-testid="model-size"').mark("model-size").style("font-size:10.5px;")
+                self._qualification_line(choice)
+
+    def _qualification_line(self, choice: ModelChoiceView) -> None:
+        """README §2 step 4, SD40: what this host measured about the model.
+
+        Facts, never a verdict. There is no "recommended" here, because the seed
+        can't separate the leaders (docs/choosing-models.md §3). "Not measured"
+        never disables the tick.
+        """
+        card = choice.qualification
+        state = QUALIFICATION_UNMEASURED_STATE if card is None else card.state.value
+        warn = card is not None and card.state is not QualificationState.QUALIFIED
+        line = data_props(
+            ui.label(_qualification_text(card))
+            .classes("mono warn" if warn else "mono ink3")
+            .props('data-testid="model-qualification"')
+            .mark("model-qualification")
+            .style("font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"),
+            {"data-state": state},
+        )
+        if card is not None:
+            data_props(line, {"title": QUALIFICATION_TOOLTIP})
 
     def _size_line(self, choice: ModelChoiceView) -> str:
         """ "digest 8fa1c3d0 · 8.5 GB", or the design's refusal line
@@ -2102,6 +2155,26 @@ def _endpoint_text(endpoint: str) -> str:
         if endpoint.startswith(scheme):
             return endpoint[len(scheme) :]
     return endpoint
+
+
+def _qualification_text(card: QualificationCardView | None) -> str:
+    """The third line's words, from the rendering table above."""
+    if card is None:
+        return QUALIFICATION_UNMEASURED
+    if card.state is QualificationState.STALE_DIGEST:
+        return QUALIFICATION_STALE.format(digest=card.measured_digest)
+    text = QUALIFICATION_LINE.format(
+        f1=card.seed_macro_f1,
+        rate=format_latency_ms(round(card.ms_per_record)),
+        fill=card.entity_fill,
+    )
+    if card.estimated_ms is not None:
+        text += QUALIFICATION_ESTIMATE.format(duration=format_duration_ms(card.estimated_ms))
+    if card.parallel_calls > 1:
+        text += QUALIFICATION_PARALLEL.format(n=card.parallel_calls)
+    if card.state is QualificationState.SERVER_SENSITIVE:
+        text += QUALIFICATION_SERVER_SENSITIVE
+    return text
 
 
 def _gigabytes(value: int) -> str:

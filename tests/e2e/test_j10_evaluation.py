@@ -256,6 +256,22 @@ def test_j10_launch_an_evaluation_and_watch_it_finish(
     expect(page.locator(f'[data-testid="model-row"][data-model="{OVER_VRAM}"]')).to_have_attribute(
         "data-disabled", "true"
     )
+    # SD40: every row carries its qualification line (none measured here), and
+    # the well still shows **four** rows, as README §2 step 4 draws it. The
+    # rendered row is measured rather than trusting 4 × 63 = 252.
+    expect(page.locator('[data-testid="model-qualification"]')).to_have_count(3)
+    expect(
+        page.locator('[data-testid="model-qualification"][data-state="unmeasured"]')
+    ).to_have_count(3)
+    well = page.locator("[data-max-height-px]").filter(
+        has=page.locator('[data-testid="model-row"]')
+    )
+    max_height = well.evaluate("e => parseFloat(getComputedStyle(e).maxHeight)")
+    row_box = page.locator('[data-testid="model-row"]').first.bounding_box()
+    assert row_box is not None
+    assert 4 * row_box["height"] <= max_height < 5 * row_box["height"], (
+        f"a {row_box['height']}px row in a {max_height}px well is not four visible rows"
+    )
 
     # --- select two models ----------------------------------------------------
     _select_model(page, MODEL_A)

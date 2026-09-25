@@ -126,11 +126,19 @@ class StubOllama:
         *,
         chat: Sequence[Outcome] | None = None,
         tags: Outcome | None = None,
+        version: Outcome | None = None,
+        ps: Outcome | None = None,
+        generate: Outcome | None = None,
     ) -> None:
         self._chat: deque[Outcome] = deque(chat or [(200, completion_body(VALID_OUTPUT))])
         self._tags: Outcome = tags if tags is not None else (200, TAGS_BODY)
+        self._version: Outcome = version if version is not None else (200, {"version": "0.34.0"})
+        self._ps: Outcome = ps if ps is not None else (200, {"models": []})
+        self._generate: Outcome = generate if generate is not None else (200, {"done": True})
+        self.generate_requests: list[dict[str, Any]] = []
         self.chat_requests: list[dict[str, Any]] = []
         self.tags_urls: list[str] = []
+        self.native_urls: list[str] = []
 
     def _next_chat(self) -> Outcome:
         outcome = self._chat[0]
@@ -142,6 +150,16 @@ class StubOllama:
         if request.url.path.endswith("/api/tags"):
             self.tags_urls.append(str(request.url))
             outcome = self._tags
+        elif request.url.path.endswith("/api/version"):
+            self.native_urls.append(str(request.url))
+            outcome = self._version
+        elif request.url.path.endswith("/api/ps"):
+            self.native_urls.append(str(request.url))
+            outcome = self._ps
+        elif request.url.path.endswith("/api/generate"):
+            self.native_urls.append(str(request.url))
+            self.generate_requests.append(json.loads(request.read().decode("utf-8")))
+            outcome = self._generate
         else:
             self.chat_requests.append(json.loads(request.read().decode("utf-8")))
             outcome = self._next_chat()
@@ -944,6 +962,69 @@ async def test_an_endpoint_with_no_models_is_reachable_and_empty() -> None:
 
     assert await catalog.reachable() is EndpointStatus.REACHABLE
     assert await catalog.models() == ()
+
+
+async def test_version_reads_the_native_version_endpoint(stub: StubOllama) -> None:
+    """SD40: the launch compares a gate's Ollama version with this one."""
+    catalog = OllamaModelCatalog(base_url=LOOPBACK_URL, http_client=stub.http_client())
+
+    assert await catalog.version() == "0.34.0"
+    assert stub.native_urls == ["http://127.0.0.1:11434/api/version"]
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        httpx2.ConnectError("refused", request=httpx2.Request("GET", "/")),
+        (500, {"error": "boom"}),
+        (200, {"version": ""}),
+        (200, {"something": "else"}),
+    ],
+    ids=["refused", "500", "empty", "no-version"],
+)
+async def test_catalog_version_is_none_when_it_cannot_be_read(outcome: Outcome) -> None:
+    """Never an exception, and never a guess: `None` matches no gate."""
+    stub = StubOllama(version=outcome)
+    catalog = OllamaModelCatalog(base_url=LOOPBACK_URL, http_client=stub.http_client())
+
+    assert await catalog.version() is None
+
+
+async def test_loaded_lists_the_resident_models() -> None:
+    stub = StubOllama(
+        ps=(200, {"models": [{"name": "gemma4:12b", "digest": "4eb23ef187e2", "size": 1}]})
+    )
+    catalog = OllamaModelCatalog(base_url=LOOPBACK_URL, http_client=stub.http_client())
+
+    assert await catalog.loaded() == ("gemma4:12b",)
+    assert stub.native_urls == ["http://127.0.0.1:11434/api/ps"]
+
+
+async def test_release_asks_ollama_to_unload_now() -> None:
+    """SD40: `keep_alive: 0` with no prompt, on the native API, and nothing
+    else. It never goes near the chat endpoint an extraction uses."""
+    stub = StubOllama()
+    catalog = OllamaModelCatalog(base_url=LOOPBACK_URL, http_client=stub.http_client())
+
+    await catalog.release("qwen3:8b")
+
+    assert stub.native_urls == ["http://127.0.0.1:11434/api/generate"]
+    assert stub.generate_requests == [{"model": "qwen3:8b", "keep_alive": 0}]
+    assert stub.chat_requests == []
+
+
+async def test_release_never_raises() -> None:
+    stub = StubOllama(generate=httpx2.ConnectError("refused", request=httpx2.Request("POST", "/")))
+    catalog = OllamaModelCatalog(base_url=LOOPBACK_URL, http_client=stub.http_client())
+
+    await catalog.release("qwen3:8b")
+
+
+async def test_loaded_is_empty_when_unreachable() -> None:
+    stub = StubOllama(ps=httpx2.ConnectError("refused", request=httpx2.Request("GET", "/")))
+    catalog = OllamaModelCatalog(base_url=LOOPBACK_URL, http_client=stub.http_client())
+
+    assert await catalog.loaded() == ()
 
 
 # ===========================================================================

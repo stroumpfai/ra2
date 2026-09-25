@@ -633,6 +633,63 @@ the recommended set (plan §9 Q5). The design is `sw-design.md` §15.4 and
 | `tests/backend/services/run/conftest.py` | `seed(parallel_calls=…)`: one number or `model -> N`, pinned on each run as the launch would |
 | `tests/backend/services/run/test_transaction_boundary.py` | `test_a_row_and_its_children_are_committed_together` parametrised over N = 1, 3; the N=1 commit-sequence test kept, with a docstring saying why |
 
+
+---
+
+## Model choice — what this host measured about a model
+
+`feat/model-choice`, by `plan-model-choice.md`. **One amendment**
+(`contracts/amendments/feat-model-choice.md`), **applied file by file in the
+stage whose code needs it**, and **one revision**, `7d084d5a7dc6`, whose
+author is this branch's implementer. The design is `sw-design.md` `SD40`.
+
+### Amended files (already frozen)
+
+| File | Change | Stage | Amendment |
+|---|---|---|---|
+| `ra2/domain/ids.py` | + `QualificationId` | 2 | `feat-model-choice` §1 |
+| `ra2/persistence/models.py` | + `ModelQualification` (`model_qualification`): append-only, numbers only, referenced by nothing; `QualificationId` in the type map as `String(36)` like every id | 2 | `feat-model-choice` §3 |
+| `ra2/domain/llm.py` | + `ModelCatalog.version() -> str \| None` (`/api/version`) and `loaded() -> tuple[str, ...]` (`/api/ps`). Both answer `None`/empty when the endpoint doesn't, never raise. Stage 6 added `release(tag)` (`keep_alive: 0`), never raising, which the qualifier uses only on the model it's measuring | 3, 6 | `feat-model-choice` §2 |
+| `ra2/services/container.py` | + `Services.qualification: QualificationService` | 3 | `feat-model-choice` §5 |
+| `ra2/main.py` | Wires `QualificationService(session_factory, ranking, results, ids)` | 3 | `feat-model-choice` §6 |
+| `justfile` | + `qualify-model tag *args` | 3 | `feat-model-choice` §8 |
+| `ra2/infra/config.py` | Docstring only: "this sentence is the check" becomes "the launch checks it". No field, default or validator changes | 4 | `feat-model-choice` §9 |
+| `ra2/services/readmodels.py` | + `QualificationCardView` (state, measured digest, seed F1, serial and launch rate per record, entity fill, the parallelism the launch would pin, the scoped estimate); + `ModelChoiceView.qualification`, defaulted `None` | 5 | `feat-model-choice` §4 |
+| `ra2/api/schemas.py` | + `QualificationCardResponse`; + `ModelChoiceResponse.qualification`, defaulted `None`. Additive in `tests/api/openapi_snapshot.json` | 5 | `feat-model-choice` §7 |
+
+### New files
+
+| Path | What |
+|---|---|
+| `ra2/domain/qualification.py` | Pure. `canonical_answer`, `differ_count`, `noise_band` (floored at 2 of 48, scaled), `gate_verdict`, `parallel_decision`, and the types a qualification is made of |
+| `ra2/persistence/repositories/qualification_repo.py` | `add` and `latest_for(tag, digest=None, *, gated=False)`; no update, no delete. Encodes and decodes the two JSON columns |
+| `ra2/persistence/migrations/versions/…7d084d5a7dc6…` | `model_qualification`, a new table; no existing row touched. Registered in `tests/test_p5_contract.py`'s `POST_PHASE_5_REVISIONS` |
+| `tests/unit/qualification/` | The gate against the measured history, and one case per `ParallelReason` |
+| `tests/backend/persistence/test_qualification_repo.py` | Round trip, append-never-update, digest and gated filters |
+| `ra2/services/qualification_service.py` | `quality` (through `RankingService` and `ResultsService`, so nothing re-implements a metric), `answer_fingerprints` (SHA-256 of each canonical answer, so no model text leaves the service), `pass_wall_ms`, `record` |
+| `scripts/qualify_model.py` | `just qualify-model`. Wiring only: throwaway data dir built field by field (never a copied `Settings`, which would carry the target's `db_path`), seeded through `seed_dev`, removed on success and failure; the target receives one row |
+| `tests/backend/scripts/test_qualify_model.py` | The script through its real wiring with fake endpoints: one row and nothing else in the target, the gate's differ counts, pass order, refusals (no `--n-slot`, non-loopback, unknown tag, resident model, servers that disagree), cleanup, and a canary that must never reach stdout, stderr, the log or the row |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/infra/ollama_client.py` | `OllamaModelCatalog.version()`, `.loaded()` |
+| `tests/fixtures/fake_llm.py` | `StaticModelCatalog(version=, loaded=)`, `DEFAULT_OLLAMA_VERSION` |
+| `tests/backend/infra/test_ollama_client.py` | `StubOllama` answers `/api/version` and `/api/ps`; four new tests |
+| `ra2/services/evaluation_service.py` (Stage 4) | `launch(…, measuring=False)`. Each run is pinned to `parallel_decision(...).n`: the map's value only with a passing gate for that digest on the running Ollama version, 1 otherwise; the launch logs `parallel=N (map=M, gate=<reason>)` per model. The version is asked only when the map has an entry above 1 |
+| `ra2/domain/qualification.py` (Stage 4) | `ParallelReason.MEASURING`, `parallel_decision(…, measuring=)`: the qualifier's own passes pin the map without a gate, and no adapter passes it |
+| `scripts/qualify_model.py` (Stage 4) | Launches its passes with `measuring=True` |
+| `tests/backend/services/evaluation/test_launch_gate.py` (new) | Every way of having or not having a gate, the log reason, the unmapped model asking no version, and a static check that `ra2/api/` and `ra2/ui/` never pass `measuring=` |
+| `tests/backend/services/evaluation/conftest.py` | `record_gate`, a qualification on record as the qualifier would leave it |
+| `tests/backend/services/evaluation/test_launch.py` | `test_launch_pins_each_models_own_parallel_calls` records a passing gate first; its assertions are unchanged |
+| `ra2/services/evaluation_service.py` (Stage 5) | `_model_choices` attaches each row's card, reading qualifications and asking the Ollama version only there (view load, refresh), never on the progress timer's path; `_view` only scopes the estimate. `_reject_infeasible` asks for no card |
+| `ra2/api/v1/evaluations.py`, `ra2/api/v1/models.py` | Map the card |
+| `ra2/ui/views/evaluation_view.py` (Stage 5) | The row's third line (`model-qualification`, `data-state`, `--warn` for stale and server-sensitive, a tooltip), its wording in one `QUALIFICATION_*` table; `MODELS_WELL_PX` 196 → 260, because the measured row is 64.8px and the rule is four visible rows |
+| `ra2/ui/components/progress_card.py` | `_format_duration_ms` → public `format_duration_ms`, so the estimate and the ETA read alike |
+| `tests/backend/services/evaluation/test_model_card.py` (new), `tests/backend/api/models/test_models_api.py`, `tests/ui/test_evaluation_view.py`, `tests/e2e/test_j10_evaluation.py` | The card per state, the parallelism it shows, the scoped estimate, the timer asking nothing; the wire shape; the four `data-state`s and the tick of an unmeasured model; and, in Chromium, that four measured rows fit the well and five don't |
+| `docs/performance.md`, `docs/choosing-models.md` | §5.4 starts with the gate (Step 0, before Ollama changes) and gains "After a re-pull or an Ollama upgrade"; §6 uses `just qualify-model` |
+
 ---
 
 ## Phase 5 — owner: M35 (Wave 0), amendment only

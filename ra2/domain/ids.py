@@ -28,6 +28,7 @@ __all__ = [
     "ObjektRowId",
     "PersonRowId",
     "PromptTemplateId",
+    "QualificationId",
     "RecordId",
     "RunId",
     "TaskId",
@@ -110,3 +111,7 @@ ExtractionId = NewType("ExtractionId", str)
 #: `score` needs no id type — it carries mvp-spec.md §5's composite key, the
 #: same treatment `extraction_value` gets.
 MismatchId = NewType("MismatchId", str)
+
+#: This host's measurement of one model (tag, digest) over the synthetic seed
+#: (sw-design.md SD40). Append-only: a re-qualification is a new row.
+QualificationId = NewType("QualificationId", str)

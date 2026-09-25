@@ -128,10 +128,11 @@ class Settings(BaseSettings):
     #: **An entry is a measurement, not a preference.** Batched decoding is
     #: not guaranteed bit-identical to batch size 1. Measured on this host,
     #: `qwen3:8b` changed 0–2 of 48 answers at four calls, and `granite4.1:8b`
-    #: changed 14–15. Add a tag only after it has passed
-    #: `plan-parallel-calls.md` §4.1's gate here, and record the result in
-    #: `docs/performance.md` §5.3 (model, digest, Ollama version, date,
-    #: differ counts). Code can't check that; this sentence is the check.
+    #: changed 14–15. **The launch checks it** (SD40): an entry applies only
+    #: while the newest `model_qualification` for the tag and its current
+    #: digest passed the gate at this N or above on the running Ollama
+    #: version. Otherwise the run is pinned to 1 and the launch logs why.
+    #: `just qualify-model <tag> --gate 4 --n-slot URL` records a gate.
     #:
     #: Two things RA2 cannot read and so cannot refuse:
     #:
