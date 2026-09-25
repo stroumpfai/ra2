@@ -146,9 +146,9 @@ numbers attached.
 ```diff
      lifecycle: LifecycleService
 +    # --- model choice (SD40) ---
-+    #: `summarise` in the qualifier's throwaway app, `record` on the target.
-+    #: Neither adapter serves a write; the API only reads, through
-+    #: `evaluation`.
++    #: `quality` and the pass readers in the qualifier's throwaway app,
++    #: `record` on the target. Neither adapter serves a write; the Models
++    #: card reads qualifications through `evaluation`.
 +    qualification: QualificationService
 ```
 
@@ -158,7 +158,7 @@ numbers attached.
 +    qualification_service = QualificationService(
 +        session_factory=session_factory,
 +        ranking=ranking_service,
-+        clock=clock,
++        results=results_service,
 +        ids=ids,
 +    )
      services = Services(

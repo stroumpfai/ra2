@@ -649,6 +649,10 @@ author is this branch's implementer. The design is `sw-design.md` `SD40`.
 |---|---|---|---|
 | `ra2/domain/ids.py` | + `QualificationId` | 2 | `feat-model-choice` §1 |
 | `ra2/persistence/models.py` | + `ModelQualification` (`model_qualification`): append-only, numbers only, referenced by nothing; `QualificationId` in the type map as `String(36)` like every id | 2 | `feat-model-choice` §3 |
+| `ra2/domain/llm.py` | + `ModelCatalog.version() -> str \| None` (`/api/version`) and `loaded() -> tuple[str, ...]` (`/api/ps`). Both answer `None`/empty when the endpoint doesn't, never raise | 3 | `feat-model-choice` §2 |
+| `ra2/services/container.py` | + `Services.qualification: QualificationService` | 3 | `feat-model-choice` §5 |
+| `ra2/main.py` | Wires `QualificationService(session_factory, ranking, results, ids)` | 3 | `feat-model-choice` §6 |
+| `justfile` | + `qualify-model tag *args` | 3 | `feat-model-choice` §8 |
 
 ### New files
 
@@ -659,6 +663,17 @@ author is this branch's implementer. The design is `sw-design.md` `SD40`.
 | `ra2/persistence/migrations/versions/…7d084d5a7dc6…` | `model_qualification`, a new table; no existing row touched. Registered in `tests/test_p5_contract.py`'s `POST_PHASE_5_REVISIONS` |
 | `tests/unit/qualification/` | The gate against the measured history, and one case per `ParallelReason` |
 | `tests/backend/persistence/test_qualification_repo.py` | Round trip, append-never-update, digest and gated filters |
+| `ra2/services/qualification_service.py` | `quality` (through `RankingService` and `ResultsService`, so nothing re-implements a metric), `answer_fingerprints` (SHA-256 of each canonical answer, so no model text leaves the service), `pass_wall_ms`, `record` |
+| `scripts/qualify_model.py` | `just qualify-model`. Wiring only: throwaway data dir built field by field (never a copied `Settings`, which would carry the target's `db_path`), seeded through `seed_dev`, removed on success and failure; the target receives one row |
+| `tests/backend/scripts/test_qualify_model.py` | The script through its real wiring with fake endpoints: one row and nothing else in the target, the gate's differ counts, pass order, refusals (no `--n-slot`, non-loopback, unknown tag, resident model, servers that disagree), cleanup, and a canary that must never reach stdout, stderr, the log or the row |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/infra/ollama_client.py` | `OllamaModelCatalog.version()`, `.loaded()` |
+| `tests/fixtures/fake_llm.py` | `StaticModelCatalog(version=, loaded=)`, `DEFAULT_OLLAMA_VERSION` |
+| `tests/backend/infra/test_ollama_client.py` | `StubOllama` answers `/api/version` and `/api/ps`; four new tests |
 
 ---
 

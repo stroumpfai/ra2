@@ -16,6 +16,7 @@ from ra2.domain.qualification import (
     GateVerdict,
     canonical_answer,
     differ_count,
+    gate_result,
     gate_verdict,
     noise_band,
     noise_floor,
@@ -143,3 +144,60 @@ def test_the_band_and_the_speedup_are_inclusive_bounds() -> None:
         )
         is GateVerdict.FAILS_PARALLEL
     )
+
+
+def _answers(flipped: int, records: int = 48) -> dict[RecordId, str]:
+    """`records` answers, the first `flipped` of them different from the
+    reference."""
+    return {RecordId(f"r{i:02d}"): ("changed" if i < flipped else "same") for i in range(records)}
+
+
+def test_gate_result_measures_every_pass_against_the_first_one_slot_pass() -> None:
+    result = gate_result(
+        n=4,
+        baseline=[_answers(0), _answers(1), _answers(0)],
+        serial_on_n_slot=_answers(0),
+        parallel=_answers(1),
+        serial_on_n_slot_ms=83_000,
+        parallel_ms=34_000,
+    )
+    assert (result.n, result.records, result.noise_band) == (4, 48, 2)
+    assert (result.serial_on_n_slot_differ, result.parallel_differ) == (0, 1)
+    assert result.speedup == 2.44
+    assert result.verdict is GateVerdict.PASSES
+
+
+def test_gate_result_fails_a_model_whose_parallel_answers_move() -> None:
+    result = gate_result(
+        n=4,
+        baseline=[_answers(0), _answers(0), _answers(0)],
+        serial_on_n_slot=_answers(2),
+        parallel=_answers(14),
+        serial_on_n_slot_ms=147_000,
+        parallel_ms=54_000,
+    )
+    assert result.verdict is GateVerdict.FAILS_PARALLEL
+
+
+def test_gate_result_needs_a_baseline_to_measure_noise_against() -> None:
+    with pytest.raises(ValueError, match="two one-slot serial passes"):
+        gate_result(
+            n=4,
+            baseline=[_answers(0)],
+            serial_on_n_slot=_answers(0),
+            parallel=_answers(0),
+            serial_on_n_slot_ms=1,
+            parallel_ms=1,
+        )
+
+
+def test_gate_result_refuses_a_pass_that_took_no_time() -> None:
+    with pytest.raises(ValueError, match="no time"):
+        gate_result(
+            n=4,
+            baseline=[_answers(0), _answers(0)],
+            serial_on_n_slot=_answers(0),
+            parallel=_answers(0),
+            serial_on_n_slot_ms=1000,
+            parallel_ms=0,
+        )

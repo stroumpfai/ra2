@@ -147,6 +147,10 @@ RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 #: one that reports a digest and a size, lives beside it.
 _OPENAI_COMPAT_SUFFIX = "/v1"
 _NATIVE_TAGS_PATH = "/api/tags"
+#: SD40: the Ollama version a parallel-calls gate is compared on, and the
+#: models resident right now. Both native, like the tags.
+_NATIVE_VERSION_PATH = "/api/version"
+_NATIVE_PS_PATH = "/api/ps"
 
 #: The SDK refuses to construct without a key. Ollama ignores it entirely, and
 #: no credential of the user's is ever put on the wire (N1/N2).
@@ -185,6 +189,12 @@ class _OllamaTag(openai.BaseModel):
 
 class _OllamaTags(openai.BaseModel):
     models: list[_OllamaTag] | None = None
+
+
+class _OllamaVersion(openai.BaseModel):
+    """Ollama's native `/api/version`: `{"version": "0.34.0"}`."""
+
+    version: str | None = None
 
 
 def native_api_url(base_url: str, path: str) -> str:
@@ -505,6 +515,8 @@ class OllamaModelCatalog:
         self._base_url = base_url
         self._timeout_s = timeout_s
         self._tags_url = native_api_url(base_url, _NATIVE_TAGS_PATH)
+        self._version_url = native_api_url(base_url, _NATIVE_VERSION_PATH)
+        self._ps_url = native_api_url(base_url, _NATIVE_PS_PATH)
         self._client = _build_client(
             base_url=base_url, timeout_s=timeout_s, http_client=http_client
         )
@@ -531,6 +543,29 @@ class OllamaModelCatalog:
         if await self._fetch_tags() is None:
             return EndpointStatus.UNREACHABLE
         return EndpointStatus.REACHABLE
+
+    async def version(self) -> str | None:
+        """The Ollama version, verbatim, or `None` for every failure (SD40).
+        `None` never matches a recorded version, so an endpoint that won't say
+        runs serially rather than on a gate it can't be shown to match."""
+        try:
+            payload = await self._client.get(self._version_url, cast_to=_OllamaVersion)
+        except openai.APIConnectionError, openai.APIStatusError, ValueError, TypeError:
+            return None
+        return payload.version if isinstance(payload.version, str) and payload.version else None
+
+    async def loaded(self) -> tuple[str, ...]:
+        """The tags resident right now (`/api/ps` has the `/api/tags` entry
+        shape). Empty for every failure, which the qualifier reads as "nothing
+        in the way". Only the qualifier asks, and an unreachable endpoint
+        fails the pass that follows anyway."""
+        try:
+            payload = await self._client.get(self._ps_url, cast_to=_OllamaTags)
+        except openai.APIConnectionError, openai.APIStatusError, ValueError, TypeError:
+            return ()
+        if not isinstance(payload.models, list):
+            return ()
+        return tuple(tag for tag in (entry.name or entry.model for entry in payload.models) if tag)
 
     async def _fetch_tags(self) -> _OllamaTags | None:
         """`None` for every failure — connection refused, a timeout, a 500, a

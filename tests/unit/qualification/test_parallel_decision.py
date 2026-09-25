@@ -25,6 +25,7 @@ OLLAMA = "0.34.0"
 
 QUALITY = QualitySummary(
     records=200,
+    reasoning_effort="none",
     macro_f1=0.895,
     macro_f1_low=0.870,
     macro_f1_high=0.905,

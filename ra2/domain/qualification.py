@@ -51,6 +51,7 @@ __all__ = [
     "QualitySummary",
     "canonical_answer",
     "differ_count",
+    "gate_result",
     "gate_verdict",
     "noise_band",
     "noise_floor",
@@ -130,6 +131,9 @@ class QualitySummary(BaseModel):
     model_config = _FROZEN
 
     records: int
+    #: The effort the pass asked with (SD36). It moves time per record by
+    #: 30× on a thinking model, so a number without it isn't comparable.
+    reasoning_effort: str
     macro_f1: float
     macro_f1_low: float
     macro_f1_high: float
@@ -281,6 +285,48 @@ def gate_verdict(
     if parallel_ok:
         return GateVerdict.FAILS_SERVER
     return GateVerdict.FAILS_BOTH
+
+
+def gate_result(
+    *,
+    n: int,
+    baseline: Sequence[Mapping[RecordId, str]],
+    serial_on_n_slot: Mapping[RecordId, str],
+    parallel: Mapping[RecordId, str],
+    serial_on_n_slot_ms: int,
+    parallel_ms: int,
+) -> GateResult:
+    """One N's gate, from the passes themselves.
+
+    `baseline` is the one-slot serial passes, the first being the reference
+    every other pass is compared with. The speedup compares the two passes on
+    the **same** N-slot server, so a difference between the servers can't
+    pose as a gain. Every map is record -> an answer's fingerprint, so a
+    caller never has to hand model text across a layer.
+    """
+    if len(baseline) < 2:
+        raise ValueError("a gate needs at least two one-slot serial passes")
+    if parallel_ms <= 0 or serial_on_n_slot_ms <= 0:
+        raise ValueError("a pass that took no time was not measured")
+    reference = baseline[0]
+    band = noise_band([differ_count(reference, other) for other in baseline[1:]], len(reference))
+    serial_differ = differ_count(reference, serial_on_n_slot)
+    parallel_differ = differ_count(reference, parallel)
+    speedup = serial_on_n_slot_ms / parallel_ms
+    return GateResult(
+        n=n,
+        records=len(reference),
+        noise_band=band,
+        serial_on_n_slot_differ=serial_differ,
+        parallel_differ=parallel_differ,
+        speedup=round(speedup, 2),
+        verdict=gate_verdict(
+            band=band,
+            serial_on_n_slot_differ=serial_differ,
+            parallel_differ=parallel_differ,
+            speedup=speedup,
+        ),
+    )
 
 
 def parallel_decision(

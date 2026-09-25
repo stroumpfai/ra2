@@ -7,7 +7,8 @@ SD40 in `sw-design.md`, the Models card in the design README, and
 `contracts/amendments/feat-model-choice.md` (proposed, not yet applied). Every
 §9 question is answered. **Stage 2 done on 2026-09-25** on
 `feat/model-choice`: the pure gate, the table, its revision `7d084d5a7dc6`
-and its repository. Stage 3 is next. Authority as always:
+and its repository. **Stage 3 done on 2026-09-25**: `just qualify-model`,
+`QualificationService` and the two new catalogue calls. Stage 4 is next. Authority as always:
 `mvp-spec.md` on *what*, `sw-design.md` on *how* (CLAUDE.md). Every frozen
 file the code touches is named as an amendment (§6).
 
@@ -389,7 +390,53 @@ single author. `metadata.create_all()` is never used (Do-NOT #10).
 | `test_qualifications_are_appended_never_updated` | backend | Two `add`s for one (tag, digest), `latest_for` returns the newer, the older is still there |
 | `test_migration_creates_model_qualification` | backend | Upgrade, downgrade, re-upgrade on a temp DB |
 
-### Stage 3 — the command
+### Stage 3 — the command ✅ (2026-09-25)
+
+**Done**, against fake endpoints only. Stage 6 is the first run against real
+Ollama. Amendment §2 (`llm.py`), §5 (`container.py`), §6 (`main.py`) and §8
+(`justfile`) are applied and recorded in `CONTRACTS.md`. `just lint` is clean.
+`just test`: 2622 passed, 1 skipped. The 15 script tests take ~29 s serially.
+Where it differed from the plan:
+
+- **`summarise` became three readers:** `quality(evaluation_id)`,
+  `answer_fingerprints(run_id)` and `pass_wall_ms(run_id)`. The gate's
+  arithmetic went to the domain as **`gate_result(...)`**, so the script
+  passes fingerprints to a pure function and holds no logic of its own.
+- **Fingerprints, not answers.** The service returns the SHA-256 of each
+  canonical answer, which keeps equality and drops the text. The seed is
+  synthetic, but the rule then holds wherever the service is pointed.
+- **The gate reuses the one seed.** The throwaway `Settings` set
+  `dev_record_max` to `--gate-records` (48), and gate passes use the Dev
+  scope, so a single 200-record seed serves both measurements.
+- **`QualitySummary` gained `reasoning_effort`.** The effort moves time per
+  record by 30× on a thinking model, so a figure without it can't be
+  compared. It's a JSON field, so no migration.
+- **The throwaway migration runs before the event loop.** Alembic's
+  `env.py` calls `asyncio.run` itself. Every app's engine is disposed
+  before its loop ends, or aiosqlite warns and the suite fails.
+- **Refusals the plan didn't list:** a tag the endpoint doesn't offer, and
+  two servers that disagree on digest or Ollama version.
+- **Tests:** named as in the table. `test_catalog_version_is_none_when_unreachable`
+  became `…_when_it_cannot_be_read`, parametrised over refused, 500, an empty
+  version and a missing one. Added: pass order, the resident-model refusal,
+  the server-disagreement refusal, `--gate` values below 2, and `/api/ps`.
+  "Hand-computed" F1 became "the ranking's own figures, copied". The quality
+  test pins records, parse failures, entity fill, effort and latency exactly.
+
+**Found, not fixed (outside this plan):** `stats.macro_interval` (P4-D1)
+centres the macro interval on the mean of the Wilson *centres*, not on the
+macro point. Near 0 a Wilson centre sits above its point, so the interval can
+lie entirely above the reported macro-F1: on a fake scoring 0.083 it read
+0.091–…. At the leaders' ~0.9 it errs the other way, and for "tied or not"
+it's harmless. But a printed interval that excludes its own point will look
+like a bug to a reader.
+
+**Stage 4 must solve one thing first.** Once the launch enforces D6, the
+qualifier's own parallel passes would be pinned to 1, because the throwaway
+database has no gate on record. The gate can't be measured if measuring it
+needs a gate. Stage 4 adds an explicit launch option for measurement passes,
+reachable in-process only and passed by no adapter, and SD40 gets a sentence
+naming it as the one launch that pins the map without a gate.
 
 `QualificationService`, `scripts/qualify_model.py` and the `qualify-model`
 recipe in `justfile` (frozen → amendment). `ModelCatalog.version()` in the

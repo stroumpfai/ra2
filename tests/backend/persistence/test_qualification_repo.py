@@ -28,6 +28,7 @@ NEW_DIGEST = "7c1e2f3a4b5d"
 def _quality(macro_f1: float = 0.895) -> QualitySummary:
     return QualitySummary(
         records=200,
+        reasoning_effort="none",
         macro_f1=macro_f1,
         macro_f1_low=macro_f1 - 0.025,
         macro_f1_high=macro_f1 + 0.010,
