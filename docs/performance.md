@@ -1,10 +1,10 @@
 # Performance — RA2
 
-**How long an evaluation takes, what makes it faster, what that costs, and
-which local model to use.**
+**How long an evaluation takes, what makes it faster, and what that costs.**
 
-This page is for someone who has to plan evaluation runs on RA2, or choose the
-models they compare. It assumes no knowledge of the codebase.
+This page is for someone who has to plan evaluation runs on RA2. It assumes
+no knowledge of the codebase. **Which models to compare** is a separate
+question, answered in [`choosing-models.md`](choosing-models.md).
 
 **This page is not authority.** `mvp-spec.md` decides *what* the product must
 do, `sw-design.md` decides *how* it is built, and where either disagrees with
@@ -13,6 +13,7 @@ named here. Re-measure rather than edit them (§7 says how).
 
 **Last reviewed:** 2026-09-23 · against commit `12268ed` · Linux, 28 cores,
 31 GB RAM, NVIDIA RTX 5060 Ti 16 GB · Ollama 0.34.0.
+Model choice split out to `choosing-models.md` on 2026-09-25; no number changed.
 
 ---
 
@@ -26,8 +27,8 @@ named here. Re-measure rather than edit them (§7 says how).
 | A 3 000-record evaluation | **~1.5 h per model** with `qwen3:8b`, **~10 h** with `gemma4:12b` (§3.2) |
 | Biggest lever | **Reasoning effort.** `none` vs the model's default: 6 s vs 190 s for one record |
 | Second biggest | **The model**, mostly through how much it *writes*, not through its size (§4.3) |
-| Recommended model | **`qwen3:8b`**. Tied for first on quality, fastest of the leaders. It captures no entities (§4.4) |
-| Parallel calls | **Built, off by default.** `RA2_LLM_PARALLEL_CALLS='{"qwen3:8b": 4}'` plus `OLLAMA_NUM_PARALLEL=4` on the Ollama host: 2.4× for `qwen3:8b` with identical scores. The server setting changes `ministral-3:8b`'s answers, so it left the recommended set (§5.3). Setup: §5.4 |
+| Recommended model | **`qwen3:8b`**, the fastest of the leaders. Which models to compare, and why: [`choosing-models.md`](choosing-models.md) |
+| Parallel calls | **Built, off by default.** `RA2_LLM_PARALLEL_CALLS='{"qwen3:8b": 4}'` plus `OLLAMA_NUM_PARALLEL=4` on the Ollama host: 2.4× for `qwen3:8b` with identical scores. The server setting changes `ministral-3:8b`'s answers, so it left the recommended set (§5.3, [`choosing-models.md` §5](choosing-models.md)). Setup: §5.4 |
 
 ---
 
@@ -104,63 +105,16 @@ dev-sized evaluation first (§5, lever 4) and extrapolate from its ETA.
 
 ---
 
-## 4. Model comparison
+## 4. Model speed
+
+Quality, entities and the recommendation moved to
+[`choosing-models.md`](choosing-models.md) on 2026-09-25. This section keeps
+what decides how long a model takes. The subsection numbers are unchanged,
+because other documents cite them.
 
 ### 4.1 Quality
 
-Scored and ranked by RA2 itself on the 200-record seed (6 labelled features, 1
-exploratory). Macro-F1 has a 95 % Wilson interval. RA2 calls models **tied**
-when their intervals cross.
-
-| Rank | Model | Macro-F1 | 95 % interval | RA2's verdict |
-|---|---|---|---|---|
-| 1 | `gemma4:12b` | 0.899 | 0.874–0.909 | tied for best |
-| 1 | `qwen3:8b` | 0.895 | 0.870–0.905 | tied for best |
-| 1 | `ministral-3:8b` | 0.888 | 0.862–0.898 | tied for best |
-| 1 | `granite4.1:8b` | 0.886 | 0.861–0.897 | tied for best |
-| 1 | `gemma3:4b` | 0.881 | 0.855–0.892 | tied for best |
-| 6 | `llama3.2:3b` | 0.830 | 0.803–0.844 | behind on 2 features |
-| 6 | `qwen3.5:9b` | 0.829 | 0.801–0.843 | behind on 1 feature |
-| 8 | `qwen3.5:2b` | 0.755 | 0.730–0.772 | behind on 2 features |
-
-Per feature (F1):
-
-| Feature | n | `llama3.2:3b` | `qwen3.5:2b` | `gemma3:4b` | `qwen3:8b` | `granite4.1:8b` | `ministral-3:8b` | `qwen3.5:9b` | `gemma4:12b` |
-|---|---|---|---|---|---|---|---|---|---|
-| `AnzObjFeld` | 200 | 0.93 | 0.92 | 0.93 | 0.93 | 0.91 | 0.86 | 0.88 | 0.92 |
-| `UnfDatumFeld` | 200 | 0.84 | 0.88 | 0.84 | 0.88 | 0.88 | 0.88 | 0.84 | 0.88 |
-| `UnfTypAusw` | 200 | 0.66 | 0.45 | 0.81 | 0.85 | 0.81 | 0.87 | 0.69 | 0.88 |
-| `UnfZeitFeld` | 182 | 0.68 | 0.42 | 0.83 | 0.84 | 0.84 | 0.84 | 0.79 | 0.84 |
-| `anyone_injured` | 200 | 0.94 | 0.93 | 0.94 | 0.94 | 0.94 | 0.94 | 0.89 | 0.94 |
-| `objects_involved` | 200 | 0.94 | 0.92 | 0.94 | 0.93 | 0.93 | 0.93 | 0.88 | 0.93 |
-
-Mean F1 by language, over the features whose language cell clears the 20-case
-floor (6 for `de` and `fr`, 5 for `it`):
-
-| Model | de | fr | it |
-|---|---|---|---|
-| `gemma4:12b` | 0.91 | **0.89** | **0.93** |
-| `qwen3:8b` | **0.91** | 0.88 | **0.93** |
-| `granite4.1:8b` | **0.91** | 0.85 | **0.93** |
-| `ministral-3:8b` | 0.90 | 0.88 | 0.89 |
-| `gemma3:4b` | 0.90 | 0.88 | 0.85 |
-| `qwen3.5:9b` | 0.84 | 0.79 | 0.86 |
-| `llama3.2:3b` | 0.86 | 0.79 | 0.82 |
-| `qwen3.5:2b` | 0.85 | **0.63** | 0.71 |
-
-**How far to trust this.** The seed is synthetic, and its contradictions and
-silent narratives are unrecoverable by design, so a *perfect reader* tops out
-around **90 %** macro-F1 (`docs/seed.md` §8: 89.6 % at 48 records). The five
-leaders are at that ceiling. **This corpus can't separate them. Only real data
-can**, and that's the question RA2 exists to answer. What the seed *does*
-show reliably:
-
-- **The bottom three are measurably worse.** They lose on the two features
-  that need reading rather than copying: the accident type (`UnfTypAusw`) and
-  the time (`UnfZeitFeld`).
-- **`qwen3.5:2b` is weak outside German.** French 0.63, Italian 0.71.
-- **Bigger isn't better here.** `qwen3.5:9b` ranks below `gemma3:4b` and
-  `qwen3:8b`.
+Moved: [`choosing-models.md` §3](choosing-models.md).
 
 ### 4.2 Speed, size and fit
 
@@ -196,39 +150,13 @@ count predicts neither. Look at what the model *writes*.
 
 ### 4.4 What the short answers leave out: entities
 
-The response schema has an `entities` list next to `features`. It holds the
-object-level capture (vehicles, people) that RA2 stores but **never scores**
-(`mvp-spec.md` §8.2). The models differ sharply in whether they fill it (20
-seed records each):
-
-| Model | Records with entities | Mean entities per record |
-|---|---|---|
-| `gemma4:12b` | **20 / 20** | 7.0 |
-| `qwen3.5:9b` | 17 / 20 | 5.5 |
-| `llama3.2:3b` | 17 / 20 | 1.2 |
-| `gemma3:4b` | 10 / 20 | 2.1 |
-| `ministral-3:8b` | 4 / 20 | 0.2 |
-| `qwen3:8b` | **0 / 20** | 0 |
-| `granite4.1:8b` | 0 / 20 | 0 |
-| `qwen3.5:2b` | 0 / 20 | 0 |
-
-**Most of the speed difference among the leaders is this list.** The ranking
-can't show it, because entities aren't scored. If the object-level capture
-matters for the report, `gemma4:12b` does it thoroughly at 6.6× the time of
-`qwen3:8b`, and `gemma3:4b` does half of it at 1.7× the time.
+Moved: [`choosing-models.md` §4](choosing-models.md). In short: the fast
+leaders write no `entities`, and that list is most of the speed difference
+among the leaders.
 
 ### 4.5 Recommendation
 
-| Use | Model | Why |
-|---|---|---|
-| **Default for feature extraction** | **`qwen3:8b`** | Tied for first, best on Italian, fastest per record. 3 000 records in ~1.5 h |
-| Second opinion in the same evaluation | `granite4.1:8b` | Different family and tokeniser, also tied for first. ~2.5 h at 3 000. `ministral-3:8b` ties too, but its answers change when Ollama is set for parallel calls (§5.3) |
-| When entities matter | `gemma4:12b` | The only model that fills `entities` on every record. ~10 h at 3 000 |
-| Fast iteration on a prompt | `qwen3:8b` on a dev-sized corpus | ~1.5 min per 50 records |
-| **Avoid** | `qwen3.5:2b`, `qwen3.5:9b` | Rank last or near-last; `9b` is also 5× slower than `qwen3:8b` |
-
-All five leaders may still separate on real data. Keep **two or three** of them
-in the first real evaluation rather than one.
+Moved: [`choosing-models.md` §1](choosing-models.md).
 
 ---
 
@@ -239,7 +167,7 @@ Ordered by effect. "Measured" means on this host, as described in §7.
 | # | Lever | Effect | Benefit | Downside |
 |---|---|---|---|---|
 | 1 | **Reasoning effort** (per evaluation; default from `RA2_LLM_REASONING_EFFORT`, default `none`) | 6 s vs 190 s for one record with a thinking model (`qwen3.5:latest` on CPU; `sw-design.md`, the `llm_reasoning_effort` entry in `config.py`) | The difference between a run that finishes and one that times out | Thinking might improve accuracy on hard features; `none` gives that up. It's recorded on the run, so a `none` run and a `high` run can be compared |
-| 2 | **Model choice** | 1.7–11.3 s per record, 6.6× (§3.1) | See §4.5 | Faster models capture less (§4.4); the top five tie on the seed |
+| 2 | **Model choice** | 1.7–11.3 s per record, 6.6× (§3.1) | See [`choosing-models.md`](choosing-models.md) | Faster models capture less (§4.4); the top five tie on the seed |
 | 3 | **Output length** (the prompt template) | Seconds per record scale with output tokens (§4.3) | Asking for short evidence spans, or no entities, cuts time roughly in proportion | A new template version; entities and evidence are what a reviewer reads. Not measured on its own |
 | 4 | **Corpus size** (Dev / Full) | Linear. Dev takes the first `RA2_DEV_RECORD_MAX` (50) records by id | Minutes instead of hours while a prompt or feature set is still changing | Dev runs are marked "smoke test, not a result" and are too small for per-language cells |
 | 5 | **Number of models** | Linear, since runs are serial | Fewer runs, sooner | Fewer comparisons. The seed can't tell the leaders apart |
@@ -451,7 +379,7 @@ ones in RA2's map. Each loaded model reserves four caches:
 | `granite4.1:8b` | 5.9 → 8.0 GB | unchanged |
 | `gemma3:4b` | 2.9 → 3.8 GB | unchanged |
 | `gemma4:12b` | 8.1 → 10.4 GB | unchanged |
-| `ministral-3:8b` | 5.6 → 7.5 GB | **6 of 48 change**, which is why it left the recommended set (§4.5) |
+| `ministral-3:8b` | 5.6 → 7.5 GB | **6 of 48 change**, which is why it left the recommended set ([`choosing-models.md` §5](choosing-models.md)) |
 | `llama3.2:3b`, `qwen3.5:2b`, `qwen3.5:9b` | not measured | not measured |
 
 Every model still fits in 16 GB on its own, but two of them loaded together
@@ -505,7 +433,8 @@ already stored keep the value they recorded.
   on the same GPU can force the next one to spill to CPU. Measured on
   `qwen3:8b` alongside a resident `gemma4:12b`: 1.7 s → ~3 s per record.
 - **The synthetic seed saturates.** It can rank weak models below strong ones.
-  It can't order strong models against each other (§4.1).
+  It can't order strong models against each other
+  ([`choosing-models.md` §3](choosing-models.md)).
 
 **Known gaps in the application:**
 
@@ -528,9 +457,9 @@ scores only, never prompt or output text (`CLAUDE.md` Do-NOT #13).
 
 | What | How |
 |---|---|
-| §3.1, §4.1 | `RA2_DATA_DIR=<scratch> uv run python scripts/reset_data.py yes`, then `scripts/seed_dev.py --records 200`. One evaluation with all eight models, launched via `EvaluationService.launch` and `RunService.launch_runs` with an `InlineTaskRunner`, scored by the chained scoring job. Numbers read from `RunService.progress`, `RankingService.ranking_tab` and `ResultsService.extraction_tab` |
+| §3.1, `choosing-models.md` §3 | `RA2_DATA_DIR=<scratch> uv run python scripts/reset_data.py yes`, then `scripts/seed_dev.py --records 200`. One evaluation with all eight models, launched via `EvaluationService.launch` and `RunService.launch_runs` with an `InlineTaskRunner`, scored by the chained scoring job. Numbers read from `RunService.progress`, `RankingService.ranking_tab` and `ResultsService.extraction_tab` |
 | §4.2 | Generation speed: Ollama's own `eval_count / eval_duration` on a fixed synthetic prompt, second call (warm), `think: false`. Token counts: `OllamaLLMClient.extract` on seed prompts resolved through `RunService._resolve_prompt` |
-| §4.4 | 20 seed records per model through `OllamaLLMClient.extract`, counting the length of the `entities` array |
+| `choosing-models.md` §4 | 20 seed records per model through `OllamaLLMClient.extract`, counting the length of the `entities` array |
 | §5.3 | A second `ollama serve` on `127.0.0.1:11435` (`OLLAMA_NUM_PARALLEL=4`, `OLLAMA_MODELS` pointing at the system store, `OLLAMA_NOPRUNE=1`), so the system service was never reconfigured. 48 seed prompts sent through `OllamaLLMClient.extract` under an `asyncio.Semaphore(N)`; outputs compared by SHA-256 of the raw text and of canonical JSON |
 
 Models as pulled on 2026-09-23: `qwen3:8b`, `qwen3.5:2b`, `qwen3.5:9b`,

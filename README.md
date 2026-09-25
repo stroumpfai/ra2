@@ -624,6 +624,8 @@ question `sw-design.md` wins:
 | [`CLAUDE.md`](CLAUDE.md) | The Do-NOT list, the layer rule, the ownership rule. |
 | [`CONTRACTS.md`](CONTRACTS.md) | What is frozen, and every documented deviation with its reason. |
 | [`data-handling.md`](data-handling.md) | Outputs, retention, destruction and the incident path. **Decisions still open** are marked as such. |
+| [`docs/choosing-models.md`](docs/choosing-models.md) | Which local models to compare, which to avoid, and how to judge one this page hasn't measured. Reference, not authority. |
+| [`docs/performance.md`](docs/performance.md) | How long an evaluation takes, what makes it faster, and how to turn parallel calls on. Reference, not authority. |
 | [`docs/risk-assesment.md`](docs/risk-assesment.md) | External review of the use cases and the implementation, with a remediation log. |
 | [`docs/seed.md`](docs/seed.md) | What the development seed contains, and the score a perfect reader could reach on it. Reference, not authority. |
 | [`docs/testing.md`](docs/testing.md) | The testing approach, written for someone who has to judge it. Reference, not authority. |
