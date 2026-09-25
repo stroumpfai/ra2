@@ -174,12 +174,17 @@ async def test_launch_pins_each_models_own_parallel_calls(
     launchable: Callable[..., Awaitable[tuple[CorpusId, FeatureConfigView, str]]],
     fitting_model: str,
     second_fitting_model: str,
+    record_gate: Callable[..., Awaitable[None]],
 ) -> None:
     """SD38 — **per model**, unlike the effort above. The map names one of
     the two models; the other was never measured, so it runs serially. The
     value is pinned on the run so Resume and the ranking read what the run
-    executed at, not what the map says later."""
+    executed at, not what the map says later.
+
+    Since SD40 the mapped model needs a passing gate on record for its digest
+    to get its 4. `test_launch_gate.py` covers every way of not having one."""
     _, _, evaluation_id = await launchable(models=(fitting_model, second_fitting_model))
+    await record_gate(fitting_model, "8fa1c3d0")
     service = EvaluationService(
         session_factory=db_session_factory,
         model_catalog=model_catalog,

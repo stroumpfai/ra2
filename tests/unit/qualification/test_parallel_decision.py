@@ -135,3 +135,18 @@ def test_server_sensitivity_is_any_gate_where_serial_answers_moved() -> None:
     assert _qualification(_gate(4, GateVerdict.FAILS_SERVER)).server_sensitive
     assert _qualification(_gate(4, GateVerdict.FAILS_BOTH)).server_sensitive
     assert not _qualification(_gate(4, GateVerdict.FAILS_PARALLEL)).server_sensitive
+
+
+def test_a_measurement_pins_the_map_without_a_gate() -> None:
+    """The qualifier's own passes: the measurement a gate is made of."""
+    decision = parallel_decision(
+        mapped=4, qualification=None, digest=DIGEST, ollama_version=None, measuring=True
+    )
+    assert decision == ParallelDecision(4, ParallelReason.MEASURING)
+
+
+def test_a_measurement_of_an_unmapped_model_is_still_serial() -> None:
+    decision = parallel_decision(
+        mapped=None, qualification=None, digest=DIGEST, ollama_version=None, measuring=True
+    )
+    assert decision == ParallelDecision(1, ParallelReason.NOT_MAPPED)

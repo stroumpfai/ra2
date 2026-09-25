@@ -653,6 +653,7 @@ author is this branch's implementer. The design is `sw-design.md` `SD40`.
 | `ra2/services/container.py` | + `Services.qualification: QualificationService` | 3 | `feat-model-choice` §5 |
 | `ra2/main.py` | Wires `QualificationService(session_factory, ranking, results, ids)` | 3 | `feat-model-choice` §6 |
 | `justfile` | + `qualify-model tag *args` | 3 | `feat-model-choice` §8 |
+| `ra2/infra/config.py` | Docstring only: "this sentence is the check" becomes "the launch checks it". No field, default or validator changes | 4 | `feat-model-choice` §9 |
 
 ### New files
 
@@ -674,6 +675,13 @@ author is this branch's implementer. The design is `sw-design.md` `SD40`.
 | `ra2/infra/ollama_client.py` | `OllamaModelCatalog.version()`, `.loaded()` |
 | `tests/fixtures/fake_llm.py` | `StaticModelCatalog(version=, loaded=)`, `DEFAULT_OLLAMA_VERSION` |
 | `tests/backend/infra/test_ollama_client.py` | `StubOllama` answers `/api/version` and `/api/ps`; four new tests |
+| `ra2/services/evaluation_service.py` (Stage 4) | `launch(…, measuring=False)`. Each run is pinned to `parallel_decision(...).n`: the map's value only with a passing gate for that digest on the running Ollama version, 1 otherwise; the launch logs `parallel=N (map=M, gate=<reason>)` per model. The version is asked only when the map has an entry above 1 |
+| `ra2/domain/qualification.py` (Stage 4) | `ParallelReason.MEASURING`, `parallel_decision(…, measuring=)`: the qualifier's own passes pin the map without a gate, and no adapter passes it |
+| `scripts/qualify_model.py` (Stage 4) | Launches its passes with `measuring=True` |
+| `tests/backend/services/evaluation/test_launch_gate.py` (new) | Every way of having or not having a gate, the log reason, the unmapped model asking no version, and a static check that `ra2/api/` and `ra2/ui/` never pass `measuring=` |
+| `tests/backend/services/evaluation/conftest.py` | `record_gate`, a qualification on record as the qualifier would leave it |
+| `tests/backend/services/evaluation/test_launch.py` | `test_launch_pins_each_models_own_parallel_calls` records a passing gate first; its assertions are unchanged |
+| `docs/performance.md`, `docs/choosing-models.md` | §5.4 starts with the gate (Step 0, before Ollama changes) and gains "After a re-pull or an Ollama upgrade"; §6 uses `just qualify-model` |
 
 ---
 

@@ -14,6 +14,7 @@ named here. Re-measure rather than edit them (§7 says how).
 **Last reviewed:** 2026-09-23 · against commit `12268ed` · Linux, 28 cores,
 31 GB RAM, NVIDIA RTX 5060 Ti 16 GB · Ollama 0.34.0.
 Model choice split out to `choosing-models.md` on 2026-09-25; no number changed.
+§5.4 rewritten around `just qualify-model` the same day (SD40).
 
 ---
 
@@ -271,15 +272,79 @@ median 1.7 s → 2.7 s for `qwen3:8b` at 4 calls, even as throughput more than d
 
 ### 5.4 Turning parallel calls on
 
-It takes two settings, and neither does anything without the other:
+It takes three things, in this order:
 
-- **Ollama** must accept four requests at once: `OLLAMA_NUM_PARALLEL=4`.
-- **RA2** must send four at once, and only for the model that passed the
-  gate: `RA2_LLM_PARALLEL_CALLS={"qwen3:8b": 4}`.
+1. **A gate on record.** `just qualify-model` measures whether the model's
+   answers survive parallel calls on *this* host, and stores the result.
+   Without one, RA2 runs the model one record at a time, whatever the map
+   says (`sw-design.md` SD40).
+2. **Ollama** must accept four requests at once: `OLLAMA_NUM_PARALLEL=4`.
+3. **RA2** must send four at once, for that model only:
+   `RA2_LLM_PARALLEL_CALLS={"qwen3:8b": 4}`.
 
 If only Ollama is set, RA2 still sends one call at a time. If only RA2 is set,
 Ollama queues the extra calls, the run is no faster, and every queued call
-waits against `RA2_LLM_TIMEOUT_S`.
+waits against `RA2_LLM_TIMEOUT_S`. If the gate is missing, stale or failed,
+the launch runs the model serially and its log line says which
+(`gate=missing`, `digest`, `ollama_version` or `failed`).
+
+#### Step 0: Run the gate, before changing Ollama
+
+The gate compares the model on a **one-slot** server with the same model on
+a **four-slot** one. Your system Ollama is still one-slot, so it's the first
+of the two. Start a private four-slot server beside it on another port, using
+the same model store so nothing is downloaded again.
+
+First, unload everything, because a model left in GPU memory spoils the
+timings (the command refuses to start if one is loaded):
+
+```bash
+ollama ps                  # lists what's loaded
+ollama stop <tag>          # for each one
+```
+
+Then, in a **second terminal**, start the private server and leave it
+running:
+
+**Linux** (the standard install keeps its models under the `ollama` user):
+
+```bash
+sudo -u ollama env OLLAMA_HOST=127.0.0.1:11435 OLLAMA_NUM_PARALLEL=4 \
+  OLLAMA_MODELS=/usr/share/ollama/.ollama/models OLLAMA_NOPRUNE=1 ollama serve
+```
+
+**Windows** (PowerShell):
+
+```powershell
+$env:OLLAMA_HOST="127.0.0.1:11435"; $env:OLLAMA_NUM_PARALLEL="4"; $env:OLLAMA_NOPRUNE="1"; ollama serve
+```
+
+**macOS:**
+
+```bash
+OLLAMA_HOST=127.0.0.1:11435 OLLAMA_NUM_PARALLEL=4 OLLAMA_NOPRUNE=1 ollama serve
+```
+
+`OLLAMA_NOPRUNE=1` stops the private server from tidying the shared model
+store. Back in the first terminal:
+
+```bash
+just qualify-model qwen3:8b --gate 4 --n-slot http://127.0.0.1:11435/v1
+```
+
+It takes about 15 minutes for `qwen3:8b`: a 200-record quality pass
+(~6 min), then five 48-record passes for the gate. `gemma4:12b` takes about
+an hour. It ends with lines like:
+
+```
+  quality: macro-F1 0.895 (0.870–0.905) · 1.75 s/record · entities in 0% of records · 0 parse failures
+  gate ×4: passes · band 2 · serial on 4 slots differs on 0 · parallel differs on 1 of 48 · 2.40×
+Recorded as 01a0… in …/ra2.sqlite.
+```
+
+Only `passes` lets the map apply. Any other verdict means this model stays
+serial on this host: leave it out of the map. Stop the private server with
+Ctrl+C in its terminal.
 
 #### Step 1: Set up Ollama
 
@@ -364,6 +429,10 @@ Launch a new evaluation that includes `qwen3:8b`:
   its time per record is about 0.7 s instead of about 1.7 s. A note under the
   table explains the mark.
 
+The launch's own log line says why it pinned what it pinned:
+`launch …: qwen3:8b parallel=4 (map=4, gate=gated)`. Anything other than
+`gate=gated` means the gate from Step 0 doesn't match what's running now.
+
 Only runs launched **after** the change use it. Each run records the value it
 was launched with, and Resume continues at that value, so runs from before
 the change stay at 1 and stay comparable with each other.
@@ -391,11 +460,29 @@ evaluation.
 
 Only `qwen3:8b` belongs in it today. `granite4.1:8b`, `gemma3:4b` and
 `gemma4:12b` change 4–29 of 48 answers when their calls overlap, and Qwen 3.5
-can't run in parallel at all in Ollama 0.34. Before adding a model, measure
-it through `plan-parallel-calls.md` §4.1's gate on the analyst's host, and
-record the result in §5.3 above: model, digest, Ollama version, date, and
-differ counts. A different GPU, Ollama version or model digest is a new
-measurement.
+can't run in parallel at all in Ollama 0.34. For any other model, run its
+gate (Step 0) and add it to the map only if the verdict is `passes`. Adding
+it without a gate does nothing but put `gate=missing` in the log.
+
+#### After a re-pull or an Ollama upgrade
+
+A gate belongs to one set of weights on one Ollama version. After
+`ollama pull` changes a mapped model's digest, or after Ollama is upgraded,
+RA2 runs that model serially again (`gate=digest` or `gate=ollama_version`)
+until the gate is re-run. Nothing gives different answers without warning;
+the only loss is speed.
+
+Your system server now has four slots, so for a re-run the roles swap: start
+the private server with **one** slot, and point the flags the other way:
+
+```bash
+# second terminal, Linux
+sudo -u ollama env OLLAMA_HOST=127.0.0.1:11436 OLLAMA_NUM_PARALLEL=1 \
+  OLLAMA_MODELS=/usr/share/ollama/.ollama/models OLLAMA_NOPRUNE=1 ollama serve
+# first terminal
+just qualify-model qwen3:8b --gate 4 \
+  --one-slot http://127.0.0.1:11436/v1 --n-slot http://127.0.0.1:11434/v1
+```
 
 #### Undoing it
 

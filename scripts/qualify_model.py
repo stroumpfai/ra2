@@ -266,7 +266,9 @@ class _Qualifier:
         await services.evaluation.update_draft(
             evaluation_id, selected_models=(self._plan.tag,), size=size
         )
-        await services.evaluation.launch(evaluation_id)
+        # A measurement, not an evaluation: the gate this pass is part of
+        # can't be on record yet, so the map applies as asked (SD40).
+        await services.evaluation.launch(evaluation_id, measuring=True)
         await services.run.launch_runs(evaluation_id)
         runs = await services.run.list_runs(evaluation_id)
         run = runs.items[0]

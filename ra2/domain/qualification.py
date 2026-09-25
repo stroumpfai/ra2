@@ -111,6 +111,9 @@ class ParallelReason(StrEnum):
     beside `parallel=N`: a code, never a sentence (data-handling.md §5.1)."""
 
     GATED = "gated"
+    #: The qualifier's own gate passes: the measurement a gate is made of,
+    #: so there is no gate to ask yet (SD40).
+    MEASURING = "measuring"
     NOT_MAPPED = "not_mapped"
     NO_GATE = "missing"
     DIGEST = "digest"
@@ -335,6 +338,7 @@ def parallel_decision(
     qualification: Qualification | None,
     digest: str,
     ollama_version: str | None,
+    measuring: bool = False,
 ) -> ParallelDecision:
     """What the launch pins for one model (SD40). The only place this rule
     exists: the launch and the Models card both call it.
@@ -349,9 +353,17 @@ def parallel_decision(
     Every refusal pins **1**. A map entry above the gated N isn't lowered to
     the gated N, because that would run at a value nobody configured
     (plan-model-choice.md Q5).
+
+    `measuring` is the one exception, and it's here rather than in the launch
+    so the rule stays in one place. `just qualify-model` runs the passes a
+    gate is *made of*, in a throwaway database that can't hold a gate yet, so
+    it pins the map's value as asked. No adapter passes it: the API and the
+    UI launch the analyst's evaluations, which are never measurements.
     """
     if mapped is None or mapped <= 1:
         return ParallelDecision(1, ParallelReason.NOT_MAPPED)
+    if measuring:
+        return ParallelDecision(mapped, ParallelReason.MEASURING)
     if qualification is None or not qualification.gates:
         return ParallelDecision(1, ParallelReason.NO_GATE)
     if qualification.model_digest != digest:

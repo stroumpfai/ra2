@@ -27,7 +27,7 @@ Linux, NVIDIA RTX 5060 Ti 16 GB · Ollama 0.34.0.
 | Vehicles and people captured as entities | `gemma4:12b` | The only model that fills `entities` on every record. ~10 h at 3 000 records (§4) |
 | Fast iteration on a prompt | `qwen3:8b` on a Dev-sized corpus | ~1.5 min per 50 records |
 | **To avoid** | `qwen3.5:2b`, `qwen3.5:9b` | Rank last or near-last. `9b` is also 5× slower than `qwen3:8b` |
-| A model not on this page, or a new version of one that is | Measure it first | §6 |
+| A model not on this page, or a new version of one that is | `just qualify-model <tag>` | §6 |
 
 **Keep two or three of the leaders in the first real evaluation, not one.**
 The synthetic seed can't tell them apart (§3). Only real data can, and that's
@@ -161,8 +161,11 @@ server set up for parallel calls. The full counts are in
 | `qwen3.5:2b`, `qwen3.5:9b` | can't | Ollama 0.34 serves this architecture one call at a time whatever the setting |
 | `llama3.2:3b` | not measured | |
 
-**A verdict belongs to one digest on one Ollama version.** A re-pull or an
-Ollama upgrade is a new model as far as the gate is concerned (§6.3).
+**A verdict belongs to one digest on one Ollama version, and RA2 checks.**
+The launch applies a parallel-calls entry only with a passing gate for the
+digest that will run, on the Ollama version that's running. A re-pull or an
+Ollama upgrade takes the model back to serial until the gate is re-run (§6.3).
+The gate is `just qualify-model <tag> --gate 4 --n-slot URL` ([`performance.md` §5.4](performance.md)).
 
 ---
 
@@ -184,54 +187,67 @@ New models, and new versions of old tags, appear all the time. The table in
   run. Qwen 3.5 ranks below Qwen 3 here, so a version number predicts nothing
   in either direction.
 
-### 6.2 Measure it on the seed, beside a known model
+### 6.2 Measure it
 
-Stop RA2 first, then use a separate data directory. **`reset-seed` wipes the
-directory it's given, so it must never be the one holding real
-evaluations.**
+```bash
+just qualify-model <tag>
+```
+
+It runs the model over the 200-record synthetic seed in a temporary data
+directory, scores it exactly as an evaluation would, prints the result and
+stores it in RA2's database for this host. Your own evaluations aren't
+touched, and the temporary directory is deleted afterwards. Unload other
+models first (`ollama ps`, then `ollama stop <tag>`): the command refuses to
+measure while another one is loaded, because it would distort the timings.
+
+```
+qwen3:8b · digest 500a1f067a9f · Ollama 0.34.0
+  quality: macro-F1 0.895 (0.870–0.905) · 1.75 s/record · entities in 0% of records · 0 parse failures
+Recorded as 01a0… in …/ra2.sqlite.
+```
+
+Read it against §2:
+
+1. **Macro-F1.** Tied with the leaders, or behind? Ties are all the seed can
+   tell you (§3). Qualify `qwen3:8b` too, if it isn't already: if it doesn't
+   land near 0.895, something about the setup differs from this page, and
+   the new model's number can't be compared either.
+2. **Time per record**, times your corpus size.
+3. **Entities.** The share of records where the model filled `entities`.
+   No screen shows entities yet, so this line is the only place to see it.
+
+Per-language F1 is stored with the result, but not printed yet. To see it,
+and the per-feature table, launch an evaluation over a seeded trial data
+directory. **`reset-seed` wipes the directory it's given, so never point it at
+the one holding real evaluations.** Stop RA2 first:
 
 ```bash
 RA2_DATA_DIR=/tmp/ra2-trial just reset-seed yes --records 200
 RA2_DATA_DIR=/tmp/ra2-trial just dev
 ```
 
-In the app, select the new model **and `qwen3:8b`**, then launch. The known
-model is the yardstick: if `qwen3:8b` doesn't land near 0.895, something about
-the setup differs from this page, and the new model's number can't be
-compared either.
-
-Read, in this order:
-
-1. **Results → Ranking.** Is it tied with the leaders, or behind? Ties are
-   all the seed can tell you (§3).
-2. **Per-language table.** A model that holds German and drops French or
-   Italian is the `qwen3.5:2b` pattern.
-3. **Time per record** in the ranking, times your corpus size.
-
-**Entities can't be checked this way.** RA2 stores each record's entities
-but no screen and no API shows them yet. §4's counts were taken outside the
-app ([`performance.md` §7](performance.md)). A new model's time per record is
-a rough hint: among the leaders, the ones that write entities are the slow
-ones. The planned command in §6.4 reports entity fill directly.
-
-Delete `/tmp/ra2-trial` when you're done.
+A model that holds German and drops French or Italian is the `qwen3.5:2b`
+pattern. Delete `/tmp/ra2-trial` when you're done.
 
 ### 6.3 A new version of a tag you already use
 
 `ollama pull` can replace the weights behind a tag without changing its name.
 RA2 records the **digest** on every run, so the Evaluation screen's
-reproducibility line shows which weights ran.
+reproducibility line shows which weights ran, and every qualification is
+stored per digest.
 
-- **Quality numbers** describe the old digest. Re-run §6.2 before trusting
-  them.
-- **A parallel-calls entry** describes the old digest too. Take the tag out of
-  `RA2_LLM_PARALLEL_CALLS` until the gate has been re-run
-  ([`performance.md` §5.4](performance.md), "Adding another model").
+- **Quality numbers** describe the old digest. Run `just qualify-model` again.
+- **Parallel calls** stop automatically. The launch uses a map entry only
+  with a gate for the digest that will run, so the new weights run one record
+  at a time, and the log says `gate=digest`, until the gate is re-run
+  ([`performance.md` §5.4](performance.md), "After a re-pull or an Ollama
+  upgrade"). An Ollama upgrade does the same, with `gate=ollama_version`.
 - **Evaluations already run** keep their digest. Comparing an old run with a
   new one compares two models, not one.
 
 ### 6.4 Planned
 
-[`plan-model-choice.md`](../plan-model-choice.md) turns §6.2 and the gate
-into one command, `just qualify-model <tag>`, stores the result per digest,
-and shows it on the Models card. Until then, this section is the procedure.
+The Models card will show each model's stored result on its row: seed F1,
+time per record, entity fill and, where the launch would honour it,
+`parallel ×4` ([`plan-model-choice.md`](../plan-model-choice.md) Stage 5).
+Until then, the command's output is where to read it.

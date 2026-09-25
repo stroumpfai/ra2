@@ -28,6 +28,7 @@ Hence key-sorted, compact, `ensure_ascii=False`, and the codes ordered by
 """
 
 import json
+import logging
 import platform
 import statistics
 from collections.abc import Sequence
@@ -59,6 +60,7 @@ from ra2.domain.llm import (
     ModelCatalog,
     ModelInfo,
 )
+from ra2.domain.qualification import parallel_decision
 from ra2.infra.clock import Clock
 from ra2.infra.config import Settings
 from ra2.infra.gpu import GpuProbe
@@ -79,6 +81,7 @@ from ra2.persistence.repositories.corpus_repo import CorpusRepository
 from ra2.persistence.repositories.evaluation_repo import EvaluationRepository
 from ra2.persistence.repositories.feature_repo import FeatureRepository
 from ra2.persistence.repositories.prompt_repo import PromptRepository
+from ra2.persistence.repositories.qualification_repo import QualificationRepository
 from ra2.persistence.repositories.run_repo import RunRepository
 from ra2.persistence.session import session_scope
 from ra2.services.errors import (
@@ -121,6 +124,8 @@ __all__ = [
 
 #: `NotFoundError.kind` values — stable identifiers the API and UI switch on,
 #: the way `FindingCode` values are (CLAUDE.md).
+_log = logging.getLogger(__name__)
+
 _EVALUATION_KIND: Final = "evaluation"
 _CORPUS_KIND: Final = "corpus"
 _CONFIG_KIND: Final = "feature config"
@@ -531,7 +536,9 @@ class EvaluationService:
             evaluation = await self._require(session, evaluation_id)
             return await self._scope(session, evaluation)
 
-    async def launch(self, evaluation_id: EvaluationId) -> EvaluationView:
+    async def launch(
+        self, evaluation_id: EvaluationId, *, measuring: bool = False
+    ) -> EvaluationView:
         """The launch transaction (sw-design.md §15.2). In **one** transaction:
 
         1. verify the cited `feature_config` is frozen — an unfrozen one is
@@ -558,6 +565,12 @@ class EvaluationService:
             prompt language) and the launch's own preconditions — a template,
             at least one model, and a reachable endpoint to pin each model's
             digest against.
+        Each run's `llm_parallel_calls` is `parallel_decision`'s (SD40): the
+        map's value only with a passing gate for that model's digest on this
+        Ollama version, 1 otherwise, and the launch logs why. `measuring=True`
+        is `just qualify-model`'s and nobody else's: its passes *are* the gate
+        measurement, so the map applies as asked. No adapter passes it.
+
         :raises EvaluationLockedError: already launched.
         :raises NotFoundError: no such evaluation.
         """
@@ -566,6 +579,13 @@ class EvaluationService:
         connection = await self.connection_status()
         catalogue = await self._model_catalog.models()
         models = self._judge(catalogue, connection)
+        # Only when some entry could apply: an empty map, today's default,
+        # costs no extra round trip.
+        ollama_version = (
+            await self._model_catalog.version()
+            if any(calls > 1 for calls in self._settings.llm_parallel_calls.values())
+            else None
+        )
 
         async with session_scope(self._session_factory) as session:
             evaluation = await self._editable(session, evaluation_id)
@@ -601,7 +621,18 @@ class EvaluationService:
                     )
                     for feature in features
                 ],
-                runs=[self._new_run(evaluation, template, model, connection) for model in chosen],
+                runs=[
+                    self._new_run(
+                        evaluation,
+                        template,
+                        model,
+                        connection,
+                        parallel_calls=await self._parallel_calls(
+                            session, evaluation, model, ollama_version, measuring=measuring
+                        ),
+                    )
+                    for model in chosen
+                ],
                 is_dev=await self._is_dev(session, evaluation, corpus),
                 launched_at=launched_at,
             )
@@ -764,12 +795,52 @@ class EvaluationService:
             raise FeatureValidationError(validation_errors)
         return tuple(chosen)
 
+    async def _parallel_calls(
+        self,
+        session: AsyncSession,
+        evaluation: Evaluation,
+        model: ModelChoiceView,
+        ollama_version: str | None,
+        *,
+        measuring: bool,
+    ) -> int:
+        """SD40: what this model's run is pinned to, and a log line saying why.
+
+        The gate is the newest *gated* qualification for this digest, or for
+        any digest when this one has none, so a re-pull shows up as `digest`
+        rather than as "never measured".
+        """
+        mapped = self._settings.llm_parallel_calls.get(model.tag)
+        repo = QualificationRepository(session)
+        qualification = await repo.latest_for(
+            model.tag, model.digest, gated=True
+        ) or await repo.latest_for(model.tag, gated=True)
+        decision = parallel_decision(
+            mapped=mapped,
+            qualification=qualification,
+            digest=model.digest,
+            ollama_version=ollama_version,
+            measuring=measuring,
+        )
+        # Ids, a tag, numbers and a code: what `data-handling.md` §5.1 allows.
+        _log.info(
+            "launch %s: %s parallel=%d (map=%s, gate=%s)",
+            evaluation.id,
+            model.tag,
+            decision.n,
+            mapped if mapped is not None else "-",
+            decision.reason.value,
+        )
+        return decision.n
+
     def _new_run(
         self,
         evaluation: Evaluation,
         template: PromptTemplate,
         model: ModelChoiceView,
         connection: ConnectionView,
+        *,
+        parallel_calls: int,
     ) -> Run:
         """One `queued` run, **provenance and all** (mvp-spec.md §19.8).
 
@@ -792,10 +863,10 @@ class EvaluationService:
             # provenance reports, so re-pointing anything afterwards cannot
             # move an already-launched run (§19.8).
             llm_reasoning_effort=evaluation.reasoning_effort,
-            # SD38: this host's measured parallelism for *this* tag, pinned so
-            # Resume and the ranking read what the run executed at, not what
-            # the map says later. Unmapped means serial.
-            llm_parallel_calls=self._settings.llm_parallel_calls.get(model.tag, 1),
+            # SD38/SD40: this host's gated parallelism for *this* tag and
+            # digest, pinned so Resume and the ranking read what the run
+            # executed at, not what the map or a later gate says.
+            llm_parallel_calls=parallel_calls,
             status=RunStatus.QUEUED,
             host_platform=platform.platform()[:200],
             gpu_name=connection.gpu_name,

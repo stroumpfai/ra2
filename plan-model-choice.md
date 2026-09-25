@@ -8,7 +8,8 @@ SD40 in `sw-design.md`, the Models card in the design README, and
 §9 question is answered. **Stage 2 done on 2026-09-25** on
 `feat/model-choice`: the pure gate, the table, its revision `7d084d5a7dc6`
 and its repository. **Stage 3 done on 2026-09-25**: `just qualify-model`,
-`QualificationService` and the two new catalogue calls. Stage 4 is next. Authority as always:
+`QualificationService` and the two new catalogue calls. **Stage 4 done on
+2026-09-25**: the launch enforces the gate. Stage 5 is next. Authority as always:
 `mvp-spec.md` on *what*, `sw-design.md` on *how* (CLAUDE.md). Every frozen
 file the code touches is named as an amendment (§6).
 
@@ -457,7 +458,38 @@ The script is wiring. What it does is tested through the service and a
 `main(argv)` entry point with injected settings, the way `ra2/cli.py` is
 tested. There's no test-only branch (Do-NOT #12).
 
-### Stage 4 — enforcement at launch (D6)
+### Stage 4 — enforcement at launch (D6) ✅ (2026-09-25)
+
+**Done.** Amendment §9 (`config.py`, docstring only) is applied. That leaves
+only §4 and §7 (`readmodels.py`, `schemas.py`) for Stage 5. `just lint` is
+clean. `just test`: 2636 passed, 1 skipped. Where it differed:
+
+- **The measurement exception.** The qualifier's passes would otherwise be
+  pinned to 1 in a database that can't hold a gate yet. It's
+  `ParallelReason.MEASURING`, inside `parallel_decision(…, measuring=True)`,
+  so the rule keeps one home. `EvaluationService.launch(…, measuring=True)`
+  is the only way in, and the qualifier the only caller.
+  `test_no_adapter_launches_as_a_measurement` fails if `ra2/api/` or
+  `ra2/ui/` ever passes it. SD40 names it.
+- **The reason is logged at launch, not at run start.** The run worker
+  knows the pin but not why, and the launch is where the decision is made.
+  SD40 and §15.4 say so. The run-start line still prints `parallel=N`.
+- **The version is asked only when the map has an entry above 1**, so an
+  empty map (every host today) costs no extra round trip.
+  `test_an_unmapped_model_is_unaffected` pins `version_calls == 0`.
+- **The docs' order is the gate first.** `performance.md` §5.4 now opens with
+  Step 0: run the gate *before* changing the system Ollama. At that point it's
+  still the one-slot server the gate needs, beside a private four-slot one
+  started from the same model store. A new "After a re-pull or an Ollama
+  upgrade" section gives the swapped-roles command for later, when the system
+  server is already four-slot.
+- **Tests beyond the table:** a gate for other weights that's newer doesn't
+  shadow the current digest's; a failed gate; a map above the gated N; a
+  later quality-only qualification keeping the gate; and a measuring launch.
+  `test_resume_keeps_the_pin_even_after_a_new_qualification` wasn't written.
+  Resume reads only the run's pin and never a qualification (`run_service`
+  doesn't import one), so `test_resume_runs_at_the_pinned_parallelism`
+  already covers it.
 
 The analyst-facing docs change here, in the same commit as the enforcement,
 because this is when a host's existing map starts depending on a gate:
