@@ -1,9 +1,17 @@
 # Amendment — `feat/model-choice`
 
 > **PROPOSED in Stage 1 of [`plan-model-choice.md`](../../plan-model-choice.md)**
-> (2026-09-25). To be applied in Stage 2, in the same commit as the code that
-> needs it, as `feat-parallel-calls` was. No wave is running. Once applied,
-> it's recorded in `CONTRACTS.md` under "Model choice".
+> (2026-09-25). **Applied file by file, in the stage whose code needs it**, and
+> recorded in `CONTRACTS.md` under "Model choice" as each is applied. No wave
+> is running.
+>
+> | § | File | Applied |
+> |---|---|---|
+> | 1 | `ra2/domain/ids.py` | Stage 2 |
+> | 3 | `ra2/persistence/models.py` | Stage 2, plus `QualificationId: String(36)` in the type map, which SQLAlchemy requires for a `NewType` |
+> | 2, 5, 6, 8 | `domain/llm.py`, `container.py`, `main.py`, `justfile` | Stage 3 |
+> | 9 | `ra2/infra/config.py` | Stage 4 |
+> | 4, 7 | `readmodels.py`, `schemas.py` | Stage 5 |
 
 The design is `sw-design.md` **SD40** (§15.2, §15.4, §15.5, §15.7). In short:
 a model's fitness on this host becomes a stored, append-only

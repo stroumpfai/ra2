@@ -68,6 +68,7 @@ from ra2.domain.ids import (
     ObjektRowId,
     PersonRowId,
     PromptTemplateId,
+    QualificationId,
     RecordId,
     RunId,
 )
@@ -94,6 +95,7 @@ __all__ = [
     "Feature",
     "FeatureConfig",
     "Mismatch",
+    "ModelQualification",
     "ObjektCell",
     "ObjektRow",
     "PersonCell",
@@ -183,6 +185,7 @@ class Base(DeclarativeBase):
         RunId: String(_ID_LEN),
         ExtractionId: String(_ID_LEN),
         MismatchId: String(_ID_LEN),
+        QualificationId: String(_ID_LEN),
         FileKind: String(16),
         SourceKind: String(16),
         DeliveryStatus: String(16),
@@ -1339,3 +1342,42 @@ class Mismatch(Base):
     note: Mapped[str | None] = mapped_column(default=None)
 
     run: Mapped[Run] = relationship(back_populates="mismatches")
+
+
+class ModelQualification(Base):
+    """This host's measurement of one model (tag, digest) over the synthetic
+    seed (sw-design.md SD40, `plan-model-choice.md`).
+
+    **Append-only.** Re-qualifying adds a row, and the newest per
+    (tag, digest) wins, the way a re-run adds runs. Nothing updates or deletes
+    one except `just reset`, which wipes the database with it.
+
+    **Numbers only.** Written by `just qualify-model` from a throwaway data dir
+    over the synthetic seed. No delivery content can reach it, and no other
+    table references it.
+
+    The two summaries are JSON because they are read whole and never queried
+    inside. A new figure then costs a field, not a migration.
+    """
+
+    __tablename__ = "model_qualification"
+    __table_args__ = (
+        Index("ix_model_qualification_tag_digest", "model_tag", "model_digest", "measured_at"),
+        CheckConstraint("seed_records > 0", name="seed_records_positive"),
+    )
+
+    id: Mapped[QualificationId] = mapped_column(primary_key=True)
+    model_tag: Mapped[str] = mapped_column(String(200))
+    model_digest: Mapped[str] = mapped_column(String(64))
+    #: Compared at launch (SD40). `None` only when the endpoint did not say.
+    ollama_version: Mapped[str | None] = mapped_column(String(64), default=None)
+    #: Recorded, **not** compared (SD40): often unknown, and a name misses the
+    #: driver and CUDA versions that matter more.
+    gpu_name: Mapped[str | None] = mapped_column(String(200), default=None)
+    ra2_version: Mapped[str | None] = mapped_column(String(64), default=None)
+    measured_at: Mapped[datetime]
+    seed_records: Mapped[int]
+    #: `domain.qualification.QualitySummary`, serialised.
+    quality_json: Mapped[str]
+    #: `list[domain.qualification.GateResult]`; `[]` when not gated.
+    gate_json: Mapped[str] = mapped_column(default="[]")

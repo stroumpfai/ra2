@@ -633,6 +633,33 @@ the recommended set (plan §9 Q5). The design is `sw-design.md` §15.4 and
 | `tests/backend/services/run/conftest.py` | `seed(parallel_calls=…)`: one number or `model -> N`, pinned on each run as the launch would |
 | `tests/backend/services/run/test_transaction_boundary.py` | `test_a_row_and_its_children_are_committed_together` parametrised over N = 1, 3; the N=1 commit-sequence test kept, with a docstring saying why |
 
+
+---
+
+## Model choice — what this host measured about a model
+
+`feat/model-choice`, by `plan-model-choice.md`. **One amendment**
+(`contracts/amendments/feat-model-choice.md`), **applied file by file in the
+stage whose code needs it**, and **one revision**, `7d084d5a7dc6`, whose
+author is this branch's implementer. The design is `sw-design.md` `SD40`.
+
+### Amended files (already frozen)
+
+| File | Change | Stage | Amendment |
+|---|---|---|---|
+| `ra2/domain/ids.py` | + `QualificationId` | 2 | `feat-model-choice` §1 |
+| `ra2/persistence/models.py` | + `ModelQualification` (`model_qualification`): append-only, numbers only, referenced by nothing; `QualificationId` in the type map as `String(36)` like every id | 2 | `feat-model-choice` §3 |
+
+### New files
+
+| Path | What |
+|---|---|
+| `ra2/domain/qualification.py` | Pure. `canonical_answer`, `differ_count`, `noise_band` (floored at 2 of 48, scaled), `gate_verdict`, `parallel_decision`, and the types a qualification is made of |
+| `ra2/persistence/repositories/qualification_repo.py` | `add` and `latest_for(tag, digest=None, *, gated=False)`; no update, no delete. Encodes and decodes the two JSON columns |
+| `ra2/persistence/migrations/versions/…7d084d5a7dc6…` | `model_qualification`, a new table; no existing row touched. Registered in `tests/test_p5_contract.py`'s `POST_PHASE_5_REVISIONS` |
+| `tests/unit/qualification/` | The gate against the measured history, and one case per `ParallelReason` |
+| `tests/backend/persistence/test_qualification_repo.py` | Round trip, append-never-update, digest and gated filters |
+
 ---
 
 ## Phase 5 — owner: M35 (Wave 0), amendment only
