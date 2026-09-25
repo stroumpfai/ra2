@@ -10,7 +10,10 @@ SD40 in `sw-design.md`, the Models card in the design README, and
 and its repository. **Stage 3 done on 2026-09-25**: `just qualify-model`,
 `QualificationService` and the two new catalogue calls. **Stage 4 done on
 2026-09-25**: the launch enforces the gate. **Stage 5 done on 2026-09-25**: the
-Models card shows each model's qualification. Stage 6 (real Ollama) is next. Authority as always:
+Models card shows each model's qualification. **Stage 6 done on 2026-09-25**:
+three models qualified against real Ollama reproduce every figure and verdict
+on record (§1.4). All stages are done on `feat/model-choice`; it isn't merged
+yet. Authority as always:
 `mvp-spec.md` on *what*, `sw-design.md` on *how* (CLAUDE.md). Every frozen
 file the code touches is named as an amendment (§6).
 
@@ -58,6 +61,47 @@ The 200-record seed puts a perfect reader at ~90 % macro-F1
 is usable. It can't say which leader is best.** Everything this plan puts on
 screen has to be worded that way, or the Models card turns into a ranking the
 data doesn't support.
+
+### 1.4 Stage 6 results (2026-09-25)
+
+`just qualify-model <tag> --gate 4 --n-slot http://127.0.0.1:11435/v1` on
+this host (RTX 5060 Ti 16 GB, Ollama 0.34.0). The system service was
+one-slot, a private four-slot `ollama serve` ran on 11435 over the same model
+store, and the target was a throwaway data dir. It took 1 h 45 min for all
+three.
+
+| Model | Figure | On record (`docs/choosing-models.md`, `plan-parallel-calls.md` §1.2) | Stage 6 |
+|---|---|---|---|
+| `qwen3:8b` | macro-F1 | 0.895 (0.870–0.905) | **0.895 (0.870–0.905)** |
+| | per record | 1.71 s | 1.77 s |
+| | entities | 0 / 20 | 0 % |
+| | gate ×4 | passes: parallel 0–1, serial on 4 slots 0, 2.3–2.5× | **passes**: 1, 0, 2.53× |
+| `granite4.1:8b` | macro-F1 | 0.886 (0.861–0.897) | **0.886 (0.861–0.897)** |
+| | per record | 3.07 s | 3.11 s |
+| | entities | 0 / 20 | 0 % |
+| | gate ×4 | fails parallel: 14–15, 0–2, 2.7× | **fails parallel**: 10, 1, 2.62× |
+| `gemma4:12b` | macro-F1 | 0.899 (0.874–0.909) | **0.899 (0.874–0.909)** |
+| | per record | 11.28 s | 10.24 s |
+| | entities | 20 / 20 | 99.5 % |
+| | gate ×4 | fails parallel, narrowly: 4 (one pass), serial 0–3 | **fails parallel**: 9, 1, 2.39× |
+
+What this says:
+
+1. **Every macro-F1 and interval is identical**, and **every verdict
+   matches** D5's historical table. The command reproduces the hand
+   measurements it replaces.
+2. **Differ counts move between sessions, verdicts don't.** `granite4.1:8b`
+   went 14–15 → 10 and `gemma4:12b` 4 → 9. Both stay far above the band.
+   This is expected of a count taken from one pass per N, and it's why the
+   band is a floor rather than a tolerance.
+3. **`gemma4:12b` ran 9 % faster** than on record (10.24 vs 11.28 s). Not
+   investigated. The dev host had a second GPU-enabled Ollama in Docker when
+   the record was made (see the parallel-calls memory), which may explain it.
+4. **The card agrees with the launch.** Read headless through the real
+   services with `RA2_LLM_PARALLEL_CALLS={"qwen3:8b": 4, "granite4.1:8b": 4}`,
+   `qwen3:8b` showed `qualified · parallel ×4` at 0.70 s per record, and
+   `granite4.1:8b` showed `qualified` with **parallel 1**, despite its map
+   entry. An unmeasured model showed no card.
 
 ---
 
@@ -549,7 +593,26 @@ table.
 | `test_an_unmeasured_model_is_still_selectable` | ui | "Not measured" never disables a tick |
 | E2E: the row's third line exists, 10.5px mono, and the row still fits `MODELS_WELL_PX` | e2e | Design fidelity §8.2 |
 
-### Stage 6 — verify on this host
+### Stage 6 — verify on this host ✅ (2026-09-25)
+
+**Done.** Results are in §1.4. Two things came up first:
+
+- **A bug the fakes couldn't show.** Moving from the one-slot server to the
+  four-slot one left the measured model resident on the first for its
+  keep-alive while the second loaded a copy: 8.1 + 10.4 GB for `gemma4:12b`
+  on 16 GB. `ModelCatalog.release(tag)` (Ollama's `keep_alive: 0`) now
+  unloads it from the server a pass doesn't use, and the qualifier waits for
+  `/api/ps` to confirm. Other models are still refused and never unloaded.
+  Committed as `63af2ae`, with tests, before the run.
+- **A flaky UI test of this branch's own**, found by the gate, fixed in the
+  same commit.
+
+`just qualify-model` printed only counts, times, scores and verdicts. The
+private server was stopped by PID (checked against its command line first).
+The system service was never reconfigured.
+
+**Not done:** the Status line should name the merge commit, and there is
+none yet.
 
 Throwaway everything, as plan-parallel-calls.md Stage 0b did. Unload every
 model on 11434 first. The N-slot server is a private `ollama serve` on
