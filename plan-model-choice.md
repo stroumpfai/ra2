@@ -2,8 +2,10 @@
 
 **Status.** Written 2026-09-24 against `ecc4db4`. **Stage 0 done on
 2026-09-25**: `docs/choosing-models.md` now holds model choice, and
-`docs/performance.md` keeps time and cost. §9 Q1, Q3, Q5 and Q6 were answered
-on 2026-09-25. Q2 and Q4 are still open, and Stage 1 waits on them. Authority as always:
+`docs/performance.md` keeps time and cost. **Stage 1 done on 2026-09-25**:
+SD40 in `sw-design.md`, the Models card in the design README, and
+`contracts/amendments/feat-model-choice.md` (proposed, not yet applied). Every
+§9 question is answered. Stage 2 is next. Authority as always:
 `mvp-spec.md` on *what*, `sw-design.md` on *how* (CLAUDE.md). Every frozen
 file the code touches is named as an amendment (§6).
 
@@ -74,7 +76,7 @@ data doesn't support.
 
 **D1. A qualification is a measurement of a (tag, digest) on this host.**
 It records the tag, digest, Ollama version, GPU name (or `null`), date, seed
-size and RA2 commit, plus two optional parts:
+size and RA2's installed version, plus two optional parts:
 
 - **Quality and cost** (always): macro-F1 with its interval, per-language
   mean F1, median and mean latency, median completion tokens, time per record
@@ -237,7 +239,7 @@ model_qualification
   model_digest       TEXT NOT NULL
   ollama_version     TEXT NULL
   gpu_name           TEXT NULL
-  ra2_commit         TEXT NULL
+  ra2_version        TEXT NULL
   measured_at        TIMESTAMP NOT NULL
   seed_records       INTEGER NOT NULL
   quality_json       TEXT NOT NULL     -- QualitySummary
@@ -257,10 +259,13 @@ or delete** (D2).
   `RankingService`, then hands the raw outputs to the domain functions. Raw
   text never leaves the service.
 - `record(q: Qualification) -> None`: used on the target app.
-- `latest(tags) -> dict[str, Qualification]`: used by `EvaluationService`
-  for the Models card and by `_new_run` for D6.
-
 It joins the `Services` bundle (`container.py`, frozen → amendment).
+
+`EvaluationService` doesn't call it. For the Models card and for `_new_run`
+(D6), it reads `QualificationRepository.latest_for` with its own session
+factory, the same way it reads every other table it needs. That avoids
+adding a cross-service protocol to the frozen `protocols.py` (Stage 1
+decision).
 
 ### 4.4 The launch (D6)
 
@@ -303,20 +308,40 @@ nowhere**, not on any screen and not in the API. An analyst trying a new
 model can't check entity fill from the app. D1's qualification reports it,
 which is one more reason for Stage 3.
 
-### Stage 1 — the contract, first
+### Stage 1 — the contract, first ✅ (2026-09-25)
 
-- `sw-design.md`: **SD40** (D1–D8). SD38's "enforcing it is left out"
-  sentence becomes a pointer to SD40. §10 adds no setting. §15.4 describes
-  the launch's decision. §15.7 lists the new module, service and table.
-- `design/prompt-evaluation/README.md` step 4: the third line and its four
-  states (D7). The state model on l.320 gains `qualification`.
-- `docs/choosing-models.md` §6: the manual procedure becomes
-  `just qualify-model`, and §6.4 ("Planned") goes.
-- `docs/performance.md` §5.4: the reordered steps (§4.5), with the old
-  "record the result in §5.3" replaced by "run `just qualify-model`".
-- `contracts/amendments/feat-model-choice.md` for §6's files.
+**Done.**
 
-**Done when** the design says what Stages 2–5 build, before they build it.
+- `sw-design.md`: **SD40** (D1–D8, with Q2–Q5's answers). SD38's
+  "enforcing it is left out" now points to SD40. The §10 row for
+  `RA2_LLM_PARALLEL_CALLS` says an entry needs a gate on record. §15.2 lists
+  `model_qualification`, §15.4 describes the launch's decision, §15.5 the
+  two new `ModelCatalog` calls, and §15.7 the new module, repository,
+  service and script.
+- `design/prompt-evaluation/README.md` step 4: the third line, its four
+  states as `data-state`, the no-badge rule, and the state model.
+- `contracts/amendments/feat-model-choice.md`: proposed diffs for §6's
+  files. It's applied in Stage 2.
+
+Four decisions Stage 1 made that the plan hadn't:
+
+- **The models well grows from 196px to 252px.** The design's rule is "4
+  visible rows", and the third line makes a row 63px instead of 49px.
+  Keeping 196px would quietly show three rows. `test_scroll_well_caps_height…`
+  in `tests/ui/test_components.py` passes its own 196 to the component and
+  doesn't change. Stage 5's E2E measures the rendered row height.
+- **`EvaluationService` reads the repository, not `QualificationService`**
+  (§4.3), so the frozen `protocols.py` isn't touched.
+- **`ra2_version` instead of `ra2_commit`.** It comes from
+  `importlib.metadata`. A commit would need a `git` shell-out from `ra2/`
+  (N3), and an installed copy has no `.git`.
+- The amendment names **`ra2/domain/ids.py`** too (`QualificationId`), so
+  §6 lists nine frozen files, not seven.
+
+**Moved out of Stage 1:** the analyst-facing docs
+(`docs/choosing-models.md` §6 and `docs/performance.md` §5.4). They would
+describe a command that doesn't exist yet, so they change in Stage 4, when
+the command and the enforcement both do.
 
 ### Stage 2 — domain and persistence
 
@@ -359,6 +384,14 @@ The script is wiring. What it does is tested through the service and a
 tested. There's no test-only branch (Do-NOT #12).
 
 ### Stage 4 — enforcement at launch (D6)
+
+The analyst-facing docs change here, in the same commit as the enforcement,
+because this is when a host's existing map starts depending on a gate:
+
+- `docs/choosing-models.md` §6: the manual procedure becomes
+  `just qualify-model`, and §6.4 ("Planned") goes.
+- `docs/performance.md` §5.4: the reordered steps (§4.5), with the old
+  "record the result in §5.3" replaced by "run `just qualify-model`".
 
 | Test | Layer | Asserts |
 |---|---|---|
@@ -415,19 +448,20 @@ names the merge commit.
 
 | File | Change |
 |---|---|
+| `ra2/domain/ids.py` | `+ QualificationId` |
 | `ra2/domain/llm.py` | `+ ModelCatalog.version() -> str \| None` and `+ ModelCatalog.loaded() -> tuple[str, ...]` (`/api/ps`, empty when unreachable) |
 | `ra2/persistence/models.py` | `+ ModelQualification` |
 | `ra2/services/readmodels.py` | `+ QualificationCardView`; `+ ModelChoiceView.qualification` |
-| `ra2/services/container.py` | `+ qualifications: QualificationService` |
+| `ra2/services/container.py` | `+ qualification: QualificationService` |
 | `ra2/api/schemas.py` | `+ ModelChoiceResponse.qualification` |
 | `justfile` | `+ qualify-model` |
 | `ra2/main.py` | Wiring `QualificationService` into `Services` |
 
-All go in `contracts/amendments/feat-model-choice.md` and into
-`CONTRACTS.md`'s change log. `ra2/infra/config.py` is **not** touched: D6
-changes what the map *means*, not its shape, and its docstring's
-"this sentence is the check" moves to SD40 in Stage 1 (that one docstring edit
-is part of the amendment).
+| `ra2/infra/config.py` | Docstring only: "this sentence is the check" becomes "the launch checks it" (SD40). No field, default or validator changes |
+
+All nine are in `contracts/amendments/feat-model-choice.md` with their exact
+diffs, and they go into `CONTRACTS.md`'s change log when Stage 2 applies
+them.
 
 ---
 
@@ -485,8 +519,10 @@ is part of the amendment).
 - **Q5: 1.** A map entry above the gated N pins 1, with reason `FAILED`.
 - **Q6 yes.** Done, as a separate document (Stage 0).
 
-**Still open:** Q2 and Q4. Both are recommended **yes**, and Stage 1 writes
-SD40 from the answers. Here is what each one decides.
+**Answered 2026-09-25, later:** Q3 confirmed as "don't keep". **Q2 yes**
+(floor at 2 of 48) and **Q4 yes** (digest and Ollama version compared, GPU
+name recorded only). Both are in SD40. For the record, here is what each one
+decided.
 
 ### Q2 in detail: the noise-band floor
 
