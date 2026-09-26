@@ -17,6 +17,10 @@ answered as this plan recommends. **Stage 2 done on 2026-09-26**:
 renamed read-model and API field, four tests. **Stage 3 done on 2026-09-26**:
 the VRAM column, the Model column's `digest · size`, the em dash, the note —
 and the design's "must agree with the model sub-line" asserted in the browser.
+**Stage 4 done on 2026-09-26** (§5): two real 48-record runs against this
+host's Ollama in a throwaway data dir reproduce the pin exactly, and
+`docs/performance.md` §6 no longer lists the gap. **All stages done; not yet
+merged.**
 
 ---
 
@@ -248,6 +252,22 @@ Ranking tab prints no promise it does not keep.
 
 **Exit:** the audit table in `fix-ranking-token-format.md` reads sixteen of
 sixteen.
+
+**Measured, 2026-09-26.** `qwen3.5:2b` + `llama3.2:3b` over the 48-record seed
+in a throwaway `RA2_DATA_DIR`, launched and scored through the real services
+against this host's Ollama, both runs `done` at 48/48:
+
+| Model | Digest | Macro F1 | Median latency | Pinned size | Catalogue | Renders |
+|---|---|---|---|---|---|---|
+| `qwen3.5:2b` | `324d162b` | 0.737 | 2 287 ms | 2 741 192 820 | 2 741 192 820 | `2.7 GB` |
+| `llama3.2:3b` | `a80c4f17` | 0.807 | 2 164 ms | 2 019 393 189 | 2 019 393 189 | `2.0 GB` |
+
+Both share rank 1 — six scored features on 48 records do not separate them,
+which is the verdict the tab composes. The pin equals the catalogue's
+`size_bytes` for both, so the Models card and the ranking cannot disagree.
+With the column nulled on both runs, as a pre-revision run carries it, the
+VRAM cell reads `—` and the sub-line falls back to `324d162b` / `a80c4f17`
+alone. Nothing but ids, counts, scores and sizes was printed (Do-NOT #13).
 
 ---
 
