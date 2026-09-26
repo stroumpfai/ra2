@@ -19,8 +19,8 @@ the VRAM column, the Model column's `digest · size`, the em dash, the note —
 and the design's "must agree with the model sub-line" asserted in the browser.
 **Stage 4 done on 2026-09-26** (§5): two real 48-record runs against this
 host's Ollama in a throwaway data dir reproduce the pin exactly, and
-`docs/performance.md` §6 no longer lists the gap. **All stages done; not yet
-merged.**
+`docs/performance.md` §6 no longer lists the gap. **All stages done; merged
+into `main` as `fe1c0e4`.**
 
 ---
 
