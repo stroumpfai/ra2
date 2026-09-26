@@ -1083,6 +1083,20 @@ class Run(Base):
     #: `server_default` is the migration's backfill, declared here too so
     #: `alembic check` sees one truth (`Evaluation.reasoning_effort`'s rule).
     llm_parallel_calls: Mapped[int] = mapped_column(default=1, server_default="1")
+    #: sw-design.md SD41 — the catalogue's `size_bytes` for this tag at launch,
+    #: the number the Models card showed beside the tick. The ranking reports
+    #: it as VRAM, in its own column and in the Model column's `digest · size`
+    #: sub-line, so the design's "must agree with the model sub-line" holds by
+    #: construction. Pinned here rather than read when the tab is opened: a
+    #: ranking is derived from stored rows (§16.5), `ollama pull` moves a tag's
+    #: size behind an unchanged name, and results are read with Ollama stopped.
+    #:
+    #: **NULLABLE, no backfill**, unlike `llm_parallel_calls` above: that
+    #: column's `1` was a fact about every earlier row, and there is no
+    #: equivalent fact here. A run launched before this column recorded no
+    #: size, and the ranking renders that absence as an em dash — `0` is the
+    #: defect this column repairs.
+    model_size_bytes: Mapped[int | None] = mapped_column(default=None)
 
     evaluation: Mapped[Evaluation] = relationship(back_populates="runs")
     extractions: Mapped[list[Extraction]] = relationship(

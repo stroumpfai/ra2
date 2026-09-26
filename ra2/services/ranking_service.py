@@ -132,14 +132,18 @@ class RankingService:
                     tied=by_model[run.id].tied,
                     worse=by_model[run.id].worse,
                     verdict=_verdict(by_model[run.id]),
-                    # Reported, never scored (SD20, SD38). None of the six
-                    # below takes any part in `rank`.
+                    # Reported, never scored (SD20, SD38, SD41). None of the
+                    # six below takes any part in `rank`.
                     presence_rate=reported[run.id]["presence"],
                     median_latency_ms=int(reported[run.id]["latency"]),
                     prompt_tokens=int(reported[run.id]["tokens"]),
-                    vram_bytes=0,
                     ms_per_record=round(reported[run.id]["per_record"]),
                     parallel_calls=run.llm_parallel_calls,
+                    # SD41. The run's own pin, not the catalogue's answer
+                    # today: this tab is derived from stored rows, and a
+                    # re-pull moves a tag's size behind an unchanged name.
+                    # `None` stays `None` — the tab renders an em dash.
+                    model_size_bytes=run.model_size_bytes,
                 )
                 for run in ordered
                 if run.id in by_model

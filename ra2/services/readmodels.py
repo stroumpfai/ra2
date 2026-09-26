@@ -1088,8 +1088,8 @@ class RankingRow:
     design's own rule 4, "the tie-breaker you apply, not one the tool
     applies". The presence rate joins them (`SD20`): §11.2 is unambiguous that
     presence has no gold label, and a model that flags everything present
-    maximises it. So do time per record and parallel calls (`SD38`). None of
-    them takes any part in `rank`.
+    maximises it. So do time per record and parallel calls (`SD38`), and the
+    model's size (`SD41`). None of them takes any part in `rank`.
     """
 
     model_id: str
@@ -1106,7 +1106,6 @@ class RankingRow:
     presence_rate: float
     median_latency_ms: int
     prompt_tokens: int
-    vram_bytes: int
     #: `mean(latency_ms) ÷ parallel_calls`, by Little's law. It is the cost
     #: per record at this run's parallelism, and it stays comparable across
     #: runs whose `median_latency_ms` doesn't (SD38). `0` when no row carries a
@@ -1115,6 +1114,12 @@ class RankingRow:
     #: The run's pinned `llm_parallel_calls`. `> 1` marks the median latency
     #: cell `×N`.
     parallel_calls: int = 1
+    #: The run's pinned `model_size_bytes` — the size the endpoint reported for
+    #: this tag at launch, rendered as the design's VRAM column *and* as the
+    #: size half of the Model column's `digest · size` sub-line, from this one
+    #: field (`SD41`). `None` for a run launched before that column existed,
+    #: which both cells render as an em dash: `0` is the defect it repairs.
+    model_size_bytes: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

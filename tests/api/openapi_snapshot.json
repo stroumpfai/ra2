@@ -3433,6 +3433,17 @@
             "title": "Model Id",
             "type": "string"
           },
+          "model_size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Size Bytes"
+          },
           "ms_per_record": {
             "default": 0,
             "title": "Ms Per Record",
@@ -3467,10 +3478,6 @@
             "title": "Verdict",
             "type": "string"
           },
-          "vram_bytes": {
-            "title": "Vram Bytes",
-            "type": "integer"
-          },
           "worse": {
             "title": "Worse",
             "type": "integer"
@@ -3490,8 +3497,7 @@
           "verdict",
           "presence_rate",
           "median_latency_ms",
-          "prompt_tokens",
-          "vram_bytes"
+          "prompt_tokens"
         ],
         "title": "RankingRowResponse",
         "type": "object"

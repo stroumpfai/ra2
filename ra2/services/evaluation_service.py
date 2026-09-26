@@ -932,6 +932,12 @@ class EvaluationService:
             # digest, pinned so Resume and the ranking read what the run
             # executed at, not what the map or a later gate says.
             llm_parallel_calls=parallel_calls,
+            # SD41: the size the endpoint reported for this tag when the
+            # analyst ticked it — the Models card's own `· 5.2 GB`. Pinned
+            # here because it is a fact about *this* run: `ollama pull` moves
+            # a tag's size behind an unchanged name, and the ranking reads
+            # stored rows, never the catalogue (§16.5).
+            model_size_bytes=model.size_bytes,
             status=RunStatus.QUEUED,
             host_platform=platform.platform()[:200],
             gpu_name=connection.gpu_name,

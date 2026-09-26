@@ -1091,14 +1091,18 @@ class RankingRowResponse(_Schema):
     tied: int
     worse: int
     verdict: str
-    #: Reported, never scored — and neither are the three below (SD20).
+    #: Reported, never scored — and neither are the four below (SD20).
     presence_rate: float
     median_latency_ms: int
     prompt_tokens: int
-    vram_bytes: int
     #: Reported, never scored (SD38): mean latency ÷ parallel calls.
     ms_per_record: int = 0
     parallel_calls: int = 1
+    #: Reported, never scored (SD41): the size the endpoint reported for this
+    #: run's tag at launch, which the Ranking tab renders as VRAM. `None` for a
+    #: run launched before the column existed — **not** `0`, which is what this
+    #: field carried, hard-coded, before SD41.
+    model_size_bytes: int | None = None
 
 
 class SeparatingRowResponse(_Schema):

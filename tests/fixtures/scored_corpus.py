@@ -104,6 +104,15 @@ class ScoredCorpus:
     record_ids: tuple[RecordId, ...]
 
 
+#: SD41 — what the endpoint would report for this fixture's roster, in the
+#: design's own numbers. A model outside it pins `None`, which is the
+#: pre-revision run's state.
+MODEL_SIZE_BYTES: dict[str, int] = {
+    "qwen3:14b": 12_100_000_000,
+    "mistral-small:24b": 15_600_000_000,
+}
+
+
 async def seed_scored_corpus(
     session: AsyncSession,
     *,
@@ -196,6 +205,15 @@ async def seed_scored_corpus(
                 host_platform="linux",
                 gpu_name="none",
                 llm_endpoint="http://127.0.0.1:11434/v1",
+                # SD41. The size a launch would have pinned from the
+                # catalogue, in the design's own figures for this roster
+                # (`design/results/README.md` §3b: 12.1 GB and 15.6 GB), so the
+                # Ranking tab's VRAM column and Model sub-line render what the
+                # drawn board shows. A run with **no** size is the other case
+                # and is made by nulling this column, the way the parallel
+                # tests set `llm_parallel_calls` — the absence is a rendering
+                # hazard, not one of the scoring hazards above.
+                model_size_bytes=MODEL_SIZE_BYTES.get(model),
             )
         )
     await session.flush()

@@ -160,6 +160,37 @@ async def test_the_ranking_tab_serialises_with_shared_ranks(
 
 
 @pytest.mark.asyncio
+async def test_the_ranking_wire_carries_the_pinned_size_and_never_a_zero(
+    api_client: AsyncClient,
+    scored: ScoredCorpus,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """**SD41.** `model_size_bytes` replaced `vram_bytes`, which every row
+    carried as a hard-coded `0` — a number no client could read a meaning out
+    of.
+
+    On the wire the field is the run's pin, and `null` when the run has none:
+    the absence has to survive serialisation, or the tab has no way to tell it
+    from a measurement.
+    """
+    from sqlalchemy import update
+
+    from ra2.persistence.models import Run
+
+    body = (await api_client.get(f"/api/v1/evaluations/{scored.evaluation_id}/ranking")).json()
+    assert body["rows"]
+    assert all(row["model_size_bytes"] > 0 for row in body["rows"])
+    assert all("vram_bytes" not in row for row in body["rows"])
+
+    async with db_session_factory() as session:
+        await session.execute(update(Run).values(model_size_bytes=None))
+        await session.commit()
+
+    body = (await api_client.get(f"/api/v1/evaluations/{scored.evaluation_id}/ranking")).json()
+    assert all(row["model_size_bytes"] is None for row in body["rows"])
+
+
+@pytest.mark.asyncio
 async def test_the_ranking_matches_the_extraction_tab_over_the_wire(
     api_client: AsyncClient, scored: ScoredCorpus
 ) -> None:
