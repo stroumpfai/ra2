@@ -244,8 +244,16 @@ qwen3:14b tie on 4 of the 7 scored features and their macro intervals cross. Pic
 | Presence | 92px, right | mono presence score from tab 2 |
 | Best / tied / worse | 120px | three mono 11px counts in `--ink` / `--ink2` / `--ink3` |
 | Median latency | 104px, right | mono value over mono 10.5px token count |
-| VRAM | 78px | mono size — **must agree with the model sub-line** |
+| VRAM | 78px | mono size — **must agree with the model sub-line** (see the note below) |
 | Verdict | 134px | `.pill`: "tied for best" as filled accent (leader) and outlined accent (tied), "behind on 5" as neutral `--rule2` / `--ink2` — the same vocabulary as tab 1's `.mk` |
+
+**Note on VRAM, added post-phase-5 (`sw-design.md` SD41).** The figure is the model's size as the
+endpoint reported it **at launch**, pinned on the run (`run.model_size_bytes`) and rendered from one
+field in both cells — which is what makes "must agree with the model sub-line" structural rather than a
+rule to remember. A *loaded* model's footprint is a different number, and one KV cache larger per
+parallel call (`docs/performance.md` §4.2, §5.4), so the rendered table carries a one-line footnote
+saying so, beside the `×N` note. A run launched before that column existed renders `—` in both cells,
+never `0`.
 
 Fixtures: **1** mistral‑small:24b 4b81e2d5 · 15.6 GB · 0.830 [0.815–0.844] · 0.907 · 3/3/1 · 1 505 ms ·
 2.4 M tok — **1** qwen3:14b a7d3f19c · 12.1 GB · 0.821 [0.806–0.836] · 0.914 · 4/1/2 · 968 ms ·

@@ -305,6 +305,34 @@ def test_j13_the_ranking_macro_is_the_mean_of_the_extraction_tabs_own_cells(
     )
 
 
+def test_j13_the_ranking_vram_agrees_with_the_model_sub_line(
+    page: Page, server_url: str, scored_evaluation: ScoredCorpus
+) -> None:
+    """**SD41**, and the one rule `design/results/README.md` §3b states about
+    this column: the VRAM cell "must agree with the model sub-line".
+
+    Both cells render one `RankingRow.model_size_bytes`, so agreement is a
+    property of the read model rather than a habit of the renderer — and this
+    is where a reader would see it break, at the drawn width. It also asserts
+    the column is *there*: it was promised by four documents and rendered by
+    none, with `ranking_service` filling it with `0`.
+    """
+    _open(page, server_url, scored_evaluation, "ranking")
+    rows = page.locator('[data-testid="ranking-row"]')
+    expect(rows).not_to_have_count(0)
+
+    for index in range(rows.count()):
+        row = rows.nth(index)
+        vram = row.locator('[data-testid="vram"]').inner_text().strip()
+        sub_line = row.locator('[data-testid="model-sub-line"]').inner_text().strip()
+        assert vram.endswith(" GB"), f"the VRAM cell reads {vram!r}"
+        assert sub_line.endswith(f" · {vram}"), (
+            f"the Model sub-line {sub_line!r} disagrees with the VRAM cell {vram!r}"
+        )
+
+    expect(page.locator('[data-testid="vram-note"]')).to_be_visible()
+
+
 def test_j13_the_ranking_does_not_claim_the_best_column_sums_to_the_feature_count(
     page: Page, server_url: str, scored_evaluation: ScoredCorpus
 ) -> None:

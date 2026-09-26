@@ -39,6 +39,7 @@ __all__ = [
     "fingerprint_badge",
     "footnote",
     "format_count",
+    "format_gigabytes",
     "format_latency_ms",
     "format_local",
     "format_tokens",
@@ -74,6 +75,8 @@ PAGE_SIZES: Final[tuple[int, ...]] = (10, 25, 50, 100)
 
 #: Where `format_tokens` switches from a thousands space to `M`.
 _TOKENS_PER_MILLION: Final = 1_000_000
+#: Decimal GB, matching `GpuInfo.total_vram_gb` and how Ollama reports sizes.
+_BYTES_PER_GB: Final = 1_000_000_000
 
 
 def format_count(value: int) -> str:
@@ -82,6 +85,21 @@ def format_count(value: int) -> str:
     Presentation only — the number itself is always a service's.
     """
     return f"{value:,}".replace(",", " ")
+
+
+def format_gigabytes(value: int) -> str:
+    """`8_500_000_000` -> `"8.5 GB"`. Decimal GB, one decimal, everywhere a
+    model's size is rendered.
+
+    **Decimal, not binary**, matching `GpuInfo.total_vram_gb` and how Ollama
+    itself reports sizes: the Models card's `· 8.5 GB`, the VRAM-limit refusal
+    it can turn into, and Ranking's VRAM column (`SD41`) are three renderings
+    of one datum, and a 7 % unit disagreement between them would read as a
+    disagreement about the model.
+
+    Presentation only — the byte count is always a service's.
+    """
+    return f"{value / _BYTES_PER_GB:.1f} GB"
 
 
 def format_tokens(count: int) -> str:

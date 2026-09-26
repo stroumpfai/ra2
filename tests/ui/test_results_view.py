@@ -30,7 +30,7 @@ from ra2.persistence.models import Run
 from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
 from ra2.services.container import Services
 from ra2.services.scoring_service import ScoringService
-from ra2.ui.components import format_latency_ms, format_tokens
+from ra2.ui.components import format_gigabytes, format_latency_ms, format_tokens
 from ra2.ui.views.results.chrome import DEV_PILL, RUN_PILL
 from ra2.ui.views.results.extraction_tab import (
     ENCODING_CAVEAT,
@@ -44,7 +44,13 @@ from ra2.ui.views.results.presence_tab import (
     SCOPE_BANNER,
     WINDOWS_1252_CAVEAT,
 )
-from ra2.ui.views.results.ranking_tab import COMPUTATION_RULES, PARALLEL_NOTE, VALIDITY_FOOTER
+from ra2.ui.views.results.ranking_tab import (
+    COMPUTATION_RULES,
+    EMPTY_CELL,
+    PARALLEL_NOTE,
+    VALIDITY_FOOTER,
+    VRAM_NOTE,
+)
 
 
 class _Ids:
@@ -426,6 +432,59 @@ async def test_the_ranking_token_column_groups_its_digits(scored: Scored) -> Non
     }
     assert expected <= rendered
     assert not any(text.isdigit() and len(text) > 3 for text in rendered)
+
+
+async def test_the_ranking_vram_column_agrees_with_the_model_sub_line(
+    scored: Scored,
+) -> None:
+    """**SD41**, and `design/results/README.md` §3b's only stated rule about
+    this column: the VRAM cell "must agree with the model sub-line".
+
+    Both render one `RankingRow.model_size_bytes`, so the rule is structural
+    and this is what says so. The expectation comes from the read model.
+    """
+    view = await scored.services.ranking.ranking_tab(scored.corpus.evaluation_id)
+    sizes = [row.model_size_bytes for row in view.rows]
+    assert sizes and all(size is not None for size in sizes)
+    expected = {format_gigabytes(size) for size in sizes if size is not None}
+
+    await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}&tab=ranking")
+    vram = {
+        str(getattr(e, "text", ""))
+        for cell in scored.user.find(marker="vram").elements
+        for e in cell.descendants()
+    }
+    sub_lines = [
+        str(getattr(e, "text", "")) for e in scored.user.find(marker="model-sub-line").elements
+    ]
+    assert expected <= vram
+    for size in expected:
+        assert any(line.endswith(f" · {size}") for line in sub_lines)
+    await scored.user.should_see(VRAM_NOTE)
+
+
+async def test_a_run_without_a_pinned_size_renders_an_em_dash(scored: Scored) -> None:
+    """**SD41, D5.** A run launched before the column existed carries no size.
+
+    Both cells say so: the VRAM cell is an em dash and the sub-line falls back
+    to the digest alone. `0` is what this column rendered for a whole phase,
+    and a zero here reads as a model that needs no memory.
+    """
+    async with scored.session_factory() as session:
+        await session.execute(update(Run).values(model_size_bytes=None))
+        await session.commit()
+
+    await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}&tab=ranking")
+    vram = [
+        str(getattr(e, "text", ""))
+        for cell in scored.user.find(marker="vram").elements
+        for e in cell.descendants()
+    ]
+    assert vram and set(vram) == {EMPTY_CELL}
+    sub_lines = [
+        str(getattr(e, "text", "")) for e in scored.user.find(marker="model-sub-line").elements
+    ]
+    assert sub_lines and not any("GB" in line for line in sub_lines)
 
 
 async def test_a_serial_ranking_carries_no_parallel_mark(scored: Scored) -> None:

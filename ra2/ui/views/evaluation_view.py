@@ -141,6 +141,7 @@ from ra2.ui.components import (
     data_table,
     dialog_card,
     format_count,
+    format_gigabytes,
     format_latency_ms,
     format_local,
     icon_button,
@@ -973,11 +974,11 @@ class _EvaluationPage:
         Byte-to-gigabyte formatting only — `fits_vram` is the service's
         judgement (sw-design.md §15.6), never re-derived here.
         """
-        size = _gigabytes(choice.size_bytes)
+        size = format_gigabytes(choice.size_bytes)
         if not choice.disabled:
             return f"digest {choice.digest} · {size}"
         vram = self._connection.gpu_vram_bytes if self._connection is not None else None
-        limit = UNKNOWN_VALUE if vram is None else _gigabytes(vram)
+        limit = UNKNOWN_VALUE if vram is None else format_gigabytes(vram)
         return f"{size} — exceeds {limit} VRAM"
 
     def _models_footer(self, models: Sequence[ModelChoiceView]) -> None:
@@ -2175,12 +2176,6 @@ def _qualification_text(card: QualificationCardView | None) -> str:
     if card.state is QualificationState.SERVER_SENSITIVE:
         text += QUALIFICATION_SERVER_SENSITIVE
     return text
-
-
-def _gigabytes(value: int) -> str:
-    """`8_500_000_000` -> `"8.5 GB"`. Presentation only, exactly like
-    `format_count`: the byte count is always a service's."""
-    return f"{value / 1_000_000_000:.1f} GB"
 
 
 # --- small shared widgets ----------------------------------------------------

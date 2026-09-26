@@ -179,6 +179,79 @@ async def test_ranking_reports_time_per_record_and_parallel_calls(
 
 
 @pytest.mark.asyncio
+async def test_ranking_reports_the_size_pinned_on_the_run(
+    ranking_service: RankingService,
+    scored: ScoredCorpus,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """**SD41.** The VRAM figure is the run's own `model_size_bytes`.
+
+    Four documents promise it and `ranking_service` filled it with `0`. It is
+    the run's pin, not the catalogue's answer today — a re-pull moves a tag's
+    size behind an unchanged name — and, like every other reported figure, it
+    takes no part in `rank`: change every one of them and the order must not
+    move.
+    """
+    from sqlalchemy import select, update
+
+    from ra2.persistence.models import Run
+
+    before = await ranking_service.ranking_tab(scored.evaluation_id)
+    async with db_session_factory() as session:
+        stored = {
+            row.model_id: (
+                await session.scalars(select(Run.model_size_bytes).where(Run.id == row.model_id))
+            ).one()
+            for row in before.rows
+        }
+    # The fixture pins one per model, so `None` here is a broken fixture rather
+    # than the case `test_a_run_without_a_pinned_size_...` covers.
+    assert all(size is not None for size in stored.values())
+    pinned = {run_id: size for run_id, size in stored.items() if size is not None}
+    assert [row.model_size_bytes for row in before.rows] == [
+        pinned[row.model_id] for row in before.rows
+    ]
+
+    async with db_session_factory() as session:
+        for run_id, size in pinned.items():
+            await session.execute(
+                update(Run).where(Run.id == run_id).values(model_size_bytes=size * 2)
+            )
+        await session.commit()
+    after = await ranking_service.ranking_tab(scored.evaluation_id)
+
+    assert [row.model_size_bytes for row in after.rows] == [
+        pinned[row.model_id] * 2 for row in after.rows
+    ]
+    assert [(r.model_id, r.rank) for r in before.rows] == [(r.model_id, r.rank) for r in after.rows]
+    assert [r.macro_f1 for r in before.rows] == [r.macro_f1 for r in after.rows]
+
+
+@pytest.mark.asyncio
+async def test_a_run_without_a_pinned_size_reports_none_not_zero(
+    ranking_service: RankingService,
+    scored: ScoredCorpus,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """**SD41, D5.** A run launched before the column existed recorded no size.
+
+    `None` travels all the way out, because `0` is the defect this column
+    repairs: the tab renders an em dash rather than a number nothing measured.
+    """
+    from sqlalchemy import update
+
+    from ra2.persistence.models import Run
+
+    async with db_session_factory() as session:
+        await session.execute(update(Run).values(model_size_bytes=None))
+        await session.commit()
+
+    view = await ranking_service.ranking_tab(scored.evaluation_id)
+    assert view.rows
+    assert all(row.model_size_bytes is None for row in view.rows)
+
+
+@pytest.mark.asyncio
 async def test_an_unscoreable_run_returns_a_well_formed_nothing_scoreable_payload(
     ranking_service: RankingService,
     scored: ScoredCorpus,

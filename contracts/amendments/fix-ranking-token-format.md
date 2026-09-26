@@ -18,6 +18,7 @@ has its own plan, `plan-ranking-vram.md`.
 | Ranking: prompt tokens as **"2.4 M tok"** (`design/results/README.md` §3b) | `f"{count}"` — `69000` | **§1** |
 | `plan-model-choice.md` §9 Q4: the qualification's GPU name "shown on the card" | nowhere | **§2** |
 | `docs/performance.md` §6: latency "comparable … while both ran serially, which today they always do" | SD38 shipped `×N` | **§3** |
+| Ranking: a **VRAM** column (`mvp-spec.md` §11.5, design §3b, `sw-design.md` §16.5, `plan-phase-4.md` T3) | `vram_bytes=0`, no column | **`fix/ranking-vram`** — closed by `SD41`, sixteen of sixteen |
 
 ---
 

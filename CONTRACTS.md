@@ -731,6 +731,51 @@ run column and a migration: `plan-ranking-vram.md`.
 
 ---
 
+## The ranking's VRAM column — the sixteenth metric, a slice
+
+`fix/ranking-vram`, by `plan-ranking-vram.md`. **One amendment**
+(`contracts/amendments/fix-ranking-vram.md`), applied file by file in the stage
+whose code needs it, and **one revision**, whose author is this branch's
+implementer. The design is `sw-design.md` `SD41`.
+
+The gap the audit slice above left open: four documents promise a VRAM figure
+on the Ranking tab, `ranking_service` wrote `vram_bytes=0`, no column was
+rendered, the Model column's `digest · size` sub-line lost its size with it,
+and §3d's rule 4 printed the promise verbatim above the table. It was never
+buildable as specified — `plan-phase-4.md` T3 names
+`evaluation.selected_models_json` as the source, and that column holds model
+**tags**.
+
+### Amended files (already frozen)
+
+| File | Change | Stage | Amendment |
+|---|---|---|---|
+| `ra2/persistence/models.py` | + `Run.model_size_bytes`, **nullable, no backfill** — unlike `llm_parallel_calls`'s `1` there is no fact to backfill, and `0` is the defect being repaired | 2 | `fix-ranking-vram` §1 |
+| `ra2/services/readmodels.py` | `RankingRow.vram_bytes` → `model_size_bytes: int \| None`. A rename: the screen keeps the analyst's word, the schema says which datum it is | 2 | `fix-ranking-vram` §2 |
+| `ra2/api/schemas.py` | The same on `RankingRowResponse`. **Not additive**; `tests/api/openapi_snapshot.json` regenerated. The field it replaces was the constant `0` for every row ever served | 2 | `fix-ranking-vram` §3 |
+| `ra2/ui/components/primitives.py` *(addition)* | + `format_gigabytes`, moved out of `evaluation_view._gigabytes` now that two callers render a model size | 3 | `fix-ranking-vram` §4 |
+| `ra2/ui/views/results/ranking_tab.py` | The VRAM column (78px, after Prompt tokens), the sub-line's `· size`, `—` for a run with none, `VRAM_NOTE` under the table. `COMPUTATION_RULES[3]` unchanged — it already names VRAM | 3 | `fix-ranking-vram` §5 |
+| `ra2/ui/views/evaluation_view.py` | `_gigabytes` deleted, imports the shared one. No rendered change | 3 | `fix-ranking-vram` §6 |
+
+### New files
+
+| Path | What |
+|---|---|
+| `ra2/persistence/migrations/versions/…_pin_the_model_size_on_the_run.py` | `run.model_size_bytes`, additive, nullable, no existing row touched. Registered in `tests/test_p5_contract.py`'s `POST_PHASE_5_REVISIONS` |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/services/evaluation_service.py` | `_new_run` pins `model.size_bytes` — the number the Models card drew beside the tick, at the one moment it is a fact about this run |
+| `ra2/services/ranking_service.py` | Reads `run.model_size_bytes` instead of writing `0`. Reported, never scored (`SD20`), like the five figures beside it |
+| `ra2/api/v1/ranking.py` | Maps the renamed field |
+| `sw-design.md` | + `SD41`; §10's `run` block; §16.5's sentence, which listed a column that did not exist (Stage 1) |
+| `design/results/README.md` | §3b gains the note on what the VRAM figure is — the drawn widths and copy are otherwise untouched, per `SD37`'s "the design READMEs are the drawn board" (Stage 1) |
+| `docs/performance.md` | §6 loses the VRAM bullet; the header's revision note takes the date. **No measured number changes** (Stage 4) |
+
+---
+
 ## Phase 5 — owner: M35 (Wave 0), amendment only
 
 Re-established at tag `p5-frozen`, the same way M27 established the phase-4

@@ -17,7 +17,8 @@ Model choice split out to `choosing-models.md` on 2026-09-25; no number changed.
 §5.4 rewritten around `just qualify-model` the same day (SD40).
 §6's latency gap restated on 2026-09-26, when SD38's `×N` mark and time-per-record
 column made the old wording ("both ran serially, which today they always do")
-false; no number changed.
+false; no number changed. The VRAM gap closed the same day (SD41): the ranking
+reports the size pinned on the run, and §6 says what that figure is.
 
 ---
 
@@ -515,6 +516,11 @@ already stored keep the value they recorded.
 
 **Measured:**
 
+- **The ranking's VRAM column is a size, not a footprint.** It reports the
+  model's size as the endpoint gave it at launch, pinned on the run
+  (`sw-design.md` SD41), and a note under the table says so. A *loaded* model
+  needs a different amount — §4.2's "Loaded" column is the one to read — and
+  one more KV cache per parallel call (§5.4).
 - **Re-runs aren't bit-exact.** Temperature 0 and a fixed seed make a re-run
   *nearly* identical: 0–2 of 48 records changed between serial passes for
   both `gemma3:4b` and `qwen3:8b`. Treat a one- or two-record difference
@@ -528,9 +534,6 @@ already stored keep the value they recorded.
 
 **Known gaps in the application:**
 
-- **The Results ranking doesn't report VRAM.** Its caption names latency and
-  VRAM as the tie-breakers you apply, but `ranking_service` fills
-  `vram_bytes` with `0`, and no VRAM column is rendered. Use §4.2's table.
 - **Latency is per call, not per run.** The ranking's median latency is the
   time one record takes, so it is comparable down its column only between runs
   at the same parallelism. A run above 1 carries the `×N` mark for exactly

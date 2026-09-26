@@ -12,7 +12,11 @@ from collections.abc import Awaitable, Callable
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from tests.fixtures.fake_llm import StaticEndpointProber, StaticModelCatalog
+from tests.fixtures.fake_llm import (
+    DEFAULT_MODELS,
+    StaticEndpointProber,
+    StaticModelCatalog,
+)
 
 from ra2.domain.extraction import EvaluationSize, RunStatus
 from ra2.domain.ids import CodeAttributeId, CorpusId, EvaluationId, PromptTemplateId
@@ -161,6 +165,33 @@ async def test_the_drafts_reasoning_effort_reaches_every_run_it_launches(
         runs = (await session.scalars(select(Run).where(Run.evaluation_id == evaluation_id))).all()
     assert len(runs) == 2
     assert {run.llm_reasoning_effort for run in runs} == {"high"}
+
+
+async def test_launch_pins_each_models_size(
+    db_session_factory: async_sessionmaker[AsyncSession],
+    evaluation_service: EvaluationService,
+    launchable: Callable[..., Awaitable[tuple[CorpusId, FeatureConfigView, str]]],
+    fitting_model: str,
+    second_fitting_model: str,
+) -> None:
+    """**SD41.** Each run records the size the catalogue reported for its own
+    tag — the number the Models card drew beside that tick.
+
+    Pinned at launch, so the Ranking tab reports what the run ran rather than
+    what a later `ollama pull` left behind. The expectation comes from the
+    catalogue fixture, not from a literal repeated here.
+    """
+    _, _, evaluation_id = await launchable(models=(fitting_model, second_fitting_model))
+
+    await evaluation_service.launch(EvaluationId(evaluation_id))
+
+    async with db_session_factory() as session:
+        runs = (await session.scalars(select(Run).where(Run.evaluation_id == evaluation_id))).all()
+    catalogue = {model.tag: model.size_bytes for model in DEFAULT_MODELS}
+    assert {run.model_name: run.model_size_bytes for run in runs} == {
+        fitting_model: catalogue[fitting_model],
+        second_fitting_model: catalogue[second_fitting_model],
+    }
 
 
 async def test_launch_pins_each_models_own_parallel_calls(

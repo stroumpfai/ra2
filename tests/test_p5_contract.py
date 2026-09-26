@@ -140,6 +140,12 @@ POST_PHASE_5_REVISIONS = {
     # docstring. A new table, append-only, referenced by nothing; no existing
     # row is touched.
     "20260925_1044_7d084d5a7dc6_record_what_this_host_measured_about_a_model.py",
+    # `fix/ranking-vram` — `run.model_size_bytes` (SD41). The catalogue's size
+    # for this run's tag at launch, so the ranking can report the VRAM figure
+    # four documents promise and `ranking_service` was filling with `0`.
+    # Additive, **nullable, no backfill**: a run from before it recorded no
+    # size, and the tab renders that absence as an em dash.
+    "20260926_0757_9874691cc8eb_pin_the_model_size_on_the_run.py",
 }
 
 
