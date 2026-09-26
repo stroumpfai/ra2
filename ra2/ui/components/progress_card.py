@@ -29,7 +29,13 @@ from nicegui.element import Element
 
 from ra2.domain.extraction import RunStatus
 from ra2.services.readmodels import RunProgressView
-from ra2.ui.components.primitives import bar, card, format_count, format_latency_ms
+from ra2.ui.components.primitives import (
+    bar,
+    card,
+    format_count,
+    format_latency_ms,
+    format_tokens,
+)
 
 __all__ = ["format_duration_ms", "progress_card"]
 
@@ -49,14 +55,6 @@ def format_duration_ms(ms: int) -> str:
         return f"{round(ms / _MS_PER_MINUTE)} m"
     hours, remainder_ms = divmod(ms, _MS_PER_HOUR)
     return f"{hours} h {round(remainder_ms / _MS_PER_MINUTE)} m"
-
-
-def _format_tokens(count: int) -> str:
-    """`2_100_000` -> `"2.1 M"`; anything smaller uses `format_count`'s own
-    thousands separator (design: "2.1 M prompt tok")."""
-    if count >= 1_000_000:
-        return f"{count / 1_000_000:.1f} M"
-    return format_count(count)
 
 
 def _status_text(progress: RunProgressView) -> str:
@@ -101,7 +99,7 @@ def _metrics_line(progress: RunProgressView) -> str:
     if progress.median_latency_ms is not None:
         segments.append(f"median latency {format_latency_ms(progress.median_latency_ms)}")
     if progress.prompt_tokens > 0:
-        segments.append(f"{_format_tokens(progress.prompt_tokens)} prompt tok")
+        segments.append(f"{format_tokens(progress.prompt_tokens)} prompt tok")
     return " · ".join(segments)
 
 

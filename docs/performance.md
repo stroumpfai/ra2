@@ -15,6 +15,9 @@ named here. Re-measure rather than edit them (§7 says how).
 31 GB RAM, NVIDIA RTX 5060 Ti 16 GB · Ollama 0.34.0.
 Model choice split out to `choosing-models.md` on 2026-09-25; no number changed.
 §5.4 rewritten around `just qualify-model` the same day (SD40).
+§6's latency gap restated on 2026-09-26, when SD38's `×N` mark and time-per-record
+column made the old wording ("both ran serially, which today they always do")
+false; no number changed.
 
 ---
 
@@ -529,8 +532,10 @@ already stored keep the value they recorded.
   VRAM as the tie-breakers you apply, but `ranking_service` fills
   `vram_bytes` with `0`, and no VRAM column is rendered. Use §4.2's table.
 - **Latency is per call, not per run.** The ranking's median latency is the
-  time one record takes. It's comparable between runs only while both ran
-  serially, which today they always do.
+  time one record takes, so it is comparable down its column only between runs
+  at the same parallelism. A run above 1 carries the `×N` mark for exactly
+  that reason, and **time per record** is the column to compare instead
+  (§5.3).
 - **The ETA is linear from records done so far.** Output length varies by
   record, so it wanders, and it only appears after the first record commits.
 

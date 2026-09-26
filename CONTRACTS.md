@@ -692,6 +692,45 @@ author is this branch's implementer. The design is `sw-design.md` `SD40`.
 
 ---
 
+## The displayed performance metrics — an audit, a slice
+
+`fix/ranking-token-format`, one amendment
+(`contracts/amendments/fix-ranking-token-format.md`), **applied in the same
+commit**. No wave is running, no table, column or Alembic head.
+
+Every performance figure the documents say is on a screen, checked against the
+code that renders it. Fifteen of sixteen were there. The audit table is in the
+amendment; the one display defect and the two document corrections are below.
+**The sixteenth — the Ranking tab's VRAM column, planned in `mvp-spec.md`
+§11.5, `design/results/README.md` §3b, `sw-design.md` §16.5 and
+`plan-phase-4.md` T3, and rendered nowhere** — is not fixed here. It needs a
+run column and a migration: `plan-ranking-vram.md`.
+
+### Amended files (already frozen)
+
+| File | Change | Amendment |
+|---|---|---|
+| `ra2/ui/components/primitives.py` *(addition)* | + `format_tokens` — `"2.1 M"` above a million, `format_count`'s thousands space below it. One rule for a token count, now that two components print one. `format_duration_ms`'s precedent (`feat-model-choice`) one level further out, because here the second caller is a different component rather than a view | `fix-ranking-token-format` §1 |
+| `ra2/ui/components/progress_card.py` | `_format_tokens` deleted; the metrics line calls the shared one. **No rendered output changes** | `fix-ranking-token-format` §2 |
+| `ra2/ui/views/results/ranking_tab.py` | The Prompt tokens cell renders `format_tokens` instead of `f"{count}"`, and carries `data-testid="prompt-tokens"`. The design renders this cell "2.4 M tok"; a 3 000-record run put seven unbroken digits in 104px | `fix-ranking-token-format` §3 |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/ui/components/__init__.py` | Re-exports `format_tokens`, as it does the other three formatters |
+| `plan-model-choice.md` | §9 Q4's GPU-name row claimed the qualification's GPU name is "shown on the card". It is stored and rendered nowhere — `D7`'s own table never listed it and `SD40` says "recorded, not compared". The plan is corrected; the code is not extended (amendment §4) |
+| `docs/performance.md` | §6's latency gap said runs are comparable "only while both ran serially, **which today they always do**" — false since `SD38` shipped the `×N` mark and the Time / record column, which §5.3 of the same page documents. Restated, with the date in the header's revision note. **No measured number changed.** The VRAM bullet stands, and `plan-ranking-vram.md` is what closes it (amendment §5) |
+| `tests/ui/test_results_view.py` | + `test_the_ranking_token_column_groups_its_digits`: the cell renders `format_tokens` of the read model's own figure, and no cell holds a bare run of four digits. Fails on the old rendering |
+
+### New files
+
+| Path | What |
+|---|---|
+| `plan-ranking-vram.md` | The plan for the missing column. No code |
+
+---
+
 ## Phase 5 — owner: M35 (Wave 0), amendment only
 
 Re-established at tag `p5-frozen`, the same way M27 established the phase-4

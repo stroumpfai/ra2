@@ -41,6 +41,7 @@ __all__ = [
     "format_count",
     "format_latency_ms",
     "format_local",
+    "format_tokens",
     "frozen_readout",
     "icon_button",
     "labeled_field",
@@ -71,6 +72,9 @@ LONG_TAIL_SEGMENTS: Final = 24
 #: Census (README §1a, §2b).
 PAGE_SIZES: Final[tuple[int, ...]] = (10, 25, 50, 100)
 
+#: Where `format_tokens` switches from a thousands space to `M`.
+_TOKENS_PER_MILLION: Final = 1_000_000
+
 
 def format_count(value: int) -> str:
     """`4978` -> `"4 978"`. A space, exactly as the design files render it.
@@ -78,6 +82,28 @@ def format_count(value: int) -> str:
     Presentation only — the number itself is always a service's.
     """
     return f"{value:,}".replace(",", " ")
+
+
+def format_tokens(count: int) -> str:
+    """`2_100_000` -> `"2.1 M"`; `69_000` -> `"69 000"`. One rule for a token
+    count, wherever one is rendered.
+
+    A token count is a *magnitude*, not a measurement being compared: the
+    progress card's metrics line and Ranking's Prompt tokens column both
+    answer "how much did this cost", and a millions figure spelled out to the
+    digit ("2 100 000") is read digit by digit before it is understood. Above
+    a million it renders `M` to one decimal, and below it falls through to
+    `format_count`'s thousands space — the design's own two renderings
+    ("2.1 M prompt tok", "2.4 M tok") plus the small case a 200-record run
+    actually produces.
+
+    **Not `format_latency_ms`'s rule.** That one holds a single unit down a
+    column *because* the numbers there are compared against each other; these
+    are not, and the unit switch costs nothing a reader has to unpick.
+    """
+    if count >= _TOKENS_PER_MILLION:
+        return f"{count / _TOKENS_PER_MILLION:.1f} M"
+    return format_count(count)
 
 
 def format_latency_ms(ms: int) -> str:

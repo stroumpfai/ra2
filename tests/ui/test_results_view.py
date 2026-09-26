@@ -30,7 +30,7 @@ from ra2.persistence.models import Run
 from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
 from ra2.services.container import Services
 from ra2.services.scoring_service import ScoringService
-from ra2.ui.components import format_latency_ms
+from ra2.ui.components import format_latency_ms, format_tokens
 from ra2.ui.views.results.chrome import DEV_PILL, RUN_PILL
 from ra2.ui.views.results.extraction_tab import (
     ENCODING_CAVEAT,
@@ -407,6 +407,25 @@ async def test_the_ranking_latency_column_reads_in_seconds(scored: Scored) -> No
     ]
     assert expected <= set(rendered)
     assert not any(text.endswith(" ms") for text in rendered)
+
+
+async def test_the_ranking_token_column_groups_its_digits(scored: Scored) -> None:
+    """The design renders this cell "2.4 M tok". It rendered `f"{count}"` —
+    seven unbroken digits on a 3 000-record run — so the assertion is on
+    `format_tokens`, the one rule both this column and the progress card's
+    metrics line follow."""
+    view = await scored.services.ranking.ranking_tab(scored.corpus.evaluation_id)
+    expected = {format_tokens(row.prompt_tokens) for row in view.rows}
+    assert expected
+
+    await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}&tab=ranking")
+    rendered = {
+        str(getattr(e, "text", ""))
+        for cell in scored.user.find(marker="prompt-tokens").elements
+        for e in cell.descendants()
+    }
+    assert expected <= rendered
+    assert not any(text.isdigit() and len(text) > 3 for text in rendered)
 
 
 async def test_a_serial_ranking_carries_no_parallel_mark(scored: Scored) -> None:

@@ -38,7 +38,7 @@ from typing import Final
 from nicegui import ui
 
 from ra2.services.readmodels import RankingTabView
-from ra2.ui.components.primitives import data_props, format_latency_ms
+from ra2.ui.components.primitives import data_props, format_latency_ms, format_tokens
 from ra2.ui.views.results.chrome import run_descriptor
 
 __all__ = ["COMPUTATION_RULES", "PARALLEL_NOTE", "VALIDITY_FOOTER", "render_ranking_tab"]
@@ -174,7 +174,10 @@ def _table(view: RankingTabView) -> None:
                         _td_mono(f"{row.best} / {row.tied} / {row.worse}")
                         _latency_cell(row.median_latency_ms, row.parallel_calls)
                         _td_mono(format_latency_ms(row.ms_per_record), testid="ms-per-record")
-                        _td_mono(f"{row.prompt_tokens}")
+                        # `format_tokens`, not `f"{...}"`: the design renders
+                        # this cell "2.4 M tok", and a run of 3 000 records
+                        # spelled the same number out to seven digits.
+                        _td_mono(format_tokens(row.prompt_tokens), testid="prompt-tokens")
                         with ui.element("td").classes("td").style("padding:8px 12px;"):
                             pill = (
                                 ui.element("span")
