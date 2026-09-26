@@ -37,11 +37,23 @@ from typing import Final
 
 from nicegui import ui
 
-from ra2.services.readmodels import RankingTabView
-from ra2.ui.components.primitives import data_props, format_latency_ms, format_tokens
+from ra2.services.readmodels import RankingRow, RankingTabView
+from ra2.ui.components.primitives import (
+    data_props,
+    format_gigabytes,
+    format_latency_ms,
+    format_tokens,
+)
 from ra2.ui.views.results.chrome import run_descriptor
 
-__all__ = ["COMPUTATION_RULES", "PARALLEL_NOTE", "VALIDITY_FOOTER", "render_ranking_tab"]
+__all__ = [
+    "COMPUTATION_RULES",
+    "EMPTY_CELL",
+    "PARALLEL_NOTE",
+    "VALIDITY_FOOTER",
+    "VRAM_NOTE",
+    "render_ranking_tab",
+]
 
 #: "How this ranking is computed" — the four numbered rules, verbatim.
 COMPUTATION_RULES: Final = (
@@ -64,6 +76,22 @@ PARALLEL_NOTE: Final = (
     "×N: this model ran N records at once. Its latency per call is not "
     "comparable with the other rows; compare time per record instead."
 )
+
+#: Under the table, always, because the column is always there (SD41). The
+#: figure is the size the endpoint reported for the model at launch, which is
+#: not a loaded model's footprint: `docs/performance.md` §4.2 measured the gap
+#: in both directions, and §5.4 measured one more KV cache per parallel call.
+#: Rule 4 above is the design's copy and stays verbatim, so this says the part
+#: the table cannot.
+VRAM_NOTE: Final = (
+    "VRAM: the model's size as the endpoint reported it at launch. A loaded "
+    "model needs somewhat more, and one more KV cache per parallel call."
+)
+
+#: A figure the run does not carry. **Never `0`**, which is what this column
+#: rendered before SD41 — `SuppressedCell`'s rule one layer up: never print a
+#: number that says something the datum does not.
+EMPTY_CELL: Final = "—"
 
 #: Interpolated with the **real** cfg and corpus. A ranking is valid for one
 #: config on one corpus and must be re-run if either moves.
@@ -131,7 +159,10 @@ def _table(view: RankingTabView) -> None:
         with (
             ui.element("div").style("overflow:auto;"),
             ui.element("table").style(
-                "min-width:900px;width:100%;border-collapse:collapse;table-layout:fixed;"
+                # 900px + the 78px VRAM column (SD41). The well is
+                # `overflow:auto`, so the table scrolls rather than collapsing
+                # a column below the width the design drew for it.
+                "min-width:978px;width:100%;border-collapse:collapse;table-layout:fixed;"
             ),
         ):
             with ui.element("thead"), ui.element("tr"):
@@ -144,6 +175,7 @@ def _table(view: RankingTabView) -> None:
                     ("Median latency", "104px"),
                     ("Time / record", "104px"),
                     ("Prompt tokens", "104px"),
+                    ("VRAM", "78px"),
                     ("Verdict", "134px"),
                 ):
                     _th(label, width)
@@ -162,9 +194,13 @@ def _table(view: RankingTabView) -> None:
                         _td_mono(str(row.rank), size="13px")
                         with ui.element("td").classes("td").style("padding:8px 12px;"):
                             ui.label(row.tag).classes("mono").style("font-size:12px;")
-                            ui.label(row.digest[:8]).classes("mono").style(
-                                "font-size:10.5px;color:var(--ink3);"
-                            )
+                            # "digest · size" (design §3b). The size half is
+                            # the same field the VRAM cell renders, which is
+                            # what makes "must agree with the model sub-line"
+                            # a property rather than a rule to remember.
+                            ui.label(_digest_and_size(row)).classes("mono").props(
+                                'data-testid="model-sub-line"'
+                            ).mark("model-sub-line").style("font-size:10.5px;color:var(--ink3);")
                         with ui.element("td").classes("td").style("padding:8px 12px;"):
                             ui.label(f"{row.macro_f1:.3f}").classes("val")
                             ui.label(f"[{row.ci_low:.3f}–{row.ci_high:.3f}]").classes("ci")
@@ -178,6 +214,7 @@ def _table(view: RankingTabView) -> None:
                         # this cell "2.4 M tok", and a run of 3 000 records
                         # spelled the same number out to seven digits.
                         _td_mono(format_tokens(row.prompt_tokens), testid="prompt-tokens")
+                        _td_mono(_size_text(row.model_size_bytes), testid="vram")
                         with ui.element("td").classes("td").style("padding:8px 12px;"):
                             pill = (
                                 ui.element("span")
@@ -193,6 +230,23 @@ def _table(view: RankingTabView) -> None:
             ui.label(PARALLEL_NOTE).props('data-testid="parallel-note"').mark(
                 "parallel-note"
             ).style("padding:8px 14px;font-size:11.5px;color:var(--ink3);")
+        ui.label(VRAM_NOTE).props('data-testid="vram-note"').mark("vram-note").style(
+            "padding:8px 14px;font-size:11.5px;color:var(--ink3);"
+        )
+
+
+def _digest_and_size(row: RankingRow) -> str:
+    """The Model column's sub-line: `"4b81e2d5 · 15.6 GB"`, or the digest
+    alone for a run launched before the size was pinned (SD41)."""
+    digest = row.digest[:8]
+    if row.model_size_bytes is None:
+        return digest
+    return f"{digest} · {format_gigabytes(row.model_size_bytes)}"
+
+
+def _size_text(size_bytes: int | None) -> str:
+    """The VRAM cell. `—` rather than `0` when the run carries no size."""
+    return EMPTY_CELL if size_bytes is None else format_gigabytes(size_bytes)
 
 
 def _latency_cell(median_latency_ms: int, parallel_calls: int) -> None:

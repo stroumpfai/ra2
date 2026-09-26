@@ -12,7 +12,11 @@ named in §6.
 with §10's `run` block and §16.5's sentence, the note on §3b of
 `design/results/README.md`, `contracts/amendments/fix-ranking-vram.md` and this
 slice's `CONTRACTS.md` section. No code changed. §10's three questions are
-answered as this plan recommends.
+answered as this plan recommends. **Stage 2 done on 2026-09-26**:
+`run.model_size_bytes` and revision `9874691cc8eb`, the launch pin, the
+renamed read-model and API field, four tests. **Stage 3 done on 2026-09-26**:
+the VRAM column, the Model column's `digest · size`, the em dash, the note —
+and the design's "must agree with the model sub-line" asserted in the browser.
 
 ---
 
