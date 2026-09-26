@@ -8,6 +8,12 @@ sixteenth.** Nothing here is built yet. Authority as always: `mvp-spec.md` on
 *what*, `sw-design.md` on *how* (CLAUDE.md). One revision, one amendment,
 named in §6.
 
+**Stage 1 done on 2026-09-26** on `fix/ranking-vram`: `SD41` in `sw-design.md`
+with §10's `run` block and §16.5's sentence, the note on §3b of
+`design/results/README.md`, `contracts/amendments/fix-ranking-vram.md` and this
+slice's `CONTRACTS.md` section. No code changed. §10's three questions are
+answered as this plan recommends.
+
 ---
 
 ## 1. What four documents promise
