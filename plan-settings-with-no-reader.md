@@ -308,8 +308,14 @@ no floor to show.
 | `test_a_field_read_only_through_a_property_passes_through_that_property` | contract | §4.1 case 2 is a second lookup, not a free-text allowlist — the exemption cannot be widened by writing a reason | 4 |
 | `test_a_settings_field_with_no_reader_fails_the_contract` | contract | The gate actually fails: a synthetic field with no reader is detected, so the test cannot rot into a tautology | 4 |
 | `test_the_draft_floor_comes_from_the_settings` | backend | Stage 2's reader, at the value `models.py:716` always claimed | 2 |
-| `test_a_raised_floor_suppresses_a_cell_the_default_would_show` | backend | The floor is load-bearing end to end, not merely stored — through `results_service` | 2 |
-| `test_the_floor_is_pinned_at_launch_and_a_later_change_does_not_move_a_stored_result` | backend | It is a pinned input; `SD19` says suppression is read-time, so this states which of the two is true | 2 |
+| `test_a_later_settings_change_does_not_move_an_existing_draft` | backend | The seed is read **once**, at `save_draft` — a changed environment moves the next draft, never this one | 2 |
+
+*Changed in Stage 2:* two rows planned here were dropped. "A raised floor
+suppresses a cell the default would show" is already pinned from the row
+onwards by `test_extraction_tab.py:71` and `test_ranking_tab.py:266`, which set
+the column and assert the suppression; the only new link is Settings → row, and
+that is the test above. "Pinned at launch" became the once-at-creation test,
+because `update_draft` already refuses after launch and that has its own test.
 | `test_serve_binds_the_configured_host_and_port` | backend | Stage 3's reader, against a stub `uvicorn.run` | 3 |
 | `test_serve_refuses_a_non_loopback_host` | backend | D2/D3 — **before a socket is opened**, and with no opt-out reachable | 3 |
 | `test_serve_refuses_every_non_loopback_form` | backend | `0.0.0.0`, a LAN address, a hostname that would resolve to loopback — D4's "literally, no DNS" | 3 |

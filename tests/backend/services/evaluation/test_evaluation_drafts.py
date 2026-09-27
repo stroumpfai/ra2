@@ -11,10 +11,14 @@ from collections.abc import Awaitable, Callable
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from tests.fixtures.fake_llm import StaticEndpointProber, StaticModelCatalog
 
 from ra2.domain.extraction import EvaluationSize
 from ra2.domain.ids import CorpusId, EvaluationId, FeatureConfigId, PromptTemplateId
 from ra2.infra.clock import FrozenClock
+from ra2.infra.config import Settings
+from ra2.infra.gpu import StaticGpuProbe
+from ra2.infra.idgen import SeededFactory
 from ra2.persistence.models import Evaluation
 from ra2.services.errors import (
     EvaluationLockedError,
@@ -44,9 +48,9 @@ async def test_save_draft_takes_the_designs_defaults(
 
     assert draft.temperature == 0.0
     assert draft.seed == 42
-    # The one default read from `Settings` rather than named in the service:
-    # an analyst who set `RA2_LLM_REASONING_EFFORT` has already said what a
-    # new evaluation should ask.
+    # One of the two defaults read from `Settings` rather than named in the
+    # service: an analyst who set `RA2_LLM_REASONING_EFFORT` has already said
+    # what a new evaluation should ask. The other, the floor, is below.
     assert draft.reasoning_effort == "none"
     assert draft.size is EvaluationSize.FULL
     assert draft.prompt_language == "de"
@@ -54,6 +58,100 @@ async def test_save_draft_takes_the_designs_defaults(
     assert draft.selected_models == ()
     assert draft.launched_at is None
     assert draft.is_launched is False
+
+
+def _service_with(
+    settings: Settings,
+    db_session_factory: async_sessionmaker[AsyncSession],
+    model_catalog: StaticModelCatalog,
+    endpoint_prober: StaticEndpointProber,
+    gpu_probe: StaticGpuProbe,
+    clock: FrozenClock,
+    ids: SeededFactory,
+) -> EvaluationService:
+    """The conftest's `evaluation_service`, on a `Settings` of the test's own."""
+    return EvaluationService(
+        session_factory=db_session_factory,
+        model_catalog=model_catalog,
+        endpoint_prober=endpoint_prober,
+        gpu_probe=gpu_probe,
+        clock=clock,
+        ids=ids,
+        settings=settings,
+    )
+
+
+async def _stored_floor(
+    db_session_factory: async_sessionmaker[AsyncSession], evaluation_id: EvaluationId
+) -> int:
+    async with db_session_factory() as session:
+        row = await session.get(Evaluation, evaluation_id)
+    assert row is not None
+    return row.min_cell_count
+
+
+async def test_the_draft_floor_comes_from_the_settings(
+    eval_settings: Settings,
+    db_session_factory: async_sessionmaker[AsyncSession],
+    model_catalog: StaticModelCatalog,
+    endpoint_prober: StaticEndpointProber,
+    gpu_probe: StaticGpuProbe,
+    clock: FrozenClock,
+    ids: SeededFactory,
+    seed_corpus: Callable[..., Awaitable[CorpusId]],
+    frozen_config: Callable[..., Awaitable[FeatureConfigView]],
+) -> None:
+    """`SD42`: `RA2_MIN_CELL_COUNT` seeds the draft's floor, as `models.py`
+    said it did from phase 4 while nothing read it.
+
+    The value is deliberately **not** the column's own `20`: a test at the
+    default cannot tell a seed from a fallback, which is exactly how the
+    missing reader went unnoticed.
+    """
+    settings = eval_settings.model_copy(update={"min_cell_count": 30})
+    assert settings.min_cell_count != Evaluation.__table__.c.min_cell_count.default.arg
+    service = _service_with(
+        settings, db_session_factory, model_catalog, endpoint_prober, gpu_probe, clock, ids
+    )
+    corpus_id = await seed_corpus()
+    config = await frozen_config()
+
+    draft = await service.save_draft(
+        name="Floor", corpus_id=corpus_id, feature_config_id=config.feature_config_id
+    )
+
+    assert await _stored_floor(db_session_factory, draft.evaluation_id) == settings.min_cell_count
+
+
+async def test_a_later_settings_change_does_not_move_an_existing_draft(
+    eval_settings: Settings,
+    db_session_factory: async_sessionmaker[AsyncSession],
+    model_catalog: StaticModelCatalog,
+    endpoint_prober: StaticEndpointProber,
+    gpu_probe: StaticGpuProbe,
+    clock: FrozenClock,
+    ids: SeededFactory,
+    seed_corpus: Callable[..., Awaitable[CorpusId]],
+    frozen_config: Callable[..., Awaitable[FeatureConfigView]],
+) -> None:
+    """The floor is read **once**, when the draft is saved. A host whose
+    environment changes afterwards moves its next draft, never this one — the
+    floor is an input to the evaluation, not a view onto the process."""
+    before = eval_settings.model_copy(update={"min_cell_count": 30})
+    after = eval_settings.model_copy(update={"min_cell_count": 5})
+    wiring = (db_session_factory, model_catalog, endpoint_prober, gpu_probe, clock, ids)
+    corpus_id = await seed_corpus()
+    config = await frozen_config()
+
+    first = await _service_with(before, *wiring).save_draft(
+        name="Before", corpus_id=corpus_id, feature_config_id=config.feature_config_id
+    )
+    second = await _service_with(after, *wiring).save_draft(
+        name="After", corpus_id=corpus_id, feature_config_id=config.feature_config_id
+    )
+
+    assert await _stored_floor(db_session_factory, first.evaluation_id) == before.min_cell_count
+    assert await _stored_floor(db_session_factory, second.evaluation_id) == after.min_cell_count
 
 
 async def test_save_draft_survives_having_no_template_yet(

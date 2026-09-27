@@ -331,12 +331,18 @@ class EvaluationService:
     ) -> EvaluationDraftView:
         """Create an unlaunched evaluation with the design's defaults —
         the active template, temperature 0.0, seed 42, size `full`, and the
-        process's `RA2_LLM_REASONING_EFFORT` as the reasoning effort.
+        process's `RA2_LLM_REASONING_EFFORT` and `RA2_MIN_CELL_COUNT` as the
+        reasoning effort and the suppression floor.
 
-        The effort is the one default that is **read from `Settings` rather
-        than named here**: an analyst who has set the environment variable has
-        already said what a new evaluation should ask, and a constant here
-        would quietly overrule them on every new draft.
+        Those two are the defaults **read from `Settings` rather than named
+        here**: an analyst who has set the environment variable has already
+        said what a new evaluation should ask, and a constant here would
+        quietly overrule them on every new draft. The floor was documented
+        this way from phase 4 and read by nothing until `SD42` — every draft
+        took the column's own `20`, whatever the environment said.
+
+        Read **once**, here. A draft keeps the floor it was created with; a
+        later change to the environment moves new drafts, never this one.
         """
         async with session_scope(self._session_factory) as session:
             await self._require_corpus(session, corpus_id)
@@ -356,6 +362,7 @@ class EvaluationService:
                 temperature=_DEFAULT_TEMPERATURE,
                 seed=_DEFAULT_SEED,
                 reasoning_effort=self._settings.llm_reasoning_effort,
+                min_cell_count=self._settings.min_cell_count,
                 size=EvaluationSize.FULL,
                 selected_models_json=None,
             )
