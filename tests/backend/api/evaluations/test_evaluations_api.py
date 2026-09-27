@@ -17,6 +17,7 @@ from tests.backend.api.evaluations.conftest import FITTING_MODEL
 
 from ra2.services.evaluation_service import (
     EVAL_ERROR_CONFIG_NOT_FROZEN,
+    EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE,
     EVAL_ERROR_NO_MODELS_SELECTED,
     EVAL_ERROR_NO_TEMPLATE,
 )
@@ -47,6 +48,9 @@ async def test_save_draft_creates_a_row(
     assert body["seed"] == 42
     assert body["reasoning_effort"] == "none"
     assert body["size"] == "full"
+    # The floor the draft was seeded with (`SD42`) — `RA2_MIN_CELL_COUNT`,
+    # unset in the suite, so the §11.4 default.
+    assert body["min_cell_count"] == 20
 
 
 async def test_save_draft_unknown_corpus_is_404(
@@ -124,6 +128,7 @@ async def test_update_draft(
             "temperature": 0.5,
             "seed": 7,
             "reasoning_effort": "medium",
+            "min_cell_count": 5,
         },
     )
 
@@ -133,6 +138,7 @@ async def test_update_draft(
     assert body["temperature"] == 0.5
     assert body["seed"] == 7
     assert body["reasoning_effort"] == "medium"
+    assert body["min_cell_count"] == 5
 
 
 async def test_update_draft_with_an_unmappable_reasoning_effort_is_422(
@@ -152,6 +158,22 @@ async def test_update_draft_with_an_unmappable_reasoning_effort_is_422(
     assert resp.status_code == 422, resp.text
     (message,) = resp.json()["validation_errors"]
     assert "xhigh" in message and "none, low, medium, high" in message
+
+
+async def test_update_draft_with_a_floor_below_one_is_422(
+    api_client: AsyncClient, seed_ready: Callable[..., Awaitable[dict[str, str]]]
+) -> None:
+    """The service's sentence, not a pydantic `ge=1` error — the same refusal
+    the view shows, because there is one rule and one place it lives."""
+    seeded = await seed_ready()
+
+    resp = await api_client.put(
+        f"/api/v1/evaluations/{seeded['evaluation_id']}",
+        json={"min_cell_count": 0},
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["validation_errors"] == [EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE.format(floor=0)]
 
 
 async def test_update_draft_not_found(api_client: AsyncClient) -> None:

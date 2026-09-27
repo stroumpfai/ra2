@@ -118,6 +118,7 @@ __all__ = [
     "EVAL_ERROR_ENDPOINT_UNREACHABLE",
     "EVAL_ERROR_ENUM_NO_CODELIST",
     "EVAL_ERROR_ENUM_NO_LABEL_IN_LANGUAGE",
+    "EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE",
     "EVAL_ERROR_MODEL_EXCEEDS_VRAM",
     "EVAL_ERROR_MODEL_NOT_AVAILABLE",
     "EVAL_ERROR_NO_MODELS_SELECTED",
@@ -164,6 +165,13 @@ EVAL_ERROR_NO_TEMPLATE: Final = "no prompt template is selected; a launch needs 
 #: the launch.
 EVAL_ERROR_UNKNOWN_REASONING_EFFORT: Final = (
     "{effort}: not a reasoning effort this endpoint maps; expected one of {expected}."
+)
+#: Step 6's floor (mvp-spec.md §11.4). Refused here for the reasoning
+#: effort's reason: the same rule has to hold for a request that never went
+#: through the view. Below 1 there is no cell the floor could suppress, so a
+#: value there says nothing the analyst could have meant.
+EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE: Final = (
+    "{floor}: not a minimum cell count; a cell needs at least one record to be shown."
 )
 #: The design's "Launch N runs" with N = 0 has nothing to launch.
 EVAL_ERROR_NO_MODELS_SELECTED: Final = "no models are selected; a launch needs at least one."
@@ -331,12 +339,18 @@ class EvaluationService:
     ) -> EvaluationDraftView:
         """Create an unlaunched evaluation with the design's defaults —
         the active template, temperature 0.0, seed 42, size `full`, and the
-        process's `RA2_LLM_REASONING_EFFORT` as the reasoning effort.
+        process's `RA2_LLM_REASONING_EFFORT` and `RA2_MIN_CELL_COUNT` as the
+        reasoning effort and the suppression floor.
 
-        The effort is the one default that is **read from `Settings` rather
-        than named here**: an analyst who has set the environment variable has
-        already said what a new evaluation should ask, and a constant here
-        would quietly overrule them on every new draft.
+        Those two are the defaults **read from `Settings` rather than named
+        here**: an analyst who has set the environment variable has already
+        said what a new evaluation should ask, and a constant here would
+        quietly overrule them on every new draft. The floor was documented
+        this way from phase 4 and read by nothing until `SD42` — every draft
+        took the column's own `20`, whatever the environment said.
+
+        Read **once**, here. A draft keeps the floor it was created with; a
+        later change to the environment moves new drafts, never this one.
         """
         async with session_scope(self._session_factory) as session:
             await self._require_corpus(session, corpus_id)
@@ -356,6 +370,7 @@ class EvaluationService:
                 temperature=_DEFAULT_TEMPERATURE,
                 seed=_DEFAULT_SEED,
                 reasoning_effort=self._settings.llm_reasoning_effort,
+                min_cell_count=self._settings.min_cell_count,
                 size=EvaluationSize.FULL,
                 selected_models_json=None,
             )
@@ -376,6 +391,7 @@ class EvaluationService:
         reasoning_effort: str | None = None,
         size: EvaluationSize | None = None,
         selected_models: tuple[str, ...] | None = None,
+        min_cell_count: int | None = None,
     ) -> EvaluationDraftView:
         """Edit any of the six steps. **Draft only.**
 
@@ -388,8 +404,8 @@ class EvaluationService:
 
         :raises EvaluationLockedError: `launched_at` is set; nothing changed.
         :raises FeatureValidationError: a selected model exceeds the host's
-            VRAM, or the reasoning effort is one Ollama does not map; nothing
-            changed.
+            VRAM, the reasoning effort is one Ollama does not map, or the
+            floor is below 1; nothing changed.
         :raises NotFoundError: no such evaluation, or a cited row is missing.
         """
         async with session_scope(self._session_factory) as session:
@@ -426,6 +442,12 @@ class EvaluationService:
                         ]
                     )
                 evaluation.reasoning_effort = reasoning_effort
+            if min_cell_count is not None:
+                if min_cell_count < 1:
+                    raise FeatureValidationError(
+                        [EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE.format(floor=min_cell_count)]
+                    )
+                evaluation.min_cell_count = min_cell_count
             if size is not None:
                 evaluation.size = size
             if selected_models is not None:
@@ -1251,6 +1273,7 @@ def _draft_view(evaluation: Evaluation) -> EvaluationDraftView:
         size=EvaluationSize(evaluation.size),
         selected_models=_selected_models(evaluation),
         launched_at=evaluation.launched_at,
+        min_cell_count=evaluation.min_cell_count,
     )
 
 

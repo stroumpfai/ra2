@@ -70,6 +70,7 @@ from ra2.domain.qualification import (
 from ra2.infra.config import Settings
 from ra2.persistence.models import Corpus, Evaluation, Feature, Mismatch, Record, Run
 from ra2.services.container import Services
+from ra2.services.evaluation_service import EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE
 from ra2.services.readmodels import EvaluationDraftView, FeatureSetSummary, PromptTemplateView
 from ra2.ui import theme
 from ra2.ui.components import format_local
@@ -606,10 +607,10 @@ async def test_the_setup_column_renders_all_six_numbered_steps(seeded: Seeded) -
     assert _all_text(user, "models-count") == f"{len(DEFAULT_MODELS)} available · 0 selected"
     assert "reachable" in _all_text(user, "endpoint-line")
     assert not _find(user, "endpoint-reason")
-    # 5 · Determinism — three `labeled_field`s, label above the control:
-    # temperature, seed, and the reasoning effort every run of this
-    # evaluation is launched with.
-    assert len(_find(user, "labeled-field")) == 3
+    # Four `labeled_field`s in the column, label above the control: step 5's
+    # temperature, seed and reasoning effort, and step 6's floor.
+    assert len(_find(user, "labeled-field")) == 4
+    # 5 · Determinism.
     assert "0.0" in _all_text(user, "temperature-select")
     (seed_input,) = _find(user, "seed-input")
     assert seed_input._props["value"] == "42"
@@ -620,6 +621,10 @@ async def test_the_setup_column_renders_all_six_numbered_steps(seeded: Seeded) -
     radios = _all_text(user, "sel-radio")
     assert "Evaluation · all 4 978" in radios
     assert "Dev · 50 records" in radios
+    # …and the floor, mvp-spec.md §11.4's "configurable per evaluation".
+    (floor_input,) = _find(user, "floor-input")
+    assert floor_input._props["value"] == "20"
+    assert floor_input._props["aria-label"] == evaluation_view.FLOOR_LABEL
     assert _all_text(user, "size-note") == evaluation_view.SIZE_NOTE
 
 
@@ -647,6 +652,42 @@ async def test_step_five_persists_the_reasoning_effort_as_it_is_chosen(
 
     view = await seeded.services.evaluation.get(seeded.draft.evaluation_id)
     assert view.draft.reasoning_effort == "high"
+
+
+async def test_step_six_persists_the_floor_as_it_is_typed(seeded: Seeded) -> None:
+    """mvp-spec.md §11.4's "configurable per evaluation", reachable from the
+    product (`SD42`). Saved on change like every other step, so the value the
+    launch pins is the value on screen."""
+    user = seeded.user
+    await user.open("/evaluation")
+    await user.should_see("Evaluation")
+
+    user.find(marker="floor-input").trigger("change", args="3")
+    # The redraw puts the **persisted** floor back in the box.
+    await _until(lambda: _find(user, "floor-input")[0]._props["value"] == "3")
+
+    view = await seeded.services.evaluation.get(seeded.draft.evaluation_id)
+    assert view.draft.min_cell_count == 3
+
+
+async def test_a_floor_below_one_is_refused_and_the_stored_floor_stays(seeded: Seeded) -> None:
+    """The refusal is the service's (`EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE`),
+    so it holds for the API too. The view's part is to say the service's
+    sentence — not "1 feature validation error(s)", which is what `_update`
+    used to show for every such refusal — and to put the stored value back
+    rather than show one that was never saved."""
+    user = seeded.user
+    await user.open("/evaluation")
+    await user.should_see("Evaluation")
+    before = (await seeded.services.evaluation.get(seeded.draft.evaluation_id)).draft
+
+    user.find(marker="floor-input").trigger("change", args="0")
+    await user.should_see(EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE.format(floor=0))
+
+    after = (await seeded.services.evaluation.get(seeded.draft.evaluation_id)).draft
+    assert after.min_cell_count == before.min_cell_count
+    (floor_input,) = _find(user, "floor-input")
+    assert floor_input._props["value"] == str(before.min_cell_count)
 
 
 async def test_a_launched_evaluation_cannot_change_the_reasoning_effort(
@@ -1208,6 +1249,8 @@ async def test_a_launched_evaluation_says_why_the_setup_column_is_locked(
         assert _is_disabled(element), testid
     (seed_input,) = _find(user, "seed-input")
     assert _is_disabled(seed_input)
+    (floor_input,) = _find(user, "floor-input")
+    assert _is_disabled(floor_input)
     assert all("disabled" in t._props for t in _find(user, "tick"))
 
 

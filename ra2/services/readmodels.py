@@ -620,6 +620,11 @@ class EvaluationDraftView:
     reasoning_effort: str = DEFAULT_REASONING_EFFORT
     selected_models: tuple[str, ...] = ()
     launched_at: datetime | None = None
+    #: Step 6's floor — mvp-spec.md §11.4's "configurable per evaluation"
+    #: (`SD19`, `SD42`). Defaulted, like `reasoning_effort`, so every
+    #: construction that predates it holds (amendment:
+    #: fix/settings-with-no-reader).
+    min_cell_count: int = 20
 
     @property
     def is_launched(self) -> bool:

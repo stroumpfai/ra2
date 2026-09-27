@@ -1639,6 +1639,11 @@
             ],
             "title": "Launched At"
           },
+          "min_cell_count": {
+            "default": 20,
+            "title": "Min Cell Count",
+            "type": "integer"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -4295,6 +4300,17 @@
               }
             ],
             "title": "Feature Config Id"
+          },
+          "min_cell_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Cell Count"
           },
           "name": {
             "anyOf": [

@@ -319,6 +319,11 @@ attack, just an unbounded operation with a plausible user error behind it.
   the way the LLM client refuses a non-loopback endpoint), or delete the two
   settings so they stop implying a control that is not there. The first is
   better: it makes the deployment posture testable.
+  *Built* — the first, by `plan-settings-with-no-reader.md` (`SD42`): a `serve`
+  launcher in `cli.py` reads `host`/`port` and refuses a host outside
+  `LOOPBACK_HOSTS` before binding, with no opt-out; `just dev`, `dev-reload` and
+  `dev-agent` all go through it. **The bind half of this finding is closed; the
+  host-path half (the two bullets below) is not.**
 - Bound the walk: file count and total bytes, with a `Finding` rather than an
   exception.
 
@@ -2028,6 +2033,14 @@ the environment, read by nothing — are four instances of **a setting that
 implies a control nobody implemented**. §8.6 called this shape out for
 `exports_dir`; it is a category, not an instance. One contract test would close
 it: every `Settings` field has a reader in `ra2/`, or it does not exist.
+
+*Built* — that test, as `SD42`, by `plan-settings-with-no-reader.md`: an AST
+scan, because a text search would have passed `port` on `domain/llm.py`'s
+`parts.port`. Every instance got a reader rather than a deletion. It found a
+fifth instance this report had not: `Settings.min_cell_count`, read by
+nothing while `models.py` said it defaulted the draft — so `mvp-spec.md`
+§11.4's "configurable per evaluation" was unreachable. `run_concurrency` is
+**not** an instance: it has a reader and a tested refusal (§15 F7).
 
 ---
 
