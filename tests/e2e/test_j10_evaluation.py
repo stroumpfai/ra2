@@ -67,6 +67,7 @@ this app supports (sw-design.md §8.2).
 import json
 import re
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -245,7 +246,9 @@ def test_j10_launch_an_evaluation_and_watch_it_finish(
     assert [o.strip() for o in reasoning.inner_text().split("\n") if o.strip()] == list(
         REASONING_EFFORTS
     )
-    reasoning.select_option("medium")
+    # Waited out, not just asserted: the save redraws the column, and the
+    # layout reads below measured the discarded one on a loaded run (NaN).
+    _redrawn(page, "reasoning-select", lambda: reasoning.select_option("medium"))
     expect(page.locator('[data-testid="reasoning-select"] option[selected]')).to_have_count(1)
     # The endpoint is reachable, so Launch is only waiting on a selection.
     expect(page.locator('[data-testid="endpoint-line"]')).to_contain_text("reachable")
@@ -272,6 +275,35 @@ def test_j10_launch_an_evaluation_and_watch_it_finish(
     assert 4 * row_box["height"] <= max_height < 5 * row_box["height"], (
         f"a {row_box['height']}px row in a {max_height}px well is not four visible rows"
     )
+
+    # Step 6's floor (`SD42`): mvp-spec.md §11.4's "configurable per
+    # evaluation", reachable from a real browser, laid out inside the setup
+    # column at the narrowest viewport the app supports. Set, persisted, and
+    # put back to the seeded 20 so nothing later in this journey moves. Each
+    # save is waited out to its redraw (`_redrawn`) before the next event: a
+    # `change` fired on the column being replaced is dropped.
+    floor = page.locator('[data-testid="floor-input"]')
+    expect(floor).to_have_value("20")
+    for value in ("7", "20"):
+
+        def _type_floor(value: str = value) -> None:
+            floor.fill(value)
+            floor.dispatch_event("change")
+
+        _redrawn(page, "floor-input", _type_floor)
+        _until_floor(page, server_url, evaluation_id=evaluation_id, floor=int(value))
+    viewport = page.viewport_size
+    page.set_viewport_size({"width": 1024, "height": 800})
+    boxes = _floor_in_step_six(page)
+    assert boxes["floor_width"] > 0, f"the floor input has no width at 1024px: {boxes}"
+    assert boxes["floor_right"] <= boxes["step_right"], (
+        f"the floor input overflows step 6 at 1024px: {boxes}"
+    )
+    assert not page.evaluate("document.body.scrollWidth > document.body.clientWidth + 1"), (
+        "step 6 made the page scroll horizontally at 1024px"
+    )
+    if viewport is not None:
+        page.set_viewport_size(viewport)
 
     # --- select two models ----------------------------------------------------
     _select_model(page, MODEL_A)
@@ -413,6 +445,70 @@ def test_j10_launch_an_evaluation_and_watch_it_finish(
     assert surviving_draft["launched_at"] is not None, survivor
     surviving_runs = _get(page, server_url, f"/api/v1/runs?evaluation_id={evaluation_id}")
     assert len(cast("list[object]", surviving_runs["items"])) == 2, surviving_runs
+
+
+def _redrawn(page: Page, testid: str, action: Callable[[], object]) -> None:
+    """Do `action`, then wait until the column has been **rebuilt** after it.
+
+    Every setup control saves and then redraws the whole column
+    (`EvaluationView.reload`). Until the redraw lands, the element on screen is
+    one that is about to be discarded: an event fired on it is dropped, and a
+    style read off it can come back empty. Waiting for the saved *value* is not
+    enough — the value is already on screen before the save — so this marks the
+    current element and waits for the selector to resolve to an unmarked one.
+    """
+    selector = f'[data-testid="{testid}"]'
+    page.evaluate("s => { document.querySelector(s).__ra2Stale = true; }", selector)
+    action()
+    page.wait_for_function(
+        "s => { const e = document.querySelector(s); return !!e && !e.__ra2Stale; }",
+        arg=selector,
+        timeout=TIMEOUT_MS,
+    )
+
+
+def _until_floor(page: Page, server_url: str, *, evaluation_id: str, floor: int) -> None:
+    """Poll `GET /api/v1/evaluations/{id}` until the draft carries `floor`.
+
+    Polled for `_until_discarded`'s reason: the change handler saves after the
+    event returns, and the box already shows the typed value before it has.
+    """
+    deadline = time.monotonic() + TIMEOUT_MS / 1000
+    stored: object = None
+    while time.monotonic() < deadline:
+        body = _get(page, server_url, f"/api/v1/evaluations/{evaluation_id}")
+        stored = cast("dict[str, object]", body["draft"])["min_cell_count"]
+        if stored == floor:
+            return
+        page.wait_for_timeout(100)
+    raise AssertionError(f"the draft's floor is {stored}, never {floor}")
+
+
+def _floor_in_step_six(page: Page) -> dict[str, float]:
+    """Step 6's right edge and the floor input's, measured in **one** page
+    evaluation.
+
+    Every save redraws the setup column *after* the save returns, so two
+    separate measurements can straddle the redraw and read a box from an
+    element that is already gone — which is what a loaded run of the full E2E
+    layer did. One evaluation cannot straddle it; it can only land between the
+    old column leaving and the new one arriving, and that case is retried.
+    """
+    deadline = time.monotonic() + TIMEOUT_MS / 1000
+    while time.monotonic() < deadline:
+        boxes = page.evaluate(
+            """() => {
+                const step = document.querySelector('[data-testid="step-6"]');
+                const floor = step && step.querySelector('[data-testid="floor-input"]');
+                if (!floor) return null;
+                const s = step.getBoundingClientRect(), f = floor.getBoundingClientRect();
+                return {step_right: s.right, floor_right: f.right, floor_width: f.width};
+            }"""
+        )
+        if boxes is not None:
+            return cast("dict[str, float]", boxes)
+        page.wait_for_timeout(100)
+    raise AssertionError("step 6 never rendered a floor input")
 
 
 def _until_discarded(page: Page, server_url: str, *, corpus_id: str, besides: str) -> None:

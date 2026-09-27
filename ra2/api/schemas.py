@@ -773,6 +773,10 @@ class UpdateEvaluationRequest(_Schema):
     reasoning_effort: str | None = Field(default=None, max_length=16)
     size: EvaluationSize | None = None
     selected_models: list[str] | None = None
+    #: Step 6's floor (mvp-spec.md §11.4). **No `ge=1` here**, for
+    #: `reasoning_effort`'s reason: the refusal is `EvaluationService`'s 422,
+    #: a sentence that holds for the view and the API alike.
+    min_cell_count: int | None = None
 
 
 class EvaluationDraftResponse(_Schema):
@@ -790,6 +794,7 @@ class EvaluationDraftResponse(_Schema):
     size: EvaluationSize = EvaluationSize.FULL
     selected_models: list[str] = Field(default_factory=list)
     launched_at: datetime | None = None
+    min_cell_count: int = 20
 
 
 class RunProgressResponse(_Schema):

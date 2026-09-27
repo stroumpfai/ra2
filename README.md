@@ -329,7 +329,7 @@ Every setting is an environment variable prefixed `RA2_`, readable from a
 | `RA2_GPU_VRAM_GB` / `RA2_GPU_NAME` | unset | Declare the GPU instead of probing it. |
 | `RA2_DEV_RECORD_MAX` | `50` | At or below this, a run is a dev-sized smoke test. |
 | `RA2_EVAL_RECORD_MIN` | `200` | Below this, a run is marked *dev* and every view says "smoke test, not a result". |
-| `RA2_MIN_CELL_COUNT` | `20` | The floor a **new** evaluation starts with: result cells below it render as "insufficient data". Each evaluation keeps the floor it was created with, so changing this moves the next draft and never an existing one. |
+| `RA2_MIN_CELL_COUNT` | `20` | The floor a **new** evaluation starts with: result cells below it render as "insufficient data". Each evaluation keeps the floor it was created with, so changing this moves the next draft and never an existing one — and a draft's own floor is set on the Evaluation screen, step 6, as **Minimum n per cell**. |
 | `RA2_MAX_UPLOAD_MB` | `512` | Upload ceiling. |
 | `RA2_STORAGE_SECRET` | a fixed string | NiceGUI session storage. **Not** a security boundary: the app has no login. |
 | `RA2_LOG_LEVEL` | `INFO` | The `ra2` logger, on **stderr** — no log file, so nothing to retain and nothing for `just reset` to wipe. `INFO` is what makes a long run legible: a line per record before the model is called and one after it. **A level, not a content switch** — a log line may carry ids, counts, statuses, model tags and durations, and never narrative, a prompt, model output or `unfall_uid` ([`data-handling.md` §5.1](data-handling.md)). |

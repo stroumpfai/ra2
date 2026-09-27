@@ -801,15 +801,16 @@ deployment posture testable and until now nothing refused `--host 0.0.0.0`.
 | `ra2/cli.py` | + `serve`: builds `Settings`, refuses a host outside `LOOPBACK_HOSTS`, runs `create_app` on `host`/`port`. `--reload` watches `ra2/` alone | 3 | §2 |
 | `justfile` | `dev` and `dev-reload` call `ra2.cli serve`; `--host`/`--port` leave the recipes. Defaults unchanged | 3 | §3 |
 | `ra2/services/readmodels.py` | + `EvaluationDraftView.min_cell_count`, defaulted | 5 | §4 |
-| `ra2/api/schemas.py` | `min_cell_count` on the draft update request and response. Additive; snapshot regenerated | 5 | §5 |
+| `ra2/api/schemas.py` | `min_cell_count` on the draft update request and response. Additive; snapshot regenerated. **No `ge=1`** — the service's sentence is the one refusal | 5 | §5 |
 
 ### Not frozen, and changed
 
 | Path | What |
 |---|---|
-| `ra2/services/evaluation_service.py` | `save_draft` seeds `min_cell_count` from `Settings`, beside the reasoning effort that already does, for the same reason (Stage 2); `update_draft` accepts it (Stage 5) |
+| `ra2/services/evaluation_service.py` | `save_draft` seeds `min_cell_count` from `Settings`, beside the reasoning effort that already does, for the same reason (Stage 2); `update_draft` accepts it and refuses below 1 with `EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE` (Stage 5) |
 | `scripts/dev_agent.py` | Runs `serve` with `RA2_HOST`/`RA2_PORT` in the child environment instead of `--host`/`--port` on argv — the `RA2_PORT` it always set becomes the one that decides (Stage 3) |
-| `ra2/ui/views/evaluation_view.py` | Step 5's floor control (Stage 5) |
+| `ra2/ui/views/evaluation_view.py` | Step 6's floor control, "Minimum n per cell" — step 6 (Size) rather than step 5 (Determinism), because it decides how much data a number needs, not what the model answers; `SIZE_NOTE` gains the sentence. `_seed_input` generalised to `_number_input` for it. **`_update` now shows a `FeatureValidationError`'s sentences** instead of "1 feature validation error(s)", which is what every `SD36` refusal had been rendering (Stage 5) |
+| `ra2/api/v1/evaluations.py` | Passes `min_cell_count` through `update_draft` and maps it onto the draft response (Stage 5) |
 | `sw-design.md` | + `SD42`; §10's `RA2_HOST`/`RA2_PORT` and `RA2_MIN_CELL_COUNT` rows say what reads them (Stage 1) |
 | `docs/risk-assesment.md` | A4 and G3 record what is being built against them (Stage 1) |
 | `plan-settings-in-the-app.md` | Paused. Its inventory's two `run_concurrency` rows corrected, its `SD42` renumbered `SD43` (Stage 1) |

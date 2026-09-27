@@ -92,19 +92,49 @@ decides.
 ## 4. `ra2/services/readmodels.py` — `+ EvaluationDraftView.min_cell_count` *(Stage 5)*
 
 ```diff
-     reasoning_effort: str = DEFAULT_REASONING_EFFORT
-+    #: mvp-spec.md §11.4's floor, per evaluation (`SD19`, `SD42`). Defaulted,
-+    #: like `reasoning_effort`, so every constructor that predates it holds.
+     selected_models: tuple[str, ...] = ()
+     launched_at: datetime | None = None
++    #: Step 6's floor — mvp-spec.md §11.4's "configurable per evaluation"
++    #: (`SD19`, `SD42`). Defaulted, like `reasoning_effort`, so every
++    #: construction that predates it holds (amendment:
++    #: fix/settings-with-no-reader).
 +    min_cell_count: int = 20
 ```
 
-Step 5's control has to show the draft's floor, and the draft view is how the
-view learns anything about a draft.
+Step 6's control has to show the draft's floor, and the draft view is how the
+view learns anything about a draft. Last in the class, after the other
+defaulted fields.
+
+**Step 6, not step 5** as this amendment first said: step 5 is Determinism —
+what makes an answer reproducible — and the floor decides nothing about the
+answer. It decides how much data a number needs before it is shown, which is
+step 6's `SIZE_NOTE` one level down (plan §4.3).
 
 ## 5. `ra2/api/schemas.py` — the same on the draft request and response *(Stage 5)*
 
-`min_cell_count: int | None = Field(default=None, ge=1)` on the update
-request, beside `temperature`, `seed` and `reasoning_effort`; `min_cell_count:
-int = 20` on the draft response. **Additive**; `tests/api/openapi_snapshot.json`
-is regenerated. The API and the UI are two adapters over one service, so a
-field the view can set is a field a request can set.
+```diff
+ class UpdateEvaluationRequest(_Schema):
+     ...
+     selected_models: list[str] | None = None
++    #: Step 6's floor (mvp-spec.md §11.4). **No `ge=1` here**, for
++    #: `reasoning_effort`'s reason: the refusal is `EvaluationService`'s 422,
++    #: a sentence that holds for the view and the API alike.
++    min_cell_count: int | None = None
+```
+
+```diff
+ class EvaluationDraftResponse(_Schema):
+     ...
+     launched_at: datetime | None = None
++    min_cell_count: int = 20
+```
+
+**Additive**; `tests/api/openapi_snapshot.json` is regenerated and gains
+exactly these two properties. The API and the UI are two adapters over one
+service, so a field the view can set is a field a request can set.
+
+**No `ge=1`**, where this amendment first proposed one: a schema bound answers
+with pydantic's error naming the field, while `EvaluationService` answers with
+`EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE` — the same sentence the view shows. Two
+refusals for one rule would be two wordings of it. `SD36` settled the same
+question for `reasoning_effort`.

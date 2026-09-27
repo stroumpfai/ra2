@@ -25,7 +25,10 @@ from ra2.services.errors import (
     FeatureValidationError,
     NotFoundError,
 )
-from ra2.services.evaluation_service import EvaluationService
+from ra2.services.evaluation_service import (
+    EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE,
+    EvaluationService,
+)
 from ra2.services.readmodels import FeatureConfigView
 
 pytestmark = pytest.mark.backend
@@ -212,6 +215,7 @@ async def test_update_draft_edits_every_step(
         reasoning_effort="medium",
         size=EvaluationSize.DEV,
         selected_models=("llama3.1:8b-instruct-q8_0",),
+        min_cell_count=5,
     )
 
     assert updated.name == "Weather eval v2"
@@ -222,6 +226,7 @@ async def test_update_draft_edits_every_step(
     assert updated.size is EvaluationSize.DEV
     assert updated.selected_models == ("llama3.1:8b-instruct-q8_0",)
     assert updated.launch_label_count == 1
+    assert updated.min_cell_count == 5
     # Round-tripped, not just returned: the view is built from the row.
     assert (await evaluation_service.get(draft.evaluation_id)).draft == updated
 
@@ -251,6 +256,26 @@ async def test_an_effort_the_endpoint_cannot_map_is_refused_and_changes_nothing(
     assert "xhigh" in message
     assert "none, low, medium, high" in message
     # Nothing changed: the whole update is one transaction.
+    assert (await evaluation_service.get(EvaluationId(evaluation_id))).draft == before.draft
+
+
+async def test_a_floor_below_one_is_refused_and_changes_nothing(
+    evaluation_service: EvaluationService,
+    launchable: Callable[..., Awaitable[tuple[CorpusId, FeatureConfigView, str]]],
+) -> None:
+    """Below 1 there is no cell the floor could suppress. Refused in the
+    service, for the reasoning effort's reason: the same rule holds for a
+    request that never went through the view."""
+    _, _, evaluation_id = await launchable()
+    before = await evaluation_service.get(EvaluationId(evaluation_id))
+
+    with pytest.raises(FeatureValidationError) as excinfo:
+        await evaluation_service.update_draft(
+            EvaluationId(evaluation_id), name="renamed", min_cell_count=0
+        )
+
+    assert excinfo.value.validation_errors == (EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE.format(floor=0),)
+    # Nothing changed — not the floor, and not the name set in the same call.
     assert (await evaluation_service.get(EvaluationId(evaluation_id))).draft == before.draft
 
 

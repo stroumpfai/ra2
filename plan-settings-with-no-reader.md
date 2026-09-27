@@ -2,9 +2,19 @@
 
 **Status.** Written 2026-09-27 against `8adf7d0`, out of the parameter
 inventory in `plan-settings-in-the-app.md` §11 — which is **paused** until this
-lands. Nothing here is built yet. Authority as always: `mvp-spec.md` on *what*,
-`sw-design.md` on *how* (CLAUDE.md). **No migration** — every column this plan
-needs already exists. One amendment file, named in §6.
+lands. Authority as always: `mvp-spec.md` on *what*, `sw-design.md` on *how*
+(CLAUDE.md). **No migration** — every column this plan needs already exists.
+One amendment file, named in §6.
+
+Built on `fix/settings-with-no-reader`, 2026-09-27. **Stage 1** (`a23acbe`):
+`SD42`, the amendment, this slice's `CONTRACTS.md` section; §6 corrected — it
+had `evaluation_service.py` and `cli.py` backwards. **Stage 2** (`2363f08`):
+the draft seeds its floor from `Settings`. **Stage 3** (`94c8c91`): `ra2
+serve`, the loopback refusal, `just dev`/`dev-reload`/`dev-agent` through it.
+**Stage 4** (`99ccb59`): the gate — an AST scan, not the text scan §4.1 first
+described, which would have passed `port` (§4.1). **Stage 5**: the floor on
+step 6, not step 5 (§4.3), plus two things found on the way — refusal
+sentences never reached the screen, and J10 raced the column's redraw.
 
 ---
 
@@ -102,7 +112,7 @@ amendment to `domain/llm.py`.**
 **D5. `min_cell_count` is repaired at both ends, and the ends are separable.**
 The reader (`evaluation_service` seeds the draft from `Settings`, which is what
 `models.py:716` has always claimed) is Stage 2 and closes the pattern. The
-control on step 5 — `mvp-spec.md` §11.4's "configurable **per evaluation**" —
+control on step 6 — `mvp-spec.md` §11.4's "configurable **per evaluation**" —
 is Stage 5 and closes the spec. Stage 5 can be dropped at the gate without
 reopening Stage 2.
 
@@ -191,23 +201,44 @@ put a second way to start the app under test.
 column's own `default=20` stays as the database's answer for a row written
 around the service.
 
-**The control (Stage 5).** A number input on step 5, beside temperature, seed
-and effort — the three it most resembles: a pinned input, set before launch,
-recorded in provenance. It is **undesigned** (`design/prompt-evaluation/README.md`
-draws three decoding controls, not four), so it is built to this plan's own
-design on `P3-D19`'s precedent, which settled the same question for the
-settings dialog.
+**The control (Stage 5).** A number input, **"Minimum n per cell", on step 6
+(Size)** — worded in *n*, as the Results tabs' "cells below n = 20 suppressed"
+is. It is **undesigned** (`design/prompt-evaluation/README.md` draws no floor),
+so it is built to this plan's own design on `P3-D19`'s precedent.
 
-Two things make it cheap and one makes it careful:
+*Changed in Stage 5:* this section first put it on step 5, beside temperature,
+seed and effort. Step 5 is **Determinism**, and its note explains what makes an
+answer reproducible; the floor decides nothing about the answer. It decides how
+much data a number needs before it is shown — which is step 6's subject one
+level down: `SIZE_NOTE` already says "below the evaluation minimum a run is
+marked dev". The floor is that rule per cell, so it sits there, and
+`SIZE_NOTE` gains the one sentence that says so.
 
-- Cheap: suppression is applied at **read** time from stored `n` (`SD19`), so
-  the floor never re-scores anything, and the whole read path already honours
-  the column.
-- Cheap: `results_service`, `ranking_service` and the three tabs already render
-  from `evaluation.min_cell_count`, so a changed value is visible with no
-  further work.
-- Careful: step 5's layout is asserted in E2E at the drawn width (sw-design
-  §8.2). §8 carries the risk.
+Two things made it cheap:
+
+- Suppression is applied at **read** time from stored `n` (`SD19`), so the
+  floor never re-scores anything.
+- `results_service`, `ranking_service` and the three tabs already render from
+  `evaluation.min_cell_count`, so a changed value is visible with no further
+  work.
+
+Three things Stage 5 found on the way:
+
+- **The refusal sentence never reached the screen.** `FeatureValidationError`'s
+  `str()` is "1 feature validation error(s)", and `EvaluationView._update`
+  notified exactly that — for every refusal `SD36` made a sentence. Nothing
+  noticed because the reasoning select only offers valid values; a free number
+  field is the first control that can send a refused one. `_update` now shows
+  the service's sentences.
+- **The API refuses in the service, not the schema** — no `ge=1` on the
+  request, for `reasoning_effort`'s reason: one rule, one sentence, both
+  adapters.
+- **There was no E2E geometry test for steps 5 or 6 to update** (§7.1 guessed
+  there was). J10 gains one, and in writing it, a race in J10 itself: every
+  setup save redraws the column *after* it returns, and J10 read layout
+  straight after its reasoning-select save. Under a full E2E run the reads
+  landed on the discarded column (`NaN`, a dropped `change`). `_redrawn` waits
+  for the redraw itself.
 
 ---
 
@@ -257,13 +288,37 @@ per §7.
 
 ### Stage 5 — the spec's "configurable per evaluation", and seen working
 
-- The step-5 control (§4.3), its UI test and its E2E.
+- The step-6 control (§4.3), its UI test and its E2E.
 - `just dev-agent` in a **throwaway `RA2_DATA_DIR`** (never the real one,
   Do-NOT #13): set the floor to 3 on one evaluation and 20 on another over the
   same seeded corpus, and read the two Results tabs against each other.
 - `README.md`'s configuration table and `docs/risk-assesment.md` A4/G3 close.
 
 **Exit:** `mvp-spec.md` §11.4 is reachable from the product.
+
+**Measured, 2026-09-27.** `just reset-seed yes --records 50` into a fresh temp
+`RA2_DATA_DIR` (synthetic codelist — the worktree has no `data/`), served
+through `ra2 serve` on a free port rather than `dev-agent`, because
+`dev-agent` mints its own empty dir and the seed has to land first. Two
+evaluations identical but for the floor, set through the draft API as step 6
+sets it, each one `qwen3.5:2b` run against this host's Ollama: both `done` at
+50/50 with 0 retries, both scored.
+
+The per-evaluation feature cells are all n = 46–50, above both floors, so they
+cannot tell the floors apart. The by-language breakdown can — the seed plans
+de 30 · fr 15 · it 5 — and it shows **identical `n` in every cell** and the
+suppression moving exactly where the floors differ:
+
+| language | n | floor 3 | floor 20 |
+|---|---|---|---|
+| de | 29 | shown | shown |
+| fr | 14 | shown | **suppressed** |
+| it | 5 | shown | **suppressed** |
+| en, mixed | 1 | suppressed | suppressed |
+
+12 of 30 language cells suppressed at 3, 24 of 30 at 20 — two more per
+feature, across six. Nothing but ids, counts, statuses and flags was printed,
+and the temp dir was removed afterwards (Do-NOT #13).
 
 ---
 
@@ -277,7 +332,7 @@ applied in the stage whose code needs it.
 | `ra2/infra/config.py` | **docstring only** — `min_cell_count` is the draft default, `host`/`port` are the bind. No field, default or validator changes | 1 |
 | `ra2/cli.py` | + the `serve` subcommand and its loopback refusal — wiring only, it is a composition root | 3 |
 | `justfile` | `dev` and `dev-reload` call `ra2.cli serve`; the two flags go. "Final" has been amended four times; it means *by amendment only* | 3 |
-| `ra2/services/readmodels.py` | + `EvaluationDraftView.min_cell_count`, defaulted — the draft view is how step 5 learns the floor | 5 |
+| `ra2/services/readmodels.py` | + `EvaluationDraftView.min_cell_count`, defaulted — the draft view is how step 6 learns the floor | 5 |
 | `ra2/api/schemas.py` | `min_cell_count` on the draft update request and the draft response. `evaluations.py:279` does update drafts, so the API gets the field the view gets | 5 |
 
 Not frozen, and changed: `ra2/services/evaluation_service.py` (its header:
@@ -307,7 +362,7 @@ no floor to show.
 | `tests/backend/services/run/test_guards.py` | **none** | §2.1 — `run_concurrency` keeps its reader, its refusal and this test |
 | `tests/ui/test_results_view.py`, `tests/fixtures/scored_corpus.py` | **none** | They pass `min_cell_count=20` explicitly, which is what a fixture should do; Stage 2 changes the *default*, not the argument |
 | `tests/backend/services/evaluation/…` draft assertions | **updated** | Any that assert a draft's floor now assert it against the settings value rather than a literal `20` |
-| `tests/e2e/…` step-5 layout | **updated** | Stage 5 adds a fourth control to a card whose geometry is asserted (§8) |
+| `tests/e2e/test_j10_evaluation.py` | **extended** | There was no step-5/6 geometry test to update. J10 gains the floor's check, and `_redrawn` for the race it exposed in J10's own reasoning-select step (§4.3) |
 
 ### 7.2 New tests
 
@@ -333,8 +388,11 @@ because `update_draft` already refuses after launch and that has its own test.
 | `test_serve_accepts_every_loopback_form` | backend | `127.0.0.1`, `localhost`, `LOCALHOST`, `::1` | 3 |
 | `test_serve_refuses_a_non_loopback_host_before_binding` | backend | D2–D4 in one parametrized test: `0.0.0.0`, `::`, a LAN address, `127.0.0.1.nip.io` (resolves to loopback, refused because it is compared literally), `127.0.0.2`. **`uvicorn.run` is never reached** | 3 |
 | `test_dev_agent_passes_the_bind_in_the_environment_and_not_on_argv` | backend/scripts | Instance 4 closed — and `RA2_HOST` pinned to `127.0.0.1` even when the developer's own environment says `0.0.0.0` | 3 |
-| `test_the_floor_control_writes_the_evaluation` | ui | Stage 5's control | 5 |
-| `test_step_5_renders_four_pinned_controls_at_the_drawn_width` | e2e | §8's risk, asserted rather than hoped | 5 |
+| `test_step_six_persists_the_floor_as_it_is_typed` | ui | Stage 5's control saves on change | 5 |
+| `test_a_floor_below_one_is_refused_and_the_stored_floor_stays` | ui | The service's sentence reaches the screen, and the box shows the stored value | 5 |
+| `test_a_floor_below_one_is_refused_and_changes_nothing` | backend | The refusal, and that nothing else in the same call landed | 5 |
+| `test_update_draft_with_a_floor_below_one_is_422` | api | Same sentence through the other adapter | 5 |
+| J10, the floor block | e2e | Set, persisted through the API, restored; inside step 6 with no horizontal scroll at 1024px | 5 |
 
 ### 7.3 The one test that would have prevented all of this
 
@@ -350,7 +408,7 @@ found and fixed once without the category being closed behind it.
 
 | Risk | Why it is small | Cover |
 |---|---|---|
-| Stage 5's fourth control breaks step 5's asserted geometry | The card is a vertical stack of labelled fields, not a fixed grid; the three it joins are the same shape | `test_step_5_renders_four_pinned_controls_at_the_drawn_width` |
+| Stage 5's control breaks the setup column's layout | Step 6 is a vertical stack; the field is the Seed's own shape | J10's floor block, at 1024px |
 | A source-scanning contract test produces a false positive **or a false negative** | The two-case rule (§4.1) is exactly the two ways a field is legitimately consumed; it parses with `ast`, so a docstring or `parts.port` cannot pass a field; and a synthetic unread field proves the gate still fails | §4.1, `test_a_settings_field_with_no_reader_fails_the_gate` and its two siblings |
 | Moving the bind into `cli.py` breaks a developer's muscle memory | `just dev` and `just dev-agent` are unchanged at the command line; only what they execute moves | Stage 3 |
 | The loopback refusal blocks a legitimate need to bind elsewhere | There is no such legitimate need under N1, and A4 is the record of what happens when one is assumed | D3 — no opt-out, `require_loopback`'s reasoning |
@@ -387,7 +445,7 @@ found and fixed once without the category being closed behind it.
 | # | Question | This plan's answer |
 |---|---|---|
 | Q1 | Wire `host`/`port` (D2), or delete them? | **Wire, with the refusal.** A4 weighs both and prefers the first because it makes the posture testable — and today nothing anywhere refuses `--host 0.0.0.0` |
-| Q2 | Does `min_cell_count` need the step-5 control, or is the host default enough? | **Both, and Stage 5 is separable.** The reader closes `SD42`; only the control makes `mvp-spec.md` §11.4's "configurable per evaluation" true |
+| Q2 | Does `min_cell_count` need the step-6 control, or is the host default enough? | **Both, and Stage 5 is separable.** The reader closes `SD42`; only the control makes `mvp-spec.md` §11.4's "configurable per evaluation" true |
 | Q3 | Is a source-scanning contract test acceptable as a gate? | **Yes**, and it is the only kind that can see this defect: the failure mode is a name no code reads. An AST scan, not a text search (§4.1) |
 | Q4 | `SD42` here and `SD43` for the paused plan, or the reverse? | **This one first.** It is smaller, it has no migration, and it makes the paused plan's new field satisfy a rule that already exists rather than one added alongside it |
 | Q5 | `temperature` and `seed` are hardcoded draft defaults while their sibling `reasoning_effort` is an env setting. Promote the two, or leave the asymmetry? | **Leave it, and document it** (§11.3). The effort's variable has a second job the other two do not have; promoting them would let a host seed drafts off the reproducibility baseline, which provenance would record correctly and therefore never flag |

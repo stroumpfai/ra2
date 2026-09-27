@@ -80,6 +80,7 @@ def _draft_response(view: EvaluationDraftView) -> EvaluationDraftResponse:
         size=view.size,
         selected_models=list(view.selected_models),
         launched_at=view.launched_at,
+        min_cell_count=view.min_cell_count,
     )
 
 
@@ -294,6 +295,7 @@ async def update_draft(
             reasoning_effort=body.reasoning_effort,
             size=body.size,
             selected_models=(None if body.selected_models is None else tuple(body.selected_models)),
+            min_cell_count=body.min_cell_count,
         )
     except EvaluationLockedError as exc:
         raise _locked(exc) from exc

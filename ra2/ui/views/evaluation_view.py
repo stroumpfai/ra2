@@ -117,7 +117,7 @@ from ra2.domain.ids import (
 from ra2.domain.llm import REASONING_EFFORTS, EndpointStatus
 from ra2.domain.qualification import QualificationState
 from ra2.services.container import Services
-from ra2.services.errors import ServiceError
+from ra2.services.errors import FeatureValidationError, ServiceError
 from ra2.services.readmodels import (
     ConnectionProbeView,
     ConnectionView,
@@ -178,6 +178,7 @@ __all__ = [
     "DEV_MARKER",
     "DISCARD_EVALUATION_LABEL",
     "ENDPOINT_WORDS",
+    "FLOOR_LABEL",
     "LAUNCHED_MESSAGE",
     "MODELS_UNSAVED_MESSAGE",
     "MODELS_WELL_PX",
@@ -372,8 +373,17 @@ REASONING_LABEL: Final = "Reasoning"
 #: #7 — every number comes from a service).
 SIZE_NOTE: Final = (
     "Below the evaluation minimum a run is marked dev and every view carries "
-    "“smoke test, not a result”."
+    "“smoke test, not a result”. A result cell with fewer records than the "
+    "minimum n reads “insufficient data”, never a number."
 )
+#: Step 6's second control, mvp-spec.md §11.4's "configurable per
+#: evaluation" (`SD42`). **Undesigned** — `design/prompt-evaluation/README.md`
+#: draws no floor — so built on `P3-D19`'s precedent. In step 6 and not beside
+#: temperature and seed: those decide what the model answers, and this decides
+#: how much data a number needs before it is shown, which is `SIZE_NOTE`'s
+#: subject one level down. Worded in *n*, as the Results tabs' "cells below
+#: n = 20 suppressed" is.
+FLOOR_LABEL: Final = "Minimum n per cell"
 #: The design's own header for this column (`design/prompt-evaluation/README.md`
 #: §2), and it is **kept verbatim for the state the design drew** — a run in
 #: flight. It was rendered in every other state too, which is how a column of
@@ -1036,8 +1046,10 @@ class _EvaluationPage:
                         disabled=self._locked,
                     )
                 with labeled_field("Seed", extra="flex:1;"):
-                    _seed_input(
+                    _number_input(
                         value=view.draft.seed,
+                        label="Seed",
+                        testid="seed-input",
                         on_change=_sync(self._set_seed),
                         disabled=self._locked,
                     )
@@ -1078,6 +1090,14 @@ class _EvaluationPage:
                     f"Dev · {format_count(view.dev_record_max)} records",
                     selected=current is EvaluationSize.DEV,
                     on_click=None if self._locked else _toggle(self._pick_size, EvaluationSize.DEV),
+                )
+            with labeled_field(FLOOR_LABEL, extra="margin-top:8px;"):
+                _number_input(
+                    value=view.draft.min_cell_count,
+                    label=FLOOR_LABEL,
+                    testid="floor-input",
+                    on_change=_sync(self._set_min_cell_count),
+                    disabled=self._locked,
                 )
             ui.label(SIZE_NOTE).classes("ink2").props('data-testid="size-note"').mark(
                 "size-note"
@@ -1485,6 +1505,17 @@ class _EvaluationPage:
             return
         await self._update(seed=seed)
 
+    async def _set_min_cell_count(self, value: str) -> None:
+        """`_set_seed`'s shape: a non-integer never reaches the service, and
+        the redraw puts the stored floor back. Below 1 is the service's to
+        refuse (`EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE`), not this view's."""
+        try:
+            floor = int(value)
+        except ValueError:
+            await self.reload()
+            return
+        await self._update(min_cell_count=floor)
+
     async def _pick_size(self, size: EvaluationSize) -> None:
         await self._update(size=size)
 
@@ -1497,6 +1528,13 @@ class _EvaluationPage:
             return
         try:
             await self._services.evaluation.update_draft(view.draft.evaluation_id, **changes)  # type: ignore[arg-type]
+        except FeatureValidationError as exc:
+            # The service's sentences, not the exception's count: `SD36` made
+            # each refusal a sentence naming the repair, and "1 feature
+            # validation error(s)" is what reached the screen instead. A free
+            # number field (step 6's floor) is the first control that can
+            # actually send a refused value.
+            ui.notify(" ".join(exc.validation_errors), type="negative")
         except ServiceError as exc:
             ui.notify(str(exc), type="negative")
         await self.reload()
@@ -2256,19 +2294,30 @@ def _select(
     return element
 
 
-def _seed_input(*, value: int, on_change: Callable[[str], None], disabled: bool) -> Element:
-    """The Seed field: typed, with the design's mono `edit` hint beside it."""
+def _number_input(
+    *,
+    value: int,
+    label: str,
+    testid: str,
+    on_change: Callable[[str], None],
+    disabled: bool,
+) -> Element:
+    """A typed integer field with the design's mono `edit` hint beside it —
+    the Seed's shape, shared with step 6's floor."""
     with ui.element("div").style("display:flex;align-items:center;gap:6px;min-width:0;"):
         element = (
             ui.element("input")
             .classes("rof mono")
-            .props('type="number" step="1" aria-label="Seed" data-testid="seed-input"')
-            .mark("seed-input")
+            .props('type="number" step="1"')
+            .mark(testid)
             .style(f"{SEL_STYLE}flex:1;min-width:0;")
         )
         # Through the props *dict*, never the props string: the string is
         # parsed, so a value the parser chokes on silently drops the element
-        # (`features_view._text_input` documents the same trap).
+        # (`features_view._text_input` documents the same trap). The label and
+        # the test id are arguments now, not literals, so they go the same way
+        # (`data_props`, SD31).
+        data_props(element, {"aria-label": label, "data-testid": testid})
         element.props["value"] = str(value)
         if disabled:
             element.props("disabled")
