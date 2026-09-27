@@ -125,10 +125,11 @@ defect. §9.
 
 For every field on `Settings`, the test requires **one** of:
 
-1. a **direct reader** — the token `.<field>` appears in `ra2/` outside
-   `infra/config.py`; or
+1. a **direct reader** — an attribute read of the field on a settings object
+   (`settings.x`, `self._settings.x`, `Settings().x`) somewhere in `ra2/`
+   outside `infra/config.py`; or
 2. a **named property** on `Settings` whose body reads the field, where that
-   property itself has a direct reader.
+   property is itself read — transitively.
 
 Case 2 is not an escape hatch with a free-text reason — it is a second lookup
 that must also pass. It exists because three fields are genuinely consumed
@@ -144,11 +145,19 @@ The failure message names the field and quotes `SD42`, because the next person
 to hit this will be adding a setting, and the useful sentence is *"give it a
 reader or do not add it"*.
 
-**It is a text scan, and that is deliberate.** An import-graph or runtime check
-would miss a field read once at startup and prove nothing about a field read
-nowhere; the defect being closed is literally *"the name appears in no source
-file"*. `scripts/check_no_real_data.py` and `test_p5_contract.py`'s chain walk
-set the precedent for a contract test that reads the tree.
+**It is a static scan of the source, and that is deliberate.** An import-graph
+or runtime check would miss a field read once at startup and prove nothing
+about a field read nowhere. `scripts/check_no_real_data.py` and
+`test_p5_contract.py`'s chain walk set the precedent for a contract test that
+reads the tree.
+
+*Changed in Stage 4:* this section first said "a text scan" for the token
+`.<field>`. That would have **passed the defect it guards**: `domain/llm.py:415`
+has `_ = parts.port` — a URL's port — so `Settings.port` would have looked read
+for its whole unread life, and docstrings across the tree name settings that
+were never read. The gate parses with `ast` and counts only an attribute read
+on a settings object. Run against the tree before this slice it names exactly
+`host`, `min_cell_count` and `port`; on this branch, nothing.
 
 ### 4.2 The bind
 
@@ -305,8 +314,10 @@ no floor to show.
 | Test | Layer | What it pins | Stage |
 |---|---|---|---|
 | `test_every_settings_field_has_a_reader` | contract | `SD42` — G3's sentence, mechanically. **The test this plan exists for** | 4 |
-| `test_a_field_read_only_through_a_property_passes_through_that_property` | contract | §4.1 case 2 is a second lookup, not a free-text allowlist — the exemption cannot be widened by writing a reason | 4 |
-| `test_a_settings_field_with_no_reader_fails_the_contract` | contract | The gate actually fails: a synthetic field with no reader is detected, so the test cannot rot into a tautology | 4 |
+| `test_a_field_read_through_a_property_passes_only_if_the_property_is_read` | contract | §4.1 case 2 is a second lookup, not a free-text allowlist — the exemption cannot be widened by writing a reason | 4 |
+| `test_a_settings_field_with_no_reader_fails_the_gate` | contract | The gate actually fails: a synthetic field with no reader is detected, so the test cannot rot into a tautology | 4 |
+| `test_a_mention_in_a_docstring_or_a_comment_is_not_a_reader` | contract | The text-search blind spot §4.1 records, closed | 4 |
+| `test_the_same_name_read_off_another_object_is_not_a_reader` | contract | `parts.port` is not `settings.port` | 4 |
 | `test_the_draft_floor_comes_from_the_settings` | backend | Stage 2's reader, at the value `models.py:716` always claimed | 2 |
 | `test_a_later_settings_change_does_not_move_an_existing_draft` | backend | The seed is read **once**, at `save_draft` — a changed environment moves the next draft, never this one | 2 |
 
@@ -340,7 +351,7 @@ found and fixed once without the category being closed behind it.
 | Risk | Why it is small | Cover |
 |---|---|---|
 | Stage 5's fourth control breaks step 5's asserted geometry | The card is a vertical stack of labelled fields, not a fixed grid; the three it joins are the same shape | `test_step_5_renders_four_pinned_controls_at_the_drawn_width` |
-| A text-scanning contract test produces a false positive | The two-case rule (§4.1) is exactly the two ways a field is legitimately consumed, and the third new test proves the gate still fails when it should | §4.1, `test_a_settings_field_with_no_reader_fails_the_contract` |
+| A source-scanning contract test produces a false positive **or a false negative** | The two-case rule (§4.1) is exactly the two ways a field is legitimately consumed; it parses with `ast`, so a docstring or `parts.port` cannot pass a field; and a synthetic unread field proves the gate still fails | §4.1, `test_a_settings_field_with_no_reader_fails_the_gate` and its two siblings |
 | Moving the bind into `cli.py` breaks a developer's muscle memory | `just dev` and `just dev-agent` are unchanged at the command line; only what they execute moves | Stage 3 |
 | The loopback refusal blocks a legitimate need to bind elsewhere | There is no such legitimate need under N1, and A4 is the record of what happens when one is assumed | D3 — no opt-out, `require_loopback`'s reasoning |
 | `RA2_MIN_CELL_COUNT` in a developer's own environment starts reaching drafts | The frozen `settings` fixture already clears it, which is why §7.1 leaves that file alone | §7.1 |
@@ -377,7 +388,7 @@ found and fixed once without the category being closed behind it.
 |---|---|---|
 | Q1 | Wire `host`/`port` (D2), or delete them? | **Wire, with the refusal.** A4 weighs both and prefers the first because it makes the posture testable — and today nothing anywhere refuses `--host 0.0.0.0` |
 | Q2 | Does `min_cell_count` need the step-5 control, or is the host default enough? | **Both, and Stage 5 is separable.** The reader closes `SD42`; only the control makes `mvp-spec.md` §11.4's "configurable per evaluation" true |
-| Q3 | Is a text-scanning contract test acceptable as a gate? | **Yes**, and it is the only kind that can see this defect: the failure mode is a name that appears in no source file |
+| Q3 | Is a source-scanning contract test acceptable as a gate? | **Yes**, and it is the only kind that can see this defect: the failure mode is a name no code reads. An AST scan, not a text search (§4.1) |
 | Q4 | `SD42` here and `SD43` for the paused plan, or the reverse? | **This one first.** It is smaller, it has no migration, and it makes the paused plan's new field satisfy a rule that already exists rather than one added alongside it |
 | Q5 | `temperature` and `seed` are hardcoded draft defaults while their sibling `reasoning_effort` is an env setting. Promote the two, or leave the asymmetry? | **Leave it, and document it** (§11.3). The effort's variable has a second job the other two do not have; promoting them would let a host seed drafts off the reproducibility baseline, which provenance would record correctly and therefore never flag |
 

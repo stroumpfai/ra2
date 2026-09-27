@@ -819,7 +819,7 @@ deployment posture testable and until now nothing refused `--host 0.0.0.0`.
 | Path | What |
 |---|---|
 | `plan-settings-with-no-reader.md`, `plan-settings-in-the-app.md` | This slice's plan, and the paused one it came out of. No code |
-| `tests/test_settings_have_readers.py` | The `SD42` gate: a text scan of `ra2/`, because the defect is a name that appears in no source file (Stage 4) |
+| `tests/test_settings_have_readers.py` | The `SD42` gate: an AST scan of `ra2/` for attribute reads on a settings object. Not a text search — `domain/llm.py`'s `parts.port` and every docstring naming a setting would have passed a field read by nothing. Names `host`, `min_cell_count`, `port` on the pre-slice tree (Stage 4) |
 
 ---
 
