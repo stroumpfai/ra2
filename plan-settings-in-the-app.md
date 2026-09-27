@@ -7,11 +7,23 @@ Nothing here is built yet. Authority as always: `mvp-spec.md` on *what*,
 `sw-design.md` on *how* (CLAUDE.md). One revision, one amendment file, named
 in §6.
 
+**Paused 2026-09-27, revisited after `4307b61`.** It waited for
+`plan-settings-with-no-reader.md`, now merged, which took `SD42` — *every
+`Settings` field has a reader in `ra2/`, or it does not exist*, enforced by
+`tests/test_settings_have_readers.py` — and fixed the three dead settings the
+§11 inventory found. What that changes here: §11 is updated to the merged
+state; §6 is corrected (it had `evaluation_service.py` and `run_service.py` as
+frozen, and both say "Not frozen."); D4 now records why the gate stays green;
+§4.3 and §7 carry two lessons the floor's control taught; and Stage 5's check
+is re-planned, because `just dev-agent` cannot show a value surviving a
+restart. **The design itself is unchanged**, and D4's five call sites were
+re-verified against `4307b61` — `evaluation_service` ×3, `run_service` ×2.
+
 ---
 
 ## 1. What is wrong
 
-`ra2/ui/views/evaluation_view.py:2284`:
+`ra2/ui/views/evaluation_view.py`, `_save_settings`:
 
 ```python
 def _save_settings(endpoint: str, timeout_s: int) -> None:
@@ -92,6 +104,13 @@ default, and `RunService`'s timeout and its `run.llm_endpoint` pin — satisfied
 structurally by `SettingsService`, exactly as `ScoreSubmitter` and
 `PromptResolver` are satisfied today.
 
+**`SD42` stays green through this, and it is worth knowing why.** Moving the
+five reads off `Settings` does not leave `llm_base_url` and `llm_timeout_s`
+without a reader: `main.py` still reads both to construct the client and the
+catalogue, and after D3 it reads them as the seed. If a later change moves the
+seed read somewhere `Settings` is not named, `test_every_settings_field_has_a_reader`
+fails and says which field — that is the gate working, not a false positive.
+
 **D5. The live client is rebound on save, not rebuilt per run.** `SD36`
 rejected a client per run and its reasons stand: a second loopback guard and a
 second connection pool inside the record loop. A save is a rare, human,
@@ -160,6 +179,15 @@ loop's path.
 The endpoint line under the Models card already renders the effective value, so
 a successful save is visible in the place the analyst was already looking.
 
+**The refusal has to arrive as its sentence.** The floor's control
+(`plan-settings-with-no-reader.md` §4.3) found that `EvaluationView._update`
+had been rendering `str(FeatureValidationError)` — "1 feature validation
+error(s)" — for every refusal `SD36` made a sentence, and nothing noticed
+because no control could send a refused value until then. D6 and D7 add two
+refusals the dialog *can* trigger, so the new `_save_settings` handler renders
+the sentence itself, and §7's UI test asserts the sentence reaches the screen,
+not merely that a notification appeared.
+
 ---
 
 ## 5. The stages
@@ -219,11 +247,17 @@ no second seam. `tests/backend/infra` per §7.
 
 ### Stage 5 — seen working, and the documents closed
 
-- `just dev-agent` in a **throwaway `RA2_DATA_DIR`** (never the real one,
-  Do-NOT #13): change the endpoint to a wrong port and see the line go
-  unreachable; change it back, launch a real run against this host's Ollama and
-  confirm `run.llm_endpoint` pins the *stored* value; restart and confirm it
-  survives; try a save mid-run and see D6.
+- A **throwaway `RA2_DATA_DIR`** (never the real one, Do-NOT #13), seeded with
+  `just reset-seed yes` — synthetic only, which on a native-Windows machine an
+  agent runs on is the only data there may be (CLAUDE.md) — and served with
+  `RA2_DATA_DIR=<that dir> RA2_PORT=<free port> uv run python -m ra2.cli
+  serve`. **Not `just dev-agent`**: it mints a fresh, empty data dir on every
+  start, so "restart and confirm it survives" would restart into a database
+  that never held the value. Then: change the endpoint to a wrong port and see
+  the line go unreachable; change it back, launch a real run against this
+  host's Ollama and confirm `run.llm_endpoint` pins the *stored* value; stop
+  and re-serve the same dir and confirm it survives; try a save mid-run and see
+  D6. Remove the dir afterwards.
 - `README.md` §Configuration: the two rows gain "changeable in the app; the
   variable seeds it", and §2 step 4 says so where an analyst reads it.
 - `docs/risk-assesment.md` E3 closes to the extent this closes it.
@@ -243,10 +277,12 @@ in the stage whose code needs it.
 | `ra2/persistence/models.py` | + `AppSetting`, append-only, referenced by nothing | 2 |
 | `ra2/services/protocols.py` | + `ConnectionSettings` | 2 |
 | `ra2/services/container.py` | + `Services.settings` | 2 |
-| `ra2/services/evaluation_service.py` | + the provider keyword; three reads move off `Settings` | 2 |
-| `ra2/services/run_service.py` | + the provider keyword; two reads move off `Settings` | 2 |
 
-Not frozen, and changed: `ra2/domain/settings.py` *(new)*,
+Not frozen, and changed: `ra2/services/evaluation_service.py` (+ the provider
+keyword; three reads move off `Settings`) and `ra2/services/run_service.py`
+(the same; two reads) — both headers say "Not frozen.", and this table first
+listed them as frozen, the mistake `plan-settings-with-no-reader.md` §6 made
+about the same file. Also `ra2/domain/settings.py` *(new)*,
 `ra2/services/settings_service.py` *(new)*, `ra2/infra/connection.py` *(new)*,
 `ra2/main.py`, `ra2/ui/views/evaluation_view.py`, `sw-design.md`, `README.md`,
 `docs/risk-assesment.md`, `tests/test_p5_contract.py`.
@@ -269,11 +305,20 @@ no route is added (§9).
 | `test_the_run_pins_the_stored_endpoint` | backend | The provenance follows the effective value, not `Settings` |
 | `test_rebind_replaces_the_client_and_refuses_a_non_loopback_url` | backend/infra | D5, and that `one-llm-seam` still holds |
 | `test_the_settings_dialog_save_stores_the_endpoint` | ui | Stage 4, against a fake service |
-| `test_the_settings_dialog_reports_the_refusals` | ui | D6 and D7 as sentences, keyed on the code |
+| `test_the_settings_dialog_reports_the_refusals` | ui | D6 and D7 as **the service's sentences on screen** (§4.3) — not merely that a notification appeared |
 | `test_the_endpoint_line_shows_a_saved_endpoint_without_a_restart` | e2e | The whole point, in the browser |
 
 `tests/test_m0_contract.py` and `tests/test_p5_contract.py` take the amended
-frozen files and the new revision.
+frozen files and the new revision. `tests/test_settings_have_readers.py`
+(`SD42`) needs no change and must stay green (D4).
+
+**The E2E test waits on the redraw, not the value.** Save closes the dialog and
+reloads the view, and the view rebuilds the setup column *after* the call
+returns. J10 was reading layout and clicking controls on the discarded column
+under a loaded run until `_redrawn` (`tests/e2e/test_j10_evaluation.py`) —
+mark the element, act, wait for the selector to resolve to an unmarked one.
+Reuse it here; a check that polls for the new endpoint text alone will pass on
+the old line's last frame.
 
 ---
 
@@ -296,12 +341,14 @@ frozen files and the new revision.
   `llm_reasoning_effort` is already a column (`SD36`) and does not come back.
   `llm_parallel_calls` is gated on a qualification (`SD40`) and is a
   measurement, not a preference — it belongs in the app only behind that gate.
-- **`RA2_MIN_CELL_COUNT`.** It is not a candidate for this store, because it is
-  not a host setting and it is already a column. It is **unwired at both ends**
-  (§11.4) and its repair is a control on step 5, not a row in `app_setting`.
+- **`RA2_MIN_CELL_COUNT`.** Not a candidate for this store: it is not a host
+  setting, and it is already a column. It was unwired at both ends (§11.4) and
+  is **fixed as of `4307b61`** — the draft seeds from it, and step 6's
+  "Minimum n per cell" sets it per evaluation.
 - **`data_dir`, `db_path`, `host`, `port`, `storage_secret`.** Bootstrap: they
   decide where the store *is*, so they cannot live in it, and they belong to
-  whoever starts the process.
+  whoever starts the process — which for `host` and `port` is now literally
+  true: `ra2 serve` reads them and refuses a non-loopback bind (`SD42`).
 - **A `config.json`.** §2. If a second non-database mechanism is ever wanted it
   is `pydantic-settings`' `JsonConfigSettingsSource` slotted below the
   environment, and it is a separate decision from this one.
@@ -324,12 +371,14 @@ frozen files and the new revision.
 
 ## 11. Appendix — every parameter, and where it sits
 
-Written because §2's argument is only as good as the inventory under it. Four
+Written because §2's argument is only as good as the inventory under it.
+**Taken 2026-09-26 against `8adf7d0`; brought up to date with `4307b61`**, which
+merged `plan-settings-with-no-reader.md` — the rows it changed say so. Four
 classes, and the test for each:
 
 | Class | Test | Home |
 |---|---|---|
-| **Host** | Decided once by whoever installs RA2. Wrong value and nothing starts. | `.env` / the `justfile`'s command line |
+| **Host** | Decided once by whoever installs RA2. Wrong value and nothing starts. | `.env` — the bind included, since `ra2 serve` reads it (`SD42`) |
 | **Operator** | Depends on *this machine* — its endpoint, its GPU, its patience. Does not vary between two evaluations. | `.env` today; `app_setting` for the two this plan moves |
 | **Experiment** | The analyst is expected to **vary it between two evaluations that are then compared** (`SD36`). | a column on `evaluation` (or `feature`), and a control |
 | **Method** | A property of how RA2 measures, not a preference. Make it configurable and two installs stop being comparable. | a `Final` in `domain/` — deliberately not a setting |
@@ -351,15 +400,15 @@ classes, and the test for each:
 | `llm_reasoning_effort` | `main` (client default), `evaluation_service` (draft default) | Experiment → **already moved** | **Yes, in its reduced role.** `SD36` made it `evaluation.reasoning_effort`; what is left in the environment is the *default for a new draft*, which is a legitimate remaining job |
 | `dev_record_max` / `eval_record_min` | `evaluation_service`, `run_service` | Method | **Yes, but they are not really settings.** `mvp-spec.md` §9 defines what "smoke test, not a result" means; a host that quietly lowered `eval_record_min` would publish dev-sized numbers as results. Worth stating as policy rather than leaving as a knob |
 | `run_concurrency` | `run_service:375`, which **refuses** anything but 1 | Operator, forward-declared | **Yes.** It has a reader, a refusal and a test (`test_run_concurrency_above_one_is_refused_not_silently_ignored`), and `sw-design.md` §15 F7 states the intent: the setting exists so lifting the limit "is a config line rather than a rewrite". The same shape as `llm_base_url` in phase 1 (N2) |
-| `host` / `port` | **nothing** | Host | **No.** The bind address is the `justfile`'s `--host 127.0.0.1 --port 8080`, and these two "describe that intent; they do not enforce it" (`docs/risk-assesment.md` A4, G3). Fixed by `plan-settings-with-no-reader.md`, which **wires** them rather than deleting them, on A4's own reasoning |
-| `min_cell_count` | **nothing** | Experiment | **No, at both ends** — see §11.4 |
+| `host` / `port` | `cli.serve` | Host | **Yes, since `4307b61`.** Read by nothing before it — the `justfile`'s `--host`/`--port` bound, and nothing refused `0.0.0.0` (A4, G3). `plan-settings-with-no-reader.md` **wired** them rather than deleting them: `ra2 serve` binds what they say and refuses a host outside `LOOPBACK_HOSTS` before a socket opens |
+| `min_cell_count` | `evaluation_service.save_draft` | Experiment | **Yes, since `4307b61`** — in its right role, the seed for a new draft's floor. The floor itself is the `evaluation` column (§11.2). Read by nothing before (§11.4) |
 
 ### 11.2 `evaluation` — the per-experiment row, and its controls
 
 The place `SD36` established, and the place most analyst-facing parameters
 already are:
 
-| Column | Control on step 5? | Note |
+| Column | Control? | Note |
 |---|---|---|
 | `prompt_template_id`, `feature_config_id`, `corpus_id` | yes | The three frozen inputs |
 | `prompt_language` | yes (`features_view`) | §15 F10's real home |
@@ -368,7 +417,7 @@ already are:
 | `reasoning_effort` | yes — select | `SD36`, the migration that set the pattern |
 | `selected_models_json` | yes — the Models card | Gated on VRAM and reachability |
 | `size` / `is_dev` | yes | Against `dev_record_max` |
-| `min_cell_count` | **no** | §11.4 |
+| `min_cell_count` | yes — step 6, "Minimum n per cell" (since `4307b61`) | Seeded from `RA2_MIN_CELL_COUNT`; refused below 1. Step 6 (Size), not beside temperature and seed: it decides how much data a number needs, nothing about the answer |
 
 Per **feature**, one layer down: `matching_rule` carries its own parameters
 (the tolerance in minutes, its step), set in `features_view`. Correct place —
@@ -398,9 +447,16 @@ reason to hold an opinion about them.
 that disagree about `HEADER_MATCH_THRESHOLD` produce ingest reports that cannot
 be compared, and the product exists to make comparisons.
 
-### 11.4 The one live defect this inventory found
+### 11.4 The one live defect this inventory found — fixed in `4307b61`
 
-**`min_cell_count` is unwired at both ends.**
+*Kept as found, because the finding is the reason `SD42` exists.* Both ends
+are wired now: `save_draft` seeds the floor from `Settings`, and step 6 sets
+it per evaluation. Measured against this host's Ollama: two evaluations
+identical but for the floor (3 and 20) had the same `n` in every cell and
+differed only where the floors did (`plan-settings-with-no-reader.md`
+Stage 5).
+
+**`min_cell_count` was unwired at both ends.**
 
 - `mvp-spec.md` §11.4: "Default **20**, configurable **per evaluation**."
 - `evaluation.min_cell_count` exists (`SD19`, revision `e5145f27bf8c`) and is
@@ -417,18 +473,23 @@ is unreachable, not that a number is wrong. It is the same shape as
 `vram_bytes=0` (`plan-ranking-vram.md` §2.1): a plan named a wiring that was
 never built, and no test asked.
 
-**It is not this plan's to fix** — it is a column and a control, not a host
-setting — but it is the single highest-value parameter change available, and it
-is cheap: suppression is applied at **read** time from stored `n` (`SD19`), so
-changing the floor never re-scores anything. Its own slice, after this one.
+**It was not this plan's to fix** — a column and a control, not a host setting
+— and it went first, in its own slice, because it was cheap: suppression is
+applied at **read** time from stored `n` (`SD19`), so changing the floor never
+re-scores anything.
 
 ### 11.5 What should become a setting next, and what should stop being one
 
-Ranked by value over cost, after this plan lands:
+Ranked by value over cost, after this plan lands. The first item on the
+original list — a control for `evaluation.min_cell_count` — is **done**
+(`4307b61`, step 6).
 
-1. **A control for `evaluation.min_cell_count`** (§11.4). The column, the read
-   path and the rendering already exist; what is missing is one number input on
-   step 5, and the default that this plan's store could seed.
+1. **The parallel-calls gate, rendered beside the model — a read, not a
+   setting.** `plan-settings-with-no-reader.md` §11.2: the real defect is that
+   the value lives in a text file while its evidence lives in
+   `model_qualification`, and a launch pinned to 1 explains itself in a log
+   line. "4 calls · qualified 2026-09-25" on the Models card needs no store
+   and no migration, so it goes before item 2.
 2. **`llm_parallel_calls` as a stored, per-model row.** It is already gated on
    `model_qualification` (`SD40`), so the evidence is in the database while the
    setting is in a text file — and the one place an analyst would look for both
@@ -443,17 +504,18 @@ Ranked by value over cost, after this plan lands:
    analyst who wants different ones is running a comparison, which is exactly
    what the per-evaluation controls are for.
 
-And two that are **documented knobs doing nothing** — the same class of defect
-as a Save button that does not save. Both are
-`plan-settings-with-no-reader.md`, which ships **before** this plan:
+And two that were **documented knobs doing nothing** — the same class of defect
+as a Save button that does not save. Both were fixed by
+`plan-settings-with-no-reader.md`, merged as `4307b61`, and `SD42`'s gate now
+fails the build on the next one:
 
 - **`RA2_HOST` / `RA2_PORT`** — read by nothing; the `justfile` binds. A setting
   that describes an intent it cannot enforce is worse than no setting, because
-  a reader of §10 believes it. That plan **wires** them, with a loopback
+  a reader of §10 believes it. That plan **wired** them, with a loopback
   refusal in the launcher, rather than deleting them: A4 weighs both and
   prefers wiring because it makes the deployment posture testable.
 - **`RA2_MIN_CELL_COUNT`** — dead, and repaired at both ends there (the reader
-  it always claimed, and item 1 above).
+  it always claimed, and the step-6 control).
 
 **`RA2_RUN_CONCURRENCY` is not one of them**, and an earlier draft of this
 appendix was wrong to say so: it has a reader, a refusal and a test, and §15 F7
