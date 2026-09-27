@@ -547,6 +547,12 @@ on real data — and is committed.
 > exist and are verified live. **Keeping real data off the development
 > checkout entirely is still open**, and it is the recommendation that would
 > make the rule unnecessary rather than merely stated.
+>
+> **Re-opened in part 2026-09-27 — see §8.7.** The sandbox half of the deny
+> rules does not run on native Windows, where development was happening; an
+> agent read a file outside the checkout unprompted. Rule since: no real data
+> on a native-Windows machine where an agent runs; develop on Linux, macOS or
+> WSL2.
 
 *Scenario.* The project is built with an AI coding assistant by explicit design
 (`vision.md` → Environment). The assistant runs on the same machine as
@@ -976,6 +982,7 @@ the last three days in which any of them can be done.*
 | 14 | **◑ §8.6** | Decide backup vs. accepted re-run. E4 adds a second way to lose the corpus | B3, E1 | ½ d |
 | 13 | open · §8.6 | Extend the NDA or equivalent to the reviewing domain expert before Goal 3's review | B2 | — |
 | 3 | **✓ §8.3** | **Move real data off the development checkout** — C2's second recommendation, now near-free (§9.4). Closes C2 and C4 together | C2, C4 | ½ d |
+| **33** | **◑ §8.7** | **No sandbox on Windows, so no real data where agents run on Windows.** Develop on Linux, macOS or WSL2 (drive mounts off on WSL2); a native-Windows agent machine holds synthetic data only. Rule stated in `docs/rules.md` §2 and `CLAUDE.md`; applying it to the machines is open | C2 | ½ d |
 
 ### Gate 3 — at the acceptance pass (M34), once, deliberately
 
@@ -1523,6 +1530,77 @@ database file. It does not reach the blocks the filesystem freed, a backup, or
 a disk image. **B4 carries this**, and `data-handling.md` §2 states full-disk
 encryption as the deployment condition that makes every deletion above mean
 something — still unconfirmed, still not the reviewer's to observe.
+
+### 8.7 C2 — no sandbox on Windows · rule stated 2026-09-27 · `fix-c2-dev-platform` · machine separation open
+
+**Status: the rule is stated; applying it to the machines is the project's to
+do.** §8.3 put a deny list behind Do-NOT #13 and called it the backstop. This
+entry records that on the platform development was actually happening on,
+**half of that backstop did not exist**, and states the rule that follows.
+
+**What happened.** On 2026-09-26 an agent session on a native-Windows
+workstation, in auto mode, was asked to build `codes.json` from a CSV attached
+to the conversation. To find a complete copy it searched the user's home
+directory four levels deep, found `C:\Users\David\work\astra-data\ra2\`, read
+`UAP_Referenzen.csv` there with a Python script and wrote its output into the
+same folder. Nothing prompted and nothing blocked. The file was a public
+reference code table, not a delivery, so nothing sensitive was exposed — but
+**nothing in place would have stopped the same commands on a real one**, and the
+agent had no prior knowledge that the folder existed.
+
+**Why the controls did not engage.**
+
+| Control | Why it did nothing here |
+|---|---|
+| `sandbox.filesystem.denyRead` in `.claude/settings.json` | **Claude Code's sandbox does not run on native Windows** — only on Linux, macOS and WSL2. The setting is accepted and inert |
+| `permissions.deny` `Read(./data/**)`, `Read(./var/**)` | Written relative to the checkout. `astra-data` is a sibling folder; no rule in a project file can name every place real data might sit |
+| Do-NOT #13 | Names `data/` and `RA2_DATA_DIR`. A copy of a delivery kept anywhere else is covered by its spirit and not by its words |
+| Permission prompts | Auto mode approved every command; subagents inherit the mode |
+
+§8.3's live probes showed the deny rules working in a session where the sandbox
+ran. They say nothing about a native-Windows session, and the claim that a
+`Read(...)` rule "covers a sandboxed `cat`" is true only where there is a
+sandbox.
+
+**The finding generalises past this folder.** A deny list is a list of places
+real data is *known* to be. The failure is always the place nobody listed. On a
+machine where nothing confines the agent, the only dependable control is that
+there is no real data on the machine to find.
+
+**The rule.** *No sandbox on Windows — use Linux, macOS or WSL2. Therefore no
+real data on a native-Windows machine where an AI agent runs.* Such a machine
+holds synthetic data only: fixtures and `just reset-seed`, never a delivery, a
+copy of one, or a database built from one. The operational machine may be
+Windows provided no agent ever runs on it; the analyst using the app needs no
+sandbox, the agent building it does.
+
+**What changed.**
+
+| Where | Change |
+|---|---|
+| `docs/rules.md` *(new)* | The rulebook for using and developing RA2 in one place, with §2 stating the platform rule and which machine may hold what |
+| `CLAUDE.md` → Working agreements | + **No sandbox on Windows, so no real data where agents run on Windows.** Linux, macOS or WSL2 recommended; on WSL2 the checkout lives on the Linux filesystem and the Windows drive mounts are off (`/etc/wsl.conf`: `[automount] enabled=false`) — otherwise `/mnt/c` restores exactly the reach this entry is about |
+| `CLAUDE.md` → the #13 paragraph | Extended past `data/`: work inside the checkout, ask for any file from elsewhere, the deny list backs you up only where the sandbox runs; points at `docs/rules.md` |
+| `sw-design.md` §12 | The *On #13* paragraph gains the same rule, since it is the document that names the backstop |
+| `contracts/amendments/fix-c2-dev-platform.md`, `CONTRACTS.md` | The amendment for the frozen file above |
+
+**Scope.** This constrains the machines **agents run on**, not the product.
+`vision.md` → Environment still requires Windows as a target, N3 still holds,
+and CI keeps its Windows leg for layers 1–3.
+
+**What this does not close.**
+
+- **Applying it.** The workstation this happened on is native Windows and has
+  real data reachable today. Either the real data leaves it, or agents do.
+  Nothing checks the rule mechanically; an agent reading `CLAUDE.md` is asked
+  to notice, which is the same kind of control #13 already is.
+- **The same machine, two environments.** A WSL2 distro with automount off
+  cannot see the Windows profile, but a native-Windows agent session on the
+  same box still can. If real data sits on the Windows side of a machine,
+  agents on that machine run in WSL2 only, never natively.
+- **Settings still describe paths.** Even with the sandbox running, what it
+  confines is whatever the settings allow. Keep the WSL2 filesystem free of
+  copied deliveries for the same reason.
 
 ---
 

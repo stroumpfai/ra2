@@ -650,6 +650,17 @@ only name a literal path, so the rule covers the default `./var` and the
 sentence covers the rest — which is why the sentence is the invariant and the
 configuration is the backstop, not the other way round.
 
+**The backstop needs a platform that runs it.** The `sandbox` half of that
+file is what confines a shell command, and Claude Code's sandbox runs on
+Linux, macOS and WSL2 — **not on native Windows**, where it is silently
+inert and a shell command reads anything the user account can. Linux, macOS
+or WSL2 is therefore the recommended development platform, and **a
+native-Windows machine on which an AI agent runs holds synthetic data only**
+(`docs/rules.md` §2, `risk-assesment.md` §8.7). This constrains the machines
+agents run on, not the product: Windows stays a target (N3), the operational
+machine may be Windows provided no agent runs on it, and CI keeps its Windows
+leg.
+
 ---
 
 ## 13. Deviations and extensions this document introduces

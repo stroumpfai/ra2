@@ -23,7 +23,12 @@ the agent reading this. Your transcript leaves this machine — so a real
 narrative you `cat` to debug an import has left the host, whatever the reason
 was. `.claude/settings.json` denies reads of `data/` and `var/`, but the rule
 is the sentence, not the deny list: `RA2_DATA_DIR` can point anywhere, and no
-glob covers a path it has not been told about.
+glob covers a path it has not been told about. **The same goes for everything
+outside this repository**: a sibling folder, a download, a copy of a delivery.
+Work inside the checkout; if you need a file from elsewhere, ask for it. And
+the deny list only backs you up where the sandbox runs — see *No sandbox on
+Windows* below. The full rulebook, for users as well as developers, is
+[`docs/rules.md`](docs/rules.md).
 
 1. **Never** import `openai` or `ollama` outside the `LLMClient` implementation.
 2. **Never** mutate an `extraction`, `record` or `corpus` row. A re-run adds rows.
@@ -94,6 +99,19 @@ gate.
 
 ## Working agreements
 
+- **No sandbox on Windows, so no real data where agents run on Windows.**
+  Claude Code's sandbox, the half of `.claude/settings.json` that confines a
+  shell command, does not run on native Windows; there it is silently inert
+  and `cat`, `find` or a Python script reads anything the user account can.
+  Prefer **Linux, macOS or WSL2** for development. A native-Windows machine
+  on which an AI agent runs holds **synthetic data only** — fixtures and
+  `just reset-seed`, never a delivery, a copy of one, or a database built from
+  one. On WSL2, keep the checkout on the Linux filesystem and turn off the
+  Windows drive mounts (`/etc/wsl.conf`: `[automount] enabled=false`), or
+  `/mnt/c` puts every Windows folder back in reach. If you are an agent on
+  native Windows, stay inside the checkout and stop if you meet anything that
+  looks like real data. The operational machine may still be Windows, as long
+  as no agent ever runs on it (`docs/rules.md` §2, `risk-assesment.md` §8.7).
 - **Toolchain.** `uv` for everything Python (`uv sync --frozen`, `uv run …`);
   `just` for every command. Never bare `pip`, never `python -m venv`.
 - **Manual verification runs `just dev-agent`, never bare `just dev`.** `dev`
