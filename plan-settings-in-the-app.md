@@ -19,6 +19,13 @@ is re-planned, because `just dev-agent` cannot show a value surviving a
 restart. **The design itself is unchanged**, and D4's five call sites were
 re-verified against `4307b61` — `evaluation_service` ×3, `run_service` ×2.
 
+**Stage 1 done on 2026-09-27** on `feat/settings-in-the-app`: `SD43` with §3's
+bootstrap-value paragraph and §10's **Stored** column, E3's *being built*
+note, `contracts/amendments/feat-settings-in-the-app.md` and this slice's
+`CONTRACTS.md` section. No code changed. Two things moved stage, both so that
+no document claims what is not yet true: `config.py`'s docstrings go to Stage
+3, and E3's control status to Stage 5 (§5, §6).
+
 ---
 
 ## 1. What is wrong
@@ -200,7 +207,9 @@ Each is a commit; each leaves `just lint` and `just test` green.
   stored row and a control; `.env` is the seed* — plus the §10 table gaining a
   **Stored?** column (two rows say yes) and §3's injection rule gaining what D4
   makes precise.
-- `docs/risk-assesment.md` E3: the control status moves off "absent".
+- `docs/risk-assesment.md` E3: a *being built* note. **Its control status moves
+  in Stage 5, when the change ships** — moving it on a documents-only commit
+  would record a control that does not exist yet.
 - `contracts/amendments/feat-settings-in-the-app.md`, and this plan's
   `CONTRACTS.md` section.
 
@@ -232,6 +241,9 @@ tests per §7.
   `rebind`, with the loopback refusal at construction it already has.
 - `main.py`: one object wired where two are wired today; the startup read of
   the stored override, before `reclaim_orphans`.
+- `infra/config.py` (frozen, amendment §1): `llm_base_url` and
+  `llm_timeout_s` say they are the seed. Here, not in Stage 1, because this is
+  the stage that makes it true.
 
 **Exit:** a stored endpoint is the one the next run calls, with no restart and
 no second seam. `tests/backend/infra` per §7.
@@ -260,7 +272,8 @@ no second seam. `tests/backend/infra` per §7.
   D6. Remove the dir afterwards.
 - `README.md` §Configuration: the two rows gain "changeable in the app; the
   variable seeds it", and §2 step 4 says so where an analyst reads it.
-- `docs/risk-assesment.md` E3 closes to the extent this closes it.
+- `docs/risk-assesment.md` E3: the control status moves, to the extent this
+  closes it — the endpoint half.
 
 **Exit:** the runbook's list of tasks that still need a shell is two shorter.
 
@@ -273,7 +286,7 @@ in the stage whose code needs it.
 
 | File | Change | Stage |
 |---|---|---|
-| `ra2/infra/config.py` | **docstring only** — `llm_base_url` and `llm_timeout_s` say they are seeds. No field, default or validator changes | 1 |
+| `ra2/infra/config.py` | **docstring only** — `llm_base_url` and `llm_timeout_s` say they are seeds. No field, default or validator changes. **Stage 3**, not 1 as first planned: the sentence becomes true when the override is read at startup | 3 |
 | `ra2/persistence/models.py` | + `AppSetting`, append-only, referenced by nothing | 2 |
 | `ra2/services/protocols.py` | + `ConnectionSettings` | 2 |
 | `ra2/services/container.py` | + `Services.settings` | 2 |

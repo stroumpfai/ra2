@@ -833,6 +833,13 @@ still need a shell as a numbered list with exact commands, and name who is
 allowed to run them. If a developer must work on the machine, that is a
 decision to record once, not a habit to fall into.
 
+*Being built* — the endpoint half of the scenario, by
+`plan-settings-in-the-app.md` (`SD43`): the settings dialog stores the endpoint
+and timeout in the database, the running app picks them up without a restart,
+and the loopback rule is refused at the save as well as at construction. That
+takes two tasks off the shell-only list; the control status above moves when
+it ships, not before.
+
 ---
 
 ### Group F — Organisation, people and governance
