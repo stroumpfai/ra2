@@ -26,20 +26,25 @@ default:
 # lost; it is a guarantee about consequences, not a licence to restart. A file
 # watcher and a half-hour job cannot share a process.
 
+# The bind is `RA2_HOST`/`RA2_PORT` (defaults `127.0.0.1`/`8080`), read by
+# `ra2 serve`, which refuses any host that is not loopback before it opens a
+# socket (sw-design.md SD42, N1). There is no flag here to override it.
+
 # Run the app on 8080 against ./var: FastAPI + NiceGUI, one process, no watcher.
 dev:
-    uv run uvicorn ra2.main:create_app --factory --host 127.0.0.1 --port 8080
+    uv run python -m ra2.cli serve
 
 # For UI and view work, where an iteration is seconds and nothing long-running
 # is in flight. **Never with a run executing** — see the note above `dev`.
 #
-# `--reload-dir ra2` is the part that was always missing: an unscoped watcher
-# on a repository that contains copies of itself restarts on a test file, a
-# script, or an agent working in a worktree under this directory.
+# The watcher is scoped to `ra2/` (`serve --reload` sets uvicorn's
+# `reload_dirs`), which is the part that was always missing: an unscoped
+# watcher on a repository that contains copies of itself restarts on a test
+# file, a script, or an agent working in a worktree under this directory.
 
 # `dev` with the file watcher on, scoped to `ra2/` alone.
 dev-reload:
-    uv run uvicorn ra2.main:create_app --factory --reload --reload-dir ra2 --host 127.0.0.1 --port 8080
+    uv run python -m ra2.cli serve --reload
 
 # Agents verifying a change run this, never bare `dev` — sharing port 8080 or
 # `./var` with a developer's own manual testing session has clobbered their

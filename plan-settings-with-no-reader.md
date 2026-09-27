@@ -317,9 +317,11 @@ the column and assert the suppression; the only new link is Settings → row, an
 that is the test above. "Pinned at launch" became the once-at-creation test,
 because `update_draft` already refuses after launch and that has its own test.
 | `test_serve_binds_the_configured_host_and_port` | backend | Stage 3's reader, against a stub `uvicorn.run` | 3 |
-| `test_serve_refuses_a_non_loopback_host` | backend | D2/D3 — **before a socket is opened**, and with no opt-out reachable | 3 |
-| `test_serve_refuses_every_non_loopback_form` | backend | `0.0.0.0`, a LAN address, a hostname that would resolve to loopback — D4's "literally, no DNS" | 3 |
-| `test_dev_agent_passes_the_port_in_the_environment_and_not_on_argv` | backend/scripts | Instance 4 closed, beside `test_reset_data.py` and `test_qualify_model.py` | 3 |
+| `test_serve_with_nothing_set_binds_what_section_10_documents` | backend | `127.0.0.1:8080` still — `just dev`'s bind did not move, it changed owner | 3 |
+| `test_serve_reload_watches_ra2_alone` | backend | `dev-reload`'s `--reload-dir ra2`, kept | 3 |
+| `test_serve_accepts_every_loopback_form` | backend | `127.0.0.1`, `localhost`, `LOCALHOST`, `::1` | 3 |
+| `test_serve_refuses_a_non_loopback_host_before_binding` | backend | D2–D4 in one parametrized test: `0.0.0.0`, `::`, a LAN address, `127.0.0.1.nip.io` (resolves to loopback, refused because it is compared literally), `127.0.0.2`. **`uvicorn.run` is never reached** | 3 |
+| `test_dev_agent_passes_the_bind_in_the_environment_and_not_on_argv` | backend/scripts | Instance 4 closed — and `RA2_HOST` pinned to `127.0.0.1` even when the developer's own environment says `0.0.0.0` | 3 |
 | `test_the_floor_control_writes_the_evaluation` | ui | Stage 5's control | 5 |
 | `test_step_5_renders_four_pinned_controls_at_the_drawn_width` | e2e | §8's risk, asserted rather than hoped | 5 |
 
