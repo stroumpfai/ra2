@@ -160,7 +160,11 @@ class Settings(BaseSettings):
     gpu_vram_gb: float | None = None
     gpu_name: str | None = None
 
-    #: Bind to loopback by default. No egress, no external listener (N1).
+    #: The bind, read by `ra2 serve` (`SD42`) — which **refuses** a host
+    #: outside `domain.llm.LOOPBACK_HOSTS` before it opens a socket. No egress,
+    #: no external listener (N1), and deliberately no opt-out, for
+    #: `require_loopback`'s reason. The check lives in the launcher because
+    #: that is where the bind is decided; `create_app()` never knows it.
     host: str = "127.0.0.1"
     port: int = 8080
 
@@ -171,7 +175,9 @@ class Settings(BaseSettings):
     dev_record_max: int = 50
     eval_record_min: int = 200
 
-    #: D3 — cells below this render as "insufficient data". Unused until scoring.
+    #: mvp-spec.md §11.4 — cells below this render as "insufficient data".
+    #: **The default a new draft is seeded with** (`SD42`); the floor itself is
+    #: `evaluation.min_cell_count`, per evaluation and pinned at launch (`SD19`).
     min_cell_count: int = 20
 
     #: NiceGUI needs a secret to enable `app.storage`. Not a security boundary:

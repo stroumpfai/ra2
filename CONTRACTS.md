@@ -776,6 +776,53 @@ buildable as specified — `plan-phase-4.md` T3 names
 
 ---
 
+## Settings with no reader — G3's category, closed by a gate, a slice
+
+`fix/settings-with-no-reader`, by `plan-settings-with-no-reader.md`. **One
+amendment** (`contracts/amendments/fix-settings-with-no-reader.md`), applied
+file by file in the stage whose code needs it, and **no revision**. The design
+is `sw-design.md` `SD42`: *every `Settings` field has a reader in `ra2/`, or it
+does not exist.*
+
+`docs/risk-assesment.md` G3 named the category — `host`, `port`, the deleted
+`exports_dir` and `dev_agent.py`'s `RA2_PORT`, each set in the environment and
+read by nothing — and prescribed the test that closes it. The parameter
+inventory behind the plan found a fifth: `min_cell_count`, which `models.py`
+said defaulted the draft and nothing did, leaving `mvp-spec.md` §11.4's
+"configurable per evaluation" unreachable. Each is **given a reader rather than
+deleted**; for `host`/`port` that is A4's own preference, because it makes the
+deployment posture testable and until now nothing refused `--host 0.0.0.0`.
+
+### Amended files (already frozen)
+
+| File | Change | Stage | Amendment |
+|---|---|---|---|
+| `ra2/infra/config.py` | **Docstrings only.** `host` is the bind `serve` reads and refuses off loopback; `min_cell_count` is the draft's default, not "unused until scoring". No field, default or validator changes | 1 | `fix-settings-with-no-reader` §1 |
+| `ra2/cli.py` | + `serve`: builds `Settings`, refuses a host outside `LOOPBACK_HOSTS`, runs `create_app` on `host`/`port`. `--reload` watches `ra2/` alone | 3 | §2 |
+| `justfile` | `dev` and `dev-reload` call `ra2.cli serve`; `--host`/`--port` leave the recipes. Defaults unchanged | 3 | §3 |
+| `ra2/services/readmodels.py` | + `EvaluationDraftView.min_cell_count`, defaulted | 5 | §4 |
+| `ra2/api/schemas.py` | `min_cell_count` on the draft update request and response. Additive; snapshot regenerated | 5 | §5 |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/services/evaluation_service.py` | `save_draft` seeds `min_cell_count` from `Settings`, beside the reasoning effort that already does, for the same reason (Stage 2); `update_draft` accepts it (Stage 5) |
+| `scripts/dev_agent.py` | Runs `serve` with `RA2_HOST`/`RA2_PORT` in the child environment instead of `--host`/`--port` on argv — the `RA2_PORT` it always set becomes the one that decides (Stage 3) |
+| `ra2/ui/views/evaluation_view.py` | Step 5's floor control (Stage 5) |
+| `sw-design.md` | + `SD42`; §10's `RA2_HOST`/`RA2_PORT` and `RA2_MIN_CELL_COUNT` rows say what reads them (Stage 1) |
+| `docs/risk-assesment.md` | A4 and G3 record what is being built against them (Stage 1) |
+| `plan-settings-in-the-app.md` | Paused. Its inventory's two `run_concurrency` rows corrected, its `SD42` renumbered `SD43` (Stage 1) |
+
+### New files
+
+| Path | What |
+|---|---|
+| `plan-settings-with-no-reader.md`, `plan-settings-in-the-app.md` | This slice's plan, and the paused one it came out of. No code |
+| `tests/test_settings_have_readers.py` | The `SD42` gate: a text scan of `ra2/`, because the defect is a name that appears in no source file (Stage 4) |
+
+---
+
 ## Phase 5 — owner: M35 (Wave 0), amendment only
 
 Re-established at tag `p5-frozen`, the same way M27 established the phase-4
