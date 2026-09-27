@@ -11,6 +11,7 @@ from ra2.domain.codes import CodeImportError
 from ra2.domain.findings import Finding
 from ra2.domain.llm import LlmEndpointError
 from ra2.domain.prompt import PromptValidationError
+from ra2.domain.settings import SettingRefusal
 
 __all__ = [
     "BlockingFindingsError",
@@ -30,6 +31,7 @@ __all__ = [
     "RunNotScoreableError",
     "RunNotScoredError",
     "ServiceError",
+    "SettingRefusedError",
     "TaggedWorkPresentError",
 ]
 
@@ -247,6 +249,13 @@ class RunActiveError(ServiceError):
         self.status = status
 
 
+# `RunActiveError` also refuses **a settings save** (SD43, amendment:
+# feat/settings-in-the-app): the live LLM client is rebound on save, and a
+# rebind under a queued or running run would move its endpoint between two of
+# its records while `run.llm_endpoint` pins one. The same two statuses, the
+# same reason — something is executing, or about to.
+
+
 class RunNotActiveError(ServiceError):
     """`RunActiveError`'s mirror — a run that is **not** `queued` or `running`
     has nothing to stop. -> HTTP 409.
@@ -296,6 +305,23 @@ class DeliveryCitedError(ServiceError):
         super().__init__(f"delivery {delivery_id} is cited by {corpus_count} corpus/corpora")
         self.delivery_id = delivery_id
         self.corpus_count = corpus_count
+
+
+class SettingRefusedError(ServiceError):
+    """A setting the analyst tried to store is refused (sw-design.md SD43).
+
+    Carries a **code**, not a sentence (CLAUDE.md: findings, not prose): the
+    settings dialog renders it from one table in `ui/`, and tests assert on
+    `refusal`. Nothing is stored when this is raised.
+
+    The loopback refusal is `SettingRefusal.ENDPOINT_NOT_LOOPBACK` — **no
+    opt-out**, the third of three places N1 is enforced, beside
+    `require_loopback` at construction and the same rule at startup.
+    """
+
+    def __init__(self, refusal: SettingRefusal) -> None:
+        super().__init__(f"setting refused: {refusal.value}")
+        self.refusal = refusal
 
 
 # `LlmEndpointError` is **not defined here** — it lives in `ra2/domain/llm.py`,

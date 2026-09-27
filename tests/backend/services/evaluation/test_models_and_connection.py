@@ -16,7 +16,12 @@ from collections.abc import Awaitable, Callable
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from tests.fixtures.fake_llm import DEFAULT_MODELS, StaticEndpointProber, StaticModelCatalog
+from tests.fixtures.fake_llm import (
+    DEFAULT_MODELS,
+    StaticConnectionSettings,
+    StaticEndpointProber,
+    StaticModelCatalog,
+)
 
 from ra2.domain.ids import CorpusId, EvaluationId
 from ra2.domain.llm import PROBE_TIMEOUT_S, EndpointStatus, ProbeCode, ProbeResult
@@ -55,6 +60,7 @@ def _unknown_vram_service(
         clock=clock,
         ids=ids,
         settings=settings,
+        connection=StaticConnectionSettings.from_settings(settings),
     )
 
 
@@ -113,6 +119,7 @@ async def test_an_unreachable_endpoint_yields_a_reason_not_a_traceback(
         clock=clock,
         ids=ids,
         settings=eval_settings,
+        connection=StaticConnectionSettings.from_settings(eval_settings),
     )
 
     models = await service.list_models()
@@ -142,6 +149,7 @@ async def test_a_non_loopback_endpoint_has_its_own_reason(
         clock=clock,
         ids=ids,
         settings=eval_settings,
+        connection=StaticConnectionSettings.from_settings(eval_settings),
     )
 
     connection = await service.connection_status()
@@ -412,6 +420,7 @@ async def test_catalogue_is_empty_and_unreachable_when_nothing_is_listening(
         clock=clock,
         ids=ids,
         settings=eval_settings,
+        connection=StaticConnectionSettings.from_settings(eval_settings),
     )
 
     catalogue = await service.catalogue()

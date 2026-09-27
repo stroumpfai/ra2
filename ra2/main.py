@@ -56,6 +56,7 @@ from ra2.services.ranking_service import RankingService
 from ra2.services.results_service import ResultsService
 from ra2.services.run_service import RunService
 from ra2.services.scoring_service import ScoringService
+from ra2.services.settings_service import SettingsService
 from ra2.ui import views
 from ra2.ui.theme import FONTS_DIR, FONTS_URL_PATH
 
@@ -179,6 +180,14 @@ def create_app(
         ids=ids,
     )
     prompt_service = PromptService(session_factory=session_factory, clock=clock, ids=ids)
+    # --- settings in the app (SD43) -----------------------------------------
+    # The endpoint and timeout **as they are now**. Both services read them
+    # here rather than off `settings`, which stays the bootstrap value (§3).
+    # Until the stored override is loaded at startup, this answers with the
+    # `Settings` seed — the same values the client below was built from.
+    settings_service = SettingsService(
+        session_factory=session_factory, clock=clock, ids=ids, settings=settings
+    )
     evaluation_service = EvaluationService(
         session_factory=session_factory,
         model_catalog=model_catalog,
@@ -187,6 +196,7 @@ def create_app(
         clock=clock,
         ids=ids,
         settings=settings,
+        connection=settings_service,
     )
     # `prompt_service` satisfies `PromptResolver` (services/protocols.py)
     # structurally — `run_service` never imports it directly. It arrives as a
@@ -227,6 +237,7 @@ def create_app(
         clock=clock,
         ids=ids,
         settings=settings,
+        connection=settings_service,
     )
     # `scoring_service` satisfies `Scorer` structurally — neither read service
     # imports it directly.
@@ -273,6 +284,7 @@ def create_app(
         mismatch=mismatch_service,
         lifecycle=lifecycle_service,
         qualification=qualification_service,
+        settings=settings_service,
     )
 
     @asynccontextmanager

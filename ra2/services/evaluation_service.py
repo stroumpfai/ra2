@@ -94,6 +94,7 @@ from ra2.services.errors import (
     FeatureValidationError,
     NotFoundError,
 )
+from ra2.services.protocols import ConnectionSettings
 from ra2.services.readmodels import (
     CatalogueView,
     ConnectionProbeView,
@@ -285,6 +286,7 @@ class EvaluationService:
         clock: Clock,
         ids: IdFactory,
         settings: Settings,
+        connection: ConnectionSettings,
     ) -> None:
         self._session_factory = session_factory
         self._model_catalog = model_catalog
@@ -293,6 +295,10 @@ class EvaluationService:
         self._clock = clock
         self._ids = ids
         self._settings = settings
+        #: SD43. The endpoint and timeout **as they are now** — a stored
+        #: value when the analyst saved one, the `Settings` seed when not.
+        #: Never read off `self._settings`: that is the bootstrap value.
+        self._connection = connection
 
     async def list_evaluations(self) -> list[EvaluationDraftView]:
         """Every evaluation, drafts included, newest first."""
@@ -503,9 +509,9 @@ class EvaluationService:
         status = await self._model_catalog.reachable()
         gpu = self._gpu_probe.describe()
         return ConnectionView(
-            endpoint=self._settings.llm_base_url,
+            endpoint=self._connection.endpoint,
             status=status,
-            timeout_s=self._settings.llm_timeout_s,
+            timeout_s=self._connection.timeout_s,
             reason=None if status is EndpointStatus.REACHABLE else _CONNECTION_REASONS[status],
             gpu_name=None if gpu is None else gpu.name,
             gpu_vram_bytes=None if gpu is None else gpu.total_vram_bytes,
@@ -520,8 +526,9 @@ class EvaluationService:
         the configured endpoint and answers in one bit for the Models card;
         this one asks about a value that is not configured anywhere yet, which
         is the only value worth testing while you are still setting Ollama up.
-        Nothing here is persisted — `RA2_LLM_BASE_URL` is still the one source
-        of the endpoint the app actually uses.
+        Nothing here is persisted: a probe is a question, and storing the
+        endpoint the app uses is `SettingsService.save_connection`'s job
+        (SD43).
 
         `timeout_s` defaults to the configured timeout; the prober lowers it
         further to its own cap, and the bound it settled on comes back on the
@@ -532,7 +539,7 @@ class EvaluationService:
         `ProbeCode.REFUSED_NOT_LOOPBACK`. An exception here would become a
         toast, and the design does not have one.
         """
-        requested = self._settings.llm_timeout_s if timeout_s is None else timeout_s
+        requested = self._connection.timeout_s if timeout_s is None else timeout_s
         result = await self._endpoint_prober.probe(endpoint, timeout_s=requested)
         return ConnectionProbeView(
             endpoint=endpoint,

@@ -28,6 +28,7 @@ __all__ = [
     "CensusInput",
     "CensusMaterialiser",
     "CensusTableInput",
+    "ConnectionSettings",
     "EnumCodeTableProvider",
     "GroundTruthProvider",
     "MismatchTally",
@@ -272,3 +273,27 @@ class MismatchTally(Protocol):
     async def tally(
         self, session: AsyncSession, run_id: RunId
     ) -> Mapping[FeatureId, ReviewTally]: ...
+
+
+# ---------------------------------------------------------------------------
+# Settings in the app (SD43, amendment: feat/settings-in-the-app).
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class ConnectionSettings(Protocol):
+    """The LLM endpoint and timeout **as they are now** (sw-design.md SD43).
+
+    Satisfied structurally by `SettingsService`, so `evaluation_service` and
+    `run_service` never import it — the `ScoreSubmitter` trick once more.
+
+    Plain attributes, not coroutines: the values are resolved at startup and
+    after each accepted save, and held. Nothing on the record loop's path
+    reads the database for them.
+    """
+
+    @property
+    def endpoint(self) -> str: ...
+
+    @property
+    def timeout_s(self) -> int: ...

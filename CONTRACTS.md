@@ -850,13 +850,16 @@ keeps every variable as the seed, so a host with no rows behaves as before.
 | `ra2/persistence/models.py` | + `AppSetting`: append-only, newest row per key wins, referenced by nothing. Plain `str` id (`P2-D6`) | 2 | §2 |
 | `ra2/services/protocols.py` | + `ConnectionSettings`: `endpoint`, `timeout_s`, held in memory — no database read on the record loop | 2 | §3 |
 | `ra2/services/container.py` | + `Services.settings` | 2 | §4 |
+| `ra2/services/errors.py` | + `SettingRefusedError`, carrying a `SettingRefusal` code; a note that `RunActiveError` also refuses a settings save. Missed at Stage 1; registered in `POST_PHASE_5_ERRORS` | 2 | §5 |
 
 ### Not frozen, and changed
 
 | Path | What |
 |---|---|
 | `ra2/services/evaluation_service.py`, `ra2/services/run_service.py` | The five connection reads move from `Settings` to the provider (Stage 2). Both are "Not frozen." by their headers |
-| `ra2/main.py` | The delegating connection object wired where the client and the catalogue are wired today; the stored override read at startup, before `reclaim_orphans` (Stage 3) |
+| `ra2/main.py` | Builds `SettingsService` and hands it to both services and to `Services` (Stage 2 — no stored rows read yet, so the Models card cannot show an endpoint the client is not using); the delegating connection object and the startup read of the stored override, before `reclaim_orphans` (Stage 3) |
+| `ra2/persistence/repositories/run_repo.py` | + `first_with_status`, the in-flight check a save makes (Stage 2) |
+| `tests/fixtures/fake_llm.py` | + `StaticConnectionSettings`, what the eleven direct service constructions in the tests pass instead of a database-backed provider (Stage 2) |
 | `ra2/ui/views/evaluation_view.py` | `_save_settings` saves, renders the service's refusal sentences, and reloads (Stage 4) |
 | `sw-design.md` | + `SD43`; §3's "`Settings` is a bootstrap value, not a live one"; §10 gains a **Stored** column, `RA2_LLM_TIMEOUT_S` and `RA2_LLM_MAX_RETRIES` split into two rows, and `RA2_LLM_BASE_URL`'s stale default (`localhost`) and note ("unused in phase 1") corrected (Stage 1) |
 | `docs/risk-assesment.md` | E3 records what is being built; its control status moves in Stage 5, when it ships (Stage 1) |
@@ -867,7 +870,8 @@ keeps every variable as the seed, so a host with no rows behaves as before.
 | Path | What |
 |---|---|
 | `ra2/domain/settings.py` | `SettingKey` and the per-key validation (Stage 2) |
-| `ra2/services/settings_service.py` | Resolution (stored row, else seed) and `save_connection` with its two refusals (Stage 2) |
+| `ra2/services/settings_service.py` | Resolution (stored row, else seed) and `save_connection` with its two refusals. A stored row that fails the rule is ignored and logged, not fatal (Stage 2) |
+| `ra2/persistence/repositories/settings_repo.py` | `add` and `latest`, and no update or delete (Stage 2) |
 | `ra2/infra/connection.py` | The delegating `LLMClient` + `ModelCatalog` and its `rebind` (Stage 3) |
 | `ra2/persistence/migrations/versions/…_store_the_settings_an_analyst_changes.py` | `app_setting`, additive, no existing row touched. Registered in `tests/test_p5_contract.py`'s `POST_PHASE_5_REVISIONS` (Stage 2) |
 

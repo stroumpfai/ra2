@@ -3,8 +3,8 @@
 > **Applied file by file in the stage whose code needs it**, as
 > `fix-settings-with-no-reader` was. No wave is running.
 
-`plan-settings-in-the-app.md`, design `sw-design.md` **SD43**. Four frozen
-files and **one revision** (`app_setting`), whose author is this branch's
+`plan-settings-in-the-app.md`, design `sw-design.md` **SD43**. Five frozen
+files (four at Stage 1; `errors.py`, §5, found in Stage 2) and **one revision** (`app_setting`), whose author is this branch's
 implementer.
 
 The defect: the Models card's settings dialog draws an endpoint and a timeout,
@@ -126,3 +126,36 @@ and its `run.llm_endpoint` pin.
 
 The dialog saves through a service the view is handed, like every other write
 in `ui/` (Do-NOT #7).
+
+## 5. `ra2/services/errors.py` — `+ SettingRefusedError` *(Stage 2)*
+
+```diff
+ from ra2.domain.prompt import PromptValidationError
++from ra2.domain.settings import SettingRefusal
+```
+
+```diff
++class SettingRefusedError(ServiceError):
++    """A setting the analyst tried to store is refused (sw-design.md SD43).
++
++    Carries a **code**, not a sentence (CLAUDE.md: findings, not prose): the
++    settings dialog renders it from one table in `ui/`, and tests assert on
++    `refusal`. Nothing is stored when this is raised.
++    """
++
++    def __init__(self, refusal: SettingRefusal) -> None:
++        super().__init__(f"setting refused: {refusal.value}")
++        self.refusal = refusal
+```
+
+and a comment after `RunActiveError` saying it **also refuses a settings
+save**: a rebind under a queued or running run would move its endpoint between
+two of its records while `run.llm_endpoint` pins one. Reused rather than a
+second error for the same two statuses (`lifecycle_service.ACTIVE_STATUSES`),
+which would be a second meaning of "active".
+
+**Missed at Stage 1.** The plan named the refusals and never the class that
+carries them; `errors.py` is where every service error lives, frozen, and each
+later one arrived by amendment the same way. Registered in
+`tests/test_p5_contract.py`'s `POST_PHASE_5_ERRORS`, whose purpose is exactly
+that an addition is an entry somebody wrote.

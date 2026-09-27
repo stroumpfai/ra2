@@ -11,7 +11,11 @@ from collections.abc import Awaitable, Callable
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from tests.fixtures.fake_llm import StaticEndpointProber, StaticModelCatalog
+from tests.fixtures.fake_llm import (
+    StaticConnectionSettings,
+    StaticEndpointProber,
+    StaticModelCatalog,
+)
 
 from ra2.domain.extraction import EvaluationSize
 from ra2.domain.ids import CorpusId, EvaluationId, FeatureConfigId, PromptTemplateId
@@ -81,6 +85,7 @@ def _service_with(
         clock=clock,
         ids=ids,
         settings=settings,
+        connection=StaticConnectionSettings.from_settings(settings),
     )
 
 

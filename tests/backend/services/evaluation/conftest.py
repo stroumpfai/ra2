@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.fixtures.fake_llm import (
     DEFAULT_MODELS,
     DEFAULT_OLLAMA_VERSION,
+    StaticConnectionSettings,
     StaticEndpointProber,
     StaticModelCatalog,
 )
@@ -240,6 +241,7 @@ def evaluation_service(
         clock=clock,
         ids=ids,
         settings=eval_settings,
+        connection=StaticConnectionSettings.from_settings(eval_settings),
     )
 
 

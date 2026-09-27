@@ -146,6 +146,11 @@ POST_PHASE_5_REVISIONS = {
     # Additive, **nullable, no backfill**: a run from before it recorded no
     # size, and the tab renders that absence as an em dash.
     "20260926_0757_9874691cc8eb_pin_the_model_size_on_the_run.py",
+    # `feat/settings-in-the-app` — `app_setting` (SD43). The endpoint and
+    # timeout an analyst saves from the settings dialog, which saved nothing
+    # before. A new table, append-only, referenced by nothing; no existing row
+    # is touched, and a database with no rows behaves as before.
+    "20260927_1510_ccbae1b96d1b_store_the_settings_an_analyst_changes.py",
 }
 
 
@@ -259,6 +264,10 @@ POST_PHASE_5_ERRORS = {
     # refuses a run that is not `queued` or `running`, as discard refuses one
     # that is; succeeding would rewrite a finished run's outcome.
     "RunNotActiveError",
+    # `feat/settings-in-the-app` — a setting the analyst tried to store is
+    # refused (SD43): off loopback, malformed, a timeout below one second.
+    # Carries a `SettingRefusal` code for `ui/` to word; nothing is stored.
+    "SettingRefusedError",
 }
 
 

@@ -20,7 +20,11 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from tests.fixtures.fake_llm import StaticEndpointProber, StaticModelCatalog
+from tests.fixtures.fake_llm import (
+    StaticConnectionSettings,
+    StaticEndpointProber,
+    StaticModelCatalog,
+)
 
 from ra2.domain.ids import CorpusId, EvaluationId
 from ra2.domain.qualification import GateVerdict
@@ -62,6 +66,9 @@ def mapped_service(
         clock=clock,
         ids=ids,
         settings=eval_settings.model_copy(update={"llm_parallel_calls": {fitting_model: 4}}),
+        connection=StaticConnectionSettings.from_settings(
+            eval_settings.model_copy(update={"llm_parallel_calls": {fitting_model: 4}})
+        ),
     )
 
 

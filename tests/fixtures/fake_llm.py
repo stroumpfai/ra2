@@ -85,6 +85,7 @@ from collections.abc import Mapping, Sequence
 from typing import Final
 
 from ra2.domain.llm import EndpointStatus, Extraction, ModelInfo, ProbeCode, ProbeResult
+from ra2.infra.config import Settings
 from ra2.infra.ollama_client import LlmEndpointError
 
 __all__ = [
@@ -92,6 +93,7 @@ __all__ = [
     "DEFAULT_MODELS",
     "DEFAULT_OLLAMA_VERSION",
     "FakeLLMClient",
+    "StaticConnectionSettings",
     "StaticEndpointProber",
     "StaticModelCatalog",
 ]
@@ -400,3 +402,21 @@ class StaticEndpointProber:
         self.probe_calls += 1
         self.calls.append((base_url, timeout_s))
         return self._result
+
+
+class StaticConnectionSettings:
+    """`ConnectionSettings` at fixed values (sw-design.md SD43).
+
+    What a service test hands `EvaluationService` and `RunService` instead of
+    a database-backed `SettingsService`, the way `StaticModelCatalog` stands
+    in for Ollama. `from_settings` is the common case: the seed a host with no
+    stored rows would use.
+    """
+
+    def __init__(self, *, endpoint: str, timeout_s: int) -> None:
+        self.endpoint = endpoint
+        self.timeout_s = timeout_s
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> StaticConnectionSettings:
+        return cls(endpoint=settings.llm_base_url, timeout_s=settings.llm_timeout_s)
