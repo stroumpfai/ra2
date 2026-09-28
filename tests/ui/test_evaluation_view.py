@@ -2151,7 +2151,13 @@ async def test_each_qualification_state_renders_its_line(
     line = _qualification_line(seeded.user, FITS_A)
     assert line._props["data-state"] == state
     assert ("warn" in line._classes) is warn
-    assert ("title" in line._props) is (recorded is not None)
+    # Every state has a tooltip. The unmeasured one names the command that
+    # measures this row's model, since an evaluation run never will.
+    assert line._props["title"] == (
+        evaluation_view.QUALIFICATION_UNMEASURED_TOOLTIP.format(tag=FITS_A)
+        if recorded is None
+        else evaluation_view.QUALIFICATION_TOOLTIP
+    )
     if state in {"qualified", "server-sensitive"}:
         # The service's numbers, formatted here: F1 to three places, the rate
         # as SD37's latency, the fill as a percentage.

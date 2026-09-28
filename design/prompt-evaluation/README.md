@@ -207,7 +207,10 @@ border:1px solid --rule; radius 3px; padding:7px 10px; surface; mono 11.5px`, wi
    " · parallel ×4" when the launch would honour the map, with a tooltip "seed-sized narratives; real ones
    are longer"; `stale-digest` in `--warn` "measured on digest 500a1f06 — re-qualify";
    `server-sensitive` in `--warn`, the qualified line plus " · changes when Ollama runs >1 slot";
-   `unmeasured` in `--ink3` "not measured on this host". "Not measured" never disables the tick. The
+   `unmeasured` in `--ink3` "not measured on this host", with a tooltip naming the one thing that
+   measures it, "An evaluation run doesn't record this. Measure it on this host with
+   `just qualify-model <tag>`." (the row's own tag), because a finished run leaving the line unchanged
+   otherwise reads as a defect. "Not measured" never disables the tick. The
    duration is left out before an evaluation exists, because only an evaluation has a scope. **No "recommended"
    badge** — the seed can't separate the leaders (`docs/choosing-models.md` §3). The row grows from 49px
    to ~65px (64.8px measured in Chromium), so the well that shows **4 visible rows** grows from 196px

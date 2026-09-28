@@ -211,6 +211,7 @@ __all__ = [
     "QUALIFICATION_TOOLTIP",
     "QUALIFICATION_UNMEASURED",
     "QUALIFICATION_UNMEASURED_STATE",
+    "QUALIFICATION_UNMEASURED_TOOLTIP",
     "REASONING_LABEL",
     "RESULTS_LINK_LABEL",
     "RUNS_TABLE",
@@ -262,6 +263,12 @@ QUALIFICATION_SERVER_SENSITIVE: Final = " · changes when Ollama runs >1 slot"
 QUALIFICATION_TOOLTIP: Final = (
     "Measured by `just qualify-model` on the synthetic seed. Its narratives "
     "are short; real ones take longer."
+)
+#: README §2 step 4: without it, a finished evaluation that leaves "not
+#: measured" in place reads as a defect. Only `just qualify-model` records one.
+QUALIFICATION_UNMEASURED_TOOLTIP: Final = (
+    "An evaluation run doesn't record this. Measure it on this host with "
+    "`just qualify-model {tag}`."
 )
 #: `data-state` on the line, so a test asserts the state and never the words.
 QUALIFICATION_UNMEASURED_STATE: Final = "unmeasured"
@@ -983,8 +990,12 @@ class _EvaluationPage:
             .style("font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"),
             {"data-state": state},
         )
-        if card is not None:
-            data_props(line, {"title": QUALIFICATION_TOOLTIP})
+        tooltip = (
+            QUALIFICATION_UNMEASURED_TOOLTIP.format(tag=choice.tag)
+            if card is None
+            else QUALIFICATION_TOOLTIP
+        )
+        data_props(line, {"title": tooltip})
 
     def _size_line(self, choice: ModelChoiceView) -> str:
         """ "digest 8fa1c3d0 · 8.5 GB", or the design's refusal line
