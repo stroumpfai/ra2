@@ -44,7 +44,7 @@ re-running the seed is a check rather than a new sample.
 |---|---|---|
 | `RA2_DEV_RECORD_MAX` | 50 | at or above, the corpus stops being marked dev-sized |
 | `RA2_EVAL_RECORD_MIN` | 200 | below, a launch is marked "smoke test, not a result" |
-| `RA2_MIN_CELL_COUNT` | 20 | below, a Results cell renders as "insufficient data" |
+| `RA2_MIN_CELL_COUNT` | 20 | the floor a new evaluation starts with: below it, a Results cell renders as "insufficient data". Each evaluation keeps its own, changeable on step 6 (*Minimum n per cell*) |
 
 `--records` defaults to **48**: under `RA2_DEV_RECORD_MAX`, so the dev-sized
 banner still shows, and large enough that at the default floor a feature's
@@ -370,7 +370,7 @@ which is a finding about that model, not about the corpus.
 
 | Symptom | Most likely cause |
 |---|---|
-| every cell suppressed | `--records` too small for `RA2_MIN_CELL_COUNT` |
+| every cell suppressed | `--records` too small for the evaluation's floor (step 6, seeded from `RA2_MIN_CELL_COUNT`) |
 | one feature near 0 % across **all** models | a format the prompt does not specify; check the mismatch list's `model=` column against `domain/matching.py` |
 | scores above the ceiling in §8 | a bug — the ground truth and the narrative have drifted |
 | `n` smaller than the record count | correct for `UnfZeitFeld` (the `EMPTY_SOURCE` records); suspicious anywhere else |

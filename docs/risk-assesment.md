@@ -821,10 +821,10 @@ design)**; the endpoint half **addressed** (`SD43`)
 
 The installer and runbook are explicitly deferred (`mvp-spec.md` §16), which is
 a defensible cut. The operational consequence is worth seeing: `vision.md`
-promises analysts who never touch a command line, while today changing the LLM
-endpoint means editing `.env` and restarting — the settings dialog says so
-honestly in a notification (`ra2/ui/views/evaluation_view.py:1550`) rather than
-pretending to save. Every such gap routes an analyst back to a developer, and
+promises analysts who never touch a command line, while changing the LLM
+endpoint meant editing `.env` and restarting — the settings dialog said so
+honestly in a notification rather than pretending to save (until `SD43`; see
+*Built* below). Every such gap routes an analyst back to a developer, and
 the developer works on the machine holding real data. Informal access spreads
 that way, quietly, and nobody records it.
 

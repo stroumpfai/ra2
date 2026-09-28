@@ -107,8 +107,8 @@ preferred route is always to synthesise the hazard into a fixture instead
 ### 3.2 While using it
 
 - **The LLM endpoint must be loopback** (`127.0.0.1`, `::1`, `localhost`). The
-  app refuses anything else at startup. Do not look for a way around it; there
-  is deliberately none.
+  app refuses anything else at startup, and the settings dialog refuses to
+  save it. Do not look for a way around it; there is deliberately none.
 - **Code tables are imported, never edited in the app.** A wrong label is fixed
   in the source and re-imported as a new generation
   (`scripts/build_codes_json.py` builds the file from ASTRA's

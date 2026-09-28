@@ -179,7 +179,7 @@ Ordered by effect. "Measured" means on this host, as described in §7.
 | 6 | **Model fits in VRAM** | Spilling ~20 % of a model to CPU took `qwen3:8b` from 1.7 s to ~3 s per record (§6) | Keep the GPU free of other models during a run | Nothing to set in RA2; see lever 7 |
 | 7 | **Ollama keep-alive** (`OLLAMA_KEEP_ALIVE`, host setting) | Saves one model load per idle gap: 5.7 s cold vs 0.04 s warm (`qwen3.5:2b`) | Negligible per record; saves seconds per evaluation | A resident model holds VRAM until Ollama needs it for another |
 | 8 | **Parallel calls** (`RA2_LLM_PARALLEL_CALLS`, per model, default `{}`) | 2.38× for `qwen3:8b` at 4 calls: 200 records in 147 s instead of 349 s, identical scores (§5.3) | Less than half the wall time on a model that passed the gate | Needs `OLLAMA_NUM_PARALLEL` ≥ the largest entry, which is server-wide and grows every loaded model's KV cache. Only models measured through the gate belong in the map |
-| 9 | **Timeout** (`RA2_LLM_TIMEOUT_S`, 600) | No effect on a healthy run | Lower it to fail fast on a model known to be quick | Too low and every record of a slow model times out. A timeout is **not** retried |
+| 9 | **Timeout** (the Models card's settings dialog; `RA2_LLM_TIMEOUT_S`, 600, is only its starting value) | No effect on a healthy run | Lower it to fail fast on a model known to be quick | Too low and every record of a slow model times out. A timeout is **not** retried. Set it in the dialog: a saved value overrides the variable, so changing the variable alone may do nothing |
 | 10 | **Retries** (`RA2_LLM_MAX_RETRIES`, 2) | No effect on a healthy run (0 retries in 1 600 records) | Survives a transient 5xx | Each retry of a failing endpoint costs another full call |
 
 ### 5.1 Reasoning effort in detail
@@ -510,7 +510,7 @@ already stored keep the value they recorded.
 - **The LLM endpoint is loopback only** (`mvp-spec.md` N1). No remote GPU, no
   hosted API, and deliberately no setting to allow one.
 - **A timeout is final for that record.** A record that doesn't answer within
-  `RA2_LLM_TIMEOUT_S` (600 s) writes no row. After 3 consecutive such
+  the timeout (600 s unless changed in the settings dialog) writes no row. After 3 consecutive such
   failures (1 if the run has committed nothing) the run stops as
   `interrupted`. Resume picks up only the missing records.
 
