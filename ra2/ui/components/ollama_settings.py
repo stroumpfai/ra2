@@ -41,6 +41,7 @@ from nicegui import ui
 from nicegui.element import Element
 
 from ra2.domain.llm import ProbeCode, is_loopback_url
+from ra2.domain.settings import SettingRefusal
 from ra2.services.readmodels import ConnectionProbeView, ConnectionView
 from ra2.ui.components.primitives import (
     data_props,
@@ -49,7 +50,14 @@ from ra2.ui.components.primitives import (
     labeled_field,
 )
 
-__all__ = ["ENDPOINT_INVALID_MESSAGE", "PROBE_WORDS", "ollama_settings_dialog", "probe_sentence"]
+__all__ = [
+    "ENDPOINT_INVALID_MESSAGE",
+    "PROBE_WORDS",
+    "SAVE_REFUSAL_WORDS",
+    "SAVE_REFUSED_RUN_ACTIVE",
+    "ollama_settings_dialog",
+    "probe_sentence",
+]
 
 #: Narrow enough that even the narrowest viewport this app supports (1024px,
 #: sw-design.md §8.2) never needs `dialog_card`'s 96vw escape hatch to do any
@@ -94,6 +102,29 @@ ENDPOINT_INVALID_MESSAGE: Final = (
     "Must be on this machine — 127.0.0.1, ::1 or localhost. RA2 never sends data off the host."
 )
 
+#: The **one rendering table** for a refused save (SD43) — the service
+#: refuses with a `SettingRefusal` code, and these are its words. Each says
+#: that nothing was saved: the dialog stays open on a refusal, and an analyst
+#: looking at the same values they typed must not think they took.
+SAVE_REFUSAL_WORDS: Final[dict[SettingRefusal, str]] = {
+    SettingRefusal.ENDPOINT_NOT_LOOPBACK: (
+        "Not saved: that host is not this machine. "
+        "The endpoint must be 127.0.0.1, ::1 or localhost."
+    ),
+    SettingRefusal.ENDPOINT_MALFORMED: (
+        "Not saved: RA2 cannot read that as a URL. It should look like http://127.0.0.1:11434/v1."
+    ),
+    SettingRefusal.TIMEOUT_NOT_POSITIVE: "Not saved: the timeout must be at least 1 second.",
+}
+
+#: A save while a run is queued or running (SD43, D6). Not a `SettingRefusal`
+#: — the values are fine; the moment is not — so it is its own line, and it
+#: says when to come back rather than what to change.
+SAVE_REFUSED_RUN_ACTIVE: Final = (
+    "Not saved: a run is queued or running, and every record of a run must use "
+    "one endpoint. Save again once it has finished or been stopped."
+)
+
 
 def probe_sentence(view: ConnectionProbeView) -> str:
     """One `ConnectionProbeView` as the sentence an analyst reads.
@@ -132,11 +163,15 @@ def _model_count_phrase(count: int | None) -> str:
 def ollama_settings_dialog(
     *,
     settings: ConnectionView,
-    on_save: Callable[[str, int], None],
+    on_save: Callable[[str, int], Awaitable[str | None]],
     on_refresh: Callable[[], None],
     on_test: Callable[[str, int], Awaitable[ConnectionProbeView]],
 ) -> Element:
-    """`on_save` receives the endpoint and the timeout in seconds; `on_refresh`
+    """`on_save` receives the endpoint and the timeout in seconds and answers
+    `None` when they were saved — the dialog then closes — or the sentence
+    saying why not, which the dialog shows under Save and stays open for
+    (SD43). It is awaited, like `on_test`: a save that only *returned* a
+    coroutine would close the dialog and store nothing. `on_refresh`
     re-asks the *configured* endpoint for its catalogue; `on_test` probes the
     endpoint **in the field** and answers with a `ConnectionProbeView`.
 
@@ -171,19 +206,27 @@ def ollama_settings_dialog(
     def _set_endpoint(value: str) -> None:
         nonlocal endpoint_value
         endpoint_value = value
+        save_refusal.set_visibility(False)
         _sync_validity()
 
     def _set_timeout(value: int) -> None:
         nonlocal timeout_value
         timeout_value = value
+        # A refusal is about the values it was given; a changed field makes
+        # it stale, so it goes rather than describing something else.
+        save_refusal.set_visibility(False)
 
-    def _save() -> None:
+    async def _save() -> None:
         # Belt and braces: the button is disabled, and the handler checks
         # anyway. A disabled button is a UI state, not a guarantee.
         if not _endpoint_is_valid():
             return
-        on_save(endpoint_value, timeout_value)
-        dialog.close()
+        refusal = await on_save(endpoint_value, timeout_value)
+        if refusal is None:
+            dialog.close()
+            return
+        save_refusal.set_text(refusal)
+        save_refusal.set_visibility(True)
 
     async def _test() -> None:
         """Probe what is in the field. Enabled even when the endpoint fails the
@@ -310,9 +353,20 @@ def ollama_settings_dialog(
             .props('type="button" data-testid="ollama-save"')
             .mark("ollama-save")
         )
-        save_button.on("click", lambda _: _save())
+        # The coroutine function, for `test_button`'s reason.
+        save_button.on("click", _save)
         with save_button:
             ui.label("Save")
+        #: Hidden until a save is refused; the service's reason, in this
+        #: module's words (`SAVE_REFUSAL_WORDS`), where the analyst is looking.
+        save_refusal = (
+            ui.label("")
+            .classes("danger")
+            .style("font-size:12px;")
+            .props('data-testid="ollama-save-refusal"')
+            .mark("ollama-save-refusal")
+        )
+        save_refusal.set_visibility(False)
         # After both elements exist: a dialog opened on an already-invalid
         # configured endpoint shows the reason immediately, without waiting
         # for the analyst to touch the field.

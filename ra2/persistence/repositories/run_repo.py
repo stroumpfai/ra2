@@ -14,6 +14,7 @@ one.
 a new row, unlike `extraction`.
 """
 
+from collections.abc import Iterable
 from datetime import datetime
 
 from sqlalchemy import func, select
@@ -61,6 +62,17 @@ class RunRepository:
         stmt = select(Run).where(Run.status == RunStatus.RUNNING)
         result = await self._session.scalars(stmt)
         return list(result.all())
+
+    async def first_with_status(self, statuses: Iterable[RunStatus]) -> Run | None:
+        """Any one run in one of `statuses`, or `None`.
+
+        "Is anything executing, or about to?" — the settings save's guard
+        (SD43) asks it with `lifecycle_service.ACTIVE_STATUSES`, and only needs
+        one run to name in the refusal.
+        """
+        stmt = select(Run).where(Run.status.in_(list(statuses))).limit(1)
+        row: Run | None = await self._session.scalar(stmt)
+        return row
 
     async def set_status(
         self,

@@ -104,7 +104,7 @@ from ra2.persistence.repositories.run_repo import RunRepository
 from ra2.persistence.session import session_scope
 from ra2.services.errors import FeatureValidationError, NotFoundError, RunNotActiveError
 from ra2.services.feature_service import matching_rule_from_json
-from ra2.services.protocols import PromptResolver, ScoreSubmitter
+from ra2.services.protocols import ConnectionSettings, PromptResolver, ScoreSubmitter
 from ra2.services.readmodels import Page, RunProgressView, RunView, SortDir
 
 __all__ = ["RunService", "run_ordinals"]
@@ -288,6 +288,7 @@ class RunService:
         clock: Clock,
         ids: IdFactory,
         settings: Settings,
+        connection: ConnectionSettings,
     ) -> None:
         self._session_factory = session_factory
         self._llm_client = llm_client
@@ -302,6 +303,9 @@ class RunService:
         self._clock = clock
         self._ids = ids
         self._settings = settings
+        #: SD43. The endpoint and timeout as they are now; see
+        #: `EvaluationService._connection`.
+        self._connection = connection
         #: The `asyncio.Task` executing each run, so `cancel` can stop **one**
         #: of them. A job covers every run of an evaluation and executes them
         #: serially, so without a task per run "stop this run" could only be
@@ -600,7 +604,7 @@ class RunService:
             len(pending),
             done,
             plan.model_name,
-            self._settings.llm_timeout_s,
+            self._connection.timeout_s,
             plan.parallel_calls,
         )
 
@@ -844,7 +848,7 @@ class RunService:
             if not run.host_platform:
                 run.host_platform = platform.platform()
             if not run.llm_endpoint:
-                run.llm_endpoint = self._settings.llm_base_url
+                run.llm_endpoint = self._connection.endpoint
             if run.llm_reasoning_effort is None:
                 # Only ever reached by a run queued **before** the effort
                 # became a per-evaluation input: `EvaluationService._new_run`

@@ -11,7 +11,7 @@ at run **start** rather than at completion (§15.4).
 
 import pytest
 from tests.backend.services.run.conftest import DEFAULT_MODEL, answer
-from tests.fixtures.fake_llm import FakeLLMClient
+from tests.fixtures.fake_llm import FakeLLMClient, StaticConnectionSettings
 
 from ra2.domain.extraction import EvaluationSize, RunStatus
 from ra2.infra.tasks import TaskStatus
@@ -156,6 +156,23 @@ async def test_provenance_is_written_at_run_start_not_at_completion(
     assert RunStatus(run.status) is RunStatus.INTERRUPTED
     # Interrupted is not terminal: a human moves it out of that state.
     assert run.finished_at is None
+
+
+async def test_the_run_pins_the_current_endpoint_not_the_seed(
+    seed, make_run_service, reporter, run_row, backend_settings
+):
+    """SD43: `run.llm_endpoint` is the endpoint **as it is now** — a stored
+    value when the analyst saved one — and not `Settings.llm_base_url`, which is
+    only the seed. Asserted at a value that differs from the seed, or the test
+    could not tell the two apart."""
+    current = StaticConnectionSettings(endpoint="http://127.0.0.1:11999/v1", timeout_s=42)
+    assert current.endpoint != backend_settings.llm_base_url
+    seeded = await seed(records=2)
+    service = make_run_service(FakeLLMClient(response=answer(), fail_from=0), connection=current)
+
+    await service.execute_run(seeded.run_id, reporter)
+
+    assert (await run_row(seeded.run_id)).llm_endpoint == current.endpoint
 
 
 async def test_a_run_asks_with_the_effort_its_launch_pinned_not_the_processs(

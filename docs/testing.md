@@ -12,6 +12,11 @@ disagrees with this page, this page is wrong. Every number below was measured,
 not remembered — re-measure rather than edit them.
 
 **Last reviewed:** 2026-09-22 · against commit `542d523` · Linux, 28 cores.
+**Test counts re-measured:** 2026-09-28 · `feat/settings-in-the-app` at
+`4c57266` · by collection, which does not depend on the machine. The
+timings were **not** re-measured: they are the Linux figures above, and the
+host that re-counted is native Windows, where the same gate takes ~1 min 50 s
+and one commit-gate test fails (§4.2).
 
 ---
 
@@ -19,9 +24,9 @@ not remembered — re-measure rather than edit them.
 
 | | |
 |---|---|
-| Automated tests | **2 595** |
-| Commit gate (`just test`) | 2 501 tests · **~32 s** · currently **green** |
-| PR gate (`just e2e`) | 94 tests · ~1 min 33 s · currently **green** |
+| Automated tests | **2 844** |
+| Commit gate (`just test`) | 2 748 tests · **~32 s** · **green on Linux** at last review |
+| PR gate (`just e2e`) | 96 tests · ~1 min 33 s · **green** |
 | Coverage | **96 %**, measured on business logic only — see §5 |
 | Manual test effort | none required to run either gate |
 | Nightly / scheduled | none |
@@ -39,13 +44,13 @@ a tool.
 
 | Layer | Directory | Tests | What it exercises | Speed |
 |---|---|---|---|---|
-| 1 · unit | `tests/unit/` | 720 | Business rules alone — parsing, validation, census maths, scoring, ranking statistics. No database, no network, no server. | ~7 s |
-| 2 · backend | `tests/backend/` | 947 | Services, database repositories and the HTTP API, against a real temporary SQLite file and an in-process HTTP client. | ~57 s |
-| 3 · UI | `tests/ui/` | 364 | Every screen, driven through a simulated browser in the same process. No real browser. | ~5 min |
-| 4 · E2E | `tests/e2e/` | 94 | Fourteen end-to-end journeys in a real Chromium against a real server, plus three checks on the layer's own Windows-only warning filter. | ~1 min 33 s |
+| 1 · unit | `tests/unit/` | 791 | Business rules alone — parsing, validation, census maths, scoring, ranking statistics. No database, no network, no server. | ~7 s |
+| 2 · backend | `tests/backend/` | 1 079 | Services, database repositories and the HTTP API, against a real temporary SQLite file and an in-process HTTP client. | ~57 s |
+| 3 · UI | `tests/ui/` | 396 | Every screen, driven through a simulated browser in the same process. No real browser. | ~5 min |
+| 4 · E2E | `tests/e2e/` | 96 | Fourteen end-to-end journeys in a real Chromium against a real server, plus three checks on the layer's own Windows-only warning filter. | ~1 min 33 s |
 | 5 · eval | `tests/eval/` | **0** | Model accuracy against a labelled baseline. **Not built** — see §7.3. |
 
-Plus 469 contract tests at `tests/` root, which assert that frozen
+Plus 481 contract tests at `tests/` root, which assert that frozen
 architectural decisions have not been edited away, and 1 that the HTTP API's
 public schema has not changed without being noticed.
 
@@ -156,6 +161,13 @@ Every push and pull request runs five jobs on GitHub Actions:
 Layers 1–3 run on **both** Linux and Windows, because the product must run on
 Windows and file encodings and line endings behave differently there. That
 matrix has caught real defects and is not decoration.
+
+**Known Windows failure (measured on a native-Windows host, 2026-09-28).**
+`tests/backend/services/lifecycle/test_database_replaced.py::test_a_replaced_file_is_reported`
+deletes the SQLite file while holding it open, which POSIX allows and Windows
+refuses (`WinError 32`). It fails deterministically there, on `main` as on
+later branches, so the Windows leg of this job is expected to be red until
+the test stops relying on it. Not verified against CI itself.
 
 Machine-readable results (JUnit XML) are uploaded as the `test-results-*`
 artifacts on each run; browser traces and screenshots as `playwright-traces`.

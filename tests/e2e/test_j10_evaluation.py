@@ -629,3 +629,39 @@ def test_j10_the_connection_settings_dialog_opens_unclipped_at_1024px(
     endpoint.blur()
     expect(page.locator('[data-testid="ollama-endpoint-error"]')).to_be_visible()
     expect(page.locator('[data-testid="ollama-save"]')).to_be_disabled()
+
+
+def test_j10_a_saved_endpoint_shows_without_a_restart(page: Page, server_url: str) -> None:
+    """SD43 in a real browser: Save stores the endpoint, and the Models card's
+    endpoint line shows it with no restart.
+
+    Until SD43 the same click told the analyst to set an environment variable
+    and restart. The server here is session-scoped and shared, so the original
+    endpoint is saved back at the end and no later journey sees this one.
+
+    Waited out with `_redrawn`, not by polling for the text: Save closes the
+    dialog and the view rebuilds the column after the call returns, and a
+    check for the new text alone can pass on the old line's last frame.
+    """
+    page.goto(f"{server_url}/evaluation")
+    expect(page.locator('[data-testid="view-title"]')).to_have_text("Evaluation")
+    line = page.locator('[data-testid="endpoint-line"]')
+    expect(line).to_contain_text("127.0.0.1:11434/v1")
+
+    def _save_endpoint(endpoint: str) -> None:
+        page.click('[aria-label="Ollama connection settings"]')
+        field = page.locator('[data-testid="ollama-endpoint"]')
+        expect(field).to_be_visible()
+        field.fill(endpoint)
+        field.blur()
+        page.click('[data-testid="ollama-save"]')
+
+    _redrawn(page, "endpoint-line", lambda: _save_endpoint("http://127.0.0.1:11999/v1"))
+    expect(line).to_contain_text("127.0.0.1:11999/v1")
+    expect(
+        page.locator('[data-testid="ollama-settings-dialog"] [data-testid="card"]')
+    ).to_be_hidden()
+    expect(page.get_by_text("RA2_LLM_BASE_URL")).to_have_count(0)
+
+    _redrawn(page, "endpoint-line", lambda: _save_endpoint("http://127.0.0.1:11434/v1"))
+    expect(line).to_contain_text("127.0.0.1:11434/v1")

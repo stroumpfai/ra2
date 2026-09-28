@@ -193,6 +193,12 @@ loopback rule below still applies.
 `localhost`). The client checks this **when the application starts** and
 refuses to run otherwise.
 
+The endpoint can also be **changed from the app** — the gear on the Models
+card, *Save* — and a saved endpoint beats the variable, which is only its
+starting value. The same rule applies there: the dialog will not save a
+non-loopback address, and a saved one that fails the rule is ignored at
+startup in favour of the variable.
+
 **There is deliberately no setting to turn this off.** An opt-out is how "no
 data leaves the host" quietly becomes "no data leaves the host by default", and
 these narratives are not anonymised. A typo or a copied `.env` pointing at a LAN
@@ -224,7 +230,18 @@ non-NVIDIA host you can declare the figure yourself with `RA2_GPU_VRAM_GB` and
 The Models card empties, the reason appears next to the endpoint line, and
 **Launch is disabled**. This is a state, not an error — there is no toast and
 no failed request. Start Ollama, then press *refresh* in the settings dialog
-behind the gear button.
+behind the gear button. If the endpoint itself is wrong, correct it in the
+same dialog and press *Save*; it takes effect at once, with no restart.
+
+**Known issue on Windows.** Windows takes about two seconds to refuse a
+connection to a loopback port nothing is listening on, and the Evaluation
+screen asks the endpoint twice while it is built — past the three seconds
+the page has to build. So on Windows, with nothing listening at the
+configured endpoint, the Evaluation screen shows a server error instead of
+the empty Models card. Starting Ollama on that endpoint brings it back. A
+*saved* endpoint on the wrong port cannot then be corrected from the
+screen; until this is fixed, start something on that port or ask for the
+row to be corrected.
 
 ---
 
@@ -314,15 +331,17 @@ not come back.
 ## Configuration
 
 Every setting is an environment variable prefixed `RA2_`, readable from a
-`.env` file. Defaults are what you get with none set.
+`.env` file. Defaults are what you get with none set. The LLM endpoint and
+timeout can also be **saved from the app** (the Models card's gear), and a
+saved value wins — the variable is then only the starting value.
 
 | Variable | Default | What it does |
 |---|---|---|
 | `RA2_DATA_DIR` | `./var` | The database, uploads and codelists live here. **Exports do not** — they go to the browser, and `just reset` cannot reach them. |
 | `RA2_DB_PATH` | `{data_dir}/ra2.sqlite` | The SQLite file. |
 | `RA2_HOST` / `RA2_PORT` | `127.0.0.1` / `8080` | The address `just dev` binds. `RA2_PORT=9001 just dev` moves the port. **The host must be loopback** — `127.0.0.1`, `::1` or `localhost` — and anything else is refused before a socket opens, with no setting to allow it: the app has no login, so binding it elsewhere would publish it ([`docs/risk-assesment.md`](docs/risk-assesment.md) A4). |
-| `RA2_LLM_BASE_URL` | `http://127.0.0.1:11434/v1` | The LLM endpoint. **Must be loopback.** |
-| `RA2_LLM_TIMEOUT_S` | `600` | Per-call timeout. Measured, not chosen: a 9.7 B thinking model answered one record in 136 s on the reporting host, and almost all of it was the response's `reasoning` field. |
+| `RA2_LLM_BASE_URL` | `http://127.0.0.1:11434/v1` | The LLM endpoint. **Must be loopback.** Changeable in the app, where a saved value wins; this variable seeds it. |
+| `RA2_LLM_TIMEOUT_S` | `600` | Per-call timeout. Measured, not chosen: a 9.7 B thinking model answered one record in 136 s on the reporting host, and almost all of it was the response's `reasoning` field. Changeable in the app beside the endpoint; this variable seeds it. |
 | `RA2_LLM_REASONING_EFFORT` | `none` | How hard the model is asked to think — `none`, `low`, `medium` or `high`, refused at startup if Ollama cannot map it. **Measured, not preferred:** the same record cost 190 s at the model's own default and 6 s at `none`, both answering correctly, and the default could not finish a 12-record run inside the timeout. Pinned on every run's provenance, so setting `high` and launching a second evaluation gives a comparison that is still legible afterwards. |
 | `RA2_LLM_MAX_RETRIES` | `2` | Retries per call — bounded, counted, and shown in the progress card. |
 | `RA2_RUN_CONCURRENCY` | `1` | Models run one at a time. Raising it is not implemented. |

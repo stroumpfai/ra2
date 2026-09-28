@@ -117,7 +117,7 @@ def discard_dialog(
     `.open(` and wants an `encoding=` beside it (Do-NOT #4).
 
     Both callbacks are **awaitable**, like `ollama_settings_dialog`'s
-    `on_test` and unlike its `on_save`: each one is a service call, and a
+    `on_test` and `on_save`: each one is a service call, and a
     handler that merely *returns* a coroutine has done nothing — NiceGUI awaits
     what a handler returns, and a discarded coroutine is a button that closes a
     dialog and changes no data.

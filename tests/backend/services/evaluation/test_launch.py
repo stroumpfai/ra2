@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.fixtures.fake_llm import (
     DEFAULT_MODELS,
+    StaticConnectionSettings,
     StaticEndpointProber,
     StaticModelCatalog,
 )
@@ -224,6 +225,9 @@ async def test_launch_pins_each_models_own_parallel_calls(
         clock=clock,
         ids=ids,
         settings=eval_settings.model_copy(update={"llm_parallel_calls": {fitting_model: 4}}),
+        connection=StaticConnectionSettings.from_settings(
+            eval_settings.model_copy(update={"llm_parallel_calls": {fitting_model: 4}})
+        ),
     )
 
     view = await service.launch(EvaluationId(evaluation_id))
@@ -404,6 +408,7 @@ async def test_a_vram_infeasible_model_is_refused_at_launch_too(
         clock=clock,
         ids=ids,
         settings=eval_settings,
+        connection=StaticConnectionSettings.from_settings(eval_settings),
     )
     await unknown_host.update_draft(EvaluationId(evaluation_id), selected_models=(oversized_model,))
 

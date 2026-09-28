@@ -19,6 +19,52 @@ is re-planned, because `just dev-agent` cannot show a value surviving a
 restart. **The design itself is unchanged**, and D4's five call sites were
 re-verified against `4307b61` — `evaluation_service` ×3, `run_service` ×2.
 
+**Stage 1 done on 2026-09-27** on `feat/settings-in-the-app`: `SD43` with §3's
+bootstrap-value paragraph and §10's **Stored** column, E3's *being built*
+note, `contracts/amendments/feat-settings-in-the-app.md` and this slice's
+`CONTRACTS.md` section. No code changed. Two things moved stage, both so that
+no document claims what is not yet true: `config.py`'s docstrings go to Stage
+3, and E3's control status to Stage 5 (§5, §6).
+
+**Stage 2 done on 2026-09-27**: `domain/settings.py`, revision `ccbae1b96d1b`
+(`app_setting`), `SettingsRepository`, `SettingsService`, `ConnectionSettings`,
+`Services.settings`, and the five reads moved off `Settings`. Four decisions
+the plan left open are settled in D6, D7 and §4.1: `RunActiveError` is
+reused, the refusal is a code, a refused stored row is ignored rather than
+fatal, and an unknown key is a log line rather than a `Finding`. `errors.py`
+joins the amendment (§5). **`main.py` builds the service but does not load
+stored rows yet** — that is Stage 3, beside the rebind, so the Models card
+never shows a stored endpoint the client is not using.
+
+**Stage 3 done on 2026-09-27**: `infra/connection.py`'s `OllamaConnection`
+wired where the client and catalogue were; `SettingsService` rebinds it on a
+save and on a startup load that found stored rows, through a new
+`ConnectionRebinder` protocol (amendment §3 — the plan never said how the
+service reaches the client, and `one-llm-seam` rules out an import);
+`lifespan` loads the stored values before `reclaim_orphans`; `config.py`'s
+"this is the seed" docstrings. Proven without Ollama and without a private
+attribute: a loopback listener stands in for the stored endpoint, and the
+real catalogue connects to it after startup — and does not when the startup
+load is removed.
+
+**Stage 4 done on 2026-09-28**: Save saves. The view's handler stores through
+`settings_service`, answers a refusal with the dialog's words for its code,
+and reloads; nothing on screen tells an analyst to edit a file. **D1 was
+wrong that the UI kit needed no amendment** (amendment §6): the dialog called
+`on_save` synchronously and closed whatever happened, so an async save would
+have been a coroutine nobody awaited, and no save could keep the dialog open
+on a refusal. `on_save` is now awaited and answers `None` or a sentence, as
+`on_test` already did; the dialog shows the sentence under Save and stays
+open.
+
+**Stage 5 done on 2026-09-28**: the check against this host's Ollama (below,
+§5), J10's E2E for the endpoint line, the README, and E3. It passed on every
+claim this slice makes — and found that one of §8's risk covers **does not
+hold on Windows**: with nothing listening at the configured endpoint, the
+Evaluation screen does not load at all, so the dialog that would fix a saved
+wrong port is out of reach. Pre-existing (the same page with no stored row
+behaves identically), measured, and recorded as the follow-up in §9.
+
 ---
 
 ## 1. What is wrong
@@ -82,6 +128,11 @@ signature is `on_save: Callable[[str, int], None]`, which is already these two
 and nothing else, so the UI kit needs no amendment and the analyst gets the
 control they were already shown. Everything else is §9.
 
+*Corrected in Stage 4:* the two values fit, but the dialog called `on_save`
+synchronously and closed regardless, which cannot carry an async save or a
+refusal. `on_save` became awaitable, answering `None` or a sentence
+(amendment §6).
+
 **D2. The store is `app_setting`, and it is append-only.** Key, JSON value,
 `changed_at`; the newest row per key wins. An `UPDATE` would be the one mutable
 row in a schema whose rule is that a re-run adds rows (Do-NOT #2), and the
@@ -124,8 +175,13 @@ old. `main.py` wires that one object where it wires two now.
 **D6. A save is refused while a run is in flight.** A rebind under a running
 worker would move the endpoint between two records of one run, and `run` pins
 one `llm_endpoint` for the whole of it — the provenance would be a lie about
-half the records. `SETTINGS_ERROR_RUN_IN_FLIGHT`, rendered where the dialog
-renders its other refusals.
+half the records. **A queued run counts too**: it executes against whichever
+client exists when it starts.
+
+*Settled in Stage 2:* the refusal is the existing `RunActiveError(run_id,
+status)` — "a queued or running run is in the way" is exactly what it already
+means for discard (G1), over `lifecycle_service.ACTIVE_STATUSES`. A second
+error for the same two statuses would be a second meaning of "active".
 
 **D7. The loopback rule is refused at the save as well as at construction.**
 Today there are two enforcement points and no opt-out (`mvp-spec.md` §19.10).
@@ -133,6 +189,15 @@ This adds a third — a stored row is a value the next startup will read, so it
 is refused on the way in *and* still refused on the way out. The dialog already
 disables Save on `is_loopback_url`; that stays a courtesy, and the service
 refusal is the rule.
+
+*Settled in Stage 2:* the save's refusal is a **code** —
+`domain.settings.SettingRefusal`, carried by `SettingRefusedError` (frozen
+`errors.py`, amendment §5) — built on `classify_endpoint`, so the save cannot
+disagree with the other three callers about what loopback is. **"Refused on
+the way out" means ignored, not fatal**: a stored row that fails the rule at
+startup is logged (the code, never the value) and the seed stays in force. An
+app that cannot start is one only a shell can fix — the cost E3 is about — and
+N1 holds either way, because the value never reaches a client.
 
 **D8. Nothing is removed from `.env`.** Both variables keep working as the
 seed, `README.md`'s table keeps every row, and a host with no stored rows
@@ -152,8 +217,10 @@ Keys are a closed set in `domain/settings.py` (`SettingKey.LLM_BASE_URL`,
 `SettingKey.LLM_TIMEOUT_S`) — `domain` because the vocabulary is needed by the
 service *and* by the refusal the dialog renders, and `ui/` may not import
 `infra/`: the move `is_loopback_url` and `REASONING_EFFORTS` already made. An
-unknown key in the table is ignored with a `Finding`, never a crash — a
-database written by a newer build must still open.
+unknown key in the table is ignored with a log line, never a crash — a
+database written by a newer build must still open. *(A log line, not the
+`Finding` this first said: `FindingCode` is frozen and names things wrong with
+a delivery's rows, not with the app's own table.)*
 
 ### 4.2 Resolution, once per process and once per save
 
@@ -179,14 +246,15 @@ loop's path.
 The endpoint line under the Models card already renders the effective value, so
 a successful save is visible in the place the analyst was already looking.
 
-**The refusal has to arrive as its sentence.** The floor's control
+**The refusal has to arrive as words the analyst can act on.** The floor's control
 (`plan-settings-with-no-reader.md` §4.3) found that `EvaluationView._update`
 had been rendering `str(FeatureValidationError)` — "1 feature validation
 error(s)" — for every refusal `SD36` made a sentence, and nothing noticed
 because no control could send a refused value until then. D6 and D7 add two
-refusals the dialog *can* trigger, so the new `_save_settings` handler renders
-the sentence itself, and §7's UI test asserts the sentence reaches the screen,
-not merely that a notification appeared.
+refusals the dialog *can* trigger. They arrive as codes (D6, D7), so the new
+`_save_settings` handler renders each through `ui/`'s one rendering table —
+never `str(exc)` — and §7's UI test asserts the rendered words reach the
+screen, not merely that a notification appeared.
 
 ---
 
@@ -200,7 +268,9 @@ Each is a commit; each leaves `just lint` and `just test` green.
   stored row and a control; `.env` is the seed* — plus the §10 table gaining a
   **Stored?** column (two rows say yes) and §3's injection rule gaining what D4
   makes precise.
-- `docs/risk-assesment.md` E3: the control status moves off "absent".
+- `docs/risk-assesment.md` E3: a *being built* note. **Its control status moves
+  in Stage 5, when the change ships** — moving it on a documents-only commit
+  would record a control that does not exist yet.
 - `contracts/amendments/feat-settings-in-the-app.md`, and this plan's
   `CONTRACTS.md` section.
 
@@ -232,6 +302,9 @@ tests per §7.
   `rebind`, with the loopback refusal at construction it already has.
 - `main.py`: one object wired where two are wired today; the startup read of
   the stored override, before `reclaim_orphans`.
+- `infra/config.py` (frozen, amendment §1): `llm_base_url` and
+  `llm_timeout_s` say they are the seed. Here, not in Stage 1, because this is
+  the stage that makes it true.
 
 **Exit:** a stored endpoint is the one the next run calls, with no restart and
 no second seam. `tests/backend/infra` per §7.
@@ -240,8 +313,9 @@ no second seam. `tests/backend/infra` per §7.
 
 - `_save_settings` becomes a real handler: service call, refusal rendering,
   close-and-reload on success. The `… then restart.` notification is deleted.
-- The two refusal sentences join `ui/`'s rendering table (CLAUDE.md: findings,
-  not prose) — the tests assert on the code.
+- The refusal codes — the three `SettingRefusal`s and `RunActiveError` — join
+  `ui/`'s rendering table (CLAUDE.md: findings, not prose); the tests assert on
+  the code, and one asserts the rendered words reach the screen.
 
 **Exit:** UI tests and the E2E of §7. No screen tells an analyst to edit a file.
 
@@ -260,9 +334,37 @@ no second seam. `tests/backend/infra` per §7.
   D6. Remove the dir afterwards.
 - `README.md` §Configuration: the two rows gain "changeable in the app; the
   variable seeds it", and §2 step 4 says so where an analyst reads it.
-- `docs/risk-assesment.md` E3 closes to the extent this closes it.
+- `docs/risk-assesment.md` E3: the control status moves, to the extent this
+  closes it — the endpoint half.
 
 **Exit:** the runbook's list of tasks that still need a shell is two shorter.
+
+**Measured, 2026-09-28.** `just reset-seed yes --records 50` into a fresh temp
+`RA2_DATA_DIR` (synthetic codelist; this checkout has no `data/`), served by
+`ra2 serve` on a free port with the **seed** deliberately on a wrong port,
+`RA2_LLM_BASE_URL=http://127.0.0.1:11999/v1`, so a saved value cannot be
+mistaken for it. Driven in a real browser (Playwright) and the API:
+
+| # | Step | Seen |
+|---|---|---|
+| 1 | Open the Evaluation screen | `endpoint 127.0.0.1:11999/v1 · unreachable` |
+| 2 | Gear → endpoint `http://127.0.0.1:11434/v1` → Save | `endpoint 127.0.0.1:11434/v1 · reachable`, **no restart** |
+| 3 | Launch a real `qwen3.5:2b` run over the 50 records | `run.llm_endpoint = http://127.0.0.1:11434/v1` — the saved value, not the seed |
+| 4 | Gear → timeout 30 → Save, while it runs | *Not saved: a run is queued or running…*; dialog still open |
+| 5 | Cancel the run | `interrupted` |
+| 6 | Stop the server; serve the same dir with the same wrong-port seed | `endpoint 127.0.0.1:11434/v1 · reachable` — the saved value survived |
+
+**Found on the way: on Windows the Evaluation screen cannot be built with the
+endpoint down.** Step 1 first returned NiceGUI's *"The page took longer than
+the response_timeout of 3.0 seconds to build"*. Windows takes **2.02 s** to
+refuse a TCP connect to a closed loopback port (Linux refuses at once), and
+the page asks the catalogue twice while it is built — `reachable` 2.08 s,
+`models` 2.04 s — so about 4 s against a 3 s limit. The code path is the one
+`main` has: with no stored row the provider answers with the seed, so the same
+happens today whenever Ollama is not running on Windows. The rest of the check
+ran with a stand-in on port 11999 that accepts and hangs up, which fails fast
+and lets the page build. Nothing but endpoints, ids, statuses and the dialog's
+own sentences was printed, and the temp dir was removed (Do-NOT #13).
 
 ---
 
@@ -273,10 +375,11 @@ in the stage whose code needs it.
 
 | File | Change | Stage |
 |---|---|---|
-| `ra2/infra/config.py` | **docstring only** — `llm_base_url` and `llm_timeout_s` say they are seeds. No field, default or validator changes | 1 |
+| `ra2/infra/config.py` | **docstring only** — `llm_base_url` and `llm_timeout_s` say they are seeds. No field, default or validator changes. **Stage 3**, not 1 as first planned: the sentence becomes true when the override is read at startup | 3 |
 | `ra2/persistence/models.py` | + `AppSetting`, append-only, referenced by nothing | 2 |
 | `ra2/services/protocols.py` | + `ConnectionSettings` | 2 |
 | `ra2/services/container.py` | + `Services.settings` | 2 |
+| `ra2/services/errors.py` | + `SettingRefusedError` (a `SettingRefusal` code); a note that `RunActiveError` also refuses a settings save. Added in Stage 2 — the plan first missed that the refusal needs an error class | 2 |
 
 Not frozen, and changed: `ra2/services/evaluation_service.py` (+ the provider
 keyword; three reads move off `Settings`) and `ra2/services/run_service.py`
@@ -294,19 +397,30 @@ no route is added (§9).
 
 ## 7. Tests
 
-| Test | Layer | What it pins |
-|---|---|---|
-| `test_a_stored_endpoint_beats_the_environment` | backend | D3, through `connection_status()` |
-| `test_an_empty_store_reports_the_environment` | backend | D3's fallback — every existing deployment's behaviour on first start |
-| `test_a_save_appends_and_never_updates` | backend | D2: two saves leave two rows and the newest wins |
-| `test_a_non_loopback_endpoint_is_refused_at_the_save` | backend | D7 — the third enforcement point, with no opt-out reachable |
-| `test_a_stored_non_loopback_row_is_still_refused_at_startup` | backend | D7's other half: a row written around the service does not become policy |
-| `test_a_save_is_refused_while_a_run_is_running` | backend | D6 |
-| `test_the_run_pins_the_stored_endpoint` | backend | The provenance follows the effective value, not `Settings` |
-| `test_rebind_replaces_the_client_and_refuses_a_non_loopback_url` | backend/infra | D5, and that `one-llm-seam` still holds |
-| `test_the_settings_dialog_save_stores_the_endpoint` | ui | Stage 4, against a fake service |
-| `test_the_settings_dialog_reports_the_refusals` | ui | D6 and D7 as **the service's sentences on screen** (§4.3) — not merely that a notification appeared |
-| `test_the_endpoint_line_shows_a_saved_endpoint_without_a_restart` | e2e | The whole point, in the browser |
+| Test | Layer | What it pins | Stage |
+|---|---|---|---|
+| `test_an_empty_store_reports_the_environment` | backend | D3's fallback — every existing deployment's behaviour on first start | 2 |
+| `test_a_stored_endpoint_beats_the_environment` | backend | D3 — at values that differ from the seed, or "read the row" and "fell back" look alike | 2 |
+| `test_a_row_written_into_the_table_changes_what_connection_status_reports` | backend | Stage 2's exit, through the service the Models card reads | 2 |
+| `test_a_save_is_current_at_once_and_survives_a_restart` | backend | Held in memory after the save; read back by a fresh service | 2 |
+| `test_a_save_appends_and_never_updates` | backend | D2: two saves leave four rows (two keys each) and the newest wins | 2 |
+| `test_a_refused_value_stores_nothing_and_changes_nothing` | backend | D7 — off loopback, malformed, a zero timeout; asserted on the `SettingRefusal` code; no row, no change | 2 |
+| `test_a_save_is_refused_while_a_run_is_active` | backend | D6, for `queued` and `running` alike — `RunActiveError` | 2 |
+| `test_a_stored_non_loopback_row_is_refused_at_startup` | backend | D7's other half: ignored, seed kept; the log names the code and never the value | 2 |
+| `test_a_key_this_build_does_not_know_is_ignored` | backend | A newer build's database still opens | 2 |
+| `test_the_service_is_a_connection_settings_provider` | backend | Structural — the two services never import it | 2 |
+| `test_the_run_pins_the_current_endpoint_not_the_seed` | backend | `run.llm_endpoint` follows the provider, at a value unlike the seed | 2 |
+| `tests/unit/settings/test_setting_refusals.py` | unit | `endpoint_refusal` agrees with `classify_endpoint` on every input; the timeout bound; the two keys | 2 |
+| `test_after_a_rebind_every_call_reaches_the_new_pair` | backend/infra | D5 — extract and the catalogue both go to the adapters built on the new values | 3 |
+| `test_a_refused_url_swaps_nothing` | backend/infra | Both built before either is swapped; the real adapters' guard, no opt-out | 3 |
+| `test_a_rebind_keeps_what_is_not_an_analysts_setting` | backend/infra | Retries and the effort default carried over | 3 |
+| `test_after_startup_the_live_client_dials_the_stored_endpoint` | backend | The wiring: `create_app` + `lifespan` + the real `OllamaConnection`, against a loopback listener. Fails without the startup load | 3 |
+| rebind assertions in `test_settings_service.py` | backend | Rebound once after a save or a stored-row load; never after a refusal, an active run, an empty store or an ignored row | 3 |
+| `test_the_settings_dialog_save_stores_the_endpoint` | ui | Through the real service: stored, rebound, and the endpoint line redrawn from the provider; no "RA2_LLM_BASE_URL" on screen | 4 |
+| `test_a_refused_save_is_worded_in_the_dialog` | ui | A zero timeout: `SAVE_REFUSAL_WORDS[TIMEOUT_NOT_POSITIVE]` on screen, dialog open, nothing stored | 4 |
+| `test_a_save_during_a_run_is_refused_in_words` | ui | D6 on screen: `SAVE_REFUSED_RUN_ACTIVE` | 4 |
+| `test_a_refused_save_keeps_the_dialog_open_and_says_why`, `test_changing_a_field_clears_a_stale_refusal` | ui | The dialog alone (amendment §6); the five existing save tests now await `on_save` | 4 |
+| `test_j10_a_saved_endpoint_shows_without_a_restart` | e2e | The whole point, in the browser: Save through the dialog, the endpoint line redrawn (`_redrawn`), the original saved back for the shared server | 5 |
 
 `tests/test_m0_contract.py` and `tests/test_p5_contract.py` take the amended
 frozen files and the new revision. `tests/test_settings_have_readers.py`
@@ -326,7 +440,7 @@ the old line's last frame.
 
 | Risk | Why it is small | Cover |
 |---|---|---|
-| A stored row makes the endpoint unreachable and the UI is the only way back | The dialog is reachable with the endpoint down — it is where "Test connection" lives — and `just reset` clears the store with the database | D3, Stage 5 |
+| A stored row makes the endpoint unreachable and the UI is the only way back | ~~The dialog is reachable with the endpoint down~~ — **false on Windows**, measured in Stage 5: with nothing listening, the Evaluation screen fails to build (2 × ~2 s refusals against a 3 s limit), and the dialog is on that screen. True on Linux and macOS. `just reset` still clears the store, with everything else | Follow-up in §9 |
 | Two configuration mechanisms confuse a reader | One wins, always, and the loser is documented as the seed in the same table | D3, D8, Stage 5's README row |
 | The rebind races a run | Refused, not serialised | D6 |
 | N1 is weakened by a UI-writable endpoint | The enforcement points go from two to three and none of them is optional | D7 |
@@ -355,6 +469,18 @@ the old line's last frame.
 - **An API route for settings.** The UI calls services in-process; no client
   has asked.
 - **A settings screen in the nav.** Two settings do not make a screen.
+- **The Evaluation screen must not wait on the endpoint to build** — the
+  follow-up Stage 5 found (§5, §8). On Windows a closed loopback port takes
+  ~2 s to refuse and the page asks twice, past NiceGUI's 3 s build limit, so
+  the screen that holds the settings dialog does not load while the endpoint
+  is down. Pre-existing and not caused by this slice, but it undercuts this
+  slice's promise, so it is named here rather than left for someone to trip
+  on. The cheapest fixes, in order: ask the endpoint **once** per page build
+  (`reachable` first, and skip `models` when it is not); give the catalogue a
+  short **connect** timeout, separate from `llm_timeout_s`, since a loopback
+  connect that has not happened in half a second is not going to; or build
+  the page first and fill the Models card after the client connects, which
+  NiceGUI's own error message suggests.
 
 ---
 

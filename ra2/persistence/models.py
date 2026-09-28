@@ -76,6 +76,7 @@ from ra2.domain.llm import DEFAULT_REASONING_EFFORT
 from ra2.domain.scoring import ScoreMetric
 
 __all__ = [
+    "AppSetting",
     "Base",
     "CensusBucketRow",
     "CensusColumn",
@@ -1395,3 +1396,28 @@ class ModelQualification(Base):
     quality_json: Mapped[str]
     #: `list[domain.qualification.GateResult]`; `[]` when not gated.
     gate_json: Mapped[str] = mapped_column(default="[]")
+
+
+class AppSetting(Base):
+    """A setting an analyst changed from the product (sw-design.md SD43).
+
+    **Append-only.** A save adds a row and the newest per key wins, the way
+    a re-run adds runs (§12.2) — and the history answers "when did the
+    endpoint change", the first question a week of runs against the wrong
+    Ollama raises. Nothing updates or deletes one except `just reset`.
+
+    **Referenced by nothing**, and it references nothing. Keys are the closed
+    set `domain.settings.SettingKey`; a key this build does not know is
+    ignored, so a database written by a newer build still opens.
+    """
+
+    __tablename__ = "app_setting"
+    __table_args__ = (Index("ix_app_setting_key_changed_at", "key", "changed_at"),)
+
+    #: A plain string, no `NewType`: nothing joins against it (`P2-D6`'s
+    #: reasoning for `code_value`).
+    id: Mapped[str] = mapped_column(String(_ID_LEN), primary_key=True)
+    key: Mapped[str] = mapped_column(String(64))
+    #: JSON, so one column holds a URL and an integer alike.
+    value_json: Mapped[str]
+    changed_at: Mapped[datetime]

@@ -25,16 +25,13 @@ from ra2.domain.language import LanguageDetector
 from ra2.domain.llm import EndpointProber, LLMClient, ModelCatalog
 from ra2.infra.clock import Clock, SystemClock
 from ra2.infra.config import Settings
+from ra2.infra.connection import OllamaConnection
 from ra2.infra.filestore import FileStore, HostPathFileStore, UploadedFileStore
 from ra2.infra.gpu import GpuProbe, probe_for
 from ra2.infra.idgen import IdFactory, Uuid7Factory
 from ra2.infra.lingua_detector import LinguaDetector
 from ra2.infra.logging import configure_logging
-from ra2.infra.ollama_client import (
-    OllamaEndpointProber,
-    OllamaLLMClient,
-    OllamaModelCatalog,
-)
+from ra2.infra.ollama_client import OllamaEndpointProber
 from ra2.infra.tasks import AsyncioTaskRunner, TaskRunner
 from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
 from ra2.persistence.session import create_engine, create_session_factory, ensure_database_dir
@@ -56,6 +53,7 @@ from ra2.services.ranking_service import RankingService
 from ra2.services.results_service import ResultsService
 from ra2.services.run_service import RunService
 from ra2.services.scoring_service import ScoringService
+from ra2.services.settings_service import SettingsService
 from ra2.ui import views
 from ra2.ui.theme import FONTS_DIR, FONTS_URL_PATH
 
@@ -117,15 +115,21 @@ def create_app(
     # Both arrive as defaulted keyword arguments, so every test above Wave 1
     # substitutes `tests/fixtures/fake_llm.py` with no test-mode branch here
     # (§12.12) and no machine needs a GPU or anything on port 11434.
-    llm_client = llm_client or OllamaLLMClient(
+    #
+    # **One object for both, and it can be rebound** (SD43). The settings
+    # dialog stores a new endpoint or timeout, and `settings_service` rebinds
+    # this in place — the next run and the next catalogue read use the new
+    # values with no restart. Built from the `Settings` seed; a stored value
+    # replaces it at startup, in `lifespan` below. The loopback guard is still
+    # the adapters' own constructors, on every rebind as on this first build.
+    connection = OllamaConnection(
         base_url=settings.llm_base_url,
         timeout_s=settings.llm_timeout_s,
         max_retries=settings.llm_max_retries,
         reasoning_effort=settings.llm_reasoning_effort,
     )
-    model_catalog = model_catalog or OllamaModelCatalog(
-        base_url=settings.llm_base_url, timeout_s=settings.llm_timeout_s
-    )
+    llm_client = llm_client or connection
+    model_catalog = model_catalog or connection
     # The settings dialog's "Test connection". It takes no `base_url` and no
     # settings: the whole point is to probe a URL the analyst typed, which is
     # not the configured one and is not persisted anywhere. It opens no socket
@@ -179,6 +183,19 @@ def create_app(
         ids=ids,
     )
     prompt_service = PromptService(session_factory=session_factory, clock=clock, ids=ids)
+    # --- settings in the app (SD43) -----------------------------------------
+    # The endpoint and timeout **as they are now**. Both services read them
+    # here rather than off `settings`, which stays the bootstrap value (§3).
+    # It answers with the `Settings` seed until `lifespan` loads the stored
+    # values, and it rebinds `connection` whenever they change, so what the
+    # Models card reports and what a run calls are always the same endpoint.
+    settings_service = SettingsService(
+        session_factory=session_factory,
+        clock=clock,
+        ids=ids,
+        settings=settings,
+        rebinder=connection,
+    )
     evaluation_service = EvaluationService(
         session_factory=session_factory,
         model_catalog=model_catalog,
@@ -187,6 +204,7 @@ def create_app(
         clock=clock,
         ids=ids,
         settings=settings,
+        connection=settings_service,
     )
     # `prompt_service` satisfies `PromptResolver` (services/protocols.py)
     # structurally — `run_service` never imports it directly. It arrives as a
@@ -227,6 +245,7 @@ def create_app(
         clock=clock,
         ids=ids,
         settings=settings,
+        connection=settings_service,
     )
     # `scoring_service` satisfies `Scorer` structurally — neither read service
     # imports it directly.
@@ -273,6 +292,7 @@ def create_app(
         mismatch=mismatch_service,
         lifecycle=lifecycle_service,
         qualification=qualification_service,
+        settings=settings_service,
     )
 
     @asynccontextmanager
@@ -293,7 +313,13 @@ def create_app(
         `ui.run_with` captures `app.router.lifespan_context` and calls it from
         inside its own wrapper, so NiceGUI's startup and this one compose. It
         is mounted below, after this.
+
+        **The stored settings load first** (SD43): the endpoint and timeout
+        an analyst saved replace the `Settings` seed, and the live client is
+        rebound to them, before this process can launch anything — so no
+        run ever starts on the seed while a saved endpoint is on record.
         """
+        await settings_service.load()
         await run_service.reclaim_orphans()
         yield
 

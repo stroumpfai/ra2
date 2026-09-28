@@ -28,6 +28,8 @@ __all__ = [
     "CensusInput",
     "CensusMaterialiser",
     "CensusTableInput",
+    "ConnectionRebinder",
+    "ConnectionSettings",
     "EnumCodeTableProvider",
     "GroundTruthProvider",
     "MismatchTally",
@@ -272,3 +274,44 @@ class MismatchTally(Protocol):
     async def tally(
         self, session: AsyncSession, run_id: RunId
     ) -> Mapping[FeatureId, ReviewTally]: ...
+
+
+# ---------------------------------------------------------------------------
+# Settings in the app (SD43, amendment: feat/settings-in-the-app).
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class ConnectionSettings(Protocol):
+    """The LLM endpoint and timeout **as they are now** (sw-design.md SD43).
+
+    Satisfied structurally by `SettingsService`, so `evaluation_service` and
+    `run_service` never import it — the `ScoreSubmitter` trick once more.
+
+    Plain attributes, not coroutines: the values are resolved at startup and
+    after each accepted save, and held. Nothing on the record loop's path
+    reads the database for them.
+    """
+
+    @property
+    def endpoint(self) -> str: ...
+
+    @property
+    def timeout_s(self) -> int: ...
+
+
+@runtime_checkable
+class ConnectionRebinder(Protocol):
+    """Rebind the live LLM client and catalogue to a new endpoint (SD43).
+
+    Satisfied structurally by `infra.connection.OllamaConnection`. A
+    protocol here, not an import there, because `import-linter`'s
+    `one-llm-seam` forbids `services` from reaching anything that imports
+    `openai` — and the object that holds the client does.
+
+    Raises `LlmEndpointError` for a non-loopback URL, having swapped
+    nothing. `SettingsService` only ever passes values `domain.settings`
+    already accepted, by the same rule.
+    """
+
+    def rebind(self, base_url: str, timeout_s: int) -> None: ...

@@ -23,6 +23,7 @@ from ra2.services.ranking_service import RankingService
 from ra2.services.results_service import ResultsService
 from ra2.services.run_service import RunService
 from ra2.services.scoring_service import ScoringService
+from ra2.services.settings_service import SettingsService
 
 __all__ = ["Services"]
 
@@ -56,3 +57,7 @@ class Services:
     #: `record` on the target. Neither adapter serves a write; the Models
     #: card reads qualifications through `evaluation`.
     qualification: QualificationService
+    #: SD43. The endpoint and timeout an analyst saves from the Models card's
+    #: settings dialog — the one write in that dialog, through a service like
+    #: every other write in `ui/` (Do-NOT #7).
+    settings: SettingsService

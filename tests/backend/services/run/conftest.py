@@ -35,7 +35,7 @@ import pytest_asyncio
 from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
-from tests.fixtures.fake_llm import FakeLLMClient, StaticModelCatalog
+from tests.fixtures.fake_llm import FakeLLMClient, StaticConnectionSettings, StaticModelCatalog
 
 from ra2.domain.extraction import EvaluationSize, RunStatus
 from ra2.domain.feature import Grain, Kind, MatchingRule, MatchingRuleKind, ValueType
@@ -69,7 +69,7 @@ from ra2.persistence.models import (
 )
 from ra2.persistence.session import create_engine, create_session_factory
 from ra2.services.feature_service import matching_rule_json
-from ra2.services.protocols import ScoreSubmitter
+from ra2.services.protocols import ConnectionSettings, ScoreSubmitter
 from ra2.services.run_service import RunService
 
 #: The design's host, so a `gpu_name` assertion is the same on a laptop with
@@ -239,6 +239,7 @@ def make_run_service(
         id_factory: SeededFactory | None = None,
         task_runner: TaskRunner | None = None,
         scorer: ScoreSubmitter | None = None,
+        connection: ConnectionSettings | None = None,
     ) -> RunService:
         return RunService(
             session_factory=session_factory or db_session_factory,
@@ -252,6 +253,9 @@ def make_run_service(
             clock=clock,
             ids=id_factory or ids,
             settings=settings or backend_settings,
+            # SD43. The seed by default; a test about the provider passes its own.
+            connection=connection
+            or StaticConnectionSettings.from_settings(settings or backend_settings),
         )
 
     return _make

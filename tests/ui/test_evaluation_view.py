@@ -67,6 +67,7 @@ from ra2.domain.qualification import (
     Qualification,
     QualitySummary,
 )
+from ra2.domain.settings import SettingRefusal
 from ra2.infra.config import Settings
 from ra2.persistence.models import Corpus, Evaluation, Feature, Mismatch, Record, Run
 from ra2.services.container import Services
@@ -75,6 +76,7 @@ from ra2.services.readmodels import EvaluationDraftView, FeatureSetSummary, Prom
 from ra2.ui import theme
 from ra2.ui.components import format_local
 from ra2.ui.components.discard_dialog import EXPORT_PER_RUN
+from ra2.ui.components.ollama_settings import SAVE_REFUSAL_WORDS, SAVE_REFUSED_RUN_ACTIVE
 
 pytestmark = pytest.mark.ui
 
@@ -1118,6 +1120,80 @@ async def test_the_models_footer_gear_opens_the_connection_settings(seeded: Seed
     assert _find(user, "ollama-save")
 
 
+async def _open_connection_settings(user: User) -> None:
+    gear = next(
+        e
+        for e in user.find(kind=ui.element).elements
+        if e._props.get("aria-label") == "Ollama connection settings"
+    )
+    _one(user, gear).click()
+    await _until(lambda: bool(_find(user, "ollama-endpoint")))
+
+
+async def test_the_settings_dialog_save_stores_the_endpoint(seeded: Seeded) -> None:
+    """SD43: Save saves. It told the analyst to set two environment variables
+    and restart; now the values are stored, the live client is rebound, and
+    the Models card's endpoint line shows the new endpoint with no restart —
+    read back from the service, not from what was typed."""
+    user = seeded.user
+    await user.open("/evaluation")
+    await _open_connection_settings(user)
+    saved = "http://127.0.0.1:11999/v1"
+    assert seeded.services.settings.endpoint != saved
+
+    user.find(marker="ollama-endpoint").trigger("change", args=saved)
+    user.find(marker="ollama-timeout").trigger("change", args="45")
+    user.find(marker="ollama-save").click()
+    await _until(lambda: seeded.services.settings.endpoint == saved)
+
+    assert seeded.services.settings.timeout_s == 45
+    await _until(lambda: "127.0.0.1:11999/v1" in _all_text(user, "endpoint-line"))
+    await user.should_not_see("RA2_LLM_BASE_URL")
+
+
+async def test_a_refused_save_is_worded_in_the_dialog(seeded: Seeded) -> None:
+    """A value the dialog cannot judge — a timeout below a second — is
+    refused by the service with a code, and the analyst reads the dialog's
+    words for that code under Save, not `str()` of an exception (the bug the
+    floor's control found in `_update`)."""
+    user = seeded.user
+    await user.open("/evaluation")
+    before = seeded.services.settings.endpoint
+    await _open_connection_settings(user)
+
+    user.find(marker="ollama-timeout").trigger("change", args="0")
+    user.find(marker="ollama-save").click()
+
+    await user.should_see(SAVE_REFUSAL_WORDS[SettingRefusal.TIMEOUT_NOT_POSITIVE])
+    assert seeded.services.settings.endpoint == before
+    assert _find(user, "ollama-settings-dialog")
+
+
+async def test_a_save_during_a_run_is_refused_in_words(launched: Seeded) -> None:
+    """D6 on screen: while a run is in flight the save is refused — every
+    record of a run must use one endpoint — and the dialog says when to come
+    back rather than what to change."""
+    await _seed_run(
+        launched.app,
+        run_id="r-in-flight",
+        evaluation_id=launched.draft.evaluation_id,
+        template_id=launched.template.prompt_template_id,
+        model_tag=FITS_A,
+        status=RunStatus.RUNNING,
+        started_at=FROZEN_NOW,
+    )
+    user = launched.user
+    await user.open("/evaluation")
+    before = launched.services.settings.endpoint
+    await _open_connection_settings(user)
+
+    user.find(marker="ollama-timeout").trigger("change", args="45")
+    user.find(marker="ollama-save").click()
+
+    await user.should_see(SAVE_REFUSED_RUN_ACTIVE)
+    assert launched.services.settings.endpoint == before
+
+
 # --- the empty state ----------------------------------------------------------
 
 
@@ -2075,7 +2151,13 @@ async def test_each_qualification_state_renders_its_line(
     line = _qualification_line(seeded.user, FITS_A)
     assert line._props["data-state"] == state
     assert ("warn" in line._classes) is warn
-    assert ("title" in line._props) is (recorded is not None)
+    # Every state has a tooltip. The unmeasured one names the command that
+    # measures this row's model, since an evaluation run never will.
+    assert line._props["title"] == (
+        evaluation_view.QUALIFICATION_UNMEASURED_TOOLTIP.format(tag=FITS_A)
+        if recorded is None
+        else evaluation_view.QUALIFICATION_TOOLTIP
+    )
     if state in {"qualified", "server-sensitive"}:
         # The service's numbers, formatted here: F1 to three places, the rate
         # as SD37's latency, the fill as a percentage.
