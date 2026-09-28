@@ -57,6 +57,14 @@ on a refusal. `on_save` is now awaited and answers `None` or a sentence, as
 `on_test` already did; the dialog shows the sentence under Save and stays
 open.
 
+**Stage 5 done on 2026-09-28**: the check against this host's Ollama (below,
+§5), J10's E2E for the endpoint line, the README, and E3. It passed on every
+claim this slice makes — and found that one of §8's risk covers **does not
+hold on Windows**: with nothing listening at the configured endpoint, the
+Evaluation screen does not load at all, so the dialog that would fix a saved
+wrong port is out of reach. Pre-existing (the same page with no stored row
+behaves identically), measured, and recorded as the follow-up in §9.
+
 ---
 
 ## 1. What is wrong
@@ -331,6 +339,33 @@ no second seam. `tests/backend/infra` per §7.
 
 **Exit:** the runbook's list of tasks that still need a shell is two shorter.
 
+**Measured, 2026-09-28.** `just reset-seed yes --records 50` into a fresh temp
+`RA2_DATA_DIR` (synthetic codelist; this checkout has no `data/`), served by
+`ra2 serve` on a free port with the **seed** deliberately on a wrong port,
+`RA2_LLM_BASE_URL=http://127.0.0.1:11999/v1`, so a saved value cannot be
+mistaken for it. Driven in a real browser (Playwright) and the API:
+
+| # | Step | Seen |
+|---|---|---|
+| 1 | Open the Evaluation screen | `endpoint 127.0.0.1:11999/v1 · unreachable` |
+| 2 | Gear → endpoint `http://127.0.0.1:11434/v1` → Save | `endpoint 127.0.0.1:11434/v1 · reachable`, **no restart** |
+| 3 | Launch a real `qwen3.5:2b` run over the 50 records | `run.llm_endpoint = http://127.0.0.1:11434/v1` — the saved value, not the seed |
+| 4 | Gear → timeout 30 → Save, while it runs | *Not saved: a run is queued or running…*; dialog still open |
+| 5 | Cancel the run | `interrupted` |
+| 6 | Stop the server; serve the same dir with the same wrong-port seed | `endpoint 127.0.0.1:11434/v1 · reachable` — the saved value survived |
+
+**Found on the way: on Windows the Evaluation screen cannot be built with the
+endpoint down.** Step 1 first returned NiceGUI's *"The page took longer than
+the response_timeout of 3.0 seconds to build"*. Windows takes **2.02 s** to
+refuse a TCP connect to a closed loopback port (Linux refuses at once), and
+the page asks the catalogue twice while it is built — `reachable` 2.08 s,
+`models` 2.04 s — so about 4 s against a 3 s limit. The code path is the one
+`main` has: with no stored row the provider answers with the seed, so the same
+happens today whenever Ollama is not running on Windows. The rest of the check
+ran with a stand-in on port 11999 that accepts and hangs up, which fails fast
+and lets the page build. Nothing but endpoints, ids, statuses and the dialog's
+own sentences was printed, and the temp dir was removed (Do-NOT #13).
+
 ---
 
 ## 6. Frozen files, and the amendment
@@ -385,7 +420,7 @@ no route is added (§9).
 | `test_a_refused_save_is_worded_in_the_dialog` | ui | A zero timeout: `SAVE_REFUSAL_WORDS[TIMEOUT_NOT_POSITIVE]` on screen, dialog open, nothing stored | 4 |
 | `test_a_save_during_a_run_is_refused_in_words` | ui | D6 on screen: `SAVE_REFUSED_RUN_ACTIVE` | 4 |
 | `test_a_refused_save_keeps_the_dialog_open_and_says_why`, `test_changing_a_field_clears_a_stale_refusal` | ui | The dialog alone (amendment §6); the five existing save tests now await `on_save` | 4 |
-| `test_the_endpoint_line_shows_a_saved_endpoint_without_a_restart` | e2e | The whole point, in the browser | 5 |
+| `test_j10_a_saved_endpoint_shows_without_a_restart` | e2e | The whole point, in the browser: Save through the dialog, the endpoint line redrawn (`_redrawn`), the original saved back for the shared server | 5 |
 
 `tests/test_m0_contract.py` and `tests/test_p5_contract.py` take the amended
 frozen files and the new revision. `tests/test_settings_have_readers.py`
@@ -405,7 +440,7 @@ the old line's last frame.
 
 | Risk | Why it is small | Cover |
 |---|---|---|
-| A stored row makes the endpoint unreachable and the UI is the only way back | The dialog is reachable with the endpoint down — it is where "Test connection" lives — and `just reset` clears the store with the database | D3, Stage 5 |
+| A stored row makes the endpoint unreachable and the UI is the only way back | ~~The dialog is reachable with the endpoint down~~ — **false on Windows**, measured in Stage 5: with nothing listening, the Evaluation screen fails to build (2 × ~2 s refusals against a 3 s limit), and the dialog is on that screen. True on Linux and macOS. `just reset` still clears the store, with everything else | Follow-up in §9 |
 | Two configuration mechanisms confuse a reader | One wins, always, and the loser is documented as the seed in the same table | D3, D8, Stage 5's README row |
 | The rebind races a run | Refused, not serialised | D6 |
 | N1 is weakened by a UI-writable endpoint | The enforcement points go from two to three and none of them is optional | D7 |
@@ -434,6 +469,18 @@ the old line's last frame.
 - **An API route for settings.** The UI calls services in-process; no client
   has asked.
 - **A settings screen in the nav.** Two settings do not make a screen.
+- **The Evaluation screen must not wait on the endpoint to build** — the
+  follow-up Stage 5 found (§5, §8). On Windows a closed loopback port takes
+  ~2 s to refuse and the page asks twice, past NiceGUI's 3 s build limit, so
+  the screen that holds the settings dialog does not load while the endpoint
+  is down. Pre-existing and not caused by this slice, but it undercuts this
+  slice's promise, so it is named here rather than left for someone to trip
+  on. The cheapest fixes, in order: ask the endpoint **once** per page build
+  (`reachable` first, and skip `models` when it is not); give the catalogue a
+  short **connect** timeout, separate from `llm_timeout_s`, since a loopback
+  connect that has not happened in half a second is not going to; or build
+  the page first and fill the Models card after the client connects, which
+  NiceGUI's own error message suggests.
 
 ---
 

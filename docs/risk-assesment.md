@@ -817,7 +817,7 @@ it mid-run (a managed Windows workstation will, if allowed to).
 
 **E3 · Handover is not built, and the gap pulls a developer back onto the
 machine** · Severity: **Medium** · Control status: **absent (deferred by
-design)**
+design)**; the endpoint half **addressed** (`SD43`)
 
 The installer and runbook are explicitly deferred (`mvp-spec.md` §16), which is
 a defensible cut. The operational consequence is worth seeing: `vision.md`
@@ -833,12 +833,20 @@ still need a shell as a numbered list with exact commands, and name who is
 allowed to run them. If a developer must work on the machine, that is a
 decision to record once, not a habit to fall into.
 
-*Being built* — the endpoint half of the scenario, by
-`plan-settings-in-the-app.md` (`SD43`): the settings dialog stores the endpoint
-and timeout in the database, the running app picks them up without a restart,
-and the loopback rule is refused at the save as well as at construction. That
-takes two tasks off the shell-only list; the control status above moves when
-it ships, not before.
+*Built* — the endpoint half of the scenario, by `plan-settings-in-the-app.md`
+(`SD43`): the settings dialog stores the endpoint and timeout in the database,
+the running app picks them up without a restart, a saved value survives a
+restart, and the loopback rule is refused at the save as well as at
+construction. Checked against this host's Ollama on 2026-09-28. Two tasks
+leave the shell-only list; the rest of the handover gap stands.
+
+*One exception, found in that check.* On Windows a connect to a loopback port
+with nothing listening takes about two seconds to be refused, and the
+Evaluation screen asks the endpoint twice while it is built — past NiceGUI's
+three-second limit, so the screen shows a server error. With the endpoint
+down, the dialog that would fix it is on that screen. A saved wrong port is
+therefore still a shell task on Windows until the page stops waiting on the
+endpoint to build (`plan-settings-in-the-app.md` §9).
 
 ---
 
