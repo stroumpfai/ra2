@@ -9,7 +9,9 @@ The last group is the architectural one. A component that quietly grew a
 `sorted()` call would pass a rendering test and fail these.
 """
 
-from collections.abc import Callable
+import asyncio
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
@@ -1256,6 +1258,36 @@ async def _ok_probe(endpoint: str, timeout_s: int) -> ConnectionProbeView:
     return _probe(latency_ms=12, model_count=3)
 
 
+def _recording_save(
+    saved: list[tuple[str, int]], answer: str | None = None
+) -> Callable[[str, int], Awaitable[str | None]]:
+    """An `on_save` that records what it was given and answers `answer` —
+    `None` for "saved", or the sentence a refusal would carry (SD43)."""
+
+    async def _save(endpoint: str, timeout_s: int) -> str | None:
+        saved.append((endpoint, timeout_s))
+        return answer
+
+    return _save
+
+
+async def _until(predicate: Callable[[], bool], *, timeout_s: float = 2.0) -> None:
+    """`on_save` is awaited now, so a click schedules it rather than running
+    it; wait for the outcome, never for a fixed time."""
+    deadline = time.monotonic() + timeout_s
+    while not predicate():
+        if time.monotonic() > deadline:
+            raise AssertionError("the condition never held")
+        await asyncio.sleep(0.01)
+
+
+async def _settle() -> None:
+    """Give a scheduled handler the chance to run, for the assertions that
+    something did **not** happen — without it they would pass by running
+    first."""
+    await asyncio.sleep(0.05)
+
+
 def _card_elements(user: User) -> list[ui.element]:
     return [e for e in _all(user) if e.tag == "section" and e._props.get("data-testid") == "card"]
 
@@ -1271,7 +1303,7 @@ async def test_ollama_settings_dialog_has_exactly_the_five_controls(user):
         "/t/ollama/controls",
         lambda: ollama_settings_dialog(
             settings=_CONNECTION,
-            on_save=lambda *_: None,
+            on_save=_recording_save([]),
             on_refresh=lambda: None,
             on_test=_ok_probe,
         ),
@@ -1301,7 +1333,7 @@ async def test_ollama_settings_dialog_save_emits_the_edited_endpoint_and_timeout
                 ui.dialog,
                 ollama_settings_dialog(
                     settings=_CONNECTION,
-                    on_save=lambda endpoint, timeout_s: saved.append((endpoint, timeout_s)),
+                    on_save=_recording_save(saved),
                     on_refresh=lambda: None,
                     on_test=_ok_probe,
                 ),
@@ -1315,9 +1347,9 @@ async def test_ollama_settings_dialog_save_emits_the_edited_endpoint_and_timeout
     user.find(marker="ollama-endpoint").trigger("change", args="http://127.0.0.1:9999/v1")
     user.find(marker="ollama-timeout").trigger("change", args="45")
     user.find(marker="ollama-save").click()
+    await _until(lambda: dialogs[0].value is False)
 
     assert saved == [("http://127.0.0.1:9999/v1", 45)]
-    assert dialogs[0].value is False, "save closes the dialog"
 
 
 async def test_ollama_settings_dialog_refresh_reasks_the_catalogue_without_saving(user):
@@ -1333,7 +1365,7 @@ async def test_ollama_settings_dialog_refresh_reasks_the_catalogue_without_savin
                 ui.dialog,
                 ollama_settings_dialog(
                     settings=_CONNECTION,
-                    on_save=lambda endpoint, timeout_s: saved.append((endpoint, timeout_s)),
+                    on_save=_recording_save(saved),
                     on_refresh=lambda: refreshed.append(True),
                     on_test=_ok_probe,
                 ),
@@ -1368,7 +1400,7 @@ async def test_ollama_settings_dialog_state_is_scoped_to_its_own_instance(user):
                         status=EndpointStatus.REACHABLE,
                         timeout_s=120,
                     ),
-                    on_save=lambda endpoint, timeout_s: saved_a.append((endpoint, timeout_s)),
+                    on_save=_recording_save(saved_a),
                     on_refresh=lambda: None,
                     on_test=_ok_probe,
                 ),
@@ -1383,7 +1415,7 @@ async def test_ollama_settings_dialog_state_is_scoped_to_its_own_instance(user):
                         status=EndpointStatus.REACHABLE,
                         timeout_s=60,
                     ),
-                    on_save=lambda endpoint, timeout_s: saved_b.append((endpoint, timeout_s)),
+                    on_save=_recording_save(saved_b),
                     on_refresh=lambda: None,
                     on_test=_ok_probe,
                 ),
@@ -1402,9 +1434,75 @@ async def test_ollama_settings_dialog_state_is_scoped_to_its_own_instance(user):
     # test needs to tell the two instances apart.
     user.find(marker="ollama-endpoint").trigger("change", args="http://127.0.0.1:9999/v1")
     user.find(marker="ollama-save").click()
+    await _until(lambda: bool(saved_a))
 
     assert saved_a == [("http://127.0.0.1:9999/v1", 120)]
     assert saved_b == [], "the second dialog's on_save must never fire from the first's edit"
+
+
+async def test_a_refused_save_keeps_the_dialog_open_and_says_why(user):
+    """SD43: the service can refuse what the dialog cannot see — a run in
+    flight, a timeout below a second. The sentence `on_save` answers with is
+    shown under Save, and the dialog stays open on the values the analyst
+    typed, so they can change one and save again."""
+    saved: list[tuple[str, int]] = []
+    dialogs: list[ui.dialog] = []
+    refusal = "Not saved: the reason, in the words the view looked up."
+
+    def build() -> None:
+        dialogs.append(
+            cast(
+                ui.dialog,
+                ollama_settings_dialog(
+                    settings=_CONNECTION,
+                    on_save=_recording_save(saved, answer=refusal),
+                    on_refresh=lambda: None,
+                    on_test=_ok_probe,
+                ),
+            )
+        )
+
+    page("/t/ollama/refused", build)
+    await user.open("/t/ollama/refused")
+    dialogs[0].open()
+
+    user.find(marker="ollama-timeout").trigger("change", args="0")
+    user.find(marker="ollama-save").click()
+    await user.should_see(marker="ollama-save-refusal")
+
+    (shown,) = user.find(marker="ollama-save-refusal").elements
+    assert shown.text == refusal
+    assert saved == [("http://127.0.0.1:11434/v1", 0)]
+    assert dialogs[0].value is True, "a refused save must not close the dialog"
+
+
+async def test_changing_a_field_clears_a_stale_refusal(user):
+    """A refusal is about the values it was given. Once a field changes it
+    would describe something else, so it goes."""
+    dialogs: list[ui.dialog] = []
+
+    def build() -> None:
+        dialogs.append(
+            cast(
+                ui.dialog,
+                ollama_settings_dialog(
+                    settings=_CONNECTION,
+                    on_save=_recording_save([], answer="Not saved."),
+                    on_refresh=lambda: None,
+                    on_test=_ok_probe,
+                ),
+            )
+        )
+
+    page("/t/ollama/stale", build)
+    await user.open("/t/ollama/stale")
+    dialogs[0].open()
+    user.find(marker="ollama-save").click()
+    await user.should_see(marker="ollama-save-refusal")
+
+    user.find(marker="ollama-timeout").trigger("change", args="45")
+
+    assert _marked(user, "ollama-save-refusal").visible is False
 
 
 async def test_ollama_settings_dialog_opens_without_clipping_at_1024px(user):
@@ -1421,7 +1519,7 @@ async def test_ollama_settings_dialog_opens_without_clipping_at_1024px(user):
         "/t/ollama/clip",
         lambda: ollama_settings_dialog(
             settings=_CONNECTION,
-            on_save=lambda *_: None,
+            on_save=_recording_save([]),
             on_refresh=lambda: None,
             on_test=_ok_probe,
         ),
@@ -1460,7 +1558,7 @@ async def test_a_non_loopback_endpoint_disables_save_and_says_why(user):
                 ui.dialog,
                 ollama_settings_dialog(
                     settings=_CONNECTION,
-                    on_save=lambda endpoint, timeout_s: saved.append((endpoint, timeout_s)),
+                    on_save=_recording_save(saved),
                     on_refresh=lambda: None,
                     on_test=_ok_probe,
                 ),
@@ -1480,6 +1578,7 @@ async def test_a_non_loopback_endpoint_disables_save_and_says_why(user):
     # Pressing it anyway emits nothing: a disabled button is a UI state, not
     # a guarantee, so the handler checks too.
     user.find(marker="ollama-save").click()
+    await _settle()
     assert saved == []
     assert dialogs[0].value is True, "a refused endpoint must not close the dialog"
 
@@ -1496,7 +1595,7 @@ async def test_a_loopback_endpoint_re_enables_save(user):
                 ui.dialog,
                 ollama_settings_dialog(
                     settings=_CONNECTION,
-                    on_save=lambda endpoint, timeout_s: saved.append((endpoint, timeout_s)),
+                    on_save=_recording_save(saved),
                     on_refresh=lambda: None,
                     on_test=_ok_probe,
                 ),
@@ -1516,6 +1615,7 @@ async def test_a_loopback_endpoint_re_enables_save(user):
     # so "hidden" is asserted over the full tree instead.
     assert _marked(user, "ollama-endpoint-error").visible is False
     user.find(marker="ollama-save").click()
+    await _until(lambda: bool(saved))
     assert saved == [("http://localhost:11434/v1", 120)]
 
 
@@ -1527,7 +1627,7 @@ async def test_the_reason_is_hidden_until_the_endpoint_is_actually_invalid(user)
         "/t/ollama/clean",
         lambda: ollama_settings_dialog(
             settings=_CONNECTION,
-            on_save=lambda *_: None,
+            on_save=_recording_save([]),
             on_refresh=lambda: None,
             on_test=_ok_probe,
         ),
@@ -1549,7 +1649,7 @@ async def test_a_dialog_opened_on_a_bad_configured_endpoint_says_so_immediately(
             settings=ConnectionView(
                 endpoint=_OFF_HOST, status=EndpointStatus.REFUSED_NOT_LOOPBACK, timeout_s=120
             ),
-            on_save=lambda *_: None,
+            on_save=_recording_save([]),
             on_refresh=lambda: None,
             on_test=_ok_probe,
         ),
@@ -1578,7 +1678,7 @@ async def test_test_connection_probes_the_typed_endpoint_not_the_configured_one(
                 ui.dialog,
                 ollama_settings_dialog(
                     settings=_CONNECTION,
-                    on_save=lambda *_: None,
+                    on_save=_recording_save([]),
                     on_refresh=lambda: None,
                     on_test=on_test,
                 ),
@@ -1612,7 +1712,7 @@ async def test_test_connection_renders_the_sentence_and_the_raw_cause(user):
                 ui.dialog,
                 ollama_settings_dialog(
                     settings=_CONNECTION,
-                    on_save=lambda *_: None,
+                    on_save=_recording_save([]),
                     on_refresh=lambda: None,
                     on_test=on_test,
                 ),
@@ -1647,7 +1747,7 @@ async def test_a_successful_test_reads_as_success(user):
                 ui.dialog,
                 ollama_settings_dialog(
                     settings=_CONNECTION,
-                    on_save=lambda *_: None,
+                    on_save=_recording_save([]),
                     on_refresh=lambda: None,
                     on_test=on_test,
                 ),
@@ -1686,7 +1786,7 @@ async def test_test_connection_works_on_an_endpoint_save_refuses(user):
                 ui.dialog,
                 ollama_settings_dialog(
                     settings=_CONNECTION,
-                    on_save=lambda *_: None,
+                    on_save=_recording_save([]),
                     on_refresh=lambda: None,
                     on_test=on_test,
                 ),
@@ -1713,7 +1813,7 @@ async def test_no_verdict_is_shown_before_the_button_is_pressed(user):
         "/t/ollama/test-pristine",
         lambda: ollama_settings_dialog(
             settings=_CONNECTION,
-            on_save=lambda *_: None,
+            on_save=_recording_save([]),
             on_refresh=lambda: None,
             on_test=_ok_probe,
         ),

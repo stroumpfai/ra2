@@ -851,6 +851,7 @@ keeps every variable as the seed, so a host with no rows behaves as before.
 | `ra2/services/protocols.py` | + `ConnectionSettings`: `endpoint`, `timeout_s`, held in memory — no database read on the record loop (Stage 2); + `ConnectionRebinder`, the seam `SettingsService` rebinds the live client through, a protocol because `one-llm-seam` keeps `services` off anything that imports `openai` (Stage 3) | 2, 3 | §3 |
 | `ra2/services/container.py` | + `Services.settings` | 2 | §4 |
 | `ra2/services/errors.py` | + `SettingRefusedError`, carrying a `SettingRefusal` code; a note that `RunActiveError` also refuses a settings save. Missed at Stage 1; registered in `POST_PHASE_5_ERRORS` | 2 | §5 |
+| `ra2/ui/components/ollama_settings.py` | `on_save` becomes `Callable[[str, int], Awaitable[str \| None]]` and is awaited; the dialog closes only on `None` and otherwise shows the sentence under Save (`ollama-save-refusal`), cleared when a field changes. + `SAVE_REFUSAL_WORDS`, `SAVE_REFUSED_RUN_ACTIVE`. The plan said no UI-kit amendment was needed; the synchronous call would have discarded the save | 4 | §6 |
 
 ### Not frozen, and changed
 
@@ -860,7 +861,8 @@ keeps every variable as the seed, so a host with no rows behaves as before.
 | `ra2/main.py` | Builds `SettingsService` and hands it to both services and to `Services` (Stage 2 — no stored rows read yet, so the Models card cannot show an endpoint the client is not using); the delegating connection object and the startup read of the stored override, before `reclaim_orphans` (Stage 3) |
 | `ra2/persistence/repositories/run_repo.py` | + `first_with_status`, the in-flight check a save makes (Stage 2) |
 | `tests/fixtures/fake_llm.py` | + `StaticConnectionSettings`, what the eleven direct service constructions in the tests pass instead of a database-backed provider (Stage 2) |
-| `ra2/ui/views/evaluation_view.py` | `_save_settings` saves, renders the service's refusal sentences, and reloads (Stage 4) |
+| `ra2/ui/views/evaluation_view.py` | The module-level `_save_settings` that notified "… then restart" is gone; the method saves through `settings_service`, answers a refusal with the dialog's words for its code, and reloads so the Models card's endpoint line shows the new value (Stage 4) |
+| `ra2/ui/components/discard_dialog.py` | Docstring only: its note that `ollama_settings_dialog`'s `on_save` is not awaitable is no longer true (Stage 4) |
 | `sw-design.md` | + `SD43`; §3's "`Settings` is a bootstrap value, not a live one"; §10 gains a **Stored** column, `RA2_LLM_TIMEOUT_S` and `RA2_LLM_MAX_RETRIES` split into two rows, and `RA2_LLM_BASE_URL`'s stale default (`localhost`) and note ("unused in phase 1") corrected (Stage 1) |
 | `docs/risk-assesment.md` | E3 records what is being built; its control status moves in Stage 5, when it ships (Stage 1) |
 | `README.md` | The two rows say "changeable in the app; the variable seeds it" (Stage 5) |

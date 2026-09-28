@@ -175,3 +175,28 @@ carries them; `errors.py` is where every service error lives, frozen, and each
 later one arrived by amendment the same way. Registered in
 `tests/test_p5_contract.py`'s `POST_PHASE_5_ERRORS`, whose purpose is exactly
 that an addition is an entry somebody wrote.
+
+## 6. `ra2/ui/components/ollama_settings.py` — `on_save` is awaited *(Stage 4)*
+
+```diff
+-    on_save: Callable[[str, int], None],
++    on_save: Callable[[str, int], Awaitable[str | None]],
+```
+
+`on_save` answers `None` when the values were saved — the dialog closes — or
+the sentence saying why not, which the dialog shows under Save
+(`ollama-save-refusal`) and stays open for. `_save` becomes `async` and is
+bound as the coroutine function, as `_test` already was. A refusal line clears
+when either field changes. **+ `SAVE_REFUSAL_WORDS`** (one sentence per
+`SettingRefusal`) and **`SAVE_REFUSED_RUN_ACTIVE`**, beside `PROBE_WORDS`: this
+dialog's words, in one table (CLAUDE.md: findings, not prose).
+
+**Missed by the plan, which said the UI kit needed no amendment** because the
+signature already carried the two values. It carried them to a handler that
+could not act on them: the dialog called `on_save` synchronously and closed
+whatever happened. An async save passed through the view's `_sync` cast would
+have been a coroutine nobody awaited — a Save that closes the dialog and
+stores nothing, the exact failure `discard_dialog`'s docstring warns about —
+and even a working fire-and-forget save could not keep the dialog open on a
+refusal. `on_test` is the precedent (`P3-D19`): async, awaited, and its answer
+rendered by the dialog.

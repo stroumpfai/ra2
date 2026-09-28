@@ -117,7 +117,12 @@ from ra2.domain.ids import (
 from ra2.domain.llm import REASONING_EFFORTS, EndpointStatus
 from ra2.domain.qualification import QualificationState
 from ra2.services.container import Services
-from ra2.services.errors import FeatureValidationError, ServiceError
+from ra2.services.errors import (
+    FeatureValidationError,
+    RunActiveError,
+    ServiceError,
+    SettingRefusedError,
+)
 from ra2.services.readmodels import (
     ConnectionProbeView,
     ConnectionView,
@@ -149,7 +154,11 @@ from ra2.ui.components import (
     tick,
 )
 from ra2.ui.components.discard_dialog import discard_dialog
-from ra2.ui.components.ollama_settings import ollama_settings_dialog
+from ra2.ui.components.ollama_settings import (
+    SAVE_REFUSAL_WORDS,
+    SAVE_REFUSED_RUN_ACTIVE,
+    ollama_settings_dialog,
+)
 from ra2.ui.components.primitives import (
     data_props,
     labeled_field,
@@ -1948,7 +1957,7 @@ class _EvaluationPage:
                 "ui.dialog",
                 ollama_settings_dialog(
                     settings=connection,
-                    on_save=_save_settings,
+                    on_save=self._save_settings,
                     on_refresh=_sync(self._refresh_connection),
                     on_test=self._test_connection,
                 ),
@@ -1970,6 +1979,31 @@ class _EvaluationPage:
         does that. Business logic in `ui/` is Do-NOT #7.
         """
         return await self._services.evaluation.test_connection(endpoint, timeout_s)
+
+    async def _save_settings(self, endpoint: str, timeout_s: int) -> str | None:
+        """The settings dialog's Save (SD43): store, rebind, redraw.
+
+        `settings_service` stores the two values and rebinds the live client,
+        so the next run and the next catalogue read use them with no restart;
+        the reload redraws the Models card's endpoint line from the same
+        provider. Until SD43 this told the analyst to set two environment
+        variables and restart, because nothing could write a setting.
+
+        A refusal comes back as the dialog's own words for its code, and the
+        dialog stays open on it. Nothing is decided here (Do-NOT #7): the
+        service refuses, the component's table words it.
+        """
+        try:
+            await self._services.settings.save_connection(endpoint, timeout_s)
+        except SettingRefusedError as exc:
+            return SAVE_REFUSAL_WORDS[exc.refusal]
+        except RunActiveError:
+            return SAVE_REFUSED_RUN_ACTIVE
+        # The dialog closes itself on `None`; forget the handle first so a
+        # later refresh does not close it twice.
+        self._settings_dialog = None
+        await self.reload()
+        return None
 
     async def _refresh_connection(self) -> None:
         """ "Refresh model list" re-asks the endpoint. Reachability is
@@ -2329,21 +2363,6 @@ def _number_input(
             )
         ui.label("edit").classes("mono ink3").style("font-size:10px;flex:none;")
     return element
-
-
-def _save_settings(endpoint: str, timeout_s: int) -> None:
-    """`ollama_settings_dialog`'s `on_save` (L3's frozen signature).
-
-    The endpoint and the timeout are `Settings` values — `RA2_LLM_BASE_URL`
-    and `RA2_LLM_TIMEOUT_S` — and nothing in phase 3 persists a setting from
-    the UI: there is no service that writes one, and `ui/` may not reach
-    `infra`. So the dialog reports where the change actually has to be made
-    rather than accepting the edit and silently dropping it.
-    """
-    ui.notify(
-        f"Set RA2_LLM_BASE_URL={endpoint} and RA2_LLM_TIMEOUT_S={timeout_s}, then restart.",
-        type="warning",
-    )
 
 
 def _sync[**P](action: Callable[P, Awaitable[None]]) -> Callable[P, None]:

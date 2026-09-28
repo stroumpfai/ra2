@@ -47,6 +47,16 @@ attribute: a loopback listener stands in for the stored endpoint, and the
 real catalogue connects to it after startup — and does not when the startup
 load is removed.
 
+**Stage 4 done on 2026-09-28**: Save saves. The view's handler stores through
+`settings_service`, answers a refusal with the dialog's words for its code,
+and reloads; nothing on screen tells an analyst to edit a file. **D1 was
+wrong that the UI kit needed no amendment** (amendment §6): the dialog called
+`on_save` synchronously and closed whatever happened, so an async save would
+have been a coroutine nobody awaited, and no save could keep the dialog open
+on a refusal. `on_save` is now awaited and answers `None` or a sentence, as
+`on_test` already did; the dialog shows the sentence under Save and stays
+open.
+
 ---
 
 ## 1. What is wrong
@@ -109,6 +119,11 @@ and the timeout. Not a settings screen. `ollama_settings_dialog`'s frozen
 signature is `on_save: Callable[[str, int], None]`, which is already these two
 and nothing else, so the UI kit needs no amendment and the analyst gets the
 control they were already shown. Everything else is §9.
+
+*Corrected in Stage 4:* the two values fit, but the dialog called `on_save`
+synchronously and closed regardless, which cannot carry an async save or a
+refusal. `on_save` became awaitable, answering `None` or a sentence
+(amendment §6).
 
 **D2. The store is `app_setting`, and it is append-only.** Key, JSON value,
 `changed_at`; the newest row per key wins. An `UPDATE` would be the one mutable
@@ -366,8 +381,10 @@ no route is added (§9).
 | `test_a_rebind_keeps_what_is_not_an_analysts_setting` | backend/infra | Retries and the effort default carried over | 3 |
 | `test_after_startup_the_live_client_dials_the_stored_endpoint` | backend | The wiring: `create_app` + `lifespan` + the real `OllamaConnection`, against a loopback listener. Fails without the startup load | 3 |
 | rebind assertions in `test_settings_service.py` | backend | Rebound once after a save or a stored-row load; never after a refusal, an active run, an empty store or an ignored row | 3 |
-| `test_the_settings_dialog_save_stores_the_endpoint` | ui | Stage 4, against a fake service | 4 |
-| `test_the_settings_dialog_reports_the_refusals` | ui | D6 and D7 **rendered from their codes and on screen** (§4.3) — not merely that a notification appeared | 4 |
+| `test_the_settings_dialog_save_stores_the_endpoint` | ui | Through the real service: stored, rebound, and the endpoint line redrawn from the provider; no "RA2_LLM_BASE_URL" on screen | 4 |
+| `test_a_refused_save_is_worded_in_the_dialog` | ui | A zero timeout: `SAVE_REFUSAL_WORDS[TIMEOUT_NOT_POSITIVE]` on screen, dialog open, nothing stored | 4 |
+| `test_a_save_during_a_run_is_refused_in_words` | ui | D6 on screen: `SAVE_REFUSED_RUN_ACTIVE` | 4 |
+| `test_a_refused_save_keeps_the_dialog_open_and_says_why`, `test_changing_a_field_clears_a_stale_refusal` | ui | The dialog alone (amendment §6); the five existing save tests now await `on_save` | 4 |
 | `test_the_endpoint_line_shows_a_saved_endpoint_without_a_restart` | e2e | The whole point, in the browser | 5 |
 
 `tests/test_m0_contract.py` and `tests/test_p5_contract.py` take the amended
