@@ -13,6 +13,12 @@ when there is not.
 accepted save, and held. Nothing on the record loop's path reads the database
 for them (plan §4.2).
 
+**And the live client follows them.** Whenever the held values change — a
+save, or a startup load that found stored rows — the injected
+`ConnectionRebinder` rebuilds the LLM client and catalogue on the new values,
+so the endpoint the Models card reports, the one a run pins, and the one it
+actually calls are always the same one.
+
 **Refusals, in order, and nothing is stored when one fires:**
 
 1. a value `domain.settings` refuses — off loopback, malformed, a timeout
@@ -44,6 +50,7 @@ from ra2.persistence.repositories.settings_repo import SettingsRepository
 from ra2.persistence.session import session_scope
 from ra2.services.errors import RunActiveError, SettingRefusedError
 from ra2.services.lifecycle_service import ACTIVE_STATUSES
+from ra2.services.protocols import ConnectionRebinder
 
 __all__ = ["SettingsService"]
 
@@ -58,8 +65,13 @@ class SettingsService:
         clock: Clock,
         ids: IdFactory,
         settings: Settings,
+        rebinder: ConnectionRebinder,
     ) -> None:
         self._session_factory = session_factory
+        #: The live client and catalogue (`infra.connection.OllamaConnection`),
+        #: rebound whenever the values this service answers with change, so
+        #: what the Models card reports and what a run calls never differ.
+        self._rebinder = rebinder
         self._clock = clock
         self._ids = ids
         # The seed. What a host with no stored rows uses, and what a refused
@@ -80,8 +92,11 @@ class SettingsService:
     # --- reads and writes ----------------------------------------------------
 
     async def load(self) -> None:
-        """Resolve the stored values over the seed. Once at startup; a save
-        keeps them current after that."""
+        """Resolve the stored values over the seed, and rebind the live
+        client when they differ from what it was built with. Once, at
+        startup, before anything can launch; a save keeps them current after
+        that."""
+        before = (self._endpoint, self._timeout_s)
         async with self._session_factory() as session:
             stored = await SettingsRepository(session).latest()
         for key, value_json in stored.items():
@@ -95,6 +110,8 @@ class SettingsService:
                 _log.warning("app_setting: %s does not hold JSON; keeping the seed", key)
                 continue
             self._apply_stored(SettingKey(key), value)
+        if (self._endpoint, self._timeout_s) != before:
+            self._rebinder.rebind(self._endpoint, self._timeout_s)
 
     async def save_connection(self, endpoint: str, timeout_s: int) -> None:
         """Store both values and make them current.
@@ -114,6 +131,9 @@ class SettingsService:
             await repo.add(self._ids.new_id(), SettingKey.LLM_BASE_URL, json.dumps(endpoint), now)
             await repo.add(self._ids.new_id(), SettingKey.LLM_TIMEOUT_S, json.dumps(timeout_s), now)
         # Only after the rows are committed: a failed save changes nothing.
+        # The rebind cannot refuse what `domain.settings` accepted — the
+        # client's constructor applies the same `classify_endpoint` rule.
+        self._rebinder.rebind(endpoint, timeout_s)
         self._endpoint = endpoint
         self._timeout_s = timeout_s
 

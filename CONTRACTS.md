@@ -848,7 +848,7 @@ keeps every variable as the seed, so a host with no rows behaves as before.
 |---|---|---|---|
 | `ra2/infra/config.py` | **Docstrings only** — `llm_base_url` and `llm_timeout_s` are the seed for a stored value. Stage 3, when that becomes true, not Stage 1 | 3 | `feat-settings-in-the-app` §1 |
 | `ra2/persistence/models.py` | + `AppSetting`: append-only, newest row per key wins, referenced by nothing. Plain `str` id (`P2-D6`) | 2 | §2 |
-| `ra2/services/protocols.py` | + `ConnectionSettings`: `endpoint`, `timeout_s`, held in memory — no database read on the record loop | 2 | §3 |
+| `ra2/services/protocols.py` | + `ConnectionSettings`: `endpoint`, `timeout_s`, held in memory — no database read on the record loop (Stage 2); + `ConnectionRebinder`, the seam `SettingsService` rebinds the live client through, a protocol because `one-llm-seam` keeps `services` off anything that imports `openai` (Stage 3) | 2, 3 | §3 |
 | `ra2/services/container.py` | + `Services.settings` | 2 | §4 |
 | `ra2/services/errors.py` | + `SettingRefusedError`, carrying a `SettingRefusal` code; a note that `RunActiveError` also refuses a settings save. Missed at Stage 1; registered in `POST_PHASE_5_ERRORS` | 2 | §5 |
 
@@ -872,7 +872,7 @@ keeps every variable as the seed, so a host with no rows behaves as before.
 | `ra2/domain/settings.py` | `SettingKey` and the per-key validation (Stage 2) |
 | `ra2/services/settings_service.py` | Resolution (stored row, else seed) and `save_connection` with its two refusals. A stored row that fails the rule is ignored and logged, not fatal (Stage 2) |
 | `ra2/persistence/repositories/settings_repo.py` | `add` and `latest`, and no update or delete (Stage 2) |
-| `ra2/infra/connection.py` | The delegating `LLMClient` + `ModelCatalog` and its `rebind` (Stage 3) |
+| `ra2/infra/connection.py` | `OllamaConnection`: the delegating `LLMClient` + `ModelCatalog` and its `rebind`, which builds both adapters before swapping either, so a refused URL swaps nothing (Stage 3) |
 | `ra2/persistence/migrations/versions/…_store_the_settings_an_analyst_changes.py` | `app_setting`, additive, no existing row touched. Registered in `tests/test_p5_contract.py`'s `POST_PHASE_5_REVISIONS` (Stage 2) |
 
 ---

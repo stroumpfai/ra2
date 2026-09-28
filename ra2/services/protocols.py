@@ -28,6 +28,7 @@ __all__ = [
     "CensusInput",
     "CensusMaterialiser",
     "CensusTableInput",
+    "ConnectionRebinder",
     "ConnectionSettings",
     "EnumCodeTableProvider",
     "GroundTruthProvider",
@@ -297,3 +298,20 @@ class ConnectionSettings(Protocol):
 
     @property
     def timeout_s(self) -> int: ...
+
+
+@runtime_checkable
+class ConnectionRebinder(Protocol):
+    """Rebind the live LLM client and catalogue to a new endpoint (SD43).
+
+    Satisfied structurally by `infra.connection.OllamaConnection`. A
+    protocol here, not an import there, because `import-linter`'s
+    `one-llm-seam` forbids `services` from reaching anything that imports
+    `openai` — and the object that holds the client does.
+
+    Raises `LlmEndpointError` for a non-loopback URL, having swapped
+    nothing. `SettingsService` only ever passes values `domain.settings`
+    already accepted, by the same rule.
+    """
+
+    def rebind(self, base_url: str, timeout_s: int) -> None: ...

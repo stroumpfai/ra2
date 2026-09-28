@@ -36,6 +36,17 @@ joins the amendment (§5). **`main.py` builds the service but does not load
 stored rows yet** — that is Stage 3, beside the rebind, so the Models card
 never shows a stored endpoint the client is not using.
 
+**Stage 3 done on 2026-09-27**: `infra/connection.py`'s `OllamaConnection`
+wired where the client and catalogue were; `SettingsService` rebinds it on a
+save and on a startup load that found stored rows, through a new
+`ConnectionRebinder` protocol (amendment §3 — the plan never said how the
+service reaches the client, and `one-llm-seam` rules out an import);
+`lifespan` loads the stored values before `reclaim_orphans`; `config.py`'s
+"this is the seed" docstrings. Proven without Ollama and without a private
+attribute: a loopback listener stands in for the stored endpoint, and the
+real catalogue connects to it after startup — and does not when the startup
+load is removed.
+
 ---
 
 ## 1. What is wrong
@@ -350,7 +361,11 @@ no route is added (§9).
 | `test_the_service_is_a_connection_settings_provider` | backend | Structural — the two services never import it | 2 |
 | `test_the_run_pins_the_current_endpoint_not_the_seed` | backend | `run.llm_endpoint` follows the provider, at a value unlike the seed | 2 |
 | `tests/unit/settings/test_setting_refusals.py` | unit | `endpoint_refusal` agrees with `classify_endpoint` on every input; the timeout bound; the two keys | 2 |
-| `test_rebind_replaces_the_client_and_refuses_a_non_loopback_url` | backend/infra | D5, and that `one-llm-seam` still holds | 3 |
+| `test_after_a_rebind_every_call_reaches_the_new_pair` | backend/infra | D5 — extract and the catalogue both go to the adapters built on the new values | 3 |
+| `test_a_refused_url_swaps_nothing` | backend/infra | Both built before either is swapped; the real adapters' guard, no opt-out | 3 |
+| `test_a_rebind_keeps_what_is_not_an_analysts_setting` | backend/infra | Retries and the effort default carried over | 3 |
+| `test_after_startup_the_live_client_dials_the_stored_endpoint` | backend | The wiring: `create_app` + `lifespan` + the real `OllamaConnection`, against a loopback listener. Fails without the startup load | 3 |
+| rebind assertions in `test_settings_service.py` | backend | Rebound once after a save or a stored-row load; never after a refusal, an active run, an empty store or an ignored row | 3 |
 | `test_the_settings_dialog_save_stores_the_endpoint` | ui | Stage 4, against a fake service | 4 |
 | `test_the_settings_dialog_reports_the_refusals` | ui | D6 and D7 **rendered from their codes and on screen** (§4.3) — not merely that a notification appeared | 4 |
 | `test_the_endpoint_line_shows_a_saved_endpoint_without_a_restart` | e2e | The whole point, in the browser | 5 |

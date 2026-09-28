@@ -61,10 +61,16 @@ class Settings(BaseSettings):
     #: at construction, and there is deliberately no opt-out setting: an
     #: opt-out is how "no data leaves the host" (N1) becomes "no data leaves
     #: the host by default" (mvp-spec.md §19.10, §15 F4).
+    #:
+    #: **The seed, not the value** (`SD43`). The settings dialog stores an
+    #: endpoint in `app_setting`, and a stored row wins; this is what a host
+    #: with no row uses. A stored row is refused on the same loopback rule at
+    #: startup, so nothing reaches the client that this field could not.
     llm_base_url: str = "http://127.0.0.1:11434/v1"
 
     #: Per-call timeout. Belongs to client construction, not to a per-call
     #: argument — which is why `LLMClient.extract` never took one.
+    #: Like `llm_base_url`, **the seed** for a stored value (`SD43`).
     #:
     #: **600, raised from 120 against a measurement.** 120 was never checked
     #: against a reasoning model: on the reporting host a 9.7 B thinking model

@@ -138,7 +138,12 @@ from the product — the LLM endpoint and timeout — reach services through a
 `ConnectionSettings` provider in `services/protocols.py`, satisfied structurally
 by `SettingsService`, which answers with the stored value when there is one and
 the `Settings` seed when there is not. A service that needs one of those two
-asks the provider; nothing reads them off `Settings` below `main.py`.
+asks the provider; nothing reads them off `Settings` below `main.py`. When the
+values change — a save, or a startup load that found stored rows — the
+service rebinds the live LLM client and catalogue through a
+`ConnectionRebinder` (`infra.connection.OllamaConnection`, which stands in
+for both), so the endpoint the Models card reports and the one a run calls
+are always the same one.
 
 ---
 

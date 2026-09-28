@@ -40,6 +40,21 @@ STORED_ENDPOINT = "http://127.0.0.1:11999/v1"
 STORED_TIMEOUT = 45
 
 
+class RecordingRebinder:
+    """`ConnectionRebinder`, recording instead of rebuilding a client."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int]] = []
+
+    def rebind(self, base_url: str, timeout_s: int) -> None:
+        self.calls.append((base_url, timeout_s))
+
+
+@pytest.fixture
+def rebinder() -> RecordingRebinder:
+    return RecordingRebinder()
+
+
 @pytest.fixture
 def clock() -> FrozenClock:
     return FrozenClock(datetime(2026, 9, 27, 12, 0, tzinfo=UTC))
@@ -50,8 +65,10 @@ def make_service(
     db_session_factory: async_sessionmaker[AsyncSession],
     backend_settings: Settings,
     clock: FrozenClock,
+    rebinder: RecordingRebinder,
 ) -> Callable[[], SettingsService]:
-    """A fresh service each call: a second one is what a restart looks like."""
+    """A fresh service each call: a second one is what a restart looks like.
+    All of them share one `rebinder`, as they would share one live client."""
 
     def _make() -> SettingsService:
         return SettingsService(
@@ -59,6 +76,7 @@ def make_service(
             clock=clock,
             ids=Uuid7Factory(),
             settings=backend_settings,
+            rebinder=rebinder,
         )
 
     return _make
@@ -96,7 +114,9 @@ def test_the_service_is_a_connection_settings_provider(
 
 
 async def test_an_empty_store_reports_the_environment(
-    make_service: Callable[[], SettingsService], backend_settings: Settings
+    make_service: Callable[[], SettingsService],
+    backend_settings: Settings,
+    rebinder: RecordingRebinder,
 ) -> None:
     """D3's fallback: a host with no rows behaves exactly as before SD43."""
     service = make_service()
@@ -104,12 +124,15 @@ async def test_an_empty_store_reports_the_environment(
 
     assert service.endpoint == backend_settings.llm_base_url
     assert service.timeout_s == backend_settings.llm_timeout_s
+    # Nothing changed, so the client `create_app` built from the seed stands.
+    assert rebinder.calls == []
 
 
 async def test_a_stored_endpoint_beats_the_environment(
     make_service: Callable[[], SettingsService],
     write_row: Callable[[str, object], Awaitable[None]],
     backend_settings: Settings,
+    rebinder: RecordingRebinder,
 ) -> None:
     assert backend_settings.llm_base_url != STORED_ENDPOINT
     assert backend_settings.llm_timeout_s != STORED_TIMEOUT
@@ -121,6 +144,8 @@ async def test_a_stored_endpoint_beats_the_environment(
 
     assert service.endpoint == STORED_ENDPOINT
     assert service.timeout_s == STORED_TIMEOUT
+    # And the live client follows, once, before anything can launch.
+    assert rebinder.calls == [(STORED_ENDPOINT, STORED_TIMEOUT)]
 
 
 async def test_a_row_written_into_the_table_changes_what_connection_status_reports(
@@ -152,12 +177,15 @@ async def test_a_row_written_into_the_table_changes_what_connection_status_repor
 
 
 async def test_a_save_is_current_at_once_and_survives_a_restart(
-    make_service: Callable[[], SettingsService],
+    make_service: Callable[[], SettingsService], rebinder: RecordingRebinder
 ) -> None:
+    """Current at once **including the live client** — D5's rebind, with no
+    restart."""
     service = make_service()
     await service.save_connection(STORED_ENDPOINT, STORED_TIMEOUT)
 
     assert (service.endpoint, service.timeout_s) == (STORED_ENDPOINT, STORED_TIMEOUT)
+    assert rebinder.calls == [(STORED_ENDPOINT, STORED_TIMEOUT)]
     restarted = make_service()
     await restarted.load()
     assert (restarted.endpoint, restarted.timeout_s) == (STORED_ENDPOINT, STORED_TIMEOUT)
@@ -193,6 +221,7 @@ async def test_a_refused_value_stores_nothing_and_changes_nothing(
     make_service: Callable[[], SettingsService],
     db_session_factory: async_sessionmaker[AsyncSession],
     backend_settings: Settings,
+    rebinder: RecordingRebinder,
     endpoint: str,
     timeout_s: int,
     refusal: SettingRefusal,
@@ -208,6 +237,7 @@ async def test_a_refused_value_stores_nothing_and_changes_nothing(
     assert await _row_count(db_session_factory) == 0
     assert service.endpoint == backend_settings.llm_base_url
     assert service.timeout_s == backend_settings.llm_timeout_s
+    assert rebinder.calls == []
 
 
 @pytest.mark.parametrize("status", [RunStatus.QUEUED, RunStatus.RUNNING])
@@ -215,6 +245,7 @@ async def test_a_save_is_refused_while_a_run_is_active(
     make_service: Callable[[], SettingsService],
     db_session_factory: async_sessionmaker[AsyncSession],
     backend_settings: Settings,
+    rebinder: RecordingRebinder,
     status: RunStatus,
 ) -> None:
     """D6: a queued run counts too — it will execute against whichever client
@@ -234,12 +265,15 @@ async def test_a_save_is_refused_while_a_run_is_active(
     assert excinfo.value.status == status.value
     assert await _row_count(db_session_factory) == 0
     assert service.endpoint == backend_settings.llm_base_url
+    # The point of D6: the client under that run was not touched.
+    assert rebinder.calls == []
 
 
 async def test_a_stored_non_loopback_row_is_refused_at_startup(
     make_service: Callable[[], SettingsService],
     write_row: Callable[[str, object], Awaitable[None]],
     backend_settings: Settings,
+    rebinder: RecordingRebinder,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """D7's other half. A row written around the service does not become
@@ -259,6 +293,8 @@ async def test_a_stored_non_loopback_row_is_refused_at_startup(
     assert SettingRefusal.ENDPOINT_NOT_LOOPBACK.value in caplog.text
     assert SettingRefusal.TIMEOUT_NOT_POSITIVE.value in caplog.text
     assert off_host not in caplog.text
+    # Ignored all the way: the client is not rebound to anything.
+    assert rebinder.calls == []
 
 
 async def test_a_key_this_build_does_not_know_is_ignored(

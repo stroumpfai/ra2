@@ -108,6 +108,22 @@ Appended after `ModelQualification`, the table it copies the shape of.
 +    def timeout_s(self) -> int: ...
 ```
 
+**And `ConnectionRebinder`** *(Stage 3)*:
+
+```diff
++@runtime_checkable
++class ConnectionRebinder(Protocol):
++    """Rebind the live LLM client and catalogue to a new endpoint (SD43)."""
++
++    def rebind(self, base_url: str, timeout_s: int) -> None: ...
+```
+
+Satisfied by `infra.connection.OllamaConnection` and injected into
+`SettingsService`. **A protocol here rather than an import there** because
+`import-linter`'s `one-llm-seam` forbids `services` from reaching anything
+that imports `openai`, and the object holding the client does. The plan
+had the rebind happening without saying how the service reaches it.
+
 The five reads that move to it: `EvaluationService.connection_status`
 (endpoint and timeout), its `test_connection` default, `RunService`'s timeout,
 and its `run.llm_endpoint` pin.
