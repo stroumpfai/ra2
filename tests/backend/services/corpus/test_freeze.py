@@ -425,6 +425,64 @@ async def test_a_utf16_file_blocks_only_while_it_is_selected(
     assert (await corpus_service.get(corpus_id)).record_count == 3
 
 
+# --- provenance: synthetic or delivered (risk D8, SD45) ----------------------
+
+#: Random-looking hex, made up for these tests: the shape a delivered key has.
+_DELIVERED_SHAPED = (
+    "7c3e9a51d2f84b06e1a9c5d3b7f20e84",
+    "e41b07c9a3d85f26b1c0e9a74d3f58b2",
+    "9a05d7e3c1b84f62a0e9d3c7b51f84a6",
+)
+
+
+def _with_delivered_shaped_keys(data: bytes) -> bytes:
+    """h08's three `unfall` rows under keys no generator here would write."""
+    for number, key in enumerate(_DELIVERED_SHAPED, start=1):
+        data = data.replace(f"aa{number:030d}".encode(), key.encode())
+    return data
+
+
+async def test_a_corpus_of_invented_keys_is_marked_synthetic(
+    corpus_service, delivery_service, upload_delivery, hazard_bytes
+):
+    """Nobody said so: the keys did. This is what catches a hazard fixture
+    uploaded through the Import view by hand."""
+    delivery_id = await upload_delivery(
+        "fixture", [("unfall.txt", hazard_bytes("h08_all_empty_column", "unfall.txt"))]
+    )
+    await delivery_service.analyse(delivery_id)
+    corpus_id = await corpus_service.freeze(delivery_id, name="fixture")
+
+    assert (await corpus_service.get(corpus_id)).is_synthetic is True
+
+
+async def test_a_corpus_of_delivered_shaped_keys_is_not(
+    corpus_service, delivery_service, upload_delivery, hazard_bytes
+):
+    """The negative control, and the direction that matters: a real corpus
+    marked synthetic would have its ranking's verdict withheld."""
+    data = _with_delivered_shaped_keys(hazard_bytes("h08_all_empty_column", "unfall.txt"))
+    delivery_id = await upload_delivery("delivered", [("unfall.txt", data)])
+    await delivery_service.analyse(delivery_id)
+    corpus_id = await corpus_service.freeze(delivery_id, name="delivered")
+
+    view = await corpus_service.get(corpus_id)
+    assert view.record_count == 3
+    assert view.is_synthetic is False
+
+
+async def test_the_seed_can_say_so_whatever_its_keys(
+    corpus_service, delivery_service, upload_delivery, hazard_bytes
+):
+    """`synthetic=True` does not depend on the key shape holding."""
+    data = _with_delivered_shaped_keys(hazard_bytes("h08_all_empty_column", "unfall.txt"))
+    delivery_id = await upload_delivery("seed", [("unfall.txt", data)])
+    await delivery_service.analyse(delivery_id)
+    corpus_id = await corpus_service.freeze(delivery_id, name="seed", synthetic=True)
+
+    assert (await corpus_service.get(corpus_id)).is_synthetic is True
+
+
 async def test_a_re_freeze_adds_a_version_and_never_mutates_the_first(
     corpus_service, analysed_golden_delivery, db_session_factory
 ):

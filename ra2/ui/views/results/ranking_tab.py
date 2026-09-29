@@ -180,8 +180,10 @@ def _table(view: RankingTabView) -> None:
                 ):
                     _th(label, width)
             with ui.element("tbody"):
+                # SD45: on a synthetic corpus nothing draws the eye to rank 1.
+                leads = 0 if view.descriptor.is_synthetic else 1
                 for row in view.rows:
-                    tinted = "background:var(--accent-soft);" if row.rank == 1 else ""
+                    tinted = "background:var(--accent-soft);" if row.rank == leads else ""
                     with data_props(
                         ui.element("tr")
                         .props(f'data-testid="ranking-row" data-rank="{row.rank}"')
@@ -219,7 +221,7 @@ def _table(view: RankingTabView) -> None:
                             pill = (
                                 ui.element("span")
                                 .classes(
-                                    "pill pill-accent" if row.rank == 1 else "pill pill-neutral"
+                                    "pill pill-accent" if row.rank == leads else "pill pill-neutral"
                                 )
                                 .props('data-testid="verdict-pill"')
                                 .mark("verdict-pill")

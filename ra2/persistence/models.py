@@ -334,6 +334,13 @@ class Corpus(Base):
     #: Every view showing a dev corpus's numbers carries the "smoke test, not a
     #: result" marker.
     is_dev_sized: Mapped[bool] = mapped_column(default=False)
+    #: `SD45` — the corpus was built from invented data: the development seed
+    #: said so, or every record key has the shape only this project's own
+    #: generators write (`domain/synthetic.py`). Provenance, not size — a
+    #: 3000-record seed is still synthetic. Its results carry the marker and
+    #: its ranking names no winner (risk D8). `server_default` is the
+    #: migration's, declared here too so `alembic check` sees no drift.
+    is_synthetic: Mapped[bool] = mapped_column(default=False, server_default="0")
     #: mvp-spec.md §4.4, D11. **Zero, in a corpus containing French, proves the
     #: lossy cp1252 conversion happened.** One number per corpus; there are
     #: deliberately no per-record damage markers.

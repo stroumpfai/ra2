@@ -906,6 +906,11 @@
             "title": "Is Dev Sized",
             "type": "boolean"
           },
+          "is_synthetic": {
+            "default": false,
+            "title": "Is Synthetic",
+            "type": "boolean"
+          },
           "language_counts": {
             "additionalProperties": {
               "type": "integer"
@@ -3735,6 +3740,11 @@
           },
           "is_dev": {
             "title": "Is Dev",
+            "type": "boolean"
+          },
+          "is_synthetic": {
+            "default": false,
+            "title": "Is Synthetic",
             "type": "boolean"
           },
           "min_cell_count": {

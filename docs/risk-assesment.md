@@ -91,7 +91,7 @@ the register was graded for a project being *built* and the project is now being
 | 23·24 | **✓ §8.8** | An intake mojibake canary and the mixed-encoding fixture — a mixed-encoding delivery was silently corrupted (reproduced). It is still corrupted, since nothing can repair it, but it is now **reported**, per file and on the corpus, and `h15` pins it. Row 22 (G2) closed with it | — | **G1, G4** |
 | 11·15 | **◑ §8.6** | Fill in `data-handling.md` §7's ten decisions and close `mvp-spec.md` §18's B1–B4. **No longer pending — late**, and four of them gate work that cannot be done afterwards (§6) | ~1 day, no code | **F1, B3, C3** |
 | 31 | open | **A stated support path** — what may be copied off the machine when something breaks. The developer is reachable rather than resident, and §9.1.1 is the chain that makes this the dominant technical residual. **Item 21 broke link 5 and did not break the chain**: a screenshot, a hand-typed description and the export all still carry content | ~2 h, no code | **C2, E3** |
-| 26·32 | open | Correct and **gate** the README; start an operations log from the first real run. The handover document currently says the deliverable does not exist | ~½ day | **F6, E3, F4** |
+| 26·32 | **open · 26 ✓ §8.9** | Correct and **gate** the README; start an operations log from the first real run. The README half is done and gated; the operations log (32) is not | ~½ day | **F6, E3, F4** |
 
 **The headline of the second pass is not a defect.** Every technical control in
 this report has improved since `616bf2b`, the gates are green, and A5 — the
@@ -978,9 +978,9 @@ the last three days in which any of them can be done.*
 | **22** | **✓ §8.8** | Refuse UTF-16/32 BOMs and NUL bytes in `detect_encoding`, each with its own `FindingCode` | **G2** | done |
 | **23** | **✓ §8.8** | An intake mojibake canary — the mirror of `CP1252_CANARY_ZERO`; one `FindingCode`, no schema change. **Per file at analysis**, not per corpus at freeze; see §8.8 | **G1** | done |
 | **24** | **✓ §8.8** | `h15_mixed_encoding` — the hazard `CLAUDE.md` has required by name since month one. Plus `h16`/`h17` for G2 | **G4** | done |
-| **25** | open | `reset_data.py` prints records and corpora, not bytes, and refuses a non-dev corpus without a second token | **E4** | 2 h |
-| **26** | open | Correct the README, and gate it: a test that no shipped nav item appears under *Not built yet* | **F6, E3** | 2 h |
-| **27** | open | A synthetic-corpus marker, rendered beside the dev chip and refused by the ranking — **needs a migration, so its deadline is earlier: before real data is in the database** | **D8** | ½ d + migration |
+| **25** | **✓ §8.9** | `reset_data.py` prints records and corpora, not bytes, and refuses a non-dev corpus without a second token. **Built as "not synthetic"** rather than "not dev-sized", and `reset-seed` refuses real data outright | **E4** | done |
+| **26** | **✓ §8.9** | Correct the README, and gate it: a test that no shipped nav item appears under *Not built yet*. Eleven further stale statements corrected by audit | **F6, E3** | done |
+| **27** | **✓ §8.9** | A synthetic-corpus marker, rendered beside the dev chip and refused by the ranking — **needs a migration, so its deadline is earlier: before real data is in the database**. Built: revision `5e1d7a3c9b20`; the ranking renders but names no winner | **D8** | done |
 | 6 | open | Record the context length on the run (`/api/show`); **flag any extraction whose returned `prompt_tokens` sits at or near the limit** — the per-extraction counts already exist (§9.4) | D1 | ½–1 d |
 | 7 | open | Carry the parse-failure rate onto Results and Ranking | D2 | 2 h |
 | 8 | open | Record model-server version and decoding options on the run; state the determinism caveat in the report template | D3 | 3 h |
@@ -1698,6 +1698,104 @@ table's own "every `FindingCode` appears" comment a gate.
   this project will receive. ISO-8859-15 differs from cp1252 in eight code
   points and would pass as cp1252; that is the pre-existing §4.4 position and
   is unchanged.
+
+### 8.9 E4, D8, F6 — real or synthetic · closed 2026-09-29 · `fix-e4-d8-f6-real-or-synthetic`
+
+**Status: closed. One migration, `5e1d7a3c9b20`**, which is row 27's early
+deadline. It has to be applied before real data is in the database. See
+`contracts/amendments/fix-e4-d8-f6-real-or-synthetic.md`, `SD45`–`SD47`.
+
+**D8: the marker (row 27).** `corpus.is_synthetic` is set in two ways:
+
+- **Explicitly.** The seed freezes with `synthetic=True`.
+- **From the keys.** Any freeze whose every record key has the generators'
+  shape is marked, whoever froze it: a short hex tag, ten zeros, then a
+  decimal number. This is what catches a hazard fixture uploaded through the
+  Import view.
+
+The key rule errs towards *real*. A random 32-hex key matches with odds near
+10^-12, every key has to match, and an empty corpus stays real.
+
+Where the marker shows:
+- The Import view: `· synthetic` in `--danger`, beside `· dev-sized`.
+- Every Results tab: a *SYNTHETIC* pill beside the run pill, never instead of
+  it, because size and provenance are independent.
+
+**What "refused by the ranking" was built as, and why.** The table still
+renders, since developers use the seed to see the Ranking tab working. What is
+withheld is every statement of a winner:
+- the verdict headline and its detail are replaced;
+- every row's verdict pill reads `synthetic`;
+- rank 1 is not tinted.
+
+The ranks and numbers stay, and a backend test asserts they are identical to
+the same rows over a delivered corpus. A screenshot of a seeded ranking now
+carries *"This corpus is synthetic. No model is ranked on it."* where the
+winner used to be.
+
+**No backfill.** Marking existing corpora would be an `UPDATE corpus`, and
+Do-NOT #2 does not bend for a migration. A seed frozen before this revision
+therefore reads as real:
+- the reset guard asks for the second token once, which is the safe direction;
+- its ranking names a leader until it is re-seeded, which is the unsafe one.
+
+**On the transition machine, re-seed once after migrating**, or delete any
+pre-existing seed corpus.
+
+**E4: the reset (row 25).**
+- **The plan counts what is lost.** It prints corpora, records and runs, read
+  with `sqlite3` in `mode=ro`, so it works at any schema revision without
+  migrating or writing. A backend test asserts the file is byte-identical
+  afterwards.
+- **A second token.** While any corpus is not synthetic, `yes` alone is
+  refused and `destroy-real-data` is needed as well.
+  - This is stricter than recommended, which said "not dev-sized". A real
+    corpus of 40 records is still a delivery.
+  - A database from before `SD45` counts every corpus as real, and so does an
+    unreadable one.
+- **Found on the way, and worse than the finding.** `just reset-seed` without
+  `yes` removed nothing and exited 0, so the recipe's second line ran the seed
+  on top of whatever database was there. On the operational machine, that
+  meant a convincing synthetic corpus beside the real one: D8, produced by the
+  command meant to rehearse destruction. The recipe now passes `--for-seed`:
+  - a dry run exits non-zero, so nothing is seeded;
+  - real data is refused whatever the tokens say;
+  - `seed_dev.py` also refuses on its own when any corpus is not synthetic.
+- The third recommendation, *should `reset-seed` exist on the operational
+  machine at all*, is answered in effect: it cannot run there once real data
+  exists.
+
+`data-handling.md` §4.1 step 4 and §4.3 are updated to match.
+
+**F6: the README (row 26).** The claim F6 quoted had already been corrected
+when this slice started. The gate had not been built.
+
+- **The gate.** `tests/test_readme_not_built_yet.py` refuses a `built=True`
+  nav label in the bold lead of any *Not built yet* bullet. It checks the lead
+  only, because *"Cross-evaluation views. Results and Mismatches read one
+  evaluation at a time"* is a true bullet whose body names two shipped
+  screens. A positive control keeps F6's original bullet failing.
+- **An audit of the rest of the README found eleven more stale statements.**
+  All are corrected; the list is in the amendment. Among them:
+  - a fixed port that is configurable;
+  - "nothing has been measured" after measurements were recorded;
+  - a missing `RA2_LLM_PARALLEL_CALLS`;
+  - a seed of "12 records" set by a `RECORDS` constant that does not exist;
+  - a `FindingCode.DOUBLED_CRLF` that does not exist (in `.gitattributes`
+    too).
+
+  **None of those eleven has a gate.** The gate covers the category F6 named,
+  not the README as a whole.
+
+**What this does not close.**
+- **E3's runbook and row 32's operations log.** Row 26 shares a line with 32
+  in §1's table, and only its README half is done.
+- **Exports of a synthetic corpus.** Every CSV still opens with
+  `CLASSIFICATION_COMMENT`, *"derived from non-anonymised police accident
+  records"*, which is false for seed data. There is no Results or Ranking
+  export, so no exported number can carry a winner, but the census and
+  mismatch exports of a seed are not marked synthetic.
+- **The pre-migration seed.** See above: re-seed once.
 
 ---
 

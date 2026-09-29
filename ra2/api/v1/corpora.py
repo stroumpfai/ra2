@@ -64,6 +64,7 @@ def _corpus_response(view: CorpusView) -> CorpusResponse:
         language_counts=dict(view.language_counts),
         delivery_id=view.delivery_id,
         locked_by_evaluations=view.locked_by_evaluations,
+        is_synthetic=view.is_synthetic,
     )
 
 

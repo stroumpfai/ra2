@@ -120,6 +120,7 @@ async def seed_scored_corpus(
     records: int = 40,
     template_version: int = 1,
     models: tuple[str, ...] = ("qwen3:14b", "mistral-small:24b"),
+    synthetic: bool = False,
 ) -> ScoredCorpus:
     """Seed one scoreable corpus carrying every hazard above.
 
@@ -142,6 +143,7 @@ async def seed_scored_corpus(
             import_report_json="[]",
             record_count=records,
             is_dev_sized=False,
+            is_synthetic=synthetic,
             cp1252_canary_count=3,
         )
     )

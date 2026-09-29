@@ -180,6 +180,9 @@ def test_a_delivery_becomes_a_corpus(
     # The design's "de 2 812 · fr 1 402 · it 396", at this delivery's scale.
     expect(row.locator('[data-testid="corpus-languages"]')).not_to_have_text("—")
     expect(row.locator('[data-testid="corpus-canary"]')).to_have_count(1)
+    # SD45: every key in this delivery was invented by `generate_hazards.py`,
+    # so the corpus is marked synthetic without anyone saying so.
+    expect(row.locator('[data-testid="synthetic"]')).to_have_count(1)
     # Nothing cites it yet, so delete is offered rather than blocked (J3).
     expect(row.locator('[data-testid="delete-corpus"]')).to_have_count(1)
     expect(row).to_contain_text("Not used by any evaluation")

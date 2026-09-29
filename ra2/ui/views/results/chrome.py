@@ -20,7 +20,7 @@ from nicegui.element import Element
 
 from ra2.services.readmodels import RunDescriptorView
 
-__all__ = ["DEV_PILL", "RUN_PILL", "empty_card", "run_descriptor"]
+__all__ = ["DEV_PILL", "RUN_PILL", "SYNTHETIC_PILL", "empty_card", "run_descriptor"]
 
 #: mvp-spec.md §13: "**Required on every dev-sized result**: the 'smoke test,
 #: not a result' marker." On these boards it *replaces* the run pill rather
@@ -28,6 +28,10 @@ __all__ = ["DEV_PILL", "RUN_PILL", "empty_card", "run_descriptor"]
 #: unmarked.
 DEV_PILL: Final = "DEV · smoke test, not a result"
 RUN_PILL: Final = "Evaluation run"
+#: `SD45`, risk D8. Beside the run pill, not instead of it: a synthetic corpus
+#: can be dev-sized or not, and both facts are worth stating. Provenance is
+#: the one a screenshot must not lose.
+SYNTHETIC_PILL: Final = "SYNTHETIC · invented data, not a result"
 
 
 def run_descriptor(view: RunDescriptorView) -> Element:
@@ -63,6 +67,15 @@ def run_descriptor(view: RunDescriptorView) -> Element:
         )
         with pill:
             ui.label(DEV_PILL if view.is_dev else RUN_PILL)
+        if view.is_synthetic:
+            synthetic = (
+                ui.element("span")
+                .classes("pill pill-danger")
+                .props('data-testid="synthetic-pill"')
+                .mark("synthetic-pill")
+            )
+            with synthetic:
+                ui.label(SYNTHETIC_PILL)
         chip = ui.element("span").classes("chip").props('data-testid="cfg-chip"').mark("cfg-chip")
         with chip:
             ui.label(f"cfg {view.config_fingerprint[:8]}")

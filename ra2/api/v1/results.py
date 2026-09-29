@@ -86,6 +86,7 @@ def descriptor_response(view: RunDescriptorView) -> RunDescriptorResponse:
         config_fingerprint=view.config_fingerprint,
         is_dev=view.is_dev,
         min_cell_count=view.min_cell_count,
+        is_synthetic=view.is_synthetic,
     )
 
 

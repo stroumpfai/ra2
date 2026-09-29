@@ -541,6 +541,11 @@ the corpus size.
 - A run over a corpus below the evaluation floor is marked **dev** and every view
   showing its numbers carries a visible "smoke test, not a result" marker.
   Thresholds: dev 20–50 records; evaluation ≥ 200 (up to 3000).
+- A corpus built from **invented** data is marked **synthetic**, whatever its
+  size: by the development seed, and by any freeze whose every record key has
+  the shape only this project's generators write. Its results carry a
+  "synthetic, not a result" marker and its ranking names no winner. Provenance,
+  not size: a 3000-record seed is not dev-sized and is still invented.
 
 Every run stores: model name **and digest**, prompt template version, temperature,
 seed, **reasoning effort**, feature config id + fingerprints, corpus id + version,
@@ -762,6 +767,8 @@ NiceGUI, single mode, no login, everything permitted.
 
 **Required everywhere text is shown:** the per-record anonymisation marking.
 **Required on every dev-sized result:** the "smoke test, not a result" marker.
+**Required on every result over a synthetic corpus:** the synthetic marker, and
+no ranking verdict (§9).
 
 ---
 

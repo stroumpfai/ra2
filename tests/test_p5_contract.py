@@ -151,6 +151,12 @@ POST_PHASE_5_REVISIONS = {
     # before. A new table, append-only, referenced by nothing; no existing row
     # is touched, and a database with no rows behaves as before.
     "20260927_1510_ccbae1b96d1b_store_the_settings_an_analyst_changes.py",
+    # `fix/e4-d8-f6-real-or-synthetic` — `corpus.is_synthetic` (SD45). The
+    # corpus was built from invented data, so its results carry the marker and
+    # its ranking names no winner (risk D8). Additive, NOT NULL, default `0`,
+    # **no backfill**: marking existing corpora would be an `UPDATE corpus`,
+    # and Do-NOT #2 does not bend for a migration.
+    "20260929_1200_5e1d7a3c9b20_mark_a_synthetic_corpus.py",
 }
 
 

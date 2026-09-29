@@ -271,3 +271,39 @@ async def test_an_unscoreable_run_returns_a_well_formed_nothing_scoreable_payloa
     assert view.scored_feature_count == 0
     assert "could be scored" in view.verdict_headline
     assert "10000" in view.verdict_detail
+
+
+# --- a synthetic corpus names no winner (risk D8, SD45) ----------------------
+
+
+@pytest.mark.asyncio
+async def test_a_synthetic_corpus_is_ranked_but_no_winner_is_named(
+    ranking_service: RankingService,
+    scored: ScoredCorpus,
+    scored_synthetic: ScoredCorpus,
+) -> None:
+    """The table renders, so the screen can be developed against the seed.
+    No sentence and no pill names a leader a screenshot could carry off."""
+    from ra2.services.ranking_service import (
+        SYNTHETIC_DETAIL,
+        SYNTHETIC_HEADLINE,
+        SYNTHETIC_ROW_VERDICT,
+    )
+
+    real = await ranking_service.ranking_tab(scored.evaluation_id)
+    invented = await ranking_service.ranking_tab(scored_synthetic.evaluation_id)
+
+    assert invented.descriptor.is_synthetic is True
+    assert (invented.verdict_headline, invented.verdict_detail) == (
+        SYNTHETIC_HEADLINE,
+        SYNTHETIC_DETAIL,
+    )
+    assert {row.verdict for row in invented.rows} == {SYNTHETIC_ROW_VERDICT}
+    # The positive control: the same rows over a delivered corpus keep theirs.
+    assert real.descriptor.is_synthetic is False
+    assert real.verdict_headline != SYNTHETIC_HEADLINE
+    assert SYNTHETIC_ROW_VERDICT not in {row.verdict for row in real.rows}
+    # And nothing else moves: the numbers are what a developer checks.
+    assert [(r.rank, r.macro_f1) for r in invented.rows] == [
+        (r.rank, r.macro_f1) for r in real.rows
+    ]

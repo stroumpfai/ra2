@@ -17,10 +17,10 @@
 # So: no conversion, in either direction, for anything.
 #
 # This is **not** the usual `* text=auto eol=lf`. That one normalises on
-# commit, which would rewrite the delivery hazards — twenty fixtures are
-# stored *with* CRLF on purpose, because a real delivery uses CRLF and
-# `FindingCode.DOUBLED_CRLF` exists to describe what some Astrana exports do
-# with it. Under `-text` each file is checked out exactly as it was committed:
+# commit, which would rewrite the delivery hazards — they are stored *with*
+# CRLF on purpose, because a real delivery uses CRLF, and some Astrana exports
+# double it (`\r\r\n`, reported as `FindingCode.ROW_BLANK_DROPPED`). Under
+# `-text` each file is checked out exactly as it was committed:
 # LF where LF was committed, CRLF where CRLF was, bytes where bytes were.
 * -text
 

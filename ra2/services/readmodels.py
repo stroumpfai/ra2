@@ -202,6 +202,8 @@ class CorpusView:
     delivery_id: DeliveryId | None
     #: > 0 renders the `LOCKED · N eval` pill and blocks delete (§6.3, J3).
     locked_by_evaluations: int = 0
+    #: `SD45` — invented data. Renders the `SYNTHETIC` chip beside the dev one.
+    is_synthetic: bool = False
 
     @property
     def is_locked(self) -> bool:
@@ -854,6 +856,9 @@ class RunDescriptorView:
     config_fingerprint: str
     is_dev: bool
     min_cell_count: int
+    #: `SD45` — the corpus is invented data. A `SYNTHETIC` pill beside the run
+    #: pill on every tab, and the ranking names no winner (risk D8).
+    is_synthetic: bool = False
 
 
 @dataclass(frozen=True, slots=True)

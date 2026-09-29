@@ -714,3 +714,29 @@ def test_every_finding_code_has_a_label() -> None:
     """The fallback in `_finding_label` renders a bare enum name at an analyst.
     It is a safety net, and a new `FindingCode` must not land in it."""
     assert set(FINDING_LABELS) == set(FindingCode)
+
+
+@pytest.mark.parametrize("is_synthetic", [True, False])
+async def test_a_synthetic_corpus_is_marked_in_the_corpora_table(
+    user: User, is_synthetic: bool
+) -> None:
+    """`SD45`, risk D8: beside the dev-sized marker, and independent of it. A
+    3000-record seed is not dev-sized, so size alone never said this."""
+    from tests.fixtures.factories import make_corpus_view
+
+    from ra2.ui.views.import_view import _render_languages
+
+    corpus = make_corpus_view(
+        "c1", record_count=3000, language_counts={"de": 3000}, is_synthetic=is_synthetic
+    )
+
+    @ui.page("/t/corpus-languages")
+    def _view() -> None:
+        _render_languages(corpus)
+
+    await user.open("/t/corpus-languages")
+    await user.should_see("de 3 000")
+    if is_synthetic:
+        await user.should_see(marker="synthetic")
+    else:
+        await user.should_not_see(marker="synthetic")

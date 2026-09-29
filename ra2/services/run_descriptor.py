@@ -74,4 +74,5 @@ async def build_descriptor(
         config_fingerprint=compute_set_fingerprint(fingerprints.all()),
         is_dev=evaluation.is_dev,
         min_cell_count=evaluation.min_cell_count,
+        is_synthetic=corpus is not None and corpus.is_synthetic,
     )

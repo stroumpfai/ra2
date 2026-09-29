@@ -675,3 +675,42 @@ async def test_a_dev_sized_run_replaces_the_run_pill_with_the_smoke_test_marker(
     assert pill.props["data-dev"] == "true"
     await user.should_see(DEV_PILL)
     await user.should_not_see(RUN_PILL)
+
+
+@pytest.mark.parametrize("is_dev", [False, True])
+async def test_a_synthetic_corpus_carries_its_pill_beside_the_run_pill(
+    user: User, is_dev: bool
+) -> None:
+    """`SD45`, risk D8: provenance, stated beside the size marker and never
+    instead of it. A 3000-record seed is not dev-sized and is still invented."""
+    from nicegui import ui
+
+    from ra2.services.readmodels import RunDescriptorView
+    from ra2.ui.views.results.chrome import SYNTHETIC_PILL, run_descriptor
+
+    @ui.page("/t/synthetic-pill")
+    def _view() -> None:
+        run_descriptor(
+            RunDescriptorView(
+                evaluation_id="eval-x",  # type: ignore[arg-type]
+                corpus_label="corpus-x",
+                record_count=3000,
+                model_count=2,
+                config_fingerprint="cfg12345678",
+                is_dev=is_dev,
+                min_cell_count=20,
+                is_synthetic=True,
+            )
+        )
+
+    await user.open("/t/synthetic-pill")
+    await user.should_see(marker="synthetic-pill")
+    await user.should_see(SYNTHETIC_PILL)
+    await user.should_see(DEV_PILL if is_dev else RUN_PILL)
+
+
+async def test_a_delivered_corpus_carries_no_synthetic_pill(scored: Scored) -> None:
+    """The negative control, over the real seeded board."""
+    await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}")
+    await scored.user.should_see(marker="run-pill")
+    await scored.user.should_not_see(marker="synthetic-pill")

@@ -70,7 +70,7 @@ Import → Census → Codelists → Features → Prompts → Evaluation → Resu
 | **Python** | 3.14 — **provisioned by `uv`**, so your system Python does not matter. |
 | **`uv`** | Install it yourself. It provisions Python and every dependency. https://docs.astral.sh/uv/ |
 | **`just`** | Install it yourself. The command surface — every command below is a `just` recipe. https://github.com/casey/just |
-| **Disk** | The database, uploaded deliveries and imported codelists live under one directory (`./var` by default). CSV exports do not: they are streamed to the browser and land wherever it saves downloads. |
+| **Disk** | The database, uploaded deliveries and imported codelists live under one directory (`./var` by default). CSV exports do not: they are streamed to the browser and land wherever it saves downloads. The exception is `just census-export`, which writes to the path you give it. |
 | **GPU** | Only for actually running models. Import, Census, Codelists, Features and Prompts need no GPU and no LLM. |
 
 `uv` and `just` are the two things you install by hand. Everything else —
@@ -115,8 +115,8 @@ just dev
 
 Then open **http://127.0.0.1:8080**.
 
-This binds the fixed port 8080 and uses `./var` as its data directory — your
-real local database.
+This binds `127.0.0.1:8080` by default (`RA2_HOST` / `RA2_PORT`) and uses
+`./var` as its data directory — your real local database.
 
 **There is no file watcher on `just dev`, on purpose.** An evaluation run is
 minutes per record and tens of minutes end to end, and uvicorn's `--reload`
@@ -174,9 +174,11 @@ loopback rule below still applies.
 ### Setup
 
 1. Install Ollama: https://ollama.com
-2. Pull one or more models. **These are examples, not a supported list** —
-   nothing has yet been measured against a real endpoint, so treat model choice
-   as an open question this tool exists to answer:
+2. Pull one or more models. **These are examples, not a supported list.** A
+   few models have been measured on the development host (see
+   [`docs/choosing-models.md`](docs/choosing-models.md) and
+   [`docs/performance.md`](docs/performance.md)); on a new host, measure with
+   `just qualify-model <tag>` before trusting a choice:
    ```bash
    ollama pull llama3.1:8b-instruct-q8_0
    ollama pull qwen2.5:14b-instruct-q6_K
@@ -345,8 +347,9 @@ saved value wins — the variable is then only the starting value.
 | `RA2_LLM_REASONING_EFFORT` | `none` | How hard the model is asked to think — `none`, `low`, `medium` or `high`, refused at startup if Ollama cannot map it. **Measured, not preferred:** the same record cost 190 s at the model's own default and 6 s at `none`, both answering correctly, and the default could not finish a 12-record run inside the timeout. Pinned on every run's provenance, so setting `high` and launching a second evaluation gives a comparison that is still legible afterwards. |
 | `RA2_LLM_MAX_RETRIES` | `2` | Retries per call — bounded, counted, and shown in the progress card. |
 | `RA2_RUN_CONCURRENCY` | `1` | Models run one at a time. Raising it is not implemented. |
+| `RA2_LLM_PARALLEL_CALLS` | `{}` | Records in flight at once, per model tag, as JSON (`{"qwen3:8b": 4}`), each 1–8; anything else is refused at startup. It applies only where `just qualify-model` recorded a passing gate at that number for the model's current digest; otherwise the run is pinned to 1. `OLLAMA_NUM_PARALLEL` must be at least the largest value. See [`docs/performance.md`](docs/performance.md). |
 | `RA2_GPU_VRAM_GB` / `RA2_GPU_NAME` | unset | Declare the GPU instead of probing it. |
-| `RA2_DEV_RECORD_MAX` | `50` | At or below this, a run is a dev-sized smoke test. |
+| `RA2_DEV_RECORD_MAX` | `50` | Below this, a corpus is marked dev-sized. It is also the size of a *Dev* evaluation: the first N records by id. |
 | `RA2_EVAL_RECORD_MIN` | `200` | Below this, a run is marked *dev* and every view says "smoke test, not a result". |
 | `RA2_MIN_CELL_COUNT` | `20` | The floor a **new** evaluation starts with: result cells below it render as "insufficient data". Each evaluation keeps the floor it was created with, so changing this moves the next draft and never an existing one — and a draft's own floor is set on the Evaluation screen, step 6, as **Minimum n per cell**. |
 | `RA2_MAX_UPLOAD_MB` | `512` | Upload ceiling. |
@@ -371,12 +374,14 @@ Everything goes through `just`. Never bare `pip`, never `python -m venv`.
 | `just lint` | ruff format check, ruff, mypy strict, and the layer contracts. |
 | `just fmt` | Apply the formatter and autofixes. |
 | `just migrate` | Bring the database to head. |
-| `just reset [yes]` | Show what a wipe of `RA2_DATA_DIR` would remove; `yes` carries it out. |
-| `just reset-seed yes` | Wipe, then seed a delivery, a corpus, a feature set and a prompt — see [The development seed](#the-development-seed). |
+| `just reset [yes]` | Show what a wipe of `RA2_DATA_DIR` would remove, counted in corpora, records and runs; `yes` carries it out. A database holding any corpus **not** marked synthetic also needs `destroy-real-data`: `just reset yes destroy-real-data`. |
+| `just reset-seed yes` | Wipe, then seed a delivery, a corpus, a feature set and a prompt — see [The development seed](#the-development-seed). **Refused outright** over a corpus that is not synthetic, and without `yes` nothing is seeded. |
+| `just check-data` | Refuse any tracked file that looks like a real delivery: the pre-commit check, over the whole tree, as CI runs it. |
+| `just qualify-model <tag>` | Measure one model on this host and record it; `--gate 2,4 --n-slot URL` adds the parallel-calls gate. |
 | `just revision "msg"` | Create a migration. **One author per phase** — see below. |
-| `just census-export <corpus> <out>` | Export a corpus's census as CSV. |
+| `just census-export <corpus> <out>` | Export a corpus's census as CSV, to the path you give it. The one export that is written to disk. |
 | `just setup-e2e` | Install the Chromium the E2E layer drives. |
-| `just eval` | The eval suite against a real Ollama (needs a GPU). |
+| `just eval` | Reserved: the eval suite against a real Ollama. Collects nothing until `tests/eval` is written — see [Not built yet](#not-built-yet). |
 
 ### The development seed
 
@@ -464,12 +469,16 @@ is never what a developer's seed leans on.
   database forward by hand. If `just reset-seed yes` fails, the import pipeline
   is broken and the script's output names the step it died on — a freeze that
   is refused is printed as a finding, not swallowed.
-- **12 records is dev-sized by design** — below both `RA2_DEV_RECORD_MAX` (50)
+- **48 records is dev-sized by design** — below both `RA2_DEV_RECORD_MAX` (50)
   and `RA2_EVAL_RECORD_MIN` (200), so every view that shows its numbers must
   mark it *smoke test, not a result*. That is exactly the state you want when
   working on those banners, and exactly the wrong one for anything that needs a
-  realistic corpus; raise `RECORDS` in the script, or move the thresholds, if
-  you need the other case.
+  realistic corpus; pass `--records N` (`just reset-seed yes --records 200`),
+  or move the thresholds, if you need the other case.
+- **The seed corpus is marked synthetic, whatever its size** (`SD45`). The
+  Import view says so, every Results tab carries a *SYNTHETIC* pill, and the
+  Ranking tab renders its table but names no winner. The seed refuses to run
+  beside a corpus that is not synthetic.
 - **To seed somewhere other than `./var`**, point `RA2_DATA_DIR` at it first —
   `RA2_DATA_DIR=/tmp/ra2-scratch just reset-seed yes` on a POSIX shell,
   `$env:RA2_DATA_DIR='...'; just reset-seed yes` on PowerShell. Both scripts
@@ -495,8 +504,8 @@ Where the seed belongs instead:
 - **Manual and exploratory testing** — clicking through Census, Features,
   Prompts and Evaluation against something real enough to be worth looking at.
 - **Verifying a local Ollama setup** — seed, open Evaluation, and launch
-  against the seeded corpus and feature set. Twelve records across three
-  languages is a few minutes on a small model and tells you the whole path
+  against the seeded corpus and feature set. Forty-eight records across three
+  languages is minutes on a small model and tells you the whole path
   works before you commit a GPU to a real run.
 - **Reproducing a report against a clean slate** — `just reset-seed yes` puts
   two machines in the same state, which is the useful first line of a bug
@@ -570,11 +579,12 @@ All three must pass. Coverage is gated at 85% over `ra2/domain` and
 | Backend | `tests/backend` | Services, repositories and the API on a temp-file SQLite. |
 | UI | `tests/ui` | NiceGUI's `User` fixture, in-process and headless. |
 | E2E | `tests/e2e` | Playwright against a real server on a random port. |
-| Eval | `tests/eval` | A real local model. Excluded from `just test` and from CI. |
+| Eval | `tests/eval` | Reserved for a real local model; empty until the first eval run (see [Not built yet](#not-built-yet)). Excluded from `just test` and from CI. |
 
 Select a layer with its marker, e.g. `uv run pytest -m unit`.
 
-**Nothing in layers 1–4 touches a socket or a real GPU.** The test fixtures
+**Nothing in layers 1–4 calls an LLM endpoint or a real GPU** (E2E opens only
+its own loopback server). The test fixtures
 substitute a fake LLM client, a static model catalogue and a static GPU probe
 through the composition root, so the whole suite passes on a laptop with no GPU
 and nothing listening on 11434. Only `just eval` needs a real endpoint, and it
@@ -607,9 +617,9 @@ true.** `* -text` disables line-ending conversion in both directions. Without
 it, Git for Windows' default (`core.autocrlf=true`) checks every LF file out
 as CRLF and the byte-exact comparisons fail on Windows while passing
 everywhere else. Do not replace it with the usual `* text=auto eol=lf`:
-twenty delivery fixtures are stored **with** CRLF on purpose, because a real
-delivery uses CRLF and `FindingCode.DOUBLED_CRLF` exists to describe what some
-Astrana exports do with it.
+the delivery fixtures are stored **with** CRLF on purpose, because a real
+delivery uses CRLF, and some Astrana exports double it (`\r\r\n`), which the
+import reports as `FindingCode.ROW_BLANK_DROPPED`.
 
 ---
 

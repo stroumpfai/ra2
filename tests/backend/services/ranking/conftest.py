@@ -19,11 +19,12 @@ from ra2.services.scoring_service import ScoringService
 
 
 class _Ids:
-    def __init__(self) -> None:
+    def __init__(self, prefix: str = "mismatch") -> None:
+        self._prefix = prefix
         self._counter = count(1)
 
     def new_id(self) -> str:
-        return f"mismatch-{next(self._counter):04d}"
+        return f"{self._prefix}-{next(self._counter):04d}"
 
 
 @pytest.fixture
@@ -31,19 +32,42 @@ async def scored(
     db_session_factory: async_sessionmaker[AsyncSession],
     frozen_clock: object,
 ) -> AsyncIterator[ScoredCorpus]:
+    yield await _scored(db_session_factory, frozen_clock, suffix="s", synthetic=False, version=1)
+
+
+@pytest.fixture
+async def scored_synthetic(
+    db_session_factory: async_sessionmaker[AsyncSession],
+    frozen_clock: object,
+) -> AsyncIterator[ScoredCorpus]:
+    """The same scored rows over a corpus marked synthetic (`SD45`)."""
+    yield await _scored(db_session_factory, frozen_clock, suffix="syn", synthetic=True, version=2)
+
+
+async def _scored(
+    db_session_factory: async_sessionmaker[AsyncSession],
+    frozen_clock: object,
+    *,
+    suffix: str,
+    synthetic: bool,
+    version: int,
+) -> ScoredCorpus:
     async with db_session_factory() as session:
-        corpus = await seed_scored_corpus(session, records=40)
+        corpus = await seed_scored_corpus(
+            session, suffix=suffix, records=40, synthetic=synthetic, template_version=version
+        )
         await session.commit()
     scoring = ScoringService(
         session_factory=db_session_factory,
         ground_truth=GroundTruthRepository(),
         task_runner=None,  # type: ignore[arg-type]
         clock=frozen_clock,  # type: ignore[arg-type]
-        id_factory=_Ids(),
+        # The first corpus keeps the ids it always had; a second needs its own.
+        id_factory=_Ids("mismatch" if suffix == "s" else f"mismatch-{suffix}"),
     )
     for run_id in corpus.run_ids:
         await scoring.score_run(run_id)
-    yield corpus
+    return corpus
 
 
 @pytest.fixture

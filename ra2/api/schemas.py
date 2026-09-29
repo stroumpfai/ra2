@@ -272,6 +272,8 @@ class CorpusResponse(_Schema):
     delivery_id: str | None = None
     #: > 0 renders `LOCKED · N eval`; DELETE then returns 409.
     locked_by_evaluations: int = 0
+    #: `SD45` — built from invented data, by the seed or from its keys.
+    is_synthetic: bool = False
 
 
 class CorpusPage(_Schema):
@@ -938,6 +940,8 @@ class RunDescriptorResponse(_Schema):
     #: **every** dev-sized result wherever its numbers appear.
     is_dev: bool
     min_cell_count: int
+    #: `SD45` — the corpus is invented data; the ranking names no winner.
+    is_synthetic: bool = False
 
 
 class ModelColumnResponse(_Schema):

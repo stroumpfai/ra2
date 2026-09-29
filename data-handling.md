@@ -116,7 +116,7 @@ destruction session around the screen.
 | 1b | **Discard the evaluation** | `DELETE /api/v1/evaluations/{id}` — **there is no button for this either**; the row action in 1a discards one run | Any of its runs is active. Tagged mismatches across its runs need `?force=true` |
 | 2 | **Delete the corpus** | Census / corpus view | Any evaluation still cites it — so step 1b first |
 | 3 | **Discard the delivery** | `DELETE /api/v1/deliveries/{id}` — **there is no button for this** (`sw-design.md` §18.6) | Any corpus still cites it — so step 2 first |
-| 4 | **Wipe the data directory** | `just reset yes` | Nothing. It prints what it will remove and does nothing without the token |
+| 4 | **Wipe the data directory** | `just reset yes destroy-real-data` — or `just reset yes` once steps 1–3 have removed every corpus | Without `yes` it only prints the plan: what it will remove, counted in corpora, records and runs. While any corpus **not** marked synthetic remains, `yes` alone is refused too, and the second token is required (`SD46`). Read the count before typing it |
 | 5 | **Delete host-path source files** | By hand, wherever the delivery was registered from | Nothing — **the app never touches these.** See §4.2 |
 | 6 | **Delete every export** | By hand: Downloads, and anywhere they were copied, attached or shared | Nothing — the app has never known where they are |
 | 7 | **The disk** | If the machine is repurposed or returned, the disk is the unit of destruction | — |
@@ -160,7 +160,10 @@ committed rows also live.
 
 Run steps 1–4 end to end on synthetic data — `just reset-seed` gives you a
 delivery, a corpus and a prompt version to destroy — **before** the machine
-holds anything that matters. An acceptance step, once, deliberately, beside the
+holds anything that matters. Once it does, `just reset-seed` refuses to run
+there at all: seeding replaces a real corpus with a convincing invented one,
+which is never the act you want (`SD46`, risk E4). Rehearse on a copy of the
+machine's setup with an empty data directory instead. An acceptance step, once, deliberately, beside the
 three already planned for M34. Destruction procedures that have never been
 executed are the ones that fail on the day.
 

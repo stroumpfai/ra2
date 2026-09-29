@@ -20,8 +20,18 @@ Three properties, each of which has bitten someone:
    migration chain is the only thing that may create a table here, exactly as
    in the app and in the backend tests.
 
-`pathlib` for every path (N3). Nothing here opens a file, so there is no
-`encoding=` to get wrong (N4); the one library call that touches the
+A fourth, since this became the operator's tool as well as the developer's
+(risk E4, `SD46`):
+
+4. **The plan says what is lost, not how many bytes it occupies**, and a
+   database holding a corpus that is not synthetic (`SD45`) needs a **second,
+   different token**, `destroy-real-data`. `yes` is a habit; this is not. The
+   same database under `just reset-seed` is refused outright: replacing a real
+   corpus with a convincing invented one is never the right act, and
+   destruction is `just reset yes destroy-real-data` on its own.
+
+`pathlib` for every path (N3). Nothing here opens a file as text, so there is
+no `encoding=` to get wrong (N4); the one library call that touches the
 filesystem in bulk is `shutil.rmtree`, which is stdlib and cross-platform, not
 the shell-out N3 forbids.
 """
@@ -29,8 +39,11 @@ the shell-out N3 forbids.
 from __future__ import annotations
 
 import shutil
+import sqlite3
 import sys
 from argparse import Namespace
+from contextlib import closing
+from dataclasses import dataclass
 from pathlib import Path
 
 from alembic import command
@@ -43,6 +56,96 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #: The word that turns the plan into the act.
 CONFIRM_TOKEN = "yes"
+
+#: The second word, required when the database may hold delivered data.
+REAL_DATA_TOKEN = "destroy-real-data"
+
+#: Passed by `just reset-seed`. A plan that is not carried out exits non-zero,
+#: so the recipe's seed step does not run over a database nobody reset, and
+#: real data is refused whatever the tokens say.
+FOR_SEED_FLAG = "--for-seed"
+
+
+@dataclass(frozen=True, slots=True)
+class Holdings:
+    """What the database holds, in the units a person decides in.
+
+    `readable=False` means the file exists and could not be read as an RA2
+    database. It is treated as holding real data: a guard that fails open on
+    an unreadable file fails open on exactly the case nobody tested.
+    """
+
+    corpora: int = 0
+    records: int = 0
+    real_corpora: int = 0
+    real_records: int = 0
+    runs: int = 0
+    readable: bool = True
+
+    @property
+    def may_hold_real_data(self) -> bool:
+        return self.real_corpora > 0 or not self.readable
+
+
+def holdings(database: Path) -> Holdings:
+    """Count corpora, records and runs, **read-only**, at any schema revision.
+
+    `sqlite3` rather than the ORM, deliberately. The mapper describes head,
+    and this has to read a database at whatever revision it is at, without
+    migrating it first and without writing to it (`mode=ro`). A database from
+    before `SD45` has no `is_synthetic` column, so every corpus in it counts
+    as real, which is the safe reading. Only counts leave this function, never
+    a value.
+    """
+    if not database.is_file():
+        return Holdings()
+    try:
+        uri = f"{database.resolve().as_uri()}?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True)) as connection:
+            tables = {
+                row[0]
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            if "corpus" not in tables:
+                return Holdings()
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(corpus)")}
+            real = "is_synthetic = 0" if "is_synthetic" in columns else "1"
+            corpora, records, real_corpora, real_records = connection.execute(
+                "SELECT count(*), coalesce(sum(record_count), 0), "
+                f"coalesce(sum({real}), 0), "
+                f"coalesce(sum(CASE WHEN {real} THEN record_count ELSE 0 END), 0) FROM corpus"
+            ).fetchone()
+            runs = (
+                connection.execute("SELECT count(*) FROM run").fetchone()[0]
+                if "run" in tables
+                else 0
+            )
+    except sqlite3.Error:
+        return Holdings(readable=False)
+    return Holdings(
+        corpora=corpora,
+        records=records,
+        real_corpora=real_corpora,
+        real_records=real_records,
+        runs=runs,
+    )
+
+
+def describe_holdings(held: Holdings) -> str:
+    """The line the operator decides on: what is lost, not its size."""
+    if not held.readable:
+        return "The database could not be read, so it is treated as holding real data."
+    if not held.corpora:
+        return "The database holds no corpus."
+    real = (
+        f"{held.real_corpora} of them NOT synthetic ({held.real_records} records)"
+        if held.real_corpora
+        else "all of them synthetic"
+    )
+    return (
+        f"The database holds {held.corpora} corpus(es), {held.records} records, "
+        f"{held.runs} run(s); {real}."
+    )
 
 
 def _human(size: int) -> str:
@@ -136,16 +239,36 @@ def upgrade_head(settings: Settings) -> None:
 def main(argv: list[str]) -> int:
     settings = Settings()
     planned = targets(settings)
+    held = holdings(settings.database_path)
+    for_seed = FOR_SEED_FLAG in argv
 
     print(f"RA2_DATA_DIR: {settings.data_dir}")
+    print(describe_holdings(held))
     print("This would remove:")
     for path in planned:
         print(f"  {describe(path)}")
     print(RUNNING_APP_WARNING)
 
+    if for_seed and held.may_hold_real_data:
+        print(
+            "\nNothing removed, nothing seeded. `just reset-seed` never replaces real data "
+            "with invented data. To destroy it, run "
+            f"`just reset {CONFIRM_TOKEN} {REAL_DATA_TOKEN}` on its own."
+        )
+        return 1
     if CONFIRM_TOKEN not in argv:
-        print(f"\nNothing removed. Run `just reset {CONFIRM_TOKEN}` to carry this out.")
-        return 0
+        recipe = "just reset-seed" if for_seed else "just reset"
+        print(f"\nNothing removed. Run `{recipe} {CONFIRM_TOKEN}` to carry this out.")
+        # Non-zero under reset-seed, so the recipe's seed step does not run
+        # over a database that was never reset.
+        return 1 if for_seed else 0
+    if held.may_hold_real_data and REAL_DATA_TOKEN not in argv:
+        print(
+            "\nNothing removed. This may be real, delivered data, and `yes` alone does not "
+            f"destroy it. Run `just reset {CONFIRM_TOKEN} {REAL_DATA_TOKEN}` if that is "
+            "what you mean (data-handling.md §4)."
+        )
+        return 1
 
     removed = sum(1 for path in planned if remove(path))
     print(f"\nRemoved {removed} of {len(planned)} target(s).")

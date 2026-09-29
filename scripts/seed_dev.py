@@ -838,7 +838,9 @@ async def seed(services: Services, *, delivery_root: Path, scenarios: tuple[Scen
 
 async def _freeze(services: Services, delivery_id: DeliveryId) -> CorpusId | None:
     try:
-        corpus_id = await services.corpus.freeze(delivery_id, name="seed corpus")
+        # `synthetic=True` is the seed saying what it built (SD45, risk D8).
+        # The keys would say it too; this does not depend on that.
+        corpus_id = await services.corpus.freeze(delivery_id, name="seed corpus", synthetic=True)
     except ServiceError as exc:
         # A blocked freeze is a **finding about the seed**, printed and not
         # swallowed: if this ever fails, the import pipeline changed and this
@@ -1049,6 +1051,18 @@ def _print_plan(scenarios: tuple[Scenario, ...]) -> None:
     print("    (language counts are the plan, not the detector's answer)")
 
 
+async def real_corpus_count(services: Services) -> int:
+    """How many corpora in this database are **not** synthetic.
+
+    A seed on top of a real corpus is the transition hazard D8 describes: two
+    corpora, one invented and convincing, on the machine that produces the
+    deliverable. So the seed refuses rather than adds. This is independent of
+    `reset_data.py`'s guard, because the seed can be run on its own.
+    """
+    page = await services.corpus.list_corpora(page_size=1_000_000)
+    return sum(1 for corpus in page.items if not corpus.is_synthetic)
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -1086,6 +1100,14 @@ def main(argv: list[str] | None = None) -> int:
     services: Services = app.state.services
 
     print(f"RA2_DATA_DIR: {settings.data_dir}")
+    real = asyncio.run(real_corpus_count(services))
+    if real:
+        print(
+            f"seed refused: this database holds {real} corpus(es) not built from invented "
+            "data. A seed beside a real corpus is how a synthetic result reaches a report. "
+            "Point RA2_DATA_DIR at an empty directory and seed that instead."
+        )
+        return 3
     delivery_root = write_delivery(settings.data_dir / "seed", scenarios)
     asyncio.run(seed(services, delivery_root=delivery_root, scenarios=scenarios))
     print("Seeded. Start the app with `just dev`.")
