@@ -38,8 +38,10 @@ from nicegui.testing.user import User
 from nicegui.testing.user_interaction import UserInteraction
 
 from ra2.domain.delivery import DeliveryStatus, SourceKind
+from ra2.domain.findings import FindingCode
 from ra2.infra.config import Settings
 from ra2.services.container import Services
+from ra2.ui.views.file_report_modal import FINDING_LABELS
 from ra2.ui.views.import_view import (
     CORPORA_CAPTION,
     NO_CORPORA_MESSAGE,
@@ -706,3 +708,9 @@ async def test_the_report_modal_no_longer_offers_remove(seeded: Seeded) -> None:
     testids = {e._props.get("data-testid") for e in user.find(kind=ui.element).elements}
     assert "remove-file" not in testids
     assert "reparse" in testids
+
+
+def test_every_finding_code_has_a_label() -> None:
+    """The fallback in `_finding_label` renders a bare enum name at an analyst.
+    It is a safety net, and a new `FindingCode` must not land in it."""
+    assert set(FINDING_LABELS) == set(FindingCode)

@@ -371,6 +371,60 @@ async def test_the_canary_stays_silent_without_french(
     assert Language.FR.value not in json.loads(corpus.language_counts_json)
 
 
+async def test_mojibake_found_at_analysis_reaches_the_import_report(
+    corpus_service, delivery_service, upload_delivery, hazard_bytes, db_session_factory
+):
+    """Risk G1. The finding is raised per file, where the analyst can still
+    act on it, and like every non-blocking file finding it is kept on the
+    corpus, so a result built on mojibake says so."""
+    delivery_id = await upload_delivery(
+        "mixed",
+        [
+            ("unfall.txt", hazard_bytes("h03_stray_delimiter", "unfall.txt")),
+            ("text.csv", hazard_bytes("h15_mixed_encoding", "text.csv")),
+        ],
+    )
+    await delivery_service.analyse(delivery_id)
+    corpus_id = await corpus_service.freeze(delivery_id, name="mixed")
+
+    async with db_session_factory() as session:
+        corpus = await session.get(Corpus, corpus_id)
+    (mojibake,) = [
+        f
+        for f in json.loads(corpus.import_report_json)
+        if f["code"] == FindingCode.UTF8_READ_AS_CP1252.value
+    ]
+    assert mojibake["severity"] == Severity.REPORTED.value
+    assert mojibake["detail"]["sequences"] == "5"
+
+
+async def test_a_utf16_file_blocks_only_while_it_is_selected(
+    corpus_service, delivery_service, upload_delivery, hazard_bytes
+):
+    """Risk G2: the refused file fails the freeze the way h02 would, and
+    deselecting it is enough, so one bad re-export never holds the rest."""
+    delivery_id = await upload_delivery(
+        "wide",
+        [
+            ("unfall.txt", hazard_bytes("h08_all_empty_column", "unfall.txt")),
+            ("text.csv", hazard_bytes("h16_utf16_bom", "text.csv")),
+        ],
+    )
+    await delivery_service.analyse(delivery_id)
+
+    with pytest.raises(BlockingFindingsError) as refused:
+        await corpus_service.freeze(delivery_id, name="wide")
+    assert {f.code for f in refused.value.findings} == {FindingCode.FILE_UNSUPPORTED_BOM}
+
+    wide = next(
+        f for f in (await delivery_service.get(delivery_id)).files if f.filename == "text.csv"
+    )
+    await delivery_service.set_selected(delivery_id, wide.file_id, selected=False)
+
+    corpus_id = await corpus_service.freeze(delivery_id, name="wide")
+    assert (await corpus_service.get(corpus_id)).record_count == 3
+
+
 async def test_a_re_freeze_adds_a_version_and_never_mutates_the_first(
     corpus_service, analysed_golden_delivery, db_session_factory
 ):

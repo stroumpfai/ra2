@@ -88,7 +88,7 @@ the register was graded for a project being *built* and the project is now being
 | # | Status | Action | Effort | Risk |
 |---|---|---|---|---|
 | 21 | **✔ closed** | **`hide_parameters=True`** — a database error wrote the narrative and `unfall_uid` into `run.error` **and into the log** (reproduced). Fixed at the engine, with a provoked-`IntegrityError` test and a positive control (`contracts/amendments/fix-a5-bound-parameters.md`) | — | **A5** |
-| 23·24 | open | An intake mojibake canary and the mixed-encoding fixture — a mixed-encoding delivery is silently corrupted today (reproduced), and real files meet the parser for the first time at handover | ~½ day | **G1, G4** |
+| 23·24 | **✓ §8.8** | An intake mojibake canary and the mixed-encoding fixture — a mixed-encoding delivery was silently corrupted (reproduced). It is still corrupted, since nothing can repair it, but it is now **reported**, per file and on the corpus, and `h15` pins it. Row 22 (G2) closed with it | — | **G1, G4** |
 | 11·15 | **◑ §8.6** | Fill in `data-handling.md` §7's ten decisions and close `mvp-spec.md` §18's B1–B4. **No longer pending — late**, and four of them gate work that cannot be done afterwards (§6) | ~1 day, no code | **F1, B3, C3** |
 | 31 | open | **A stated support path** — what may be copied off the machine when something breaks. The developer is reachable rather than resident, and §9.1.1 is the chain that makes this the dominant technical residual. **Item 21 broke link 5 and did not break the chain**: a screenshot, a hand-typed description and the export all still carry content | ~2 h, no code | **C2, E3** |
 | 26·32 | open | Correct and **gate** the README; start an operations log from the first real run. The handover document currently says the deliverable does not exist | ~½ day | **F6, E3, F4** |
@@ -975,9 +975,9 @@ the last three days in which any of them can be done.*
 | # | Status | Action | Risk | Effort |
 |---|---|---|---|---|
 | **21** | **✔ closed** | **`hide_parameters=True` on `create_async_engine`**, plus a provoked-`IntegrityError` test with a positive control, and §5.1 of `data-handling.md` stating that the list is enforced at the engine as well as at the call sites. `SD39`; `contracts/amendments/fix-a5-bound-parameters.md` | **A5** | **done** |
-| **22** | open | Refuse UTF-16/32 BOMs and NUL bytes in `detect_encoding`, each with its own `FindingCode` | **G2** | 1 h |
-| **23** | open | An intake mojibake canary — the mirror of `CP1252_CANARY_ZERO`; one `FindingCode`, no schema change | **G1** | ½ d |
-| **24** | open | `h15_mixed_encoding` — the hazard `CLAUDE.md` has required by name since month one | **G4** | 1 h |
+| **22** | **✓ §8.8** | Refuse UTF-16/32 BOMs and NUL bytes in `detect_encoding`, each with its own `FindingCode` | **G2** | done |
+| **23** | **✓ §8.8** | An intake mojibake canary — the mirror of `CP1252_CANARY_ZERO`; one `FindingCode`, no schema change. **Per file at analysis**, not per corpus at freeze; see §8.8 | **G1** | done |
+| **24** | **✓ §8.8** | `h15_mixed_encoding` — the hazard `CLAUDE.md` has required by name since month one. Plus `h16`/`h17` for G2 | **G4** | done |
 | **25** | open | `reset_data.py` prints records and corpora, not bytes, and refuses a non-dev corpus without a second token | **E4** | 2 h |
 | **26** | open | Correct the README, and gate it: a test that no shipped nav item appears under *Not built yet* | **F6, E3** | 2 h |
 | **27** | open | A synthetic-corpus marker, rendered beside the dev chip and refused by the ranking — **needs a migration, so its deadline is earlier: before real data is in the database** | **D8** | ½ d + migration |
@@ -1621,6 +1621,83 @@ and CI keeps its Windows leg for layers 1–3.
 - **Settings still describe paths.** Even with the sandbox running, what it
   confines is whatever the settings allow. Keep the WSL2 filesystem free of
   copied deliveries for the same reason.
+
+### 8.8 G1, G2, G4 — encoding at intake · closed 2026-09-29 · `fix-g-encoding-intake`
+
+**Status: closed. All three were Gate 1 items and all three are now done.**
+The one frozen file touched is `findings.py`. See
+`contracts/amendments/fix-g-encoding-intake.md` and `SD44`.
+
+**G2: refused before decoding, by name.** `refuse` runs before any decoding
+is tried. It checks for a UTF-16 or UTF-32 byte-order mark, then for a NUL
+anywhere in the bytes.
+
+- A mark raises `FILE_UNSUPPORTED_BOM`, with `detail.bom` naming the
+  encoding. UTF-32-LE is checked before UTF-16-LE, because its mark begins
+  with UTF-16-LE's.
+- A NUL raises `FILE_CONTAINS_NUL` with its offset. This is how a UTF-16
+  file with no mark shows itself.
+
+Both are BLOCKING and fail the file the way h02 does. The check runs ahead of
+the encoding override as well as inside `detect_encoding`. Choosing cp1252
+for a UTF-16 file is exactly how NUL-riddled text would otherwise get through.
+The report's evidence, re-run through `analyse_file`:
+
+| Input | Before | After |
+|---|---|---|
+| UTF-16-LE with BOM | cp1252, then `UNKNOWN_HEADER` | `FILE_UNSUPPORTED_BOM` `{"bom": "utf-16-le"}`, file fails |
+| UTF-16-LE, no BOM | utf-8, then `UNKNOWN_HEADER` | `FILE_CONTAINS_NUL` `{"byte_offset": "1"}`, file fails |
+| either, override to cp1252 or utf-8 | decoded | same refusal |
+
+**G1: counted, not refused.** A mixed file still fails UTF-8 and is still
+read as cp1252 whole. Nothing can repair that: which bytes were meant as which
+encoding is not recoverable from the bytes. What changed is that it is no
+longer silent. Whenever the effective encoding is cp1252, whether detected or
+chosen, `utf8_sequences` counts the well-formed multi-byte UTF-8 sequences
+(RFC 3629: no overlongs, no surrogates, a leading UTF-8 BOM excluded). A
+non-zero count raises `UTF8_READ_AS_CP1252` with the count, the first
+sequence's byte offset and its line. This is the recommendation's mirror of
+`CP1252_CANARY_ZERO`, with two deliberate departures:
+
+- **Per file at analysis, not per corpus at freeze.** Analysis is where the
+  analyst can still act, by asking for a re-export before building anything.
+  The finding is non-blocking, so it reaches `corpus.import_report_json`
+  anyway, which a backend test asserts. The corpus is marked either way.
+- **Bytes, not a character list.** The recommendation named `Ã`, `Â`, `â€`
+  and `Ã¼`. Counting well-formed UTF-8 sequences in the raw bytes catches the
+  same thing and every other letter too, without keeping a list.
+
+It is REPORTED, as G1 recommended, because a genuine cp1252 file can contain
+the same bytes (`ß` then a non-breaking space, say). **h01 is the negative
+control**: cp1252 German with umlauts and `ß` raises nothing. The expected
+false-positive rate on real deliveries is unmeasured, because B4 has not
+landed. The first real import is also the first measurement.
+
+**G4: the fixture.** Three are added and generated byte-exactly; the existing
+fourteen regenerate byte-identical.
+
+- `h15_mixed_encoding` holds two UTF-8 rows then one cp1252 row, five
+  sequences in all.
+- `h16_utf16_bom` and `h17_utf16_no_bom` cover G2.
+
+`test_every_hazard_directory_exists` now counts to seventeen.
+
+**Found on the way.** `ROW_BLANK_DROPPED` has had no entry in the UI's
+rendering table since the Astrana import, so it rendered as its bare enum
+name. It now has a label, and `test_every_finding_code_has_a_label` makes the
+table's own "every `FindingCode` appears" comment a gate.
+
+**What this does not close.**
+
+- **The mojibake is still in the corpus** if the analyst freezes anyway. The
+  finding sits on the corpus, but nothing downstream (Results, Ranking)
+  carries it forward. That is the same gap row 7 names for the parse-failure
+  rate, and it belongs with that row.
+- **Other wide or legacy encodings.** A file in UTF-16 with neither a BOM nor
+  any ASCII would have no NUL, but such a delivery (all CJK, say) is not one
+  this project will receive. ISO-8859-15 differs from cp1252 in eight code
+  points and would pass as cp1252; that is the pre-existing §4.4 position and
+  is unchanged.
 
 ---
 

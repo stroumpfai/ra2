@@ -2307,10 +2307,13 @@
         "type": "object"
       },
       "FindingCode": {
-        "description": "Every outcome the import pipeline can report.\n\nGrouped by where it is raised. Hazard fixture references (h01-h12) point at\nsw-design.md \u00a711.4.",
+        "description": "Every outcome the import pipeline can report.\n\nGrouped by where it is raised. Hazard fixture references (h01-h17) point at\nsw-design.md \u00a711.4.",
         "enum": [
           "ENCODING_DETECTED",
           "FILE_UNDECODABLE",
+          "FILE_UNSUPPORTED_BOM",
+          "FILE_CONTAINS_NUL",
+          "UTF8_READ_AS_CP1252",
           "DIALECT_DETECTED",
           "UNKNOWN_HEADER",
           "HEADER_MISMATCH",

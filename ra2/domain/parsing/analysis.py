@@ -26,7 +26,16 @@ from ra2.domain.delivery import Dialect, Encoding, FileAnalysis, FileKind, RowOu
 from ra2.domain.findings import DEFAULT_SEVERITY, Finding, FindingCode, Severity
 from ra2.domain.ids import FileId
 from ra2.domain.parsing.dialect import detect_dialect
-from ra2.domain.parsing.encoding import Undecodable, decode_strict, detect_encoding
+from ra2.domain.parsing.encoding import (
+    EncodingResult,
+    NulByte,
+    Undecodable,
+    UnsupportedBom,
+    decode_strict,
+    detect_encoding,
+    refuse,
+    utf8_sequences,
+)
 from ra2.domain.parsing.headers import ColumnSet, classify_header, column_index
 from ra2.domain.parsing.reader import RawRow, read_rows
 from ra2.domain.parsing.recovery import recover_rows
@@ -115,6 +124,42 @@ def _finding(
     )
 
 
+def _refusal(refused: UnsupportedBom | NulByte, file_id: FileId) -> Finding:
+    """The finding that names why `refuse` failed the file (risk G2)."""
+    if isinstance(refused, UnsupportedBom):
+        return _finding(
+            FindingCode.FILE_UNSUPPORTED_BOM, file_id=file_id, detail={"bom": refused.bom}
+        )
+    return _finding(
+        FindingCode.FILE_CONTAINS_NUL,
+        file_id=file_id,
+        detail={"byte_offset": str(refused.byte_offset)},
+    )
+
+
+def _failed(
+    file_id: FileId,
+    filename: str,
+    selected: bool,
+    finding: Finding,
+    encoding_detected: Encoding | None,
+) -> ParsedFile:
+    """A file that failed at the encoding step: no text, no rows, one finding."""
+    return ParsedFile(
+        analysis=FileAnalysis(
+            file_id=file_id,
+            filename=filename,
+            kind=FileKind.UNKNOWN,
+            encoding_detected=encoding_detected,
+            dialect_detected=None,
+            encoding=None,
+            dialect=None,
+            findings=(finding,),
+        ),
+        selected=selected,
+    )
+
+
 def _majority_canton(rows: tuple[tuple[str, ...], ...], index: int | None) -> str | None:
     """The canton this `unfall` file is for, read from the data (§4.1).
 
@@ -153,8 +198,14 @@ def analyse_file(
     findings: list[Finding] = []
 
     # --- 1. encoding (mvp-spec.md §4.2.1) ---------------------------------
+    # A wide BOM or a NUL fails the file before any decoding is tried, so an
+    # override meets it too (risk G2).
+    refused = refuse(data)
+    if refused is not None:
+        return _failed(file_id, filename, selected, _refusal(refused, file_id), None)
+
     detected = detect_encoding(data)
-    encoding_detected = detected.encoding if not isinstance(detected, Undecodable) else None
+    encoding_detected = detected.encoding if isinstance(detected, EncodingResult) else None
 
     if encoding_override is not None:
         text = decode_strict(data, encoding_override)
@@ -164,39 +215,26 @@ def analyse_file(
         )
         if text is None and failure is None:
             failure = Undecodable(byte_offset=0, byte_value=data[0] if data else 0)
-    elif isinstance(detected, Undecodable):
-        text, encoding_used, failure = None, None, detected
-    else:
+    elif isinstance(detected, EncodingResult):
         text, encoding_used, failure = detected.text, detected.encoding, None
+    else:
+        assert isinstance(detected, Undecodable)  # `refuse` has already run
+        text, encoding_used, failure = None, None, detected
 
     if text is None:
         # Undecodable bytes fail the file. No U+FFFD, no partial read (§12.4).
         offset = failure.byte_offset if failure else 0
         byte_hex = failure.byte_hex if failure else "0x00"
-        findings.append(
-            _finding(
-                FindingCode.FILE_UNDECODABLE,
-                file_id=file_id,
-                detail={
-                    "byte_offset": str(offset),
-                    "byte": byte_hex,
-                    "tried": "utf-8,cp1252",
-                },
-            )
+        undecodable = _finding(
+            FindingCode.FILE_UNDECODABLE,
+            file_id=file_id,
+            detail={
+                "byte_offset": str(offset),
+                "byte": byte_hex,
+                "tried": "utf-8,cp1252",
+            },
         )
-        return ParsedFile(
-            analysis=FileAnalysis(
-                file_id=file_id,
-                filename=filename,
-                kind=FileKind.UNKNOWN,
-                encoding_detected=encoding_detected,
-                dialect_detected=None,
-                encoding=None,
-                dialect=None,
-                findings=tuple(findings),
-            ),
-            selected=selected,
-        )
+        return _failed(file_id, filename, selected, undecodable, encoding_detected)
 
     assert encoding_used is not None
     findings.append(
@@ -210,6 +248,23 @@ def analyse_file(
             },
         )
     )
+    if encoding_used is Encoding.CP1252:
+        # The mirror of the cp1252 canary (risk G1): UTF-8 written into a file
+        # that had to be read as cp1252 is mojibake now, and nothing else says so.
+        seen = utf8_sequences(data)
+        if seen.count:
+            findings.append(
+                _finding(
+                    FindingCode.UTF8_READ_AS_CP1252,
+                    file_id=file_id,
+                    line_no=seen.first_line_no,
+                    detail={
+                        "sequences": str(seen.count),
+                        "first_byte_offset": str(seen.first_byte_offset),
+                        "first_line_no": str(seen.first_line_no),
+                    },
+                )
+            )
 
     # --- 2. dialect (mvp-spec.md §4.1) ------------------------------------
     dialect_detected = detect_dialect(text, FileKind.UNKNOWN)

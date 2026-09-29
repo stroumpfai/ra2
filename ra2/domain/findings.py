@@ -43,7 +43,7 @@ class Severity(StrEnum):
 class FindingCode(StrEnum):
     """Every outcome the import pipeline can report.
 
-    Grouped by where it is raised. Hazard fixture references (h01-h12) point at
+    Grouped by where it is raised. Hazard fixture references (h01-h17) point at
     sw-design.md §11.4.
     """
 
@@ -57,6 +57,28 @@ class FindingCode(StrEnum):
     #: `errors="replace"` is banned and U+FFFD is never written.
     #: detail: {"byte_offset": "...", "byte": "0x9d"}                  (h02)
     FILE_UNDECODABLE = "FILE_UNDECODABLE"
+
+    #: The bytes open with a UTF-16 or UTF-32 byte-order mark. The file
+    #: **fails**, under an encoding override too: decoded as UTF-8 or cp1252
+    #: it would be NUL-riddled text failing later as `UNKNOWN_HEADER`, which
+    #: names the wrong cause.
+    #: detail: {"bom": "utf-16-le"}                                    (h16)
+    FILE_UNSUPPORTED_BOM = "FILE_UNSUPPORTED_BOM"
+
+    #: The bytes contain a NUL, which no delivery format uses. The file
+    #: **fails**, under an encoding override too. Usually a UTF-16 file
+    #: written without a byte-order mark.
+    #: detail: {"byte_offset": "..."}                                  (h17)
+    FILE_CONTAINS_NUL = "FILE_CONTAINS_NUL"
+
+    #: A file decoded as cp1252 contains well-formed multi-byte UTF-8
+    #: sequences, so some of its text was written as UTF-8 and now reads as
+    #: mojibake (`Ã¼` for `ü`). This mirrors `CP1252_CANARY_ZERO`: it is
+    #: evidence about the file, not a repair, and REPORTED because a genuine
+    #: cp1252 file can contain the same bytes, rarely.
+    #: detail: {"sequences": "3", "first_byte_offset": "...",
+    #:          "first_line_no": "..."}                                (h15)
+    UTF8_READ_AS_CP1252 = "UTF8_READ_AS_CP1252"
 
     #: The delimiter/quote character detection result for a file.
     #: detail: {"delimiter": "|", "quote_char": "\\""}
@@ -144,6 +166,9 @@ class FindingCode(StrEnum):
 DEFAULT_SEVERITY: Final[dict[FindingCode, Severity]] = {
     FindingCode.ENCODING_DETECTED: Severity.REPORTED,
     FindingCode.FILE_UNDECODABLE: Severity.BLOCKING,
+    FindingCode.FILE_UNSUPPORTED_BOM: Severity.BLOCKING,
+    FindingCode.FILE_CONTAINS_NUL: Severity.BLOCKING,
+    FindingCode.UTF8_READ_AS_CP1252: Severity.REPORTED,
     FindingCode.DIALECT_DETECTED: Severity.REPORTED,
     FindingCode.UNKNOWN_HEADER: Severity.REPORTED,
     FindingCode.HEADER_MISMATCH: Severity.BLOCKING,

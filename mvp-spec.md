@@ -167,6 +167,9 @@ thousands (`1'127'946.61`); empty string means **no value provided** (§8.6).
 
 1. Detect encoding per file (UTF-8 first, then Windows-1252). Show the analyst what
    was detected. **Fail the file on undecodable bytes** — never substitute `U+FFFD`.
+   **Fail it too on a UTF-16/32 byte-order mark or a NUL byte**, naming that
+   cause, whatever encoding the analyst chooses. A file read as Windows-1252 that
+   contains UTF-8 sequences is part mojibake; report it, with the count.
 2. Parse with a real RFC4180 parser using the file's delimiter and quote char.
 3. For any row that fails to parse, or whose field count ≠ the header's, apply
    **key-anchored recovery**: the key column (`UnfallUid`/`ObjektUid`/`PersonUid`/
@@ -201,6 +204,7 @@ Reported but non-blocking (surfaced in the import report, stored on the corpus):
   `Total Personen`) ≠ count of `person` rows via `objekt`
 - text rows with no matching `unfall` row, and `unfall` rows with no text
 - per-file detected encoding
+- UTF-8 read as Windows-1252 in a file (§4.2 step 1), with the count
 
 ### 4.4 Encoding loss — one corpus-level check, nothing more
 

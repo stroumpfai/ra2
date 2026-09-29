@@ -583,21 +583,24 @@ fails on every machine without one.
 
 ### Fixtures contain the real hazards
 
-Test fixtures are not clean. The fourteen under
+Test fixtures are not clean. The seventeen under
 `tests/fixtures/deliveries/hazards/` carry a cp1252 file and a byte that
 decodes under neither encoding, a stray delimiter, an embedded newline and an
 unquoted one, an orphan key, a key duplicated across two cantonal sets, an
 all-empty column, a count mismatch, an unmatched text key, an unknown header,
-and French that is already lossy. Real data is gitignored and must never reach
-a test, so the hazards are synthesised byte-exactly and committed. A clean
+French that is already lossy, Astrana's blank rows and header, **mixed
+encodings** (UTF-8 rows then one cp1252 row in the same file) and UTF-16 with
+and without a byte-order mark. Real data is gitignored and must never reach a
+test, so the hazards are synthesised byte-exactly and committed. A clean
 fixture proves nothing about this input.
 
-> **One named hazard is still missing.** `CLAUDE.md` requires **mixed
-> encodings** — one file holding both UTF-8 and cp1252 bytes — and no fixture
-> covers it. `detect_encoding` decides per file, so such a file falls back to
-> cp1252 whole and every correctly-encoded UTF-8 row in it is silently
-> mojibaked. Tracked as **G1** and **G4** in
-> [`docs/risk-assesment.md`](docs/risk-assesment.md).
+A mixed file cannot be read correctly: detection is per file, so one cp1252
+byte makes the whole file cp1252 and the UTF-8 rows become mojibake. The
+import reports it as `UTF8_READ_AS_CP1252`, with a count, so that the
+analyst asks for a re-export instead of trusting the text. A UTF-16 file
+fails outright and names the cause (`FILE_UNSUPPORTED_BOM`,
+`FILE_CONTAINS_NUL`). See `SD44` and risks G1, G2 and G4 in
+[`docs/risk-assesment.md`](docs/risk-assesment.md).
 
 **Byte-exactly is meant literally, and `.gitattributes` is what keeps it
 true.** `* -text` disables line-ending conversion in both directions. Without
