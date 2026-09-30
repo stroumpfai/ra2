@@ -210,11 +210,12 @@ async def test_an_unmapped_model_is_unaffected(
 ) -> None:
     """A gate on record doesn't make a model parallel: the map decides whether
     to try, and the gate whether that's allowed. With an empty map, today's
-    default, the launch doesn't even ask for the version."""
+    default, the launch still asks for the version **once**, to pin it as
+    provenance (SD48), and the answer does not make the run parallel."""
     await record_gate(fitting_model, DIGEST)
 
     assert await _pinned(evaluation_service, launchable, db_session_factory, fitting_model) == 1
-    assert model_catalog.version_calls == 0
+    assert model_catalog.version_calls == 1
 
 
 async def test_a_measuring_launch_pins_the_map_without_a_gate(

@@ -714,3 +714,61 @@ async def test_a_delivered_corpus_carries_no_synthetic_pill(scored: Scored) -> N
     await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}")
     await scored.user.should_see(marker="run-pill")
     await scored.user.should_not_see(marker="synthetic-pill")
+
+
+# --- SD48: whether each model could read what it was given -------------------
+
+
+async def test_every_extraction_column_says_whether_its_model_could_read(scored: Scored) -> None:
+    """Risks D1 and D2, on the board a reader starts from. The seeded runs
+    parsed everything and recorded no context, so the line says exactly that:
+    a rate of zero, and an at-limit count that is *not recorded*, never 0."""
+    from ra2.ui.views.results.chrome import CONTEXT_NOT_RECORDED
+
+    await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}")
+    expected = f"unreadable 0.0 % · {CONTEXT_NOT_RECORDED}"
+    await scored.user.should_see(marker="model-quality", content=expected)
+    lines = scored.user.find(marker="model-quality").elements
+    assert len(lines) == len(scored.user.find(marker="model-quality", content=expected).elements)
+    assert len(lines) == len(scored.corpus.run_ids)
+
+
+async def test_the_ranking_reports_unreadable_answers_beside_vram(scored: Scored) -> None:
+    from ra2.ui.views.results.chrome import CONTEXT_NOT_RECORDED
+
+    await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}&tab=ranking")
+    await scored.user.should_see("Unreadable")
+    cells = scored.user.find(marker="unreadable").elements
+    assert len(cells) == len(scored.user.find(marker="ranking-row").elements)
+    await scored.user.should_see(marker="at-limit", content=CONTEXT_NOT_RECORDED)
+
+
+async def test_the_ranking_states_the_determinism_caveat(scored: Scored) -> None:
+    """Risk D3: under the validity footer, where a ranking screenshot is cut."""
+    from ra2.ui.views.results.chrome import DETERMINISM_CAVEAT
+
+    await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}&tab=ranking")
+    await scored.user.should_see(DETERMINISM_CAVEAT)
+
+
+def test_quality_text_never_prints_an_unknown_as_zero() -> None:
+    from ra2.services.readmodels import ReadingQuality
+    from ra2.ui.views.results.chrome import CONTEXT_NOT_RECORDED, quality_text
+
+    assert quality_text(None) == "—"
+    assert (
+        quality_text(
+            ReadingQuality(
+                extractions=0, parse_failures=0, context_length=None, at_context_limit=None
+            )
+        )
+        == f"unreadable — · {CONTEXT_NOT_RECORDED}"
+    )
+    assert (
+        quality_text(
+            ReadingQuality(
+                extractions=40, parse_failures=2, context_length=4096, at_context_limit=3
+            )
+        )
+        == "unreadable 5.0 % · 3 at limit"
+    )

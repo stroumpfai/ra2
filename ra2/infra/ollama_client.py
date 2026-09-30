@@ -135,6 +135,7 @@ __all__ = [
     "OllamaLLMClient",
     "OllamaModelCatalog",
     "native_api_url",
+    "parse_parameters",
     "require_loopback",
 ]
 
@@ -151,6 +152,8 @@ _NATIVE_TAGS_PATH = "/api/tags"
 #: models resident right now. Both native, like the tags.
 _NATIVE_VERSION_PATH = "/api/version"
 _NATIVE_PS_PATH = "/api/ps"
+#: SD48: a model's server-side decoding options (its Modelfile `PARAMETER`s).
+_NATIVE_SHOW_PATH = "/api/show"
 #: `keep_alive: 0` on a generate with no prompt is Ollama's documented unload.
 _NATIVE_GENERATE_PATH = "/api/generate"
 
@@ -187,6 +190,9 @@ class _OllamaTag(openai.BaseModel):
     model: str | None = None
     digest: str | None = None
     size: int | None = None
+    #: `/api/ps` only, and only on an Ollama that reports it: the context the
+    #: model is loaded with right now (SD48). Absent on `/api/tags`.
+    context_length: int | None = None
 
 
 class _OllamaTags(openai.BaseModel):
@@ -197,6 +203,32 @@ class _OllamaDone(openai.BaseModel):
     """The unload's answer. Read for its status only."""
 
     done: bool | None = None
+
+
+class _OllamaShow(openai.BaseModel):
+    """Ollama's native `/api/show`. Only `parameters` is read: the Modelfile's
+    `PARAMETER` lines, one `key value` per line, as one string."""
+
+    parameters: str | None = None
+
+
+def parse_parameters(text: str | None) -> dict[str, tuple[str, ...]]:
+    """`"num_ctx 8192
+    stop \"<|im_end|>\""` -> `{"num_ctx": ("8192",),
+        "stop": ("\"<|im_end|>\"",)}`.
+
+        Keys keep every value in order, because `stop` repeats. Values are kept
+        verbatim, quotes included: this is provenance, and a normalised value is
+        one the server never held. A line with no value is kept with an empty one.
+    """
+    parsed: dict[str, list[str]] = {}
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        key, _, value = stripped.partition(" ")
+        parsed.setdefault(key, []).append(value.strip())
+    return {key: tuple(values) for key, values in sorted(parsed.items())}
 
 
 class _OllamaVersion(openai.BaseModel):
@@ -525,6 +557,7 @@ class OllamaModelCatalog:
         self._tags_url = native_api_url(base_url, _NATIVE_TAGS_PATH)
         self._version_url = native_api_url(base_url, _NATIVE_VERSION_PATH)
         self._ps_url = native_api_url(base_url, _NATIVE_PS_PATH)
+        self._show_url = native_api_url(base_url, _NATIVE_SHOW_PATH)
         self._generate_url = native_api_url(base_url, _NATIVE_GENERATE_PATH)
         self._client = _build_client(
             base_url=base_url, timeout_s=timeout_s, http_client=http_client
@@ -575,6 +608,30 @@ class OllamaModelCatalog:
         if not isinstance(payload.models, list):
             return ()
         return tuple(tag for tag in (entry.name or entry.model for entry in payload.models) if tag)
+
+    async def parameters(self, tag: str) -> dict[str, tuple[str, ...]] | None:
+        """The model's server-side decoding options (`/api/show`), or `None`
+        for every failure (SD48). `{}` is an answer: the model sets none."""
+        try:
+            payload = await self._client.post(
+                self._show_url, body={"model": tag}, cast_to=_OllamaShow
+            )
+        except openai.APIConnectionError, openai.APIStatusError, ValueError, TypeError:
+            return None
+        return parse_parameters(payload.parameters)
+
+    async def context_length(self, tag: str) -> int | None:
+        """The context `tag` is loaded with now (`/api/ps`), or `None`: not
+        loaded, not reported by this Ollama, or no answer (SD48, risk D1)."""
+        try:
+            payload = await self._client.get(self._ps_url, cast_to=_OllamaTags)
+        except openai.APIConnectionError, openai.APIStatusError, ValueError, TypeError:
+            return None
+        for entry in payload.models or []:
+            if tag in (entry.name, entry.model):
+                length = entry.context_length
+                return length if isinstance(length, int) and length > 0 else None
+        return None
 
     async def release(self, tag: str) -> None:
         """Unload `tag` now (`keep_alive: 0`, no prompt). Swallows every

@@ -82,7 +82,7 @@ from ra2.domain.ids import (
     TaskId,
 )
 from ra2.domain.llm import Extraction as LlmOutput
-from ra2.domain.llm import LLMClient, LlmEndpointError
+from ra2.domain.llm import LLMClient, LlmEndpointError, ModelCatalog
 from ra2.domain.prompt import FeatureBlockEntry
 from ra2.infra.clock import Clock
 from ra2.infra.config import Settings
@@ -224,6 +224,9 @@ class _RunPlan:
     #: The constrained-decoding format, built once so two records of one run
     #: cannot be asked a differently-ordered question (§15.3).
     schema: type[BaseModel]
+    #: SD48: the run already carries the context it was loaded with, from an
+    #: earlier execution. A resumed run keeps its first reading.
+    context_pinned: bool = False
 
 
 @dataclass(slots=True)
@@ -254,6 +257,8 @@ class _RecordLoop:
     #: Set when the endpoint-error budget trips. Workers stop taking records;
     #: calls already in flight finish.
     stopped: bool = False
+    #: SD48: the loaded context has been asked for, by one worker, once.
+    context_asked: bool = False
 
 
 class _OffsetReporter:
@@ -289,6 +294,7 @@ class RunService:
         ids: IdFactory,
         settings: Settings,
         connection: ConnectionSettings,
+        model_catalog: ModelCatalog | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._llm_client = llm_client
@@ -306,6 +312,10 @@ class RunService:
         #: SD43. The endpoint and timeout as they are now; see
         #: `EvaluationService._connection`.
         self._connection = connection
+        #: SD48. Asked once per run, after its first record, for the context
+        #: the model was loaded with. `None` records nothing, which is what
+        #: every suite that is not about provenance wants.
+        self._model_catalog = model_catalog
         #: The `asyncio.Task` executing each run, so `cancel` can stop **one**
         #: of them. A job covers every run of an evaluation and executes them
         #: serially, so without a task per run "stop this run" could only be
@@ -723,6 +733,10 @@ class RunService:
                 continue
             loop.consecutive_endpoint_errors = 0
             await self._commit_record(plan, record_id, response)
+            if not plan.context_pinned and not loop.context_asked:
+                # Set before the await, so a second worker does not ask too.
+                loop.context_asked = True
+                await self._pin_context_length(plan)
             # Re-read from committed rows (§15 F6), and never allowed to go
             # backwards: two workers' counts can resolve in either order, and a
             # progress bar that steps back reads as lost work.
@@ -742,6 +756,28 @@ class RunService:
                 loop.done,
                 loop.total,
             )
+
+    async def _pin_context_length(self, plan: _RunPlan) -> None:
+        """Record the context the model is loaded with, once (SD48, risk D1).
+
+        After the first committed record, because before it nothing is
+        loaded: `/api/ps` reports what the server applied to the call that
+        just answered, whether a Modelfile, `OLLAMA_CONTEXT_LENGTH` or the
+        default set it. `None` is a result too, and leaves the column empty:
+        no extraction of this run can then be flagged as at the limit, and
+        the screens say *not recorded* rather than *none*.
+        """
+        if self._model_catalog is None:
+            return
+        length = await self._model_catalog.context_length(plan.model_name)
+        if length is None:
+            _log.info("run %s: the endpoint did not report a context length", plan.run_id)
+            return
+        async with session_scope(self._session_factory) as session:
+            await RunRepository(session).pin_context_length(plan.run_id, length)
+        _log.info(
+            "run %s: %s is loaded with a %d-token context", plan.run_id, plan.model_name, length
+        )
 
     async def _resolve_prompt(self, plan: _RunPlan, record_id: RecordId) -> str:
         """The resolved prompt for one record, in a transaction of its own
@@ -1099,6 +1135,7 @@ class RunService:
                 seed=run.seed,
                 reasoning_effort=run.llm_reasoning_effort,
                 parallel_calls=run.llm_parallel_calls,
+                context_pinned=run.context_length is not None,
                 limit=self._record_limit(evaluation),
                 features=entries,
                 feature_ids={feature.key: FeatureId(feature.id) for feature, _ in snapshot},

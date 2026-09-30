@@ -17,7 +17,7 @@ a new row, unlike `extraction`.
 from collections.abc import Iterable
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ra2.domain.extraction import RunStatus
@@ -120,6 +120,27 @@ class RunRepository:
             .where(Extraction.run_id == run_id, Extraction.parse_ok.is_(False))
         )
         return int(count or 0)
+
+    async def pin_context_length(self, run_id: RunId, context_length: int) -> None:
+        """Set `run.context_length` **once** (SD48). A run that already
+        carries one keeps it: the first reading describes the records that
+        were read under it, and a resume on a differently-loaded model does
+        not get to rewrite that."""
+        await self._session.execute(
+            update(Run)
+            .where(Run.id == run_id, Run.context_length.is_(None))
+            .values(context_length=context_length)
+        )
+        await self._session.flush()
+
+    async def prompt_tokens(self, run_id: RunId) -> list[int | None]:
+        """Every committed extraction's `prompt_tokens`, for the at-limit
+        count (SD48). Counted in Python with `domain.llm.at_context_limit` so
+        the threshold lives in one place, not in SQL as well."""
+        rows = await self._session.scalars(
+            select(Extraction.prompt_tokens).where(Extraction.run_id == run_id)
+        )
+        return list(rows)
 
     async def sum_retries(self, run_id: RunId) -> int:
         """Total retries spent so far on this run's committed extractions —

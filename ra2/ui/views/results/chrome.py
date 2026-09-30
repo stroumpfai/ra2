@@ -18,9 +18,19 @@ from typing import Final
 from nicegui import ui
 from nicegui.element import Element
 
-from ra2.services.readmodels import RunDescriptorView
+from ra2.services.readmodels import ReadingQuality, RunDescriptorView
 
-__all__ = ["DEV_PILL", "RUN_PILL", "SYNTHETIC_PILL", "empty_card", "run_descriptor"]
+__all__ = [
+    "CONTEXT_NOT_RECORDED",
+    "DETERMINISM_CAVEAT",
+    "DEV_PILL",
+    "QUALITY_TITLE",
+    "RUN_PILL",
+    "SYNTHETIC_PILL",
+    "empty_card",
+    "quality_text",
+    "run_descriptor",
+]
 
 #: mvp-spec.md §13: "**Required on every dev-sized result**: the 'smoke test,
 #: not a result' marker." On these boards it *replaces* the run pill rather
@@ -32,6 +42,45 @@ RUN_PILL: Final = "Evaluation run"
 #: can be dev-sized or not, and both facts are worth stating. Provenance is
 #: the one a screenshot must not lose.
 SYNTHETIC_PILL: Final = "SYNTHETIC · invented data, not a result"
+
+
+#: `SD48`, risks D1 and D2. Both failures score `missing` on every feature of
+#: the record, which is indistinguishable from a model that reads badly unless
+#: it is shown beside the numbers. Reported, never scored.
+QUALITY_TITLE: Final = (
+    "Unreadable: answers that were not valid JSON, so every feature of that record "
+    "scored missing. At limit: prompts that reached 95 % of the context the model "
+    "was loaded with, which the server truncates rather than refuses. Reported, "
+    "never scored."
+)
+#: `SD48`, risk D3: stated once, plainly, wherever a run is presented as
+#: reproducible or ranked. The provenance is necessary, not sufficient.
+#: Rendered on the Evaluation view's reproducibility card and under the
+#: ranking's validity footer, and repeated in `docs/evaluation-report-template.md`.
+DETERMINISM_CAVEAT: Final = (
+    "Not bit-identical. The same model, prompt, temperature and seed can still change "
+    "a few answers between runs: GPU batching, cache reuse and floating-point order "
+    "vary, and so do a different Ollama version or context size. A re-run is a check "
+    "of these numbers, not a guarantee of them."
+)
+
+#: The run did not record the context it was loaded with: *unknown*, never 0.
+CONTEXT_NOT_RECORDED: Final = "context not recorded"
+
+
+def quality_text(quality: ReadingQuality | None) -> str:
+    """`unreadable 2.1 % · 3 at limit` — the one wording for `ReadingQuality`.
+
+    An absent figure is said to be absent: no rate without extractions, and no
+    at-limit count without a recorded context. Neither is ever printed as 0.
+    """
+    if quality is None:
+        return "—"
+    rate = quality.parse_failure_rate
+    unreadable = "unreadable —" if rate is None else f"unreadable {100 * rate:.1f} %"
+    if quality.at_context_limit is None:
+        return f"{unreadable} · {CONTEXT_NOT_RECORDED}"
+    return f"{unreadable} · {quality.at_context_limit} at limit"
 
 
 def run_descriptor(view: RunDescriptorView) -> Element:

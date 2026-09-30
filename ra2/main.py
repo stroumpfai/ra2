@@ -246,6 +246,8 @@ def create_app(
         ids=ids,
         settings=settings,
         connection=settings_service,
+        # SD48: the context the model was loaded with, asked once per run.
+        model_catalog=model_catalog,
     )
     # `scoring_service` satisfies `Scorer` structurally — neither read service
     # imports it directly.

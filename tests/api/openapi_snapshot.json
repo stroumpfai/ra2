@@ -2888,6 +2888,16 @@
             "title": "Model Id",
             "type": "string"
           },
+          "quality": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadingQualityResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "tag": {
             "title": "Tag",
             "type": "string"
@@ -3255,6 +3265,17 @@
         "additionalProperties": false,
         "description": "mvp-spec.md \u00a719.8 \u2014 \"every run's record alone is sufficient to\nreproduce it\".",
         "properties": {
+          "context_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Length"
+          },
           "corpus_id": {
             "title": "Corpus Id",
             "type": "string"
@@ -3317,6 +3338,17 @@
             "title": "Model Name",
             "type": "string"
           },
+          "ollama_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ollama Version"
+          },
           "prompt_template_fingerprint": {
             "title": "Prompt Template Fingerprint",
             "type": "string"
@@ -3328,6 +3360,23 @@
           "seed": {
             "title": "Seed",
             "type": "integer"
+          },
+          "server_parameters": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Parameters"
           },
           "temperature": {
             "title": "Temperature",
@@ -3475,6 +3524,16 @@
             "title": "Prompt Tokens",
             "type": "integer"
           },
+          "quality": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadingQualityResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "rank": {
             "title": "Rank",
             "type": "integer"
@@ -3568,6 +3627,59 @@
           "unscored_feature_count"
         ],
         "title": "RankingTabResponse",
+        "type": "object"
+      },
+      "ReadingQualityResponse": {
+        "additionalProperties": false,
+        "description": "`SD48`: whether a run's model could read what it was given. Reported,\nnever scored. `at_context_limit` is `None` when the run did not record\nits context, which means *unknown*, never zero.",
+        "properties": {
+          "at_context_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At Context Limit"
+          },
+          "context_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Length"
+          },
+          "extractions": {
+            "title": "Extractions",
+            "type": "integer"
+          },
+          "parse_failure_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parse Failure Rate"
+          },
+          "parse_failures": {
+            "title": "Parse Failures",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "extractions",
+          "parse_failures"
+        ],
+        "title": "ReadingQualityResponse",
         "type": "object"
       },
       "RegisterDeliveryRequest": {

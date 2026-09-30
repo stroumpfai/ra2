@@ -457,6 +457,10 @@ and one §8 entry per finding closed. The register in §4 is left as written.
 | `justfile` | `reset *tokens`, so `just reset yes destroy-real-data` reaches the script; `reset-seed` passes `--for-seed`, which refuses real data outright and exits non-zero on a dry run. It exited 0, so the seed step ran over a database nobody had reset (E4, `SD46`) | `fix-e4-d8-f6-real-or-synthetic` |
 | `.gitattributes` | Comment only: it named a `FindingCode.DOUBLED_CRLF` that does not exist, and counted "twenty" fixtures. No rule changes | `fix-e4-d8-f6-real-or-synthetic` |
 | `tests/test_p5_contract.py` | `5e1d7a3c9b20` registered in `POST_PHASE_5_REVISIONS` | `fix-e4-d8-f6-real-or-synthetic` |
+| `ra2/domain/llm.py` | `ModelCatalog` + `parameters(tag)` (`/api/show`) and `context_length(tag)` (`/api/ps`), both never raising; + `CONTEXT_LIMIT_SHARE`, `at_context_limit`. The adapter sends no context size, and a truncated prompt scores `missing` like a bad reader (D1, `SD48`) | `fix-d1-d2-d3-run-provenance` |
+| `ra2/persistence/models.py` | + `Run.ollama_version`, `Run.server_parameters_json`, `Run.context_length`, all nullable, revision `b4f2c81e6d37`, no backfill: what the digest does not pin (D1, D3) | `fix-d1-d2-d3-run-provenance` |
+| `ra2/services/readmodels.py`, `ra2/api/schemas.py` | + `ReadingQuality`/`ReadingQualityResponse` on the model columns and ranking rows; + the three fields on `ProvenanceView`/`ProvenanceResponse`. All defaulted. OpenAPI snapshot regenerated, additive only (D2, `SD48`) | `fix-d1-d2-d3-run-provenance` |
+| `tests/test_p5_contract.py` | `b4f2c81e6d37` registered in `POST_PHASE_5_REVISIONS` | `fix-d1-d2-d3-run-provenance` |
 | `.gitignore` | **unchanged, deliberately.** Adding `Unfall.csv` would be the name-shaped fix again, and it would block the hazard fixtures, which carry the same names | — |
 | `pyproject.toml`, `.importlinter`, `tests/conftest.py` | **unchanged.** No dependency, no new contract, no new root fixture | — |
 

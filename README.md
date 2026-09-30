@@ -55,7 +55,9 @@ Import → Census → Codelists → Features → Prompts → Evaluation → Resu
   template; run them across several local models; watch progress.
 - **Results** — precision, recall and F1 per feature and model, with *n* and
   Wilson intervals, thin cells suppressed, ties drawn as ties, and a
-  per-language breakdown carrying the encoding caveat.
+  per-language breakdown carrying the encoding caveat. Each model also shows
+  how many of its answers were unreadable and how many prompts reached its
+  context limit: both score *missing*, and neither is a reading failure.
 - **Mismatches** — every disagreement with its evidence span, tagged three
   ways, tallied. A mismatch rate is not a model error rate until someone has
   read this list.
@@ -656,6 +658,7 @@ question `sw-design.md` wins:
 | [`CLAUDE.md`](CLAUDE.md) | The Do-NOT list, the layer rule, the ownership rule. |
 | [`CONTRACTS.md`](CONTRACTS.md) | What is frozen, and every documented deviation with its reason. |
 | [`data-handling.md`](data-handling.md) | Outputs, retention, destruction and the incident path. **Decisions still open** are marked as such. |
+| [`docs/evaluation-report-template.md`](docs/evaluation-report-template.md) | The skeleton of the evaluation report (deliverable 3): which figures to copy from which screen, and the determinism caveat, verbatim. |
 | [`docs/choosing-models.md`](docs/choosing-models.md) | Which local models to compare, which to avoid, and how to judge one this page hasn't measured. Reference, not authority. |
 | [`docs/performance.md`](docs/performance.md) | How long an evaluation takes, what makes it faster, and how to turn parallel calls on. Reference, not authority. |
 | [`docs/rules.md`](docs/rules.md) | Every rule for using and developing RA2 in one place — which machine may hold real data, what may leave it, how agents work. Each rule names its source; the source wins. |

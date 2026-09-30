@@ -863,6 +863,11 @@ class ProvenanceResponse(_Schema):
     llm_reasoning_effort: str | None = None
     #: Records this run kept in flight (SD38); `1` on every earlier run.
     llm_parallel_calls: int = 1
+    #: `SD48`: the Ollama version, the model's server-side decoding options
+    #: (`{}`: none set; `null`: not recorded) and the context it was loaded with.
+    ollama_version: str | None = None
+    server_parameters: dict[str, list[str]] | None = None
+    context_length: int | None = None
 
 
 class EvaluationResponse(_Schema):
@@ -944,10 +949,23 @@ class RunDescriptorResponse(_Schema):
     is_synthetic: bool = False
 
 
+class ReadingQualityResponse(_Schema):
+    """`SD48`: whether a run's model could read what it was given. Reported,
+    never scored. `at_context_limit` is `None` when the run did not record
+    its context, which means *unknown*, never zero."""
+
+    extractions: int
+    parse_failures: int
+    parse_failure_rate: float | None = None
+    context_length: int | None = None
+    at_context_limit: int | None = None
+
+
 class ModelColumnResponse(_Schema):
     model_id: str
     tag: str
     digest: str
+    quality: ReadingQualityResponse | None = None
 
 
 class FeatureScoreResponse(_Schema):
@@ -1112,6 +1130,8 @@ class RankingRowResponse(_Schema):
     #: run launched before the column existed — **not** `0`, which is what this
     #: field carried, hard-coded, before SD41.
     model_size_bytes: int | None = None
+    #: `SD48`: parse failures and prompts at the context limit (D1, D2).
+    quality: ReadingQualityResponse | None = None
 
 
 class SeparatingRowResponse(_Schema):

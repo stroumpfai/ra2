@@ -37,7 +37,7 @@ from ra2.services.readmodels import (
     RankingTabView,
     SeparatingRow,
 )
-from ra2.services.run_descriptor import build_descriptor
+from ra2.services.run_descriptor import build_descriptor, reading_quality
 
 __all__ = ["RankingService"]
 
@@ -125,6 +125,8 @@ class RankingService:
             rankings = rank_models(cells_by_model)
             separating = separating_features(cells_by_model)
             reported = await _reported_metrics(session, runs)
+            # SD48: reported, never scored, beside latency and VRAM (D1, D2).
+            quality = {run.id: await reading_quality(session, run) for run in runs}
 
             by_model = {r.model_id: r for r in rankings}
             ordered = sorted(runs, key=lambda run: (by_model[run.id].rank, run.id))
@@ -153,6 +155,7 @@ class RankingService:
                     # re-pull moves a tag's size behind an unchanged name.
                     # `None` stays `None` — the tab renders an em dash.
                     model_size_bytes=run.model_size_bytes,
+                    quality=quality[run.id],
                 )
                 for run in ordered
                 if run.id in by_model

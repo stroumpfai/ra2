@@ -1106,6 +1106,20 @@ class Run(Base):
     #: defect this column repairs.
     model_size_bytes: Mapped[int | None] = mapped_column(default=None)
 
+    # --- SD48: what the digest does not pin (risks D1, D3) ------------------
+    #: The Ollama version the run launched against (`/api/version`). The
+    #: digest pins the weights; the runtime moves answers too.
+    ollama_version: Mapped[str | None] = mapped_column(String(64), default=None)
+    #: The model's server-side decoding options at launch (`/api/show`'s
+    #: Modelfile `PARAMETER`s) as JSON, `{"num_ctx": ["8192"], ...}`. `"{}"`
+    #: means the model sets none; `None` means the endpoint did not say.
+    server_parameters_json: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The context window the model was **loaded** with, read from `/api/ps`
+    #: after the run's first record. The adapter sends none, so this is
+    #: whatever the server applied. `None`: not reported, so no extraction
+    #: can be flagged as at the limit (risk D1). Set once, never changed.
+    context_length: Mapped[int | None] = mapped_column(default=None)
+
     evaluation: Mapped[Evaluation] = relationship(back_populates="runs")
     extractions: Mapped[list[Extraction]] = relationship(
         back_populates="run", cascade="all, delete-orphan", passive_deletes=True

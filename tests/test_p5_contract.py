@@ -157,6 +157,12 @@ POST_PHASE_5_REVISIONS = {
     # **no backfill**: marking existing corpora would be an `UPDATE corpus`,
     # and Do-NOT #2 does not bend for a migration.
     "20260929_1200_5e1d7a3c9b20_mark_a_synthetic_corpus.py",
+    # `fix/d1-d2-d3-run-provenance` — `run.ollama_version`,
+    # `run.server_parameters_json`, `run.context_length` (SD48). What the
+    # digest does not pin: the runtime, the server-side decoding options, and
+    # the context window the model was loaded with, which is what flags a
+    # prompt at the limit (risk D1). Additive, nullable, no backfill.
+    "20260930_0900_b4f2c81e6d37_pin_what_the_digest_does_not.py",
 }
 
 

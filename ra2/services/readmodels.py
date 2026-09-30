@@ -93,6 +93,7 @@ __all__ = [
     "QualificationCardView",
     "RankingRow",
     "RankingTabView",
+    "ReadingQuality",
     "ResolvedPromptView",
     "ReviewTallyView",
     "RunDescriptorView",
@@ -743,6 +744,14 @@ class ProvenanceView:
     #: Records this run kept in flight (SD38). Always known, because the
     #: column is NOT NULL, and `1` on every run from before it existed.
     llm_parallel_calls: int = 1
+    #: `SD48`: what the digest does not pin. Each `None` means *not
+    #: recorded*, the `gpu_name` convention, never a guessed value.
+    ollama_version: str | None = None
+    #: The model's server-side decoding options at launch, key to values.
+    #: `{}` means it set none; `None` means the endpoint did not say.
+    server_parameters: Mapping[str, tuple[str, ...]] | None = None
+    #: The context the model was loaded with, read after the first record.
+    context_length: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -862,12 +871,42 @@ class RunDescriptorView:
 
 
 @dataclass(frozen=True, slots=True)
+class ReadingQuality:
+    """Whether a run's model could read what it was given (`SD48`, D1, D2).
+
+    Reported, never scored, like latency and VRAM (mvp-spec.md §11.5): the
+    number that qualifies a result travels with it. A parse failure scores
+    `missing` on every feature of its record, and so does a prompt the server
+    truncated, and neither is distinguishable from a model that reads badly
+    unless it is shown beside the result.
+    """
+
+    #: Committed extractions: the denominator.
+    extractions: int
+    #: `parse_ok = False` among them.
+    parse_failures: int
+    #: The context the model was loaded with (`run.context_length`), or `None`
+    #: when the run did not record one.
+    context_length: int | None
+    #: Extractions whose `prompt_tokens` reached `CONTEXT_LIMIT_SHARE` of it.
+    #: **`None` when `context_length` is**: unknown, never zero.
+    at_context_limit: int | None
+
+    @property
+    def parse_failure_rate(self) -> float | None:
+        """`None` with nothing extracted, never a `0.0` that reads as clean."""
+        return self.parse_failures / self.extractions if self.extractions else None
+
+
+@dataclass(frozen=True, slots=True)
 class ModelColumnView:
     """One model column header: the tag, and the digest that is its identity."""
 
     model_id: str
     tag: str
     digest: str
+    #: `SD48`: rendered under the tag on the Results extraction tab.
+    quality: ReadingQuality | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1130,6 +1169,9 @@ class RankingRow:
     #: field (`SD41`). `None` for a run launched before that column existed,
     #: which both cells render as an em dash: `0` is the defect it repairs.
     model_size_bytes: int | None = None
+    #: `SD48`: parse failures and prompts at the context limit, reported in
+    #: the ranking's never-scored group (risks D1, D2).
+    quality: ReadingQuality | None = None
 
 
 @dataclass(frozen=True, slots=True)

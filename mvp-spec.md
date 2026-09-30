@@ -549,8 +549,14 @@ the corpus size.
 
 Every run stores: model name **and digest**, prompt template version, temperature,
 seed, **reasoning effort**, feature config id + fingerprints, corpus id + version,
-host platform, GPU name, LLM endpoint, plus per-extraction latency and token
-counts.
+host platform, GPU name, LLM endpoint, **the model server's version, the
+model's server-side decoding options, and the context window it was loaded
+with**, plus per-extraction latency and token counts.
+
+That record is necessary, not sufficient. Local GPU inference is not
+bit-identical: batching, cache reuse and floating-point order move a few
+answers between runs of the same record. Wherever a run is presented as
+reproducible, and in the evaluation report, this is said once, plainly.
 
 Jobs run in the in-process asyncio worker, are restart-safe, and report progress
 (records done / total, ETA) in the UI.
@@ -705,6 +711,11 @@ a weak extractor manufactures false "missing" flags.
 - **Overlapping confidence intervals are rendered as a tie**, not as an order.
 - Exploratory attributes take no part.
 - Every cross-corpus number, if ever shown, carries its corpus label.
+- **Each model's unreadable answers and prompts at the context limit are
+  reported, never scored**, on every Results column and in the ranking: both
+  score *missing* on every feature of their record, which is otherwise
+  indistinguishable from a model that reads badly. An at-limit count needs a
+  recorded context; without one it is *not recorded*, never zero.
 - **Latency, VRAM and the macro presence rate are reported, never scored** —
   the tie-breaker the analyst applies, not one the tool applies. The presence
   figure is in that group rather than in the ranking for §11.2's reason: there
@@ -881,6 +892,8 @@ The MVP is done when, on the target machine:
    breakdown carrying the encoding caveat, and Goal 3 in a separate table.
 7. The mismatch list is browsable, taggable and exportable, with evidence spans.
 8. Every run's record alone is sufficient to reproduce it: model + digest, prompt
-   version, temperature, seed, config fingerprints, corpus version.
+   version, temperature, seed, config fingerprints, corpus version, model server
+   version, server-side decoding options and loaded context. *Reproduce* means
+   re-run the same question, not obtain bit-identical answers (§9).
 9. A dev-sized run is visibly marked as a smoke test wherever its numbers appear.
 10. No network egress occurs beyond the configured LLM endpoint.

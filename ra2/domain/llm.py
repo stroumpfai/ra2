@@ -19,6 +19,7 @@ gives — the effort became a **per-evaluation** pinned input, and a value that
 varies between two runs in one process cannot live on the client.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final, Protocol, runtime_checkable
@@ -26,6 +27,7 @@ from urllib.parse import urlsplit
 
 __all__ = [
     "ALLOWED_SCHEMES",
+    "CONTEXT_LIMIT_SHARE",
     "DEFAULT_REASONING_EFFORT",
     "LOOPBACK_HOSTS",
     "PROBE_TIMEOUT_S",
@@ -39,6 +41,7 @@ __all__ = [
     "ModelInfo",
     "ProbeCode",
     "ProbeResult",
+    "at_context_limit",
     "classify_endpoint",
     "is_loopback_url",
     "require_loopback",
@@ -125,6 +128,23 @@ class LLMClient(Protocol):
 # The model catalogue — phase 3 (M17, plan-phase-3.md §3.1)
 # ===========================================================================
 
+#: A prompt at or above this share of the loaded context is **at the limit**
+#: (`SD48`, risk D1). Ollama truncates rather than refuses, and truncation
+#: caps the `prompt_tokens` it reports at the window, so a prompt this close
+#: either was truncated or is one feature description away from it.
+CONTEXT_LIMIT_SHARE: Final = 0.95
+
+
+def at_context_limit(prompt_tokens: int | None, context_length: int | None) -> bool:
+    """Whether one extraction's prompt reached the model's loaded context.
+
+    `False` whenever either number is unknown: an extraction is flagged on
+    evidence, never on its absence. The caller reports *unknown* separately.
+    """
+    if prompt_tokens is None or context_length is None or context_length <= 0:
+        return False
+    return prompt_tokens >= CONTEXT_LIMIT_SHARE * context_length
+
 
 @dataclass(frozen=True, slots=True)
 class ModelInfo:
@@ -202,6 +222,23 @@ class ModelCatalog(Protocol):
         on one GPU, and the copy left resident on the first squeezes the
         second out of VRAM (SD40). It releases only the model it is
         measuring, never another."""
+        ...
+
+    async def parameters(self, tag: str) -> Mapping[str, tuple[str, ...]] | None:
+        """The decoding options `tag` carries on the server (`/api/show`'s
+        `parameters`: a Modelfile's `PARAMETER` lines), each key to its values
+        in order, since `stop` repeats. `{}` when the model sets none, `None`
+        when the endpoint does not answer. **Never raises.** Pinned on the run
+        at launch (`SD48`): the digest pins the weights, not these."""
+        ...
+
+    async def context_length(self, tag: str) -> int | None:
+        """The context window `tag` is loaded with **right now** (`/api/ps`'s
+        `context_length`), whatever set it: a Modelfile, `OLLAMA_CONTEXT_LENGTH`
+        or the server default. `None` when `tag` is not loaded, when the
+        server does not report it, or when it does not answer. **Never
+        raises.** Read after a run's first record, when the model is loaded
+        with the context that record ran in (`SD48`, risk D1)."""
         ...
 
 

@@ -25,6 +25,8 @@ The adapters are never closed, here or anywhere: the app has always held its
 one pair for the life of the process, and a rebind simply lets the old one go.
 """
 
+from collections.abc import Mapping
+
 from ra2.domain.llm import EndpointStatus, Extraction, ModelInfo
 from ra2.infra.ollama_client import OllamaLLMClient, OllamaModelCatalog
 
@@ -114,3 +116,9 @@ class OllamaConnection:
 
     async def release(self, tag: str) -> None:
         await self._catalog.release(tag)
+
+    async def parameters(self, tag: str) -> Mapping[str, tuple[str, ...]] | None:
+        return await self._catalog.parameters(tag)
+
+    async def context_length(self, tag: str) -> int | None:
+        return await self._catalog.context_length(tag)

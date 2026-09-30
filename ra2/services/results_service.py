@@ -65,7 +65,7 @@ from ra2.services.readmodels import (
     SortDir,
     SuppressedCell,
 )
-from ra2.services.run_descriptor import build_descriptor
+from ra2.services.run_descriptor import build_descriptor, model_column
 
 __all__ = ["ResultsService"]
 
@@ -136,10 +136,9 @@ class ResultsService:
             cells = await _load_cells(session, runs)
             floor = evaluation.min_cell_count
 
-            models = tuple(
-                ModelColumnView(model_id=run.id, tag=run.model_name, digest=run.model_digest)
-                for run in runs
-            )
+            # SD48: each column carries its run's parse failures and at-limit
+            # count, so the reading problem sits over the numbers it explains.
+            models = tuple([await model_column(session, run) for run in runs])
             rows = [
                 _feature_row(feature, runs, cells, floor)
                 for feature in features

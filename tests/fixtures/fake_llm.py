@@ -321,10 +321,20 @@ class StaticModelCatalog:
         status: EndpointStatus = EndpointStatus.REACHABLE,
         version: str | None = DEFAULT_OLLAMA_VERSION,
         loaded: Sequence[str] = (),
+        parameters: Mapping[str, Mapping[str, tuple[str, ...]]] | None = None,
+        context_lengths: Mapping[str, int] | None = None,
     ) -> None:
         self._models = tuple(models)
         self._status = status
         self._version = version
+        #: `tag -> the Modelfile parameters /api/show would report` (SD48).
+        #: A tag not in here answers `{}`, the model that sets none.
+        self.server_parameters: dict[str, Mapping[str, tuple[str, ...]]] = dict(parameters or {})
+        #: `tag -> the context /api/ps would report once loaded` (SD48).
+        #: Mutable, so a test can change it between runs.
+        self.context_lengths: dict[str, int] = dict(context_lengths or {})
+        self.parameters_calls = 0
+        self.context_length_calls = 0
         #: Mutable, so a test can leave a model resident between passes.
         self.loaded_tags: tuple[str, ...] = tuple(loaded)
         self.models_calls = 0
@@ -369,6 +379,21 @@ class StaticModelCatalog:
     async def release(self, tag: str) -> None:
         self.released.append(tag)
         self.loaded_tags = tuple(t for t in self.loaded_tags if t != tag)
+
+    async def parameters(self, tag: str) -> Mapping[str, tuple[str, ...]] | None:
+        """`None` when unreachable, like the real adapter (SD48)."""
+        self.parameters_calls += 1
+        if self._status is not EndpointStatus.REACHABLE:
+            return None
+        return self.server_parameters.get(tag, {})
+
+    async def context_length(self, tag: str) -> int | None:
+        """What a loaded model reports. `None` when unreachable or when this
+        fake was given nothing for `tag`, the shape of an older Ollama."""
+        self.context_length_calls += 1
+        if self._status is not EndpointStatus.REACHABLE:
+            return None
+        return self.context_lengths.get(tag)
 
 
 class StaticEndpointProber:

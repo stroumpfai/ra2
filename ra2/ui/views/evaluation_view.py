@@ -98,7 +98,7 @@ view keeps only the handle it needs to close it on "refresh".
   link would be the design's affordance quietly missing.
 """
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Final, cast
 
@@ -179,6 +179,7 @@ from ra2.ui.state import (
     set_table_state,
     table_state,
 )
+from ra2.ui.views.results.chrome import DETERMINISM_CAVEAT
 
 __all__ = [
     "CONTENT_GAP",
@@ -374,7 +375,8 @@ PROMPT_NOTE: Final = (
 )
 DETERMINISM_NOTE: Final = (
     "Temperature 0.0 takes the most likely token every time; the seed fixes what "
-    "remains random. Same inputs, same output — a re-run is a check, not a new sample. "
+    "remains random. Same inputs, nearly always the same output — a re-run is a check, "
+    "not a new sample, though GPU inference is not bit-identical (SD48). "
     "Reasoning above “none” lets the model think before it answers: better on some "
     "features, and tens of times slower per record."
 )
@@ -1412,6 +1414,12 @@ class _EvaluationPage:
             ).mark("provenance-line").style(
                 "font-size:11px;line-height:1.6;margin-top:6px;white-space:normal;"
             )
+            # SD48, risk D3: the record is necessary, not sufficient.
+            ui.label(DETERMINISM_CAVEAT).classes("ink2").props(
+                'data-testid="determinism-caveat"'
+            ).mark("determinism-caveat").style(
+                "font-size:11.5px;margin-top:6px;white-space:normal;"
+            )
 
     # --- setup actions -------------------------------------------------------
 
@@ -2197,8 +2205,28 @@ def _provenance_line(provenance: ProvenanceView) -> str:
             # SD38. Always known (NOT NULL, 1 on every earlier run): how many
             # records were in flight, which is what this run's latencies mean.
             f"parallel calls {provenance.llm_parallel_calls}",
+            # SD48: what the digest does not pin. `unknown` when not recorded,
+            # like `gpu` above: an unreproducible run has to say so.
+            f"ollama {provenance.ollama_version or UNKNOWN_VALUE}",
+            f"server options {_server_options_text(provenance.server_parameters)}",
+            "context "
+            + (
+                UNKNOWN_VALUE
+                if provenance.context_length is None
+                else str(provenance.context_length)
+            ),
         )
     )
+
+
+def _server_options_text(parameters: Mapping[str, tuple[str, ...]] | None) -> str:
+    """`num_ctx 8192 + stop "<|im_end|>"` — every Modelfile parameter, in key
+    order. `none` when the model sets none, `unknown` when not recorded."""
+    if parameters is None:
+        return UNKNOWN_VALUE
+    if not parameters:
+        return "none"
+    return " + ".join(f"{key} {value}" for key, values in parameters.items() for value in values)
 
 
 def _corpus_label(corpus: CorpusView) -> str:

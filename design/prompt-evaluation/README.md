@@ -227,7 +227,9 @@ border:1px solid --rule; radius 3px; padding:7px 10px; surface; mono 11.5px`, wi
    `--ink3`, `margin-bottom:4px`) so input and label can't be confused: **Temperature** shows `0.0`
    with a `▾` caret (fixed choice), **Seed** shows `42` with a mono 10px `edit` hint (typed). Note:
    "Temperature 0.0 takes the most likely token every time; the seed fixes what remains random. Same
-   inputs, same output — a re-run is a check, not a new sample."
+   inputs, nearly always the same output — a re-run is a check, not a new sample, though GPU
+   inference is not bit-identical." *(Amended by `SD48`, risk D3: the design's "same inputs, same
+   output" claimed more than local inference supports.)*
 6. **Size** — two `.sel` radio-style options: "Evaluation · all 4 978" (selected: `border-color:--ink`,
    `●`) and "Dev · 40 records" (`--ink3`, `○`). Note: "Below 200 records a run is marked *dev* and every
    view carries 'smoke test, not a result'."

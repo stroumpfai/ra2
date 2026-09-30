@@ -981,9 +981,9 @@ the last three days in which any of them can be done.*
 | **25** | **✓ §8.9** | `reset_data.py` prints records and corpora, not bytes, and refuses a non-dev corpus without a second token. **Built as "not synthetic"** rather than "not dev-sized", and `reset-seed` refuses real data outright | **E4** | done |
 | **26** | **✓ §8.9** | Correct the README, and gate it: a test that no shipped nav item appears under *Not built yet*. Eleven further stale statements corrected by audit | **F6, E3** | done |
 | **27** | **✓ §8.9** | A synthetic-corpus marker, rendered beside the dev chip and refused by the ranking — **needs a migration, so its deadline is earlier: before real data is in the database**. Built: revision `5e1d7a3c9b20`; the ranking renders but names no winner | **D8** | done |
-| 6 | open | Record the context length on the run (`/api/show`); **flag any extraction whose returned `prompt_tokens` sits at or near the limit** — the per-extraction counts already exist (§9.4) | D1 | ½–1 d |
-| 7 | open | Carry the parse-failure rate onto Results and Ranking | D2 | 2 h |
-| 8 | open | Record model-server version and decoding options on the run; state the determinism caveat in the report template | D3 | 3 h |
+| 6 | **✓ §8.10** | Record the context length on the run (built from `/api/ps`, the loaded value, not `/api/show`); **flag any extraction whose returned `prompt_tokens` sits at or near the limit** — the per-extraction counts already exist (§9.4) | D1 | done |
+| 7 | **✓ §8.10** | Carry the parse-failure rate onto Results and Ranking | D2 | done |
+| 8 | **✓ §8.10** | Record model-server version and decoding options on the run; state the determinism caveat in the report template (new: `docs/evaluation-report-template.md`) | D3 | done |
 | 5 | open | Render the anonymisation marking as three states until its semantics are confirmed | B5 | 2 h |
 | 10 | open | Standing copy on Results: a mismatch rate is not a model error rate until the list is read — D6 closed by delivery, the string is still worth it | D6 | 1 h |
 | 9 | open | Constrain `root_path` to an allowed root; bound the walk; make the server honour `Settings.host` or drop it | A4, G3 | ½ d |
@@ -1796,6 +1796,68 @@ when this slice started. The gate had not been built.
   export, so no exported number can carry a winner, but the census and
   mismatch exports of a seed are not marked synthetic.
 - **The pre-migration seed.** See above: re-seed once.
+
+### 8.10 D1, D2, D3 — what a run can and cannot vouch for · closed 2026-09-30 · `fix-d1-d2-d3-run-provenance`
+
+**Status: closed as recommended, except the one decision D1 left open.** One
+migration, `b4f2c81e6d37`, adds three nullable `run` columns. See
+`contracts/amendments/fix-d1-d2-d3-run-provenance.md` and `SD48`.
+
+**D1: the context, recorded and compared (row 6).** The adapter still sends
+no context size, so the server decides. What changed is that the app now
+finds out what it decided.
+
+- **What is recorded, and when.** After a run's first committed record, the
+  worker asks `/api/ps` for the context the model is loaded with and pins it
+  on `run.context_length`. It asks once per run, and a resumed run keeps its
+  first reading.
+- **Why not `/api/show`.** It reports `num_ctx` only when a Modelfile sets
+  one, which is the uncommon case; the loaded value is what the server
+  actually applied.
+- **The flag.** An extraction is at the limit when its returned
+  `prompt_tokens` reach 95 % of that context: truncation caps the count at
+  the window. The count is computed from stored rows when a board is read, so
+  no new per-extraction column was needed.
+- **Unknown is not zero.** A run with no recorded context (an earlier run, or
+  an Ollama that does not report it) shows *context not recorded*.
+
+*Not done: recommendation 3, who **sets** the context.* It is written into
+`sw-design.md` §15.8 as undecided, for the runbook, with the recorded context
+as its evidence. Recommendations 2 (refuse to launch above a budget) and 4
+(check truncation against the real server at M34) remain open. Gate 3's
+row 17 already carries the second.
+
+**D2: parse failures reach the results (row 7).** Each model's unreadable
+rate and at-limit count now appear in two places:
+- under its column header on the Results extraction tab;
+- in a new **Unreadable** column in the ranking's reported-never-scored
+  group, beside VRAM.
+
+One helper feeds both boards, and a backend test asserts they agree.
+
+**D3: the record, and what it cannot promise (row 8).**
+- **Pinned at launch:** the Ollama version, now asked at every launch rather
+  than only when a parallel-calls entry applied, and each model's server-side
+  decoding options (its Modelfile `PARAMETER`s). `{}` (sets none) and `None`
+  (endpoint did not say) are kept apart.
+- **On the reproducibility card:** all three, with `unknown` for an earlier
+  run.
+- **The caveat.** It is one constant, `DETERMINISM_CAVEAT`, shown on the
+  reproducibility card and under the ranking's validity footer.
+  `docs/evaluation-report-template.md` is new, since no template existed; it
+  quotes the caveat verbatim, and a test holds the two together.
+- **Found on the way:** the design's own step-5 note promised *"Same inputs,
+  same output"*, the exact overclaim D3 describes. The design README is
+  amended first, then the view.
+
+**What this does not close.**
+- **A launch-time budget check** (D1 recommendation 2): estimating the longest
+  record's prompt before launch. The at-limit count tells you afterwards;
+  nothing stops you beforehand.
+- **Runs launched before this revision** carry none of the three fields.
+  Their cards say `unknown`, and their at-limit counts say *not recorded*.
+- **Presence and Mismatches** columns do not carry the reading figures. They
+  are shown where a score is shown.
 
 ---
 

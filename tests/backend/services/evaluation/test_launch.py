@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.fixtures.fake_llm import (
     DEFAULT_MODELS,
+    DEFAULT_OLLAMA_VERSION,
     StaticConnectionSettings,
     StaticEndpointProber,
     StaticModelCatalog,
@@ -193,6 +194,47 @@ async def test_launch_pins_each_models_size(
         fitting_model: catalogue[fitting_model],
         second_fitting_model: catalogue[second_fitting_model],
     }
+
+
+async def test_launch_pins_the_ollama_version_and_each_models_server_options(
+    evaluation_service: EvaluationService,
+    db_session_factory: async_sessionmaker[AsyncSession],
+    launchable: Callable[..., Awaitable[tuple[CorpusId, FeatureConfigView, str]]],
+    model_catalog: StaticModelCatalog,
+    fitting_model: str,
+    second_fitting_model: str,
+) -> None:
+    """**SD48, risk D3.** The digest pins the weights, not the runtime or the
+    Modelfile's `PARAMETER`s. Each run records its own model's options, and
+    `{}` (the model sets none) stays distinct from `None` (not recorded)."""
+    import json
+
+    model_catalog.server_parameters[fitting_model] = {"num_ctx": ("8192",), "top_k": ("40",)}
+    _, _, evaluation_id = await launchable(models=(fitting_model, second_fitting_model))
+
+    await evaluation_service.launch(EvaluationId(evaluation_id))
+
+    async with db_session_factory() as session:
+        runs = (await session.scalars(select(Run).where(Run.evaluation_id == evaluation_id))).all()
+    assert {run.ollama_version for run in runs} == {DEFAULT_OLLAMA_VERSION}
+    options = {run.model_name: run.server_parameters_json for run in runs}
+    first, second = options[fitting_model], options[second_fitting_model]
+    assert first is not None and second is not None
+    assert json.loads(first) == {"num_ctx": ["8192"], "top_k": ["40"]}
+    assert json.loads(second) == {}
+    # Read after the first record, never at launch: nothing is loaded yet.
+    assert {run.context_length for run in runs} == {None}
+    assert model_catalog.context_length_calls == 0
+
+    # And the reproducibility card's read model carries all three.
+    provenance = (await evaluation_service.get(EvaluationId(evaluation_id))).provenance
+    assert provenance is not None
+    assert provenance.ollama_version == DEFAULT_OLLAMA_VERSION
+    assert provenance.server_parameters in (
+        {"num_ctx": ("8192",), "top_k": ("40",)},
+        {},
+    )
+    assert provenance.context_length is None
 
 
 async def test_launch_pins_each_models_own_parallel_calls(
