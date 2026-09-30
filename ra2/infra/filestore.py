@@ -199,6 +199,18 @@ class HostPathFileStore:
             )
         self._roots[delivery_id] = root
 
+    def restore(self, delivery_id: DeliveryId, root: Path) -> None:
+        """Rebind a delivery registered **earlier**, from its stored root.
+
+        The bindings live in memory, so a restarted process knew none of them
+        and could not re-read an analysed delivery to freeze it. The services
+        restore the binding from `delivery.root_path` before each use.
+        **Not** re-checked against `allowed_root`: that rule applies at
+        registration (`SD49`), and a delivery registered before it, or before
+        the root moved, has to stay readable rather than become a dead row.
+        """
+        self._roots[delivery_id] = root
+
     async def accept(self, delivery_id: DeliveryId, filename: str, content: BinaryIO) -> StoredFile:
         raise ReadOnlyFileStoreError(
             "a host-path delivery registers files in place; it never receives them"

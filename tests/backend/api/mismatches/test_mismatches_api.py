@@ -397,3 +397,13 @@ async def test_the_csv_is_unpaged(api_client: AsyncClient, scored: ScoredCorpus)
     # classification line, evaluation comment, header row (risk B1 added the
     # first of the three).
     assert len(lines) == listed.json()["rows"]["total"] + 3
+
+
+def test_the_note_field_warns_that_it_is_exported_verbatim() -> None:
+    """Risk B6, `SD51`. The API is the only place a note can be written (the
+    Mismatches screen has no field), so the warning sits on that field and
+    shows wherever the API is documented."""
+    from ra2.api.schemas import NOTE_LEAVES_RA2, TagMismatchRequest
+
+    schema = TagMismatchRequest.model_json_schema()
+    assert schema["properties"]["note"]["description"] == NOTE_LEAVES_RA2

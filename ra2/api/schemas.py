@@ -10,6 +10,7 @@ write mapping functions, not translations.
 """
 
 from datetime import datetime
+from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,6 +26,7 @@ from ra2.infra.tasks import TaskStatus
 from ra2.services.readmodels import SortDir
 
 __all__ = [
+    "NOTE_LEAVES_RA2",
     "AnalyseResponse",
     "BlockingFindingsResponse",
     "BreakdownResponse",
@@ -116,6 +118,15 @@ __all__ = [
     "UpdateEvaluationRequest",
     "ValueCountResponse",
 ]
+
+
+#: Risk B6, `SD51`. In the voice of the discard dialog's `EXPORT_LEAVES_RA2`:
+#: a note is exported verbatim in both mismatch CSVs, so what is quoted into it
+#: leaves with the file. Shown in `/api/docs` on the one field that writes it.
+NOTE_LEAVES_RA2: Final = (
+    "Exported verbatim in both mismatch CSVs. Write what you concluded, not what "
+    "the narrative says: a sentence quoted here leaves RA2's control with the file."
+)
 
 
 class _Schema(BaseModel):
@@ -1336,4 +1347,6 @@ class TagMismatchRequest(_Schema):
     tag: MismatchTag
     #: Optional and single-line. The column exists, the service writes it and
     #: the CSV carries it; nothing in mvp-spec.md §12 describes more.
-    note: str | None = None
+    #: Risk B6: the one free-text channel into an export, and the API is the
+    #: only place a note can be written, so the warning is on the field.
+    note: str | None = Field(default=None, description=NOTE_LEAVES_RA2)

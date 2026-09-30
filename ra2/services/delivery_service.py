@@ -28,7 +28,7 @@ from ra2.persistence.session import session_scope
 from ra2.services.errors import HostPathRefusedError, NotFoundError
 from ra2.services.readmodels import DeliveryFileView, DeliveryView, Page, SortDir
 
-__all__ = ["DeliveryService"]
+__all__ = ["DeliveryService", "store_for"]
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +242,27 @@ class _RootBindingStore(Protocol):
     from. `HostPathFileStore` is the one; an upload store needs nothing."""
 
     def bind(self, delivery_id: DeliveryId, root: Path) -> None: ...
+
+    def restore(self, delivery_id: DeliveryId, root: Path) -> None: ...
+
+
+def store_for(
+    delivery: Delivery, *, upload_store: FileStore, host_path_store: FileStore
+) -> FileStore:
+    """The store this delivery's files live in, **bound** (§6.1).
+
+    A host-path store keeps its bindings in memory, so after a restart it
+    knew no delivery at all: an analysed host-path delivery could not be
+    re-read, and so could not be frozen. The binding is restored here from
+    the row, every time, which costs one dict write and needs no startup
+    step anyone could forget. Shared by `DeliveryService` and
+    `CorpusService`, the two services that read delivery bytes.
+    """
+    if SourceKind(delivery.source_kind) is not SourceKind.HOST_PATH:
+        return upload_store
+    if delivery.root_path is not None and isinstance(host_path_store, _RootBindingStore):
+        host_path_store.restore(DeliveryId(delivery.id), Path(delivery.root_path))
+    return host_path_store
 
 
 class DeliveryService:
@@ -595,11 +616,11 @@ class DeliveryService:
     # --- internals ---------------------------------------------------------
 
     def _store_for(self, delivery: Delivery) -> FileStore:
-        """The store this delivery's files live in. Nothing downstream of the
-        seam knows which intake path was used (§6.1)."""
-        if SourceKind(delivery.source_kind) is SourceKind.HOST_PATH:
-            return self._host_path_store
-        return self._upload_store
+        """The store this delivery's files live in, bound. Nothing downstream
+        of the seam knows which intake path was used (§6.1)."""
+        return store_for(
+            delivery, upload_store=self._upload_store, host_path_store=self._host_path_store
+        )
 
     async def _set_status(self, delivery_id: DeliveryId, status: DeliveryStatus) -> None:
         async with session_scope(self._session_factory) as session:

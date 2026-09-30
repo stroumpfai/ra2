@@ -987,8 +987,8 @@ the last three days in which any of them can be done.*
 | 5 | **✓ §8.12** | Render the anonymisation marking as three states until its semantics are confirmed | B5 | done |
 | 10 | **✓ §8.12** | Standing copy on Results: a mismatch rate is not a model error rate until the list is read — D6 closed by delivery, the string is still worth it | D6 | done |
 | 9 | **✓ §8.11** | Constrain `root_path` to an allowed root; bound the walk; make the server honour `Settings.host` or drop it. Host half by `SD42`; root and walk by `SD49` | A4, G3 | done |
-| **28** | open | A contract test: every `Settings` field has a reader in `ra2/`, or it does not exist | G3 | 2 h |
-| **29** | open | Helper copy under the mismatch note field, in `EXPORT_LEAVES_RA2`'s voice | B6 | 1 h |
+| **28** | **✓ §8.11** | A contract test: every `Settings` field has a reader in `ra2/`, or it does not exist. **Built as `SD42`** (`tests/test_settings_have_readers.py`, described under G3's *Built*); this row was never updated. Every setting added since (`import_*`, `delivered_text_anonymised`) passes it | G3 | done |
+| **29** | **✓ §8.13** | Helper copy under the mismatch note field, in `EXPORT_LEAVES_RA2`'s voice. **There is no note field on the screen**: built as the API field's description, plus `data-handling.md` §3 rule 5 and the `tagged_by` proposal | B6 | done |
 
 ### Gate 2 — before real data lands on the machine
 
@@ -1894,11 +1894,13 @@ delivery-level finding that does not exist.
 step 5 therefore stays manual, but it now has one address instead of
 "wherever the delivery was registered from" (`data-handling.md` §4.1, P5).
 
-**Found on the way, not fixed.** `HostPathFileStore` keeps each delivery's
-root in memory only, and nothing rebinds it from `delivery.root_path` at
-startup. After a restart, an analysed host-path delivery cannot be re-read,
-so it cannot be frozen. This is pre-existing, unrelated to the constraint,
-and belongs in its own change.
+**Found on the way, fixed separately** (`fix-host-path-survives-restart`,
+2026-09-30). `HostPathFileStore` kept each delivery's root in memory only,
+and nothing rebound it from `delivery.root_path` at startup, so after a
+restart an analysed host-path delivery could not be re-read or frozen. Both
+services now restore the binding from the row before every use. A test
+freezes through a fresh store, which is what a restart looks like; without
+the fix it fails with the original error.
 
 **What this does not close.**
 - **Upload-only** (row 30).
@@ -1950,6 +1952,30 @@ UI tests assert it on both tabs.
 - **The export's classification line** (`CLASSIFICATION_COMMENT`) still says
   *non-anonymised* for every file. That stays deliberately: it is the
   conservative handling rule, not a per-record claim.
+
+### 8.13 B6, row 28, and a restart defect · closed 2026-09-30 · `fix-host-path-survives-restart`
+
+**Row 29 (B6).** The row asked for helper copy *under the mismatch note
+field*. There is none: `plan-phase-5.md` §2.3 said the view would offer an
+optional single-line input, and it was never built. A note can be written
+through the API only, and it is exported verbatim in both mismatch CSVs.
+
+The warning therefore goes where a note is written. `NOTE_LEAVES_RA2`, in the
+voice of the discard dialog's `EXPORT_LEAVES_RA2`, is the `note` field's
+description, and a test asserts it. `data-handling.md` §3 now lists `note`
+among the exported columns and gains rule 5: write the conclusion, not the
+narrative.
+
+The `tagged_by` gap is written there as a **proposal** to accept for the PoC
+and re-open at F3. Accepting it is the project's decision, not this commit's.
+
+**Row 28** was built as `SD42` (see G3's *Built*) and its status row was
+never updated. It is now marked done. Every setting added since passes the
+gate.
+
+**The restart defect found in §8.11** is fixed: both services restore a
+host-path delivery's binding from `delivery.root_path` before every use. See
+`contracts/amendments/fix-host-path-survives-restart.md`.
 
 ---
 

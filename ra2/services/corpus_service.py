@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ra2.domain.canary import canary_finding, count_canary_chars
-from ra2.domain.delivery import DeliveryStatus, FileKind, SourceKind
+from ra2.domain.delivery import DeliveryStatus, FileKind
 from ra2.domain.findings import Finding
 from ra2.domain.ids import CorpusId, DeliveryId, ObjektRowId, PersonRowId, RecordId
 from ra2.domain.language import LanguageDetector
@@ -45,7 +45,12 @@ from ra2.persistence.models import (
 from ra2.persistence.repositories.corpus_repo import CorpusRepository
 from ra2.persistence.repositories.delivery_repo import DeliveryRepository
 from ra2.persistence.session import session_scope
-from ra2.services.delivery_service import dump_findings, dump_json, parsed_file_for
+from ra2.services.delivery_service import (
+    dump_findings,
+    dump_json,
+    parsed_file_for,
+    store_for,
+)
 from ra2.services.errors import (
     BlockingFindingsError,
     CorpusLockedError,
@@ -309,14 +314,15 @@ class CorpusService:
     # --- internals ---------------------------------------------------------
 
     def _store_for(self, delivery: Delivery) -> FileStore:
-        """The store this delivery's files live in. Nothing downstream of the
-        seam knows which intake path was used (§6.1). Mirrors
-        `DeliveryService._store_for` — the freeze re-reads bytes through the
-        same injected, already-bound stores that intake and analyse used, so
-        a host-path delivery's registered root is not reconstructed."""
-        if SourceKind(delivery.source_kind) is SourceKind.HOST_PATH:
-            return self._host_path_store
-        return self._upload_store
+        """The store this delivery's files live in, bound (§6.1).
+
+        This used to rely on the store having been bound at registration, in
+        the same process. After a restart it had not been, and the freeze of
+        an analysed host-path delivery failed with "no host path registered".
+        `store_for` restores the binding from the row every time."""
+        return store_for(
+            delivery, upload_store=self._upload_store, host_path_store=self._host_path_store
+        )
 
     async def _read_bytes(self, delivery: Delivery, row: DeliveryFile) -> bytes:
         return await self._store_for(delivery).read_bytes(
