@@ -33,6 +33,8 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page, expect
 
+from ra2.infra.config import Settings
+
 pytestmark = pytest.mark.e2e
 
 #: `tests/e2e/` -> `tests/`.
@@ -74,8 +76,10 @@ _JSON = {"Content-Type": "application/json"}
 
 
 @pytest.fixture
-def delivery_root(tmp_path: Path) -> Path:
-    root = tmp_path / "j9-delivery"
+def delivery_root(tmp_path: Path, e2e_settings: Settings) -> Path:
+    # Under the server's import root, one directory per test: a host path
+    # anywhere else is refused (SD49), and the root is shared by the session.
+    root = e2e_settings.import_root_path / tmp_path.name / "j9-delivery"
     root.mkdir(parents=True)
     for name, source in DELIVERY.items():
         (root / name).write_bytes((_HAZARDS / source).read_bytes())

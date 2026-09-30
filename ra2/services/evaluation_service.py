@@ -32,7 +32,7 @@ import json
 import logging
 import platform
 import statistics
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any, Final
 
@@ -614,13 +614,11 @@ class EvaluationService:
         connection = await self.connection_status()
         catalogue = await self._model_catalog.models()
         models = self._judge(catalogue, connection)
-        # Only when some entry could apply: an empty map, today's default,
-        # costs no extra round trip.
-        ollama_version = (
-            await self._model_catalog.version()
-            if any(calls > 1 for calls in self._settings.llm_parallel_calls.values())
-            else None
-        )
+        # Always asked now: SD48 pins it on every run as provenance, and the
+        # parallel-calls gate (SD40) reads the same answer. One round trip
+        # per launch, not per record.
+        ollama_version = await self._model_catalog.version()
+        server_parameters = await self._server_parameters(evaluation_id, models)
 
         async with session_scope(self._session_factory) as session:
             evaluation = await self._editable(session, evaluation_id)
@@ -665,6 +663,8 @@ class EvaluationService:
                         parallel_calls=await self._parallel_calls(
                             session, evaluation, model, ollama_version, measuring=measuring
                         ),
+                        ollama_version=ollama_version,
+                        server_parameters=server_parameters.get(model.tag),
                     )
                     for model in chosen
                 ],
@@ -852,6 +852,22 @@ class EvaluationService:
         if validation_errors:
             raise FeatureValidationError(validation_errors)
 
+    async def _server_parameters(
+        self, evaluation_id: EvaluationId, models: Sequence[ModelChoiceView]
+    ) -> dict[str, Mapping[str, tuple[str, ...]] | None]:
+        """`/api/show` for each selected tag the endpoint offers (SD48).
+
+        Asked before the launch transaction, like every other socket call
+        here, so it reads the selection in a short session of its own. A tag
+        that will be refused inside the transaction costs one wasted call,
+        which is cheaper than holding a transaction across a socket.
+        """
+        async with self._session_factory() as session:
+            evaluation = await session.get(Evaluation, evaluation_id)
+            tags = _selected_models(evaluation) if evaluation is not None else ()
+        offered = {choice.tag for choice in models}
+        return {tag: await self._model_catalog.parameters(tag) for tag in tags if tag in offered}
+
     def _launch_models(
         self,
         evaluation: Evaluation,
@@ -935,6 +951,8 @@ class EvaluationService:
         connection: ConnectionView,
         *,
         parallel_calls: int,
+        ollama_version: str | None = None,
+        server_parameters: Mapping[str, tuple[str, ...]] | None = None,
     ) -> Run:
         """One `queued` run, **provenance and all** (mvp-spec.md §19.8).
 
@@ -967,6 +985,15 @@ class EvaluationService:
             # a tag's size behind an unchanged name, and the ranking reads
             # stored rows, never the catalogue (§16.5).
             model_size_bytes=model.size_bytes,
+            # SD48: what the digest does not pin. The context the model is
+            # *loaded* with is read after the first record (`run_service`),
+            # because nothing is loaded yet.
+            ollama_version=ollama_version,
+            server_parameters_json=(
+                None
+                if server_parameters is None
+                else json.dumps({k: list(v) for k, v in server_parameters.items()}, sort_keys=True)
+            ),
             status=RunStatus.QUEUED,
             host_platform=platform.platform()[:200],
             gpu_name=connection.gpu_name,
@@ -1224,6 +1251,9 @@ class EvaluationService:
             llm_endpoint=run.llm_endpoint,
             llm_reasoning_effort=run.llm_reasoning_effort,
             llm_parallel_calls=run.llm_parallel_calls,
+            ollama_version=run.ollama_version,
+            server_parameters=_server_parameters(run.server_parameters_json),
+            context_length=run.context_length,
         )
 
 
@@ -1250,6 +1280,14 @@ def _fingerprint_input(feature: Feature, enum_codelist_json: str | None) -> Fing
         enum_codelist_json=enum_codelist_json,
         description=feature.description,
     )
+
+
+def _server_parameters(payload: str | None) -> dict[str, tuple[str, ...]] | None:
+    """`run.server_parameters_json`, read back. `None` stays `None`: the
+    endpoint did not say, which is not the same as a model that sets none."""
+    if payload is None:
+        return None
+    return {key: tuple(values) for key, values in json.loads(payload).items()}
 
 
 def _selected_models(evaluation: Evaluation) -> tuple[str, ...]:

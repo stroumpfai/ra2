@@ -60,12 +60,24 @@ PREVIEW_LINES: Final = 20
 FINDING_LABELS: Final[dict[FindingCode, str]] = {
     FindingCode.ENCODING_DETECTED: "Encoding detected",
     FindingCode.FILE_UNDECODABLE: "File could not be decoded — it is excluded from any corpus",
+    FindingCode.FILE_UNSUPPORTED_BOM: (
+        "File is UTF-16 or UTF-32 — re-export it as UTF-8; it is excluded from any corpus"
+    ),
+    FindingCode.FILE_CONTAINS_NUL: (
+        "File contains NUL bytes, most likely UTF-16 — re-export it as UTF-8;"
+        " it is excluded from any corpus"
+    ),
+    FindingCode.UTF8_READ_AS_CP1252: (
+        "Part of this file is UTF-8 read as Windows-1252 — that text is garbled;"
+        " ask for a clean UTF-8 re-export"
+    ),
     FindingCode.DIALECT_DETECTED: "Delimiter and quote character detected",
     FindingCode.UNKNOWN_HEADER: "Header matches no known table",
     FindingCode.HEADER_MISMATCH: "Header matches a known table, but not exactly",
     FindingCode.ROW_RECOVERED: "Row reassembled across several lines",
     FindingCode.ROW_REJECTED_FIELD_COUNT: "Row rejected — field count differs from the header",
     FindingCode.ROW_REJECTED_PARSE_ERROR: "Row rejected — it could not be read",
+    FindingCode.ROW_BLANK_DROPPED: "Blank row dropped",
     FindingCode.DUP_KEY_CROSS_SET: "Key appears twice in this delivery",
     FindingCode.ORPHAN_FK: "Child row with no parent",
     FindingCode.SET_UNRESOLVED: "File reaches no unfall file, so it belongs to no set",

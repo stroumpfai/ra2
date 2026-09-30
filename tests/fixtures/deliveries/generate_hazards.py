@@ -1,4 +1,4 @@
-"""Regenerate the fourteen hazard fixtures (sw-design.md §11.4).
+"""Regenerate the seventeen hazard fixtures (sw-design.md §11.4).
 
 mvp-spec.md §15 is explicit that clean fixtures are not acceptable. The real
 delivery is classified and gitignored and must never reach a test (§12.11), so
@@ -36,6 +36,9 @@ The hazards, and what each one exists to prove:
 | h12_unknown_header     | header matching no table          | unknown; blocks if selected |
 | h13_astrana_blank_row  | Astrana's doubled-CRLF blank row   | dropped, real rows stay OK  |
 | h14_astrana_header     | Astrana `unfall`/`objekt`/`Mitfahrende` | classifies, freezes    |
+| h15_mixed_encoding     | UTF-8 rows, then one cp1252 row   | cp1252, mojibake reported   |
+| h16_utf16_bom          | UTF-16-LE with its byte-order mark | file fails, BOM named      |
+| h17_utf16_no_bom       | UTF-16-LE with no byte-order mark | file fails, NUL named       |
 """
 
 import sys
@@ -550,6 +553,61 @@ def _h14_astrana_header() -> dict[str, bytes]:
     return {"Unfall.csv": unfall, "Objekt.csv": objekt, "Mitfahrende.csv": person}
 
 
+#: h15's narratives, in file order, each with the encoding its row is written
+#: in. The first two are UTF-8 and hold five multi-byte sequences between them
+#: (`ü`, `ä`, `Ü` and the three-byte `‘` and `’`). The last row's cp1252 `ä`
+#: (`0xE4`, then ASCII) is what makes the file invalid UTF-8.
+MIXED_ENCODING_ROWS = (
+    (uid("aa", 1), "Grüezi, der Fussgänger stand am Rand.", "utf-8"),
+    (uid("aa", 2), "Übergang gesperrt, Sicht ‘stark’ behindert.", "utf-8"),
+    (uid("aa", 3), "Nässe auf der Fahrbahn.", "cp1252"),
+)
+
+
+def _h15_mixed_encoding() -> dict[str, bytes]:
+    """UTF-8 rows followed by one cp1252 row, in one file (risk G1).
+
+    Detection is per file, so the one cp1252 byte fails UTF-8 for the whole
+    file and cp1252 decodes all of it. The UTF-8 rows *before* it then become
+    mojibake (`GrÃ¼ezi`). Nothing can repair that, but it must not go
+    unreported: `UTF8_READ_AS_CP1252` counts the sequences.
+
+    Each line is encoded separately, which is how such a file comes to exist:
+    one export appended to another.
+    """
+    header = TEXT_DELIMITER.join((TEXT_KEY_COLUMN, TEXT_NARRATIVE_COLUMN)) + CRLF
+    out = header.encode("ascii")
+    for key, narrative, encoding in MIXED_ENCODING_ROWS:
+        out += f"{key}{TEXT_DELIMITER}{narrative}{CRLF}".encode(encoding)
+    return {"text.csv": out}
+
+
+def _utf16_text_file() -> str:
+    return text_file(
+        [
+            (uid("aa", 1), "Kollision auf der Kreuzung."),
+            (uid("aa", 2), "Fahrzeug geriet ins Schleudern."),
+        ]
+    )
+
+
+def _h16_utf16_bom() -> dict[str, bytes]:
+    """An Excel "Unicode Text" re-export: UTF-16-LE with its byte-order mark.
+
+    UTF-8 accepts `U+0000` and cp1252 decodes almost every byte, so without a
+    check this decodes "successfully" and fails later as `UNKNOWN_HEADER`,
+    which sends the analyst to fix a header that is fine (risk G2). The BOM is
+    written explicitly, since Python's `utf-16` codec picks the platform's
+    byte order.
+    """
+    return {"text.csv": b"\xff\xfe" + _utf16_text_file().encode("utf-16-le")}
+
+
+def _h17_utf16_no_bom() -> dict[str, bytes]:
+    """The same UTF-16-LE file with no byte-order mark: only its NULs show it."""
+    return {"text.csv": _utf16_text_file().encode("utf-16-le")}
+
+
 #: Ordered, so a regenerated tree is byte-identical every time.
 HAZARDS = (
     ("h01_cp1252", _h01_cp1252),
@@ -566,6 +624,9 @@ HAZARDS = (
     ("h12_unknown_header", _h12_unknown_header),
     ("h13_astrana_blank_row", _h13_astrana_blank_row),
     ("h14_astrana_header", _h14_astrana_header),
+    ("h15_mixed_encoding", _h15_mixed_encoding),
+    ("h16_utf16_bom", _h16_utf16_bom),
+    ("h17_utf16_no_bom", _h17_utf16_no_bom),
 )
 
 

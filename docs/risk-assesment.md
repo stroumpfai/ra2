@@ -88,10 +88,10 @@ the register was graded for a project being *built* and the project is now being
 | # | Status | Action | Effort | Risk |
 |---|---|---|---|---|
 | 21 | **✔ closed** | **`hide_parameters=True`** — a database error wrote the narrative and `unfall_uid` into `run.error` **and into the log** (reproduced). Fixed at the engine, with a provoked-`IntegrityError` test and a positive control (`contracts/amendments/fix-a5-bound-parameters.md`) | — | **A5** |
-| 23·24 | open | An intake mojibake canary and the mixed-encoding fixture — a mixed-encoding delivery is silently corrupted today (reproduced), and real files meet the parser for the first time at handover | ~½ day | **G1, G4** |
+| 23·24 | **✓ §8.8** | An intake mojibake canary and the mixed-encoding fixture — a mixed-encoding delivery was silently corrupted (reproduced). It is still corrupted, since nothing can repair it, but it is now **reported**, per file and on the corpus, and `h15` pins it. Row 22 (G2) closed with it | — | **G1, G4** |
 | 11·15 | **◑ §8.6** | Fill in `data-handling.md` §7's ten decisions and close `mvp-spec.md` §18's B1–B4. **No longer pending — late**, and four of them gate work that cannot be done afterwards (§6) | ~1 day, no code | **F1, B3, C3** |
 | 31 | open | **A stated support path** — what may be copied off the machine when something breaks. The developer is reachable rather than resident, and §9.1.1 is the chain that makes this the dominant technical residual. **Item 21 broke link 5 and did not break the chain**: a screenshot, a hand-typed description and the export all still carry content | ~2 h, no code | **C2, E3** |
-| 26·32 | open | Correct and **gate** the README; start an operations log from the first real run. The handover document currently says the deliverable does not exist | ~½ day | **F6, E3, F4** |
+| 26·32 | **open · 26 ✓ §8.9** | Correct and **gate** the README; start an operations log from the first real run. The README half is done and gated; the operations log (32) is not | ~½ day | **F6, E3, F4** |
 
 **The headline of the second pass is not a defect.** Every technical control in
 this report has improved since `616bf2b`, the gates are green, and A5 — the
@@ -975,18 +975,18 @@ the last three days in which any of them can be done.*
 | # | Status | Action | Risk | Effort |
 |---|---|---|---|---|
 | **21** | **✔ closed** | **`hide_parameters=True` on `create_async_engine`**, plus a provoked-`IntegrityError` test with a positive control, and §5.1 of `data-handling.md` stating that the list is enforced at the engine as well as at the call sites. `SD39`; `contracts/amendments/fix-a5-bound-parameters.md` | **A5** | **done** |
-| **22** | open | Refuse UTF-16/32 BOMs and NUL bytes in `detect_encoding`, each with its own `FindingCode` | **G2** | 1 h |
-| **23** | open | An intake mojibake canary — the mirror of `CP1252_CANARY_ZERO`; one `FindingCode`, no schema change | **G1** | ½ d |
-| **24** | open | `h15_mixed_encoding` — the hazard `CLAUDE.md` has required by name since month one | **G4** | 1 h |
-| **25** | open | `reset_data.py` prints records and corpora, not bytes, and refuses a non-dev corpus without a second token | **E4** | 2 h |
-| **26** | open | Correct the README, and gate it: a test that no shipped nav item appears under *Not built yet* | **F6, E3** | 2 h |
-| **27** | open | A synthetic-corpus marker, rendered beside the dev chip and refused by the ranking — **needs a migration, so its deadline is earlier: before real data is in the database** | **D8** | ½ d + migration |
-| 6 | open | Record the context length on the run (`/api/show`); **flag any extraction whose returned `prompt_tokens` sits at or near the limit** — the per-extraction counts already exist (§9.4) | D1 | ½–1 d |
-| 7 | open | Carry the parse-failure rate onto Results and Ranking | D2 | 2 h |
-| 8 | open | Record model-server version and decoding options on the run; state the determinism caveat in the report template | D3 | 3 h |
-| 5 | open | Render the anonymisation marking as three states until its semantics are confirmed | B5 | 2 h |
-| 10 | open | Standing copy on Results: a mismatch rate is not a model error rate until the list is read — D6 closed by delivery, the string is still worth it | D6 | 1 h |
-| 9 | open | Constrain `root_path` to an allowed root; bound the walk; make the server honour `Settings.host` or drop it | A4, G3 | ½ d |
+| **22** | **✓ §8.8** | Refuse UTF-16/32 BOMs and NUL bytes in `detect_encoding`, each with its own `FindingCode` | **G2** | done |
+| **23** | **✓ §8.8** | An intake mojibake canary — the mirror of `CP1252_CANARY_ZERO`; one `FindingCode`, no schema change. **Per file at analysis**, not per corpus at freeze; see §8.8 | **G1** | done |
+| **24** | **✓ §8.8** | `h15_mixed_encoding` — the hazard `CLAUDE.md` has required by name since month one. Plus `h16`/`h17` for G2 | **G4** | done |
+| **25** | **✓ §8.9** | `reset_data.py` prints records and corpora, not bytes, and refuses a non-dev corpus without a second token. **Built as "not synthetic"** rather than "not dev-sized", and `reset-seed` refuses real data outright | **E4** | done |
+| **26** | **✓ §8.9** | Correct the README, and gate it: a test that no shipped nav item appears under *Not built yet*. Eleven further stale statements corrected by audit | **F6, E3** | done |
+| **27** | **✓ §8.9** | A synthetic-corpus marker, rendered beside the dev chip and refused by the ranking — **needs a migration, so its deadline is earlier: before real data is in the database**. Built: revision `5e1d7a3c9b20`; the ranking renders but names no winner | **D8** | done |
+| 6 | **✓ §8.10** | Record the context length on the run (built from `/api/ps`, the loaded value, not `/api/show`); **flag any extraction whose returned `prompt_tokens` sits at or near the limit** — the per-extraction counts already exist (§9.4) | D1 | done |
+| 7 | **✓ §8.10** | Carry the parse-failure rate onto Results and Ranking | D2 | done |
+| 8 | **✓ §8.10** | Record model-server version and decoding options on the run; state the determinism caveat in the report template (new: `docs/evaluation-report-template.md`) | D3 | done |
+| 5 | **✓ §8.12** | Render the anonymisation marking as three states until its semantics are confirmed | B5 | done |
+| 10 | **✓ §8.12** | Standing copy on Results: a mismatch rate is not a model error rate until the list is read — D6 closed by delivery, the string is still worth it | D6 | done |
+| 9 | **✓ §8.11** | Constrain `root_path` to an allowed root; bound the walk; make the server honour `Settings.host` or drop it. Host half by `SD42`; root and walk by `SD49` | A4, G3 | done |
 | **28** | open | A contract test: every `Settings` field has a reader in `ra2/`, or it does not exist | G3 | 2 h |
 | **29** | open | Helper copy under the mismatch note field, in `EXPORT_LEAVES_RA2`'s voice | B6 | 1 h |
 
@@ -995,7 +995,7 @@ the last three days in which any of them can be done.*
 | # | Status | Action | Risk | Effort |
 |---|---|---|---|---|
 | 20 | **◑ §8.6** | **Rehearse the destruction procedure end to end** on `reset-seed` data. Written, never executed | B3, F1, E4 | 2 h |
-| **30** | open | **Decide host-path intake: upload-only for real deliveries.** Deletes destruction step 5 and makes `just reset yes` complete | G3, A4, B3 | decision |
+| **30** | open · §8.11 | **Decide host-path intake: upload-only for real deliveries.** Deletes destruction step 5 and makes `just reset yes` complete. *Half settled by row 9:* host-path intake stays, confined to `RA2_IMPORT_ROOT`, and `just reset` deliberately leaves that directory, so step 5 remains, with one address. Upload-only is still the open question | G3, A4, B3 | decision |
 | 15 | open | Confirm **B2 (VRAM)** and **B3 (air-gap)**. If air-gapped, build *and test* the wheel bundle and side-loaded weights **while the developer is still here** | F5, C3 | ½ d + lead time |
 | 12 | **◑ §8.6** | Deployment conditions confirmed, not merely written: disk encryption, custody, single-user, no cloud-synced data dir, loopback bind, `OLLAMA_HOST=127.0.0.1`, `OLLAMA_DEBUG` off, no tunnels | B4, A2, A3, F2 | ½ d |
 | 11 | **◑ §8.6** | The governance page — **fill in `data-handling.md` §7's ten decisions** | F1, B2, B3 | 1 d |
@@ -1621,6 +1621,335 @@ and CI keeps its Windows leg for layers 1–3.
 - **Settings still describe paths.** Even with the sandbox running, what it
   confines is whatever the settings allow. Keep the WSL2 filesystem free of
   copied deliveries for the same reason.
+
+### 8.8 G1, G2, G4 — encoding at intake · closed 2026-09-29 · `fix-g-encoding-intake`
+
+**Status: closed. All three were Gate 1 items and all three are now done.**
+The one frozen file touched is `findings.py`. See
+`contracts/amendments/fix-g-encoding-intake.md` and `SD44`.
+
+**G2: refused before decoding, by name.** `refuse` runs before any decoding
+is tried. It checks for a UTF-16 or UTF-32 byte-order mark, then for a NUL
+anywhere in the bytes.
+
+- A mark raises `FILE_UNSUPPORTED_BOM`, with `detail.bom` naming the
+  encoding. UTF-32-LE is checked before UTF-16-LE, because its mark begins
+  with UTF-16-LE's.
+- A NUL raises `FILE_CONTAINS_NUL` with its offset. This is how a UTF-16
+  file with no mark shows itself.
+
+Both are BLOCKING and fail the file the way h02 does. The check runs ahead of
+the encoding override as well as inside `detect_encoding`. Choosing cp1252
+for a UTF-16 file is exactly how NUL-riddled text would otherwise get through.
+The report's evidence, re-run through `analyse_file`:
+
+| Input | Before | After |
+|---|---|---|
+| UTF-16-LE with BOM | cp1252, then `UNKNOWN_HEADER` | `FILE_UNSUPPORTED_BOM` `{"bom": "utf-16-le"}`, file fails |
+| UTF-16-LE, no BOM | utf-8, then `UNKNOWN_HEADER` | `FILE_CONTAINS_NUL` `{"byte_offset": "1"}`, file fails |
+| either, override to cp1252 or utf-8 | decoded | same refusal |
+
+**G1: counted, not refused.** A mixed file still fails UTF-8 and is still
+read as cp1252 whole. Nothing can repair that: which bytes were meant as which
+encoding is not recoverable from the bytes. What changed is that it is no
+longer silent. Whenever the effective encoding is cp1252, whether detected or
+chosen, `utf8_sequences` counts the well-formed multi-byte UTF-8 sequences
+(RFC 3629: no overlongs, no surrogates, a leading UTF-8 BOM excluded). A
+non-zero count raises `UTF8_READ_AS_CP1252` with the count, the first
+sequence's byte offset and its line. This is the recommendation's mirror of
+`CP1252_CANARY_ZERO`, with two deliberate departures:
+
+- **Per file at analysis, not per corpus at freeze.** Analysis is where the
+  analyst can still act, by asking for a re-export before building anything.
+  The finding is non-blocking, so it reaches `corpus.import_report_json`
+  anyway, which a backend test asserts. The corpus is marked either way.
+- **Bytes, not a character list.** The recommendation named `Ã`, `Â`, `â€`
+  and `Ã¼`. Counting well-formed UTF-8 sequences in the raw bytes catches the
+  same thing and every other letter too, without keeping a list.
+
+It is REPORTED, as G1 recommended, because a genuine cp1252 file can contain
+the same bytes (`ß` then a non-breaking space, say). **h01 is the negative
+control**: cp1252 German with umlauts and `ß` raises nothing. The expected
+false-positive rate on real deliveries is unmeasured, because B4 has not
+landed. The first real import is also the first measurement.
+
+**G4: the fixture.** Three are added and generated byte-exactly; the existing
+fourteen regenerate byte-identical.
+
+- `h15_mixed_encoding` holds two UTF-8 rows then one cp1252 row, five
+  sequences in all.
+- `h16_utf16_bom` and `h17_utf16_no_bom` cover G2.
+
+`test_every_hazard_directory_exists` now counts to seventeen.
+
+**Found on the way.** `ROW_BLANK_DROPPED` has had no entry in the UI's
+rendering table since the Astrana import, so it rendered as its bare enum
+name. It now has a label, and `test_every_finding_code_has_a_label` makes the
+table's own "every `FindingCode` appears" comment a gate.
+
+**What this does not close.**
+
+- **The mojibake is still in the corpus** if the analyst freezes anyway. The
+  finding sits on the corpus, but nothing downstream (Results, Ranking)
+  carries it forward. That is the same gap row 7 names for the parse-failure
+  rate, and it belongs with that row.
+- **Other wide or legacy encodings.** A file in UTF-16 with neither a BOM nor
+  any ASCII would have no NUL, but such a delivery (all CJK, say) is not one
+  this project will receive. ISO-8859-15 differs from cp1252 in eight code
+  points and would pass as cp1252; that is the pre-existing §4.4 position and
+  is unchanged.
+
+### 8.9 E4, D8, F6 — real or synthetic · closed 2026-09-29 · `fix-e4-d8-f6-real-or-synthetic`
+
+**Status: closed. One migration, `5e1d7a3c9b20`**, which is row 27's early
+deadline. It has to be applied before real data is in the database. See
+`contracts/amendments/fix-e4-d8-f6-real-or-synthetic.md`, `SD45`–`SD47`.
+
+**D8: the marker (row 27).** `corpus.is_synthetic` is set in two ways:
+
+- **Explicitly.** The seed freezes with `synthetic=True`.
+- **From the keys.** Any freeze whose every record key has the generators'
+  shape is marked, whoever froze it: a short hex tag, ten zeros, then a
+  decimal number. This is what catches a hazard fixture uploaded through the
+  Import view.
+
+The key rule errs towards *real*. A random 32-hex key matches with odds near
+10^-12, every key has to match, and an empty corpus stays real.
+
+Where the marker shows:
+- The Import view: `· synthetic` in `--danger`, beside `· dev-sized`.
+- Every Results tab: a *SYNTHETIC* pill beside the run pill, never instead of
+  it, because size and provenance are independent.
+
+**What "refused by the ranking" was built as, and why.** The table still
+renders, since developers use the seed to see the Ranking tab working. What is
+withheld is every statement of a winner:
+- the verdict headline and its detail are replaced;
+- every row's verdict pill reads `synthetic`;
+- rank 1 is not tinted.
+
+The ranks and numbers stay, and a backend test asserts they are identical to
+the same rows over a delivered corpus. A screenshot of a seeded ranking now
+carries *"This corpus is synthetic. No model is ranked on it."* where the
+winner used to be.
+
+**No backfill.** Marking existing corpora would be an `UPDATE corpus`, and
+Do-NOT #2 does not bend for a migration. A seed frozen before this revision
+therefore reads as real:
+- the reset guard asks for the second token once, which is the safe direction;
+- its ranking names a leader until it is re-seeded, which is the unsafe one.
+
+**On the transition machine, re-seed once after migrating**, or delete any
+pre-existing seed corpus.
+
+**E4: the reset (row 25).**
+- **The plan counts what is lost.** It prints corpora, records and runs, read
+  with `sqlite3` in `mode=ro`, so it works at any schema revision without
+  migrating or writing. A backend test asserts the file is byte-identical
+  afterwards.
+- **A second token.** While any corpus is not synthetic, `yes` alone is
+  refused and `destroy-real-data` is needed as well.
+  - This is stricter than recommended, which said "not dev-sized". A real
+    corpus of 40 records is still a delivery.
+  - A database from before `SD45` counts every corpus as real, and so does an
+    unreadable one.
+- **Found on the way, and worse than the finding.** `just reset-seed` without
+  `yes` removed nothing and exited 0, so the recipe's second line ran the seed
+  on top of whatever database was there. On the operational machine, that
+  meant a convincing synthetic corpus beside the real one: D8, produced by the
+  command meant to rehearse destruction. The recipe now passes `--for-seed`:
+  - a dry run exits non-zero, so nothing is seeded;
+  - real data is refused whatever the tokens say;
+  - `seed_dev.py` also refuses on its own when any corpus is not synthetic.
+- The third recommendation, *should `reset-seed` exist on the operational
+  machine at all*, is answered in effect: it cannot run there once real data
+  exists.
+
+`data-handling.md` §4.1 step 4 and §4.3 are updated to match.
+
+**F6: the README (row 26).** The claim F6 quoted had already been corrected
+when this slice started. The gate had not been built.
+
+- **The gate.** `tests/test_readme_not_built_yet.py` refuses a `built=True`
+  nav label in the bold lead of any *Not built yet* bullet. It checks the lead
+  only, because *"Cross-evaluation views. Results and Mismatches read one
+  evaluation at a time"* is a true bullet whose body names two shipped
+  screens. A positive control keeps F6's original bullet failing.
+- **An audit of the rest of the README found eleven more stale statements.**
+  All are corrected; the list is in the amendment. Among them:
+  - a fixed port that is configurable;
+  - "nothing has been measured" after measurements were recorded;
+  - a missing `RA2_LLM_PARALLEL_CALLS`;
+  - a seed of "12 records" set by a `RECORDS` constant that does not exist;
+  - a `FindingCode.DOUBLED_CRLF` that does not exist (in `.gitattributes`
+    too).
+
+  **None of those eleven has a gate.** The gate covers the category F6 named,
+  not the README as a whole.
+
+**What this does not close.**
+- **E3's runbook and row 32's operations log.** Row 26 shares a line with 32
+  in §1's table, and only its README half is done.
+- **Exports of a synthetic corpus.** Every CSV still opens with
+  `CLASSIFICATION_COMMENT`, *"derived from non-anonymised police accident
+  records"*, which is false for seed data. There is no Results or Ranking
+  export, so no exported number can carry a winner, but the census and
+  mismatch exports of a seed are not marked synthetic.
+- **The pre-migration seed.** See above: re-seed once.
+
+### 8.10 D1, D2, D3 — what a run can and cannot vouch for · closed 2026-09-30 · `fix-d1-d2-d3-run-provenance`
+
+**Status: closed as recommended, except the one decision D1 left open.** One
+migration, `b4f2c81e6d37`, adds three nullable `run` columns. See
+`contracts/amendments/fix-d1-d2-d3-run-provenance.md` and `SD48`.
+
+**D1: the context, recorded and compared (row 6).** The adapter still sends
+no context size, so the server decides. What changed is that the app now
+finds out what it decided.
+
+- **What is recorded, and when.** After a run's first committed record, the
+  worker asks `/api/ps` for the context the model is loaded with and pins it
+  on `run.context_length`. It asks once per run, and a resumed run keeps its
+  first reading.
+- **Why not `/api/show`.** It reports `num_ctx` only when a Modelfile sets
+  one, which is the uncommon case; the loaded value is what the server
+  actually applied.
+- **The flag.** An extraction is at the limit when its returned
+  `prompt_tokens` reach 95 % of that context: truncation caps the count at
+  the window. The count is computed from stored rows when a board is read, so
+  no new per-extraction column was needed.
+- **Unknown is not zero.** A run with no recorded context (an earlier run, or
+  an Ollama that does not report it) shows *context not recorded*.
+
+*Not done: recommendation 3, who **sets** the context.* It is written into
+`sw-design.md` §15.8 as undecided, for the runbook, with the recorded context
+as its evidence. Recommendations 2 (refuse to launch above a budget) and 4
+(check truncation against the real server at M34) remain open. Gate 3's
+row 17 already carries the second.
+
+**D2: parse failures reach the results (row 7).** Each model's unreadable
+rate and at-limit count now appear in two places:
+- under its column header on the Results extraction tab;
+- in a new **Unreadable** column in the ranking's reported-never-scored
+  group, beside VRAM.
+
+One helper feeds both boards, and a backend test asserts they agree.
+
+**D3: the record, and what it cannot promise (row 8).**
+- **Pinned at launch:** the Ollama version, now asked at every launch rather
+  than only when a parallel-calls entry applied, and each model's server-side
+  decoding options (its Modelfile `PARAMETER`s). `{}` (sets none) and `None`
+  (endpoint did not say) are kept apart.
+- **On the reproducibility card:** all three, with `unknown` for an earlier
+  run.
+- **The caveat.** It is one constant, `DETERMINISM_CAVEAT`, shown on the
+  reproducibility card and under the ranking's validity footer.
+  `docs/evaluation-report-template.md` is new, since no template existed; it
+  quotes the caveat verbatim, and a test holds the two together.
+- **Found on the way:** the design's own step-5 note promised *"Same inputs,
+  same output"*, the exact overclaim D3 describes. The design README is
+  amended first, then the view.
+
+**What this does not close.**
+- **A launch-time budget check** (D1 recommendation 2): estimating the longest
+  record's prompt before launch. The at-limit count tells you afterwards;
+  nothing stops you beforehand.
+- **Runs launched before this revision** carry none of the three fields.
+  Their cards say `unknown`, and their at-limit counts say *not recorded*.
+- **Presence and Mismatches** columns do not carry the reading figures. They
+  are shown where a score is shown.
+
+### 8.11 A4, G3 — host-path intake has one door · closed 2026-09-30 · `fix-a4-g3-host-path-intake`
+
+**Status: row 9 closed. Row 30 half settled; upload-only is still the
+project's to decide.** See `contracts/amendments/fix-a4-g3-host-path-intake.md`
+and `SD49`. The bind half of A4 was already closed by `SD42`.
+
+**The root.** A host-path delivery may now be registered only from
+`RA2_IMPORT_ROOT`, default `{RA2_DATA_DIR}/import`, or beneath it. The check
+runs when the root is bound, on resolved paths, and before any file is read.
+`import/../home` and a root reached through a link are both outside.
+
+**The walk.**
+- **Bounded.** At most 200 files and 2 GB (`RA2_IMPORT_MAX_FILES`,
+  `RA2_IMPORT_MAX_GB`), counted from `stat` as the walk goes. It stops at the
+  first file past either, so a home directory costs seconds, not a full read.
+- **No links out.** A file whose real path leaves the root is refused rather
+  than skipped, because a skipped file is a silent drop.
+- **Streamed.** Each file is hashed in 1 MiB chunks, where before it was read
+  whole.
+
+**Refused, not recorded.** The recommendation said "a `Finding` rather than
+an exception". The project chose a refusal with nothing written: a delivery
+row for every mistaken path would clutter the Import view and needs a
+delivery-level finding that does not exist.
+- The service raises `HostPathRefusedError`, which carries a stable `reason`.
+- The API answers 422.
+- The Import dialog shows the sentence.
+- Tests assert that no `delivery` or `delivery_file` row survives either
+  refusal.
+
+**`just reset` leaves the import root alone.** This is the project's decision
+(2026-09-30): files registered in place are the analyst's own. Destruction
+step 5 therefore stays manual, but it now has one address instead of
+"wherever the delivery was registered from" (`data-handling.md` §4.1, P5).
+
+**Found on the way, not fixed.** `HostPathFileStore` keeps each delivery's
+root in memory only, and nothing rebinds it from `delivery.root_path` at
+startup. After a restart, an analysed host-path delivery cannot be re-read,
+so it cannot be frozen. This is pre-existing, unrelated to the constraint,
+and belongs in its own change.
+
+**What this does not close.**
+- **Upload-only** (row 30).
+- **Deliveries registered before this change** from outside the new root.
+  They are not re-checked; the rule applies at registration.
+
+### 8.12 B5, D6 — labels that claim only what is known · closed 2026-09-30 · `fix-b5-d6-honest-labels`
+
+**Status: closed.** No schema change. See
+`contracts/amendments/fix-b5-d6-honest-labels.md` and `SD50`. The supplier
+question B5 asks the project to send is still open (`mvp-spec.md` §18). What
+changed is that the screen no longer answers it by accident.
+
+**B5: the marking (row 5).** Before, a chip reading *anonymised* appeared
+only on the rare record whose narrative came from the `UnfHergangTextAnonym`
+fallback, and every other row showed **nothing**. Nearly every record
+therefore read as *not anonymised*, a statement about personal data that
+nobody had made.
+
+Every row now carries a chip, in one of four states:
+
+| State | When |
+|---|---|
+| *anonymised column* | The narrative came from the fallback column. Named for its source, since what that column guarantees is the open question |
+| *anonymisation unknown* | A delivered narrative. The default |
+| *anonymised* / *not anonymised* | A delivered narrative, once `RA2_DELIVERED_TEXT_ANONYMISED` records the supplier's answer as `yes` or `no` |
+
+- **Why a setting rather than a column per corpus:** the answer is about the
+  supplier's text file, not about any one import. It was the project's
+  choice, 2026-09-30.
+- **CSV exports** write the state's stable value (`unknown`,
+  `anonymised_column`, ...) in the existing `anonymised` column, instead of a
+  `no` that meant "nobody said".
+- **The shared test fixture** now flags one record in five instead of all of
+  them. A fixture where every narrative came from the fallback column could
+  not show the state this finding is about.
+
+**D6: the standing copy (row 10).** D6 was closed by the delivery of the
+Mismatches view (§9.4), and the string was still worth adding.
+`MISMATCH_RATE_NOTE` now stands in two places:
+- under the extraction tab's legend, where the rates are first read;
+- in the ranking's footer, beside the validity and determinism lines.
+
+UI tests assert it on both tabs.
+
+**What this does not close.**
+- **The supplier's answer.** Until it is in, every delivered narrative says
+  *unknown*, which is the honest state and not the resolved one.
+- **The export's classification line** (`CLASSIFICATION_COMMENT`) still says
+  *non-anonymised* for every file. That stays deliberately: it is the
+  conservative handling rule, not a per-record claim.
 
 ---
 

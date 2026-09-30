@@ -26,6 +26,7 @@ from collections.abc import Mapping, Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ra2.domain.anonymisation import DeliveredTextAnonymised, anonymisation_marking
 from ra2.domain.extraction import RunStatus
 from ra2.domain.feature import Kind
 from ra2.domain.ids import EvaluationId, FeatureId, RecordId, RunId
@@ -65,7 +66,7 @@ from ra2.services.readmodels import (
     SortDir,
     SuppressedCell,
 )
-from ra2.services.run_descriptor import build_descriptor
+from ra2.services.run_descriptor import build_descriptor, model_column
 
 __all__ = ["ResultsService"]
 
@@ -87,9 +88,12 @@ class ResultsService:
         *,
         session_factory: async_sessionmaker[AsyncSession],
         scorer: Scorer,
+        delivered_text_anonymised: DeliveredTextAnonymised = DeliveredTextAnonymised.UNKNOWN,
     ) -> None:
         self._session_factory = session_factory
         self._scorer = scorer
+        #: `SD50`, risk B5: the supplier's answer, as configured.
+        self._delivered = delivered_text_anonymised
 
     async def scoring_status(self, evaluation_id: EvaluationId) -> tuple[ScoringStatusView, ...]:
         """One status per run — which of §16.7's three states each tab renders."""
@@ -136,10 +140,9 @@ class ResultsService:
             cells = await _load_cells(session, runs)
             floor = evaluation.min_cell_count
 
-            models = tuple(
-                ModelColumnView(model_id=run.id, tag=run.model_name, digest=run.model_digest)
-                for run in runs
-            )
+            # SD48: each column carries its run's parse failures and at-limit
+            # count, so the reading problem sits over the numbers it explains.
+            models = tuple([await model_column(session, run) for run in runs])
             rows = [
                 _feature_row(feature, runs, cells, floor)
                 for feature in features
@@ -304,7 +307,7 @@ class ResultsService:
         )
         if feature is None:
             return None
-        rows = await _records_not_written(session, run, feature)
+        rows = await _records_not_written(session, run, feature, self._delivered)
         start = max(0, (page - 1) * page_size)
         return Page(
             items=tuple(rows[start : start + page_size]),
@@ -643,7 +646,7 @@ def _flag_inconsistency(
 
 
 async def _records_not_written(
-    session: AsyncSession, run: Run, feature: Feature
+    session: AsyncSession, run: Run, feature: Feature, delivered: DeliveredTextAnonymised
 ) -> list[PerRecordRow]:
     """The records behind the presence rate — "N records where weather is
     recorded but not written".
@@ -696,6 +699,7 @@ async def _records_not_written(
             finding=finding,
             language=language,
             language_confidence=confidence,
+            anonymisation=anonymisation_marking(bool(anonymised), delivered),
         )
         for record_id, anonymised, language, confidence, value in result
         # An empty cell is not a labelled case, so it cannot be "recorded but

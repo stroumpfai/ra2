@@ -77,6 +77,7 @@ from ra2.ui import theme
 from ra2.ui.components import format_local
 from ra2.ui.components.discard_dialog import EXPORT_PER_RUN
 from ra2.ui.components.ollama_settings import SAVE_REFUSAL_WORDS, SAVE_REFUSED_RUN_ACTIVE
+from ra2.ui.views.results.chrome import DETERMINISM_CAVEAT
 
 pytestmark = pytest.mark.ui
 
@@ -1090,8 +1091,14 @@ async def test_the_progress_column_places_a_card_per_run_and_the_reproducibility
         "endpoint 127.0.0.1:11434/v1",
         # SD38: always known, and 1 for a model nobody mapped.
         "parallel calls 1",
+        # SD48: a run seeded without them says so, never a guessed value.
+        "ollama unknown",
+        "server options unknown",
+        "context unknown",
     ):
         assert expected in line, expected
+    # SD48, risk D3: the record is necessary, not sufficient, and says so.
+    assert _all_text(user, "determinism-caveat") == DETERMINISM_CAVEAT
     # The card renders the provenance and **no explainer paragraph** — the
     # template version and fingerprint on the line above are the fact it used
     # to be talking about (`plan-evaluation-view-improvements.md` §3).

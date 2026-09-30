@@ -24,6 +24,7 @@ from ra2.domain.parsing.headers import (
     ColumnSet,
     column_index,
 )
+from ra2.domain.synthetic import all_invented
 from ra2.domain.validation import validate_delivery
 from ra2.infra.clock import Clock
 from ra2.infra.config import Settings
@@ -120,8 +121,13 @@ class CorpusService:
         *,
         name: str,
         description: str | None = None,
+        synthetic: bool = False,
     ) -> CorpusId:
         """One transaction, all-or-nothing (sw-design.md §6.3).
+
+        `synthetic=True` is the development seed saying what it built. It is
+        not the only way in: step 8 marks any corpus whose every key is
+        invented, whoever froze it (`SD45`).
 
         1. Cross-file **blocking** validation over the *selected* files. Any
            failure -> `BlockingFindingsError`, **nothing written**.
@@ -131,6 +137,7 @@ class CorpusService:
         5. Non-blocking findings into `import_report_json`.
         6. The census, via `CensusMaterialiser` on this same session.
         7. `is_dev_sized` from `RA2_DEV_RECORD_MAX` / `RA2_EVAL_RECORD_MIN`.
+        8. `is_synthetic` from `synthetic`, or from the keys (risk D8).
 
         :raises BlockingFindingsError: validation refused; zero corpus rows.
         :raises DeliveryNotAnalysedError: analysis has not finished.
@@ -187,6 +194,8 @@ class CorpusService:
                 record_count=record_count,
                 # --- 7. mvp-spec.md §9 -------------------------------------
                 is_dev_sized=record_count < self._settings.dev_record_max,
+                # --- 8. SD45: provenance, not size -------------------------
+                is_synthetic=synthetic or all_invented(r.unfall_uid for r in built.records),
                 cp1252_canary_count=canary_count,
                 delivery_id=DeliveryId(delivery.id),
                 source_file_ids_json=dump_json([row.id for row in rows]),
@@ -621,6 +630,7 @@ def _corpus_view(corpus: Corpus, locked_by_evaluations: int) -> CorpusView:
         imported_at=corpus.imported_at,
         record_count=corpus.record_count,
         is_dev_sized=corpus.is_dev_sized,
+        is_synthetic=corpus.is_synthetic,
         cp1252_canary_count=corpus.cp1252_canary_count,
         language_counts=counts,
         delivery_id=DeliveryId(corpus.delivery_id) if corpus.delivery_id else None,

@@ -107,3 +107,41 @@ async def test_the_tab_exposes_no_presence_f1_anywhere(
     for row in view.rows:
         assert not hasattr(row, "presence_f1")
         assert not hasattr(row, "presence_precision")
+
+
+async def test_the_record_list_marks_what_is_known_about_anonymisation(
+    db_session_factory: object, frozen_clock: object, scored: ScoredCorpus
+) -> None:
+    """`SD50`, risk B5. With the supplier's answer recorded as `yes`, a
+    delivered narrative is *anonymised*; a fallback-column narrative is still
+    named for its source. The default service answers `unknown`."""
+    from tests.backend.services.results.conftest import _Ids
+
+    from ra2.domain.anonymisation import AnonymisationMarking, DeliveredTextAnonymised
+    from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
+    from ra2.services.scoring_service import ScoringService
+
+    scorer = ScoringService(
+        session_factory=db_session_factory,  # type: ignore[arg-type]
+        ground_truth=GroundTruthRepository(),
+        task_runner=None,  # type: ignore[arg-type]
+        clock=frozen_clock,  # type: ignore[arg-type]
+        id_factory=_Ids(),
+    )
+    answered = ResultsService(
+        session_factory=db_session_factory,  # type: ignore[arg-type]
+        scorer=scorer,
+        delivered_text_anonymised=DeliveredTextAnonymised.YES,
+    )
+    view = await answered.presence_tab(scored.evaluation_id, feature_key=WEATHER)
+
+    assert view.records is not None
+    rows = view.records.items
+    assert rows
+    for row in rows:
+        expected = (
+            AnonymisationMarking.ANONYMISED_COLUMN
+            if row.anonymised
+            else AnonymisationMarking.ANONYMISED
+        )
+        assert row.anonymisation is expected

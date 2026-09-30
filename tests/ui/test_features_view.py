@@ -106,8 +106,9 @@ class Seeded:
 
 
 @pytest.fixture
-def delivery_root(tmp_path: Path) -> Path:
-    root = tmp_path / "features-delivery"
+def delivery_root(migrated_db: Settings) -> Path:
+    # Under the import root: a host path anywhere else is refused (SD49).
+    root = migrated_db.import_root_path / "features-delivery"
     root.mkdir(parents=True)
     for name, source in DELIVERY.items():
         (root / name).write_bytes((_HAZARDS / source).read_bytes())

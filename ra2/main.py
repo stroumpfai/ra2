@@ -106,7 +106,12 @@ def create_app(
     upload_store = upload_store or UploadedFileStore(
         settings.deliveries_dir, max_bytes=settings.max_upload_bytes
     )
-    host_path_store = host_path_store or HostPathFileStore()
+    host_path_store = host_path_store or HostPathFileStore(
+        # SD49, risk A4: one allowed root, and a bounded walk.
+        allowed_root=settings.import_root_path,
+        max_files=settings.import_max_files,
+        max_bytes=settings.import_max_bytes,
+    )
     language_detector = language_detector or LinguaDetector()
     census_materialiser = census_materialiser or RelationalCensusMaterialiser(ids=ids)
     # The one LLM seam (sw-design.md §15.5). `OllamaLLMClient.__init__` is
@@ -246,17 +251,28 @@ def create_app(
         ids=ids,
         settings=settings,
         connection=settings_service,
+        # SD48: the context the model was loaded with, asked once per run.
+        model_catalog=model_catalog,
     )
     # `scoring_service` satisfies `Scorer` structurally — neither read service
     # imports it directly.
-    results_service = ResultsService(session_factory=session_factory, scorer=scoring_service)
+    results_service = ResultsService(
+        session_factory=session_factory,
+        scorer=scoring_service,
+        # SD50: what the anonymisation marking may claim.
+        delivered_text_anonymised=settings.delivered_text_anonymised,
+    )
     ranking_service = RankingService(session_factory=session_factory, scorer=scoring_service)
     # --- phase 5 (M35): mismatch review ------------------------------------
     # Review's half of `mismatch` (sw-design.md §17). It takes a clock because
     # `tagged_at` is stamped on every write, and nothing else: there is no
     # scorer here and no path to one, which is §17.3's absent edge expressed in
     # the wiring as well as in the imports.
-    mismatch_service = MismatchService(session_factory=session_factory, clock=clock)
+    mismatch_service = MismatchService(
+        session_factory=session_factory,
+        clock=clock,
+        delivered_text_anonymised=settings.delivered_text_anonymised,
+    )
     # --- reset and discard (sw-design.md §18) ------------------------------
     # The same `upload_store` intake used, because the bytes it removes on a
     # delivery discard are the ones intake wrote. A host-path delivery's files

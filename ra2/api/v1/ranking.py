@@ -20,7 +20,7 @@ from ra2.api.schemas import (
     RankingTabResponse,
     SeparatingRowResponse,
 )
-from ra2.api.v1.results import descriptor_response
+from ra2.api.v1.results import descriptor_response, quality_response
 from ra2.domain.ids import EvaluationId
 from ra2.services.errors import NotFoundError
 
@@ -70,6 +70,7 @@ async def ranking_tab(
                 ms_per_record=row.ms_per_record,
                 parallel_calls=row.parallel_calls,
                 model_size_bytes=row.model_size_bytes,
+                quality=quality_response(row.quality),
             )
             for row in view.rows
         ],

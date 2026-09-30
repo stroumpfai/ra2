@@ -334,6 +334,13 @@ class Corpus(Base):
     #: Every view showing a dev corpus's numbers carries the "smoke test, not a
     #: result" marker.
     is_dev_sized: Mapped[bool] = mapped_column(default=False)
+    #: `SD45` — the corpus was built from invented data: the development seed
+    #: said so, or every record key has the shape only this project's own
+    #: generators write (`domain/synthetic.py`). Provenance, not size — a
+    #: 3000-record seed is still synthetic. Its results carry the marker and
+    #: its ranking names no winner (risk D8). `server_default` is the
+    #: migration's, declared here too so `alembic check` sees no drift.
+    is_synthetic: Mapped[bool] = mapped_column(default=False, server_default="0")
     #: mvp-spec.md §4.4, D11. **Zero, in a corpus containing French, proves the
     #: lossy cp1252 conversion happened.** One number per corpus; there are
     #: deliberately no per-record damage markers.
@@ -1098,6 +1105,20 @@ class Run(Base):
     #: size, and the ranking renders that absence as an em dash — `0` is the
     #: defect this column repairs.
     model_size_bytes: Mapped[int | None] = mapped_column(default=None)
+
+    # --- SD48: what the digest does not pin (risks D1, D3) ------------------
+    #: The Ollama version the run launched against (`/api/version`). The
+    #: digest pins the weights; the runtime moves answers too.
+    ollama_version: Mapped[str | None] = mapped_column(String(64), default=None)
+    #: The model's server-side decoding options at launch (`/api/show`'s
+    #: Modelfile `PARAMETER`s) as JSON, `{"num_ctx": ["8192"], ...}`. `"{}"`
+    #: means the model sets none; `None` means the endpoint did not say.
+    server_parameters_json: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The context window the model was **loaded** with, read from `/api/ps`
+    #: after the run's first record. The adapter sends none, so this is
+    #: whatever the server applied. `None`: not reported, so no extraction
+    #: can be flagged as at the limit (risk D1). Set once, never changed.
+    context_length: Mapped[int | None] = mapped_column(default=None)
 
     evaluation: Mapped[Evaluation] = relationship(back_populates="runs")
     extractions: Mapped[list[Extraction]] = relationship(

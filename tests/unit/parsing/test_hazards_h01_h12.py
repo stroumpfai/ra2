@@ -48,6 +48,13 @@ def test_h01_cp1252_is_detected_decoded_and_reported(hz):
     assert not any(REPLACEMENT_CHAR in n for n in narratives)
 
 
+def test_h01_a_genuine_cp1252_file_raises_no_mojibake_finding(hz):
+    """The negative control for h15: cp1252 German is not UTF-8 read as cp1252,
+    so the canary stays silent on the file that is exactly what it claims."""
+    parsed = hz.parse("h01_cp1252", "unfall.txt")
+    assert hz.of_code(parsed.analysis.findings, FindingCode.UTF8_READ_AS_CP1252) == []
+
+
 def test_h01_is_not_valid_utf8_so_the_fallback_is_really_exercised(hz):
     """If the fixture ever became valid UTF-8 the cp1252 path would stop being
     tested and this test would still pass on encoding alone. Guard the fixture."""
@@ -383,7 +390,114 @@ def test_h14_astrana_delivery_validates_clean(hz):
     assert hz.of_code(analysis.findings, FindingCode.SET_UNRESOLVED) == []
 
 
-# --- the rule underneath all fourteen ---------------------------------------
+# --- h15 -------------------------------------------------------------------
+
+
+def test_h15_mixed_encoding_is_read_as_cp1252_and_the_mojibake_is_reported(hz):
+    """UTF-8 rows then one cp1252 row. The file can only be read as cp1252, so
+    the UTF-8 rows are mojibake, and the finding says how much of it there is
+    and where it starts (risk G1)."""
+    parsed = hz.parse("h15_mixed_encoding", "text.csv")
+
+    assert parsed.analysis.encoding is Encoding.CP1252
+    assert parsed.analysis.kind is FileKind.TEXT
+    assert parsed.analysis.ok_count == 3
+
+    finding = hz.only(parsed.analysis.findings, FindingCode.UTF8_READ_AS_CP1252)
+    assert finding.severity is Severity.REPORTED
+    # ü, ä, Ü, ‘ and ’: the generator's MIXED_ENCODING_ROWS.
+    assert finding.detail["sequences"] == "5"
+    # The first sequence is on the first data row, line 2 after the header.
+    assert finding.detail["first_line_no"] == "2"
+    assert finding.line_no == 2
+    offset = int(finding.detail["first_byte_offset"])
+    assert hz.bytes_of("h15_mixed_encoding", "text.csv")[offset : offset + 2] == "ü".encode()
+
+
+def test_h15_the_damage_is_real_which_is_why_it_is_reported(hz):
+    """Guard the fixture: if its narratives ever read correctly, the finding
+    would be asserting against a hazard that is no longer there."""
+    parsed = hz.parse("h15_mixed_encoding", "text.csv")
+    narratives = list(parsed.values(TEXT_NARRATIVE_COLUMN))
+    assert narratives[0].startswith("GrÃ¼ezi")
+    assert narratives[2] == "Nässe auf der Fahrbahn."
+    with pytest.raises(UnicodeDecodeError):
+        hz.bytes_of("h15_mixed_encoding", "text.csv").decode("utf-8")
+
+
+def test_h15_an_override_to_cp1252_is_still_reported(hz):
+    """The analyst confirming cp1252 does not make the mojibake go away."""
+    parsed = hz.parse("h15_mixed_encoding", "text.csv", encoding_override=Encoding.CP1252)
+    assert hz.only(parsed.analysis.findings, FindingCode.UTF8_READ_AS_CP1252)
+
+
+def test_h15_an_override_to_utf8_fails_the_file(hz):
+    """There is no repair. UTF-8 is refused by the cp1252 row, as it should be."""
+    parsed = hz.parse("h15_mixed_encoding", "text.csv", encoding_override=Encoding.UTF_8)
+    assert hz.only(parsed.analysis.findings, FindingCode.FILE_UNDECODABLE)
+    assert parsed.rows == ()
+
+
+# --- h16, h17 ----------------------------------------------------------------
+
+
+def test_h16_a_utf16_file_fails_with_its_bom_named(hz):
+    """Not `UNKNOWN_HEADER`: the header is fine, the encoding is not (risk G2)."""
+    parsed = hz.parse("h16_utf16_bom", "text.csv")
+
+    finding = hz.only(parsed.analysis.findings, FindingCode.FILE_UNSUPPORTED_BOM)
+    assert finding.severity is Severity.BLOCKING
+    assert finding.detail == {"bom": "utf-16-le"}
+    assert hz.codes(parsed.analysis.findings) == [FindingCode.FILE_UNSUPPORTED_BOM]
+
+    assert parsed.analysis.kind is FileKind.UNKNOWN
+    assert parsed.analysis.encoding is None
+    assert parsed.analysis.encoding_detected is None
+    assert parsed.rows == ()
+
+
+def test_h17_a_utf16_file_without_a_bom_fails_on_its_first_nul(hz):
+    parsed = hz.parse("h17_utf16_no_bom", "text.csv")
+
+    finding = hz.only(parsed.analysis.findings, FindingCode.FILE_CONTAINS_NUL)
+    assert finding.severity is Severity.BLOCKING
+    # `U` then `\x00`: little-endian UTF-16 puts the first NUL at byte 1.
+    assert finding.detail == {"byte_offset": "1"}
+    assert hz.codes(parsed.analysis.findings) == [FindingCode.FILE_CONTAINS_NUL]
+    assert parsed.analysis.kind is FileKind.UNKNOWN
+    assert parsed.rows == ()
+
+
+@pytest.mark.parametrize(
+    ("hazard", "code"),
+    [
+        ("h16_utf16_bom", FindingCode.FILE_UNSUPPORTED_BOM),
+        ("h17_utf16_no_bom", FindingCode.FILE_CONTAINS_NUL),
+    ],
+)
+@pytest.mark.parametrize("override", list(Encoding))
+def test_h16_h17_fail_under_an_explicit_override_too(hz, hazard, code, override):
+    """cp1252 decodes a UTF-16 file without complaint, so an override is
+    exactly how NUL-riddled text would get through if the refusal lived only
+    in detection."""
+    parsed = hz.parse(hazard, "text.csv", encoding_override=override)
+    assert hz.codes(parsed.analysis.findings) == [code]
+    assert parsed.analysis.encoding is None
+    assert parsed.rows == ()
+
+
+@pytest.mark.parametrize("hazard", ["h16_utf16_bom", "h17_utf16_no_bom"])
+def test_h16_h17_block_the_delivery_they_are_part_of(hz, hazard):
+    """A refused file's finding is blocking at delivery level, and it is the
+    only blocking one: the good `unfall` file beside it is not implicated.
+    Deselecting it is the freeze's business (tests/backend, test_freeze)."""
+    files = [hz.parse("h11_unmatched_text_key", "unfall.txt"), hz.parse(hazard, "text.csv")]
+    blocking = blocking_findings(validate_delivery(files))
+    assert blocking
+    assert all(f.file_id == FileId(f"{hazard}/text.csv") for f in blocking)
+
+
+# --- the rule underneath all seventeen ---------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -435,13 +549,13 @@ def test_the_filename_never_decides_the_kind(hz, hazard, filename, expected):
 
 
 def test_every_hazard_directory_exists(hz):
-    """The fourteen of sw-design.md §11.4, all committed, none quietly missing."""
+    """The seventeen of sw-design.md §11.4, all committed, none quietly missing."""
     found = sorted(p.name for p in hz.dir.iterdir() if p.is_dir())
-    assert [name[:3] for name in found] == [f"h{n:02d}" for n in range(1, 15)]
+    assert [name[:3] for name in found] == [f"h{n:02d}" for n in range(1, 18)]
 
 
 def test_no_hazard_row_outcome_is_unaccounted(hz):
-    """Every outcome the enum defines is exercised somewhere in the fourteen."""
+    """Every outcome the enum defines is exercised somewhere in the seventeen."""
     seen = set()
     for directory in sorted(p for p in hz.dir.iterdir() if p.is_dir()):
         for path in sorted(directory.iterdir()):

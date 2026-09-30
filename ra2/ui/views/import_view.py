@@ -1097,7 +1097,8 @@ def _render_corpus_name(corpus: CorpusView) -> None:
 
 def _render_languages(corpus: CorpusView) -> None:
     """The design's "de 2 812 · fr 1 402 · it 396"; a dev-sized corpus gets the
-    `--warn` "· dev-sized" suffix (README §1b, mvp-spec.md §9)."""
+    `--warn` "· dev-sized" suffix (README §1b, mvp-spec.md §9), and a synthetic
+    one the `--danger` "· synthetic" suffix (`SD45`)."""
     composition = " · ".join(
         f"{language} {format_count(count)}" for language, count in corpus.language_counts.items()
     )
@@ -1109,6 +1110,12 @@ def _render_languages(corpus: CorpusView) -> None:
             ui.label("· dev-sized").classes("mono warn").props('data-testid="dev-sized"').style(
                 "font-size:11.5px;"
             )
+        if corpus.is_synthetic:
+            # SD45, risk D8: provenance, beside the size marker and in the
+            # danger tone, because a 3000-record seed is not dev-sized.
+            ui.label("· synthetic").classes("mono danger").props('data-testid="synthetic"').mark(
+                "synthetic"
+            ).style("font-size:11.5px;")
 
 
 def _render_canary(corpus: CorpusView) -> None:

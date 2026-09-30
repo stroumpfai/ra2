@@ -184,6 +184,13 @@ def _provenance_response(view: ProvenanceView | None) -> ProvenanceResponse | No
         llm_endpoint=view.llm_endpoint,
         llm_reasoning_effort=view.llm_reasoning_effort,
         llm_parallel_calls=view.llm_parallel_calls,
+        ollama_version=view.ollama_version,
+        server_parameters=(
+            None
+            if view.server_parameters is None
+            else {key: list(values) for key, values in view.server_parameters.items()}
+        ),
+        context_length=view.context_length,
     )
 
 

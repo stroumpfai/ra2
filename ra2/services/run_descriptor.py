@@ -29,11 +29,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ra2.domain.fingerprint import compute_set_fingerprint
-from ra2.domain.ids import EvaluationId
+from ra2.domain.ids import EvaluationId, RunId
+from ra2.domain.llm import at_context_limit
 from ra2.persistence.models import Corpus, Evaluation, EvaluationFeature, Run
-from ra2.services.readmodels import RunDescriptorView
+from ra2.persistence.repositories.run_repo import RunRepository
+from ra2.services.readmodels import ModelColumnView, ReadingQuality, RunDescriptorView
 
-__all__ = ["build_descriptor"]
+__all__ = ["build_descriptor", "model_column", "reading_quality"]
 
 #: What the label falls back to when the corpus row is gone.
 #:
@@ -74,4 +76,38 @@ async def build_descriptor(
         config_fingerprint=compute_set_fingerprint(fingerprints.all()),
         is_dev=evaluation.is_dev,
         min_cell_count=evaluation.min_cell_count,
+        is_synthetic=corpus is not None and corpus.is_synthetic,
+    )
+
+
+async def reading_quality(session: AsyncSession, run: Run) -> ReadingQuality:
+    """Whether this run's model could read what it was given (`SD48`).
+
+    Derived from committed rows, like every progress figure (§15 F6), through
+    the caller's session. The at-limit count uses `domain.llm.at_context_limit`
+    on every extraction, so the threshold is stated once; it is `None`, never
+    `0`, when the run did not record the context it was loaded with.
+    """
+    repo = RunRepository(session)
+    tokens = await repo.prompt_tokens(RunId(run.id))
+    context = run.context_length
+    return ReadingQuality(
+        extractions=len(tokens),
+        parse_failures=await repo.count_parse_failures(RunId(run.id)),
+        context_length=context,
+        at_context_limit=(
+            None
+            if context is None
+            else sum(1 for count in tokens if at_context_limit(count, context))
+        ),
+    )
+
+
+async def model_column(session: AsyncSession, run: Run) -> ModelColumnView:
+    """One model column header, with the run's reading quality under it."""
+    return ModelColumnView(
+        model_id=run.id,
+        tag=run.model_name,
+        digest=run.model_digest,
+        quality=await reading_quality(session, run),
     )

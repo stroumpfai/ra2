@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.fixtures.scored_corpus import WEATHER, ScoredCorpus
 
+from ra2.domain.anonymisation import AnonymisationMarking, DeliveredTextAnonymised
 from ra2.domain.ids import EvaluationId, MismatchId
 from ra2.domain.mismatch import MismatchTag, TagState
 from ra2.persistence.models import Score
@@ -530,3 +531,50 @@ def _counts(view: MismatchListView, tag: MismatchTag) -> tuple[int, int]:
     total = sum(entry.tally.total for entry in view.tallies)
     tagged = sum(entry.tally.counts[tag] for entry in view.tallies)
     return total, tagged
+
+
+# --- SD50, risk B5: what the anonymisation marking may claim -----------------
+
+
+@pytest.mark.parametrize(
+    ("delivered", "delivered_marking"),
+    [
+        (DeliveredTextAnonymised.UNKNOWN, AnonymisationMarking.UNKNOWN),
+        (DeliveredTextAnonymised.YES, AnonymisationMarking.ANONYMISED),
+        (DeliveredTextAnonymised.NO, AnonymisationMarking.NOT_ANONYMISED),
+    ],
+)
+async def test_every_row_is_marked_from_its_source_and_the_configured_answer(
+    db_session_factory: async_sessionmaker[AsyncSession],
+    frozen_clock: object,
+    scored: ScoredCorpus,
+    export_service: ExportService,
+    delivered: DeliveredTextAnonymised,
+    delivered_marking: AnonymisationMarking,
+) -> None:
+    """A fallback-column narrative is named for its source whatever the answer;
+    a delivered one says what the supplier said, and `unknown` until then. The
+    CSV writes the same word the screen shows."""
+    service = MismatchService(
+        session_factory=db_session_factory,
+        clock=frozen_clock,  # type: ignore[arg-type]
+        delivered_text_anonymised=delivered,
+    )
+    rows = (await service.list_mismatches(scored.evaluation_id, page_size=1000)).rows.items
+    assert rows
+    markings = {row.anonymised: row.anonymisation for row in rows}
+    # The fixture's mix reaches this list: both sources are present.
+    assert markings == {
+        True: AnonymisationMarking.ANONYMISED_COLUMN,
+        False: delivered_marking,
+    }
+
+    export = await service.export_rows(scored.evaluation_id)
+    text = export_service.mismatches_csv(
+        export.rows.items,
+        evaluation_id=scored.evaluation_id,
+        run_label=export.run_label,
+        filter_label="all tags",
+    ).decode("utf-8-sig")
+    assert f";{delivered_marking.value};" in text
+    assert ";yes;" not in text and ";no;" not in text

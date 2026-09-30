@@ -137,6 +137,27 @@ async def test_an_undecodable_file_fails_and_is_reported(
     assert row.file_kind is FileKind.UNKNOWN
 
 
+@pytest.mark.parametrize(
+    ("hazard", "code"),
+    [
+        ("h16_utf16_bom", FindingCode.FILE_UNSUPPORTED_BOM),
+        ("h17_utf16_no_bom", FindingCode.FILE_CONTAINS_NUL),
+    ],
+)
+async def test_a_utf16_file_fails_with_the_real_cause_not_unknown_header(
+    delivery_service, upload_delivery, hazard_bytes, hazard, code
+):
+    """Risk G2, through the service and the JSON round trip: the analyst is
+    told the encoding is wrong, not sent to fix a header that is fine."""
+    delivery_id = await upload_delivery("wide", [("text.csv", hazard_bytes(hazard, "text.csv"))])
+    await delivery_service.analyse(delivery_id)
+
+    (row,) = (await delivery_service.get(delivery_id)).files
+    assert _codes(row) == {code}
+    assert row.encoding is None
+    assert row.file_kind is FileKind.UNKNOWN
+
+
 async def test_a_rejected_row_is_reported_with_its_key(
     delivery_service, upload_delivery, hazard_bytes
 ):

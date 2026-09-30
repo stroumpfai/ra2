@@ -99,7 +99,11 @@ async def test_the_per_record_list_is_paged_and_marks_anonymisation(
     assert body["total"] >= 1
     assert len(body["items"]) <= 2
     for row in body["items"]:
-        assert row["anonymised"] is True
+        # SD50: the raw source fact and the marking travel together, and
+        # agree. With no supplier answer configured, a delivered narrative
+        # is `unknown`, never a `no` by silence.
+        expected = "anonymised_column" if row["anonymised"] else "unknown"
+        assert row["anonymisation"] == expected
         assert row["record_value"]
         assert "does not say what" in row["finding"]
 

@@ -151,6 +151,18 @@ POST_PHASE_5_REVISIONS = {
     # before. A new table, append-only, referenced by nothing; no existing row
     # is touched, and a database with no rows behaves as before.
     "20260927_1510_ccbae1b96d1b_store_the_settings_an_analyst_changes.py",
+    # `fix/e4-d8-f6-real-or-synthetic` — `corpus.is_synthetic` (SD45). The
+    # corpus was built from invented data, so its results carry the marker and
+    # its ranking names no winner (risk D8). Additive, NOT NULL, default `0`,
+    # **no backfill**: marking existing corpora would be an `UPDATE corpus`,
+    # and Do-NOT #2 does not bend for a migration.
+    "20260929_1200_5e1d7a3c9b20_mark_a_synthetic_corpus.py",
+    # `fix/d1-d2-d3-run-provenance` — `run.ollama_version`,
+    # `run.server_parameters_json`, `run.context_length` (SD48). What the
+    # digest does not pin: the runtime, the server-side decoding options, and
+    # the context window the model was loaded with, which is what flags a
+    # prompt at the limit (risk D1). Additive, nullable, no backfill.
+    "20260930_0900_b4f2c81e6d37_pin_what_the_digest_does_not.py",
 }
 
 
@@ -268,6 +280,10 @@ POST_PHASE_5_ERRORS = {
     # refused (SD43): off loopback, malformed, a timeout below one second.
     # Carries a `SettingRefusal` code for `ui/` to word; nothing is stored.
     "SettingRefusedError",
+    # `fix/a4-g3-host-path-intake` — a host-path registration refused before
+    # anything is written (SD49): outside `RA2_IMPORT_ROOT`, past a bound, or
+    # a link out of the root. Carries a stable `reason` code.
+    "HostPathRefusedError",
 }
 
 

@@ -113,6 +113,10 @@ MODEL_SIZE_BYTES: dict[str, int] = {
 }
 
 
+#: SD48: 96 % of a 4096 context, so `at_context_limit` flags it.
+LONG_PROMPT_TOKENS = 3950
+
+
 async def seed_scored_corpus(
     session: AsyncSession,
     *,
@@ -120,6 +124,10 @@ async def seed_scored_corpus(
     records: int = 40,
     template_version: int = 1,
     models: tuple[str, ...] = ("qwen3:14b", "mistral-small:24b"),
+    synthetic: bool = False,
+    context_length: int | None = None,
+    unreadable_records: int = 0,
+    long_prompt_records: int = 0,
 ) -> ScoredCorpus:
     """Seed one scoreable corpus carrying every hazard above.
 
@@ -142,6 +150,7 @@ async def seed_scored_corpus(
             import_report_json="[]",
             record_count=records,
             is_dev_sized=False,
+            is_synthetic=synthetic,
             cp1252_canary_count=3,
         )
     )
@@ -214,11 +223,21 @@ async def seed_scored_corpus(
                 # tests set `llm_parallel_calls` — the absence is a rendering
                 # hazard, not one of the scoring hazards above.
                 model_size_bytes=MODEL_SIZE_BYTES.get(model),
+                # SD48: what `/api/ps` reported after the first record.
+                context_length=context_length,
             )
         )
     await session.flush()
 
-    await _seed_extractions(session, suffix, run_ids, record_ids, feature_ids)
+    await _seed_extractions(
+        session,
+        suffix,
+        run_ids,
+        record_ids,
+        feature_ids,
+        unreadable=unreadable_records,
+        long_prompts=long_prompt_records,
+    )
     await session.flush()
 
     return ScoredCorpus(
@@ -305,7 +324,10 @@ async def _seed_records(
                 language="fr" if french else "de",
                 language_confidence=0.41 if french else 0.98,
                 text_raw=FRENCH_LOSSY if french else "Schneefall, Strasse nass.",
-                text_anonymised_flag=True,
+                # SD50, risk B5: the realistic mix. Nearly every narrative
+                # comes from the text file; a few fall back to the anonymised
+                # column. A fixture of only the second hid the unknown state.
+                text_anonymised_flag=index % 5 == 0,
             )
         )
         session.add(
@@ -356,24 +378,37 @@ async def _seed_extractions(
     run_ids: tuple[RunId, ...],
     record_ids: tuple[RecordId, ...],
     feature_ids: dict[str, FeatureId],
+    *,
+    unreadable: int = 0,
+    long_prompts: int = 0,
 ) -> None:
-    """One extraction per (run, record), with the value hazards on top."""
+    """One extraction per (run, record), with the value hazards on top.
+
+    SD48's two reading hazards, both off by default: the first `unreadable`
+    records of every run are answers that were not JSON (`parse_ok=False`, no
+    values, as the worker writes them), and the first `long_prompts` records
+    carry `LONG_PROMPT_TOKENS`, at the limit of a 4096 context.
+    """
     for run_index, run_id in enumerate(run_ids):
         for index, record_id in enumerate(record_ids):
             extraction_id = ExtractionId(f"ext-{suffix}-{run_index}-{index:03d}")
+            readable = index >= unreadable
             session.add(
                 Extraction(
                     id=extraction_id,
                     run_id=run_id,
                     record_id=record_id,
-                    raw_output_text="{}",
-                    parse_ok=True,
+                    raw_output_text="{}" if readable else "not json",
+                    parse_ok=readable,
+                    parse_error=None if readable else "invalid JSON",
                     latency_ms=900 + index,
-                    prompt_tokens=1200,
+                    prompt_tokens=LONG_PROMPT_TOKENS if index < long_prompts else 1200,
                     completion_tokens=40,
                     retry_count=0,
                 )
             )
+            if not readable:
+                continue
             # The second model is deliberately worse on `WEATHER`, so the two
             # separate there (s03) and overlap on `LIGHT` (s02).
             weather_wrong = (index % 4 == 0) if run_index else (index % 9 == 0)

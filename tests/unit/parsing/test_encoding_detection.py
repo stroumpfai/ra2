@@ -6,9 +6,13 @@ from ra2.domain.delivery import Encoding
 from ra2.domain.parsing.encoding import (
     ENCODING_ORDER,
     EncodingResult,
+    NulByte,
     Undecodable,
+    UnsupportedBom,
     decode_strict,
     detect_encoding,
+    refuse,
+    utf8_sequences,
 )
 
 #: Undefined in Windows-1252, and bare continuation bytes in UTF-8.
@@ -87,3 +91,109 @@ def test_no_replacement_character_is_ever_produced():
         result = detect_encoding(payload)
         if isinstance(result, EncodingResult):
             assert "�" not in result.text
+
+
+# --- refused before decoding: wide encodings and NUL (risk G2) --------------
+
+#: Header text in each wide encoding, BOM first, the way each one is written.
+WIDE = [
+    (b"\xff\xfe" + "UNFALLUID;HERGANG".encode("utf-16-le"), "utf-16-le"),
+    (b"\xfe\xff" + "UNFALLUID;HERGANG".encode("utf-16-be"), "utf-16-be"),
+    (b"\xff\xfe\x00\x00" + "UNFALLUID;HERGANG".encode("utf-32-le"), "utf-32-le"),
+    (b"\x00\x00\xfe\xff" + "UNFALLUID;HERGANG".encode("utf-32-be"), "utf-32-be"),
+]
+
+
+@pytest.mark.parametrize(("data", "bom"), WIDE)
+def test_a_wide_bom_is_refused_by_name(data, bom):
+    """UTF-32-LE's mark begins with UTF-16-LE's, so the order of the checks
+    decides whether the finding names the right one."""
+    assert refuse(data) == UnsupportedBom(bom=bom)
+    assert detect_encoding(data) == UnsupportedBom(bom=bom)
+
+
+def test_the_bom_on_its_own_is_refused_too():
+    """A file that is nothing but a UTF-16 mark still fails as UTF-16. It must
+    not decode "successfully" as the two cp1252 characters `ÿþ`."""
+    assert detect_encoding(b"\xff\xfe") == UnsupportedBom(bom="utf-16-le")
+
+
+def test_utf16_without_a_bom_is_refused_by_its_nuls():
+    """The risk report's second case: before this check it decoded as UTF-8."""
+    data = "Unfall-UID;Hergang".encode("utf-16-le")
+    assert detect_encoding(data) == NulByte(byte_offset=1)
+
+
+def test_a_nul_anywhere_is_refused_with_its_offset():
+    data = b"UNFALLUID;HERGANG\r\n" + b"x" * 40 + b"\x00tail"
+    result = detect_encoding(data)
+    assert result == NulByte(byte_offset=19 + 40)
+
+
+def test_a_nul_after_a_utf8_bom_is_counted_from_byte_zero():
+    """Same rule as `Undecodable`: the offset is into the bytes as delivered."""
+    assert detect_encoding(b"\xef\xbb\xbfab\x00") == NulByte(byte_offset=5)
+
+
+def test_clean_bytes_are_not_refused():
+    """The positive control: the refusal check does not touch ordinary input."""
+    for payload in (b"", b"plain", "Nässe".encode(), "Nässe".encode("cp1252"), b"\xef\xbb\xbfx"):
+        assert refuse(payload) is None
+
+
+# --- UTF-8 read as cp1252: the mojibake canary (risk G1) ---------------------
+
+
+def test_the_risk_reports_reproduction_is_counted():
+    """G1's evidence: two UTF-8 lines then one cp1252 byte. The file really is
+    decoded as cp1252 whole, and `utf8_sequences` is what says so."""
+    data = b"Text\n" + "Grüezi\n".encode() + "Fussgänger\n".encode("cp1252")
+    result = detect_encoding(data)
+    assert isinstance(result, EncodingResult)
+    assert result.encoding is Encoding.CP1252
+    assert "GrÃ¼ezi" in result.text
+
+    seen = utf8_sequences(data)
+    assert seen.count == 1
+    assert seen.first_byte_offset == 7
+    assert seen.first_line_no == 2
+
+
+def test_a_genuine_cp1252_file_has_no_utf8_sequences():
+    """The negative control. A cp1252 umlaut followed by ASCII is not a UTF-8
+    sequence, so ordinary German in cp1252 counts zero."""
+    data = "Straße glatt, Nässe. Fußgänger überquerte den Übergang.".encode("cp1252")
+    assert utf8_sequences(data).count == 0
+    assert utf8_sequences(data).first_byte_offset is None
+    assert utf8_sequences(data).first_line_no is None
+
+
+@pytest.mark.parametrize(
+    ("char", "length"),
+    [("ü", 2), ("’", 3), ("€", 3), ("😀", 4)],
+)
+def test_each_sequence_counts_once_whatever_its_length(char, length):
+    encoded = char.encode()
+    assert len(encoded) == length
+    assert utf8_sequences(b"a" + encoded + b"b" + encoded).count == 2
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        b"\xc0\x80",  # overlong NUL
+        b"\xe0\x80\x80",  # overlong three-byte form
+        b"\xed\xa0\x80",  # a UTF-16 surrogate
+        b"\xf4\x90\x80\x80",  # past U+10FFFF
+        b"\xc3",  # a lead byte with no continuation
+    ],
+)
+def test_malformed_utf8_is_not_counted(malformed):
+    """Only what a UTF-8 writer could have produced is evidence of one."""
+    assert utf8_sequences(b"x" + malformed + b"y").count == 0
+
+
+def test_a_leading_utf8_bom_is_not_counted():
+    """It is a mark, not text, and is stripped from the text for that reason."""
+    assert utf8_sequences(b"\xef\xbb\xbfplain").count == 0
+    assert utf8_sequences(b"\xef\xbb\xbf" + "ü".encode()).first_byte_offset == 3

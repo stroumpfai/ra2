@@ -30,6 +30,13 @@ just reset-seed yes --records 200      # a corpus a launch will not call a smoke
 seed stops at the prompt template: picking models and pressing Launch stays a
 deliberate act, and nothing in the script contacts the LLM endpoint.
 
+The corpus it freezes is **marked synthetic** (`SD45`), whatever `--records`
+says: a *SYNTHETIC* pill on every Results tab, and a Ranking tab whose table
+renders but names no winner. `reset-seed` **refuses** a data directory holding
+any corpus that is not synthetic, and so does the seed on its own (`SD46`).
+A seed corpus frozen before `SD45` reads as not synthetic, so the first reset
+after upgrading asks for `just reset yes destroy-real-data`.
+
 Every byte is synthetic. Only the *column names* come from
 `ra2.domain.parsing.headers`; every value is invented in the script. Real data
 is gitignored and never reaches the seed (Do-NOT #11).

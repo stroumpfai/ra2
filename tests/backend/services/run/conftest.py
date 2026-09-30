@@ -48,7 +48,7 @@ from ra2.domain.ids import (
     RecordId,
     RunId,
 )
-from ra2.domain.llm import DEFAULT_REASONING_EFFORT, LLMClient
+from ra2.domain.llm import DEFAULT_REASONING_EFFORT, LLMClient, ModelCatalog
 from ra2.domain.prompt import ResolvedPrompt
 from ra2.infra.clock import FrozenClock
 from ra2.infra.config import Settings
@@ -240,6 +240,7 @@ def make_run_service(
         task_runner: TaskRunner | None = None,
         scorer: ScoreSubmitter | None = None,
         connection: ConnectionSettings | None = None,
+        model_catalog: ModelCatalog | None = None,
     ) -> RunService:
         return RunService(
             session_factory=session_factory or db_session_factory,
@@ -256,6 +257,8 @@ def make_run_service(
             # SD43. The seed by default; a test about the provider passes its own.
             connection=connection
             or StaticConnectionSettings.from_settings(settings or backend_settings),
+            # SD48. `None` by default: nothing asks for the loaded context.
+            model_catalog=model_catalog,
         )
 
     return _make

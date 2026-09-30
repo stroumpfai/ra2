@@ -38,8 +38,10 @@ from nicegui.testing.user import User
 from nicegui.testing.user_interaction import UserInteraction
 
 from ra2.domain.delivery import DeliveryStatus, SourceKind
+from ra2.domain.findings import FindingCode
 from ra2.infra.config import Settings
 from ra2.services.container import Services
+from ra2.ui.views.file_report_modal import FINDING_LABELS
 from ra2.ui.views.import_view import (
     CORPORA_CAPTION,
     NO_CORPORA_MESSAGE,
@@ -99,9 +101,10 @@ class Seeded:
 
 
 @pytest.fixture
-def delivery_root(tmp_path: Path) -> Path:
+def delivery_root(migrated_db: Settings) -> Path:
     """`DELIVERY` on disk, byte-for-byte, ready to register as a host path."""
-    root = tmp_path / "delivery"
+    # Under the import root: a host path anywhere else is refused (SD49).
+    root = migrated_db.import_root_path / "delivery"
     root.mkdir(parents=True)
     for name, source in DELIVERY.items():
         (root / name).write_bytes((_HAZARDS / source).read_bytes())
@@ -706,3 +709,35 @@ async def test_the_report_modal_no_longer_offers_remove(seeded: Seeded) -> None:
     testids = {e._props.get("data-testid") for e in user.find(kind=ui.element).elements}
     assert "remove-file" not in testids
     assert "reparse" in testids
+
+
+def test_every_finding_code_has_a_label() -> None:
+    """The fallback in `_finding_label` renders a bare enum name at an analyst.
+    It is a safety net, and a new `FindingCode` must not land in it."""
+    assert set(FINDING_LABELS) == set(FindingCode)
+
+
+@pytest.mark.parametrize("is_synthetic", [True, False])
+async def test_a_synthetic_corpus_is_marked_in_the_corpora_table(
+    user: User, is_synthetic: bool
+) -> None:
+    """`SD45`, risk D8: beside the dev-sized marker, and independent of it. A
+    3000-record seed is not dev-sized, so size alone never said this."""
+    from tests.fixtures.factories import make_corpus_view
+
+    from ra2.ui.views.import_view import _render_languages
+
+    corpus = make_corpus_view(
+        "c1", record_count=3000, language_counts={"de": 3000}, is_synthetic=is_synthetic
+    )
+
+    @ui.page("/t/corpus-languages")
+    def _view() -> None:
+        _render_languages(corpus)
+
+    await user.open("/t/corpus-languages")
+    await user.should_see("de 3 000")
+    if is_synthetic:
+        await user.should_see(marker="synthetic")
+    else:
+        await user.should_not_see(marker="synthetic")

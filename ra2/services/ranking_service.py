@@ -19,6 +19,7 @@ presence rate and the ranking must not move.
 
 import statistics
 from collections.abc import Sequence
+from dataclasses import replace
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -36,7 +37,7 @@ from ra2.services.readmodels import (
     RankingTabView,
     SeparatingRow,
 )
-from ra2.services.run_descriptor import build_descriptor
+from ra2.services.run_descriptor import build_descriptor, reading_quality
 
 __all__ = ["RankingService"]
 
@@ -47,6 +48,14 @@ NO_SEPARATION_DETAIL = (
     "{first} and {second} tie on {tied} of the {scored} scored features and their macro "
     "intervals cross. Pick on cost, not on score \u2014 or run more records to break the tie."
 )
+#: Replace the verdict, and every row's verdict pill, on a synthetic corpus
+#: (`SD45`). The ranks and numbers stay: they are what a developer checks.
+SYNTHETIC_HEADLINE = "This corpus is synthetic. No model is ranked on it."
+SYNTHETIC_DETAIL = (
+    "The records were invented for development, so these numbers show that the "
+    "screen works and nothing about the models. Run the evaluation on a delivered corpus."
+)
+SYNTHETIC_ROW_VERDICT = "synthetic"
 
 
 class RankingService:
@@ -116,6 +125,8 @@ class RankingService:
             rankings = rank_models(cells_by_model)
             separating = separating_features(cells_by_model)
             reported = await _reported_metrics(session, runs)
+            # SD48: reported, never scored, beside latency and VRAM (D1, D2).
+            quality = {run.id: await reading_quality(session, run) for run in runs}
 
             by_model = {r.model_id: r for r in rankings}
             ordered = sorted(runs, key=lambda run: (by_model[run.id].rank, run.id))
@@ -144,6 +155,7 @@ class RankingService:
                     # re-pull moves a tag's size behind an unchanged name.
                     # `None` stays `None` — the tab renders an em dash.
                     model_size_bytes=run.model_size_bytes,
+                    quality=quality[run.id],
                 )
                 for run in ordered
                 if run.id in by_model
@@ -154,9 +166,16 @@ class RankingService:
                 (sum(1 for c in cells if not c.suppressed) for cells in cells_by_model.values()),
                 default=0,
             )
+            descriptor = await build_descriptor(session, evaluation, runs)
             headline, detail = _compose_verdict(rows, separating, scored_count)
+            if descriptor.is_synthetic:
+                # SD45, risk D8: the table still renders, so the screen can be
+                # developed against the seed, but no sentence and no pill on it
+                # names a winner a screenshot could carry into a report.
+                headline, detail = SYNTHETIC_HEADLINE, SYNTHETIC_DETAIL
+                rows = tuple(replace(row, verdict=SYNTHETIC_ROW_VERDICT) for row in rows)
             return RankingTabView(
-                descriptor=await build_descriptor(session, evaluation, runs),
+                descriptor=descriptor,
                 rows=rows,
                 separating=tuple(
                     SeparatingRow(

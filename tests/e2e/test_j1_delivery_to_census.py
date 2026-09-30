@@ -41,6 +41,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page, expect
 
+from ra2.infra.config import Settings
 from ra2.services.export_service import CLASSIFICATION_COMMENT, CSV_BOM, CSV_DELIMITER
 
 pytestmark = pytest.mark.e2e
@@ -93,8 +94,10 @@ CENSUS_CSV_HEADER = [
 
 
 @pytest.fixture
-def delivery_root(tmp_path: Path) -> Path:
-    root = tmp_path / "j1-delivery"
+def delivery_root(tmp_path: Path, e2e_settings: Settings) -> Path:
+    # Under the server's import root, one directory per test: a host path
+    # anywhere else is refused (SD49), and the root is shared by the session.
+    root = e2e_settings.import_root_path / tmp_path.name / "j1-delivery"
     root.mkdir(parents=True)
     for name, source in DELIVERY.items():
         (root / name).write_bytes((_HAZARDS / source).read_bytes())
@@ -180,6 +183,9 @@ def test_a_delivery_becomes_a_corpus(
     # The design's "de 2 812 · fr 1 402 · it 396", at this delivery's scale.
     expect(row.locator('[data-testid="corpus-languages"]')).not_to_have_text("—")
     expect(row.locator('[data-testid="corpus-canary"]')).to_have_count(1)
+    # SD45: every key in this delivery was invented by `generate_hazards.py`,
+    # so the corpus is marked synthetic without anyone saying so.
+    expect(row.locator('[data-testid="synthetic"]')).to_have_count(1)
     # Nothing cites it yet, so delete is offered rather than blocked (J3).
     expect(row.locator('[data-testid="delete-corpus"]')).to_have_count(1)
     expect(row).to_contain_text("Not used by any evaluation")

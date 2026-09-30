@@ -77,6 +77,7 @@ from tests.fixtures.fake_llm import DEFAULT_MODELS
 
 import ra2.ui.views.evaluation_view as evaluation_view
 from ra2.domain.llm import REASONING_EFFORTS
+from ra2.infra.config import Settings
 
 pytestmark = pytest.mark.e2e
 
@@ -117,9 +118,11 @@ RESULTS_HREF_RE = re.compile(r"^/results\?run=.+$")
 
 
 @pytest.fixture
-def delivery_root(tmp_path: Path) -> Path:
-    root = tmp_path / "j10-delivery"
-    root.mkdir(parents=True)
+def delivery_root(e2e_settings: Settings) -> Path:
+    # Under the server's import root: a host path anywhere else is refused
+    # with a 422 (SD49).
+    root = e2e_settings.import_root_path / "j10-delivery"
+    root.mkdir(parents=True, exist_ok=True)
     for name, source in DELIVERY.items():
         (root / name).write_bytes((_HAZARDS / source).read_bytes())
     return root

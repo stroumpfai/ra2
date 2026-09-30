@@ -129,12 +129,15 @@ class StubOllama:
         version: Outcome | None = None,
         ps: Outcome | None = None,
         generate: Outcome | None = None,
+        show: Outcome | None = None,
     ) -> None:
         self._chat: deque[Outcome] = deque(chat or [(200, completion_body(VALID_OUTPUT))])
         self._tags: Outcome = tags if tags is not None else (200, TAGS_BODY)
         self._version: Outcome = version if version is not None else (200, {"version": "0.34.0"})
         self._ps: Outcome = ps if ps is not None else (200, {"models": []})
         self._generate: Outcome = generate if generate is not None else (200, {"done": True})
+        self._show: Outcome = show if show is not None else (200, {"parameters": ""})
+        self.show_requests: list[dict[str, Any]] = []
         self.generate_requests: list[dict[str, Any]] = []
         self.chat_requests: list[dict[str, Any]] = []
         self.tags_urls: list[str] = []
@@ -156,6 +159,10 @@ class StubOllama:
         elif request.url.path.endswith("/api/ps"):
             self.native_urls.append(str(request.url))
             outcome = self._ps
+        elif request.url.path.endswith("/api/show"):
+            self.native_urls.append(str(request.url))
+            self.show_requests.append(json.loads(request.read().decode("utf-8")))
+            outcome = self._show
         elif request.url.path.endswith("/api/generate"):
             self.native_urls.append(str(request.url))
             self.generate_requests.append(json.loads(request.read().decode("utf-8")))
@@ -1025,6 +1032,98 @@ async def test_loaded_is_empty_when_unreachable() -> None:
     catalog = OllamaModelCatalog(base_url=LOOPBACK_URL, http_client=stub.http_client())
 
     assert await catalog.loaded() == ()
+
+
+# ===========================================================================
+# SD48: what the digest does not pin (risks D1, D3)
+# ===========================================================================
+
+#: What `/api/show` returns for a model with a Modelfile: one `key value` per
+#: line, `stop` repeated, quotes kept.
+SHOW_PARAMETERS = (
+    "num_ctx                        8192\n"
+    'stop                           "<|im_start|>"\n'
+    'stop                           "<|im_end|>"\n'
+    "temperature                    0.6"
+)
+
+
+async def test_parameters_reads_the_modelfile_from_api_show() -> None:
+    stub = StubOllama(show=(200, {"parameters": SHOW_PARAMETERS, "model_info": {}}))
+    catalog = OllamaModelCatalog(base_url=LOOPBACK_URL, http_client=stub.http_client())
+
+    assert await catalog.parameters("qwen3:8b") == {
+        "num_ctx": ("8192",),
+        "stop": ('"<|im_start|>"', '"<|im_end|>"'),
+        "temperature": ("0.6",),
+    }
+    assert stub.native_urls == ["http://127.0.0.1:11434/api/show"]
+    assert stub.show_requests == [{"model": "qwen3:8b"}]
+    assert stub.chat_requests == []
+
+
+async def test_a_model_that_sets_no_parameters_answers_empty_not_none() -> None:
+    """`{}` is an answer (the model sets none); `None` is the endpoint not
+    saying. Provenance keeps the two apart."""
+    stub = StubOllama(show=(200, {"modelfile": "FROM x"}))
+    catalog = OllamaModelCatalog(base_url=LOOPBACK_URL, http_client=stub.http_client())
+
+    assert await catalog.parameters("qwen3:8b") == {}
+
+
+async def test_parameters_is_none_when_unreachable() -> None:
+    stub = StubOllama(show=httpx2.ConnectError("refused", request=httpx2.Request("POST", "/")))
+    catalog = OllamaModelCatalog(base_url=LOOPBACK_URL, http_client=stub.http_client())
+
+    assert await catalog.parameters("qwen3:8b") is None
+
+
+async def test_context_length_is_what_the_loaded_model_reports() -> None:
+    """Read from `/api/ps`, so it is what the server applied, whether a
+    Modelfile, `OLLAMA_CONTEXT_LENGTH` or the default set it."""
+    stub = StubOllama(
+        ps=(
+            200,
+            {
+                "models": [
+                    {"name": "gemma4:12b", "context_length": 32768},
+                    {"name": "qwen3:8b", "model": "qwen3:8b", "context_length": 4096},
+                ]
+            },
+        )
+    )
+    catalog = OllamaModelCatalog(base_url=LOOPBACK_URL, http_client=stub.http_client())
+
+    assert await catalog.context_length("qwen3:8b") == 4096
+    assert stub.native_urls == ["http://127.0.0.1:11434/api/ps"]
+
+
+@pytest.mark.parametrize(
+    "ps",
+    [
+        (200, {"models": []}),  # not loaded
+        (200, {"models": [{"name": "qwen3:8b"}]}),  # an Ollama that does not report it
+        (200, {"models": [{"name": "qwen3:8b", "context_length": 0}]}),
+        httpx2.ConnectError("refused", request=httpx2.Request("GET", "/")),
+    ],
+)
+async def test_context_length_is_none_rather_than_a_guess(ps: Outcome) -> None:
+    stub = StubOllama(ps=ps)
+    catalog = OllamaModelCatalog(base_url=LOOPBACK_URL, http_client=stub.http_client())
+
+    assert await catalog.context_length("qwen3:8b") is None
+
+
+def test_parse_parameters_keeps_every_value_verbatim_and_in_order() -> None:
+    from ra2.infra.ollama_client import parse_parameters
+
+    assert parse_parameters(None) == {}
+    assert parse_parameters("") == {}
+    assert parse_parameters("top_k 40\n\nstop a\nstop b\nnum_ctx") == {
+        "num_ctx": ("",),
+        "stop": ("a", "b"),
+        "top_k": ("40",),
+    }
 
 
 # ===========================================================================

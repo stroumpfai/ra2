@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
+from ra2.domain.anonymisation import AnonymisationMarking
 from ra2.domain.census import CensusBucket, TypeHint, ValueCount
 from ra2.domain.codelist_coverage import ColumnCoverage
 from ra2.domain.codes import CodeValue
@@ -93,6 +94,7 @@ __all__ = [
     "QualificationCardView",
     "RankingRow",
     "RankingTabView",
+    "ReadingQuality",
     "ResolvedPromptView",
     "ReviewTallyView",
     "RunDescriptorView",
@@ -202,6 +204,8 @@ class CorpusView:
     delivery_id: DeliveryId | None
     #: > 0 renders the `LOCKED · N eval` pill and blocks delete (§6.3, J3).
     locked_by_evaluations: int = 0
+    #: `SD45` — invented data. Renders the `SYNTHETIC` chip beside the dev one.
+    is_synthetic: bool = False
 
     @property
     def is_locked(self) -> bool:
@@ -741,6 +745,14 @@ class ProvenanceView:
     #: Records this run kept in flight (SD38). Always known, because the
     #: column is NOT NULL, and `1` on every run from before it existed.
     llm_parallel_calls: int = 1
+    #: `SD48`: what the digest does not pin. Each `None` means *not
+    #: recorded*, the `gpu_name` convention, never a guessed value.
+    ollama_version: str | None = None
+    #: The model's server-side decoding options at launch, key to values.
+    #: `{}` means it set none; `None` means the endpoint did not say.
+    server_parameters: Mapping[str, tuple[str, ...]] | None = None
+    #: The context the model was loaded with, read after the first record.
+    context_length: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -854,6 +866,37 @@ class RunDescriptorView:
     config_fingerprint: str
     is_dev: bool
     min_cell_count: int
+    #: `SD45` — the corpus is invented data. A `SYNTHETIC` pill beside the run
+    #: pill on every tab, and the ranking names no winner (risk D8).
+    is_synthetic: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ReadingQuality:
+    """Whether a run's model could read what it was given (`SD48`, D1, D2).
+
+    Reported, never scored, like latency and VRAM (mvp-spec.md §11.5): the
+    number that qualifies a result travels with it. A parse failure scores
+    `missing` on every feature of its record, and so does a prompt the server
+    truncated, and neither is distinguishable from a model that reads badly
+    unless it is shown beside the result.
+    """
+
+    #: Committed extractions: the denominator.
+    extractions: int
+    #: `parse_ok = False` among them.
+    parse_failures: int
+    #: The context the model was loaded with (`run.context_length`), or `None`
+    #: when the run did not record one.
+    context_length: int | None
+    #: Extractions whose `prompt_tokens` reached `CONTEXT_LIMIT_SHARE` of it.
+    #: **`None` when `context_length` is**: unknown, never zero.
+    at_context_limit: int | None
+
+    @property
+    def parse_failure_rate(self) -> float | None:
+        """`None` with nothing extracted, never a `0.0` that reads as clean."""
+        return self.parse_failures / self.extractions if self.extractions else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -863,6 +906,8 @@ class ModelColumnView:
     model_id: str
     tag: str
     digest: str
+    #: `SD48`: rendered under the tag on the Results extraction tab.
+    quality: ReadingQuality | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1059,6 +1104,9 @@ class PerRecordRow:
     finding: str
     language: str
     language_confidence: float
+    #: `SD50`, risk B5: what the marking may claim. `anonymised` above is the
+    #: raw source fact (the fallback column); this is what is rendered.
+    anonymisation: AnonymisationMarking = AnonymisationMarking.UNKNOWN
 
 
 @dataclass(frozen=True, slots=True)
@@ -1125,6 +1173,9 @@ class RankingRow:
     #: field (`SD41`). `None` for a run launched before that column existed,
     #: which both cells render as an em dash: `0` is the defect it repairs.
     model_size_bytes: int | None = None
+    #: `SD48`: parse failures and prompts at the context limit, reported in
+    #: the ranking's never-scored group (risks D1, D2).
+    quality: ReadingQuality | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1403,6 +1454,8 @@ class MismatchRowView:
     analyst_tag: str | None
     tagged_at: datetime | None
     note: str | None
+    #: `SD50`, risk B5: what the marking may claim, rendered on every row.
+    anonymisation: AnonymisationMarking = AnonymisationMarking.UNKNOWN
 
     @property
     def tag(self) -> MismatchTag | None:

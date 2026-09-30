@@ -37,7 +37,7 @@ from ra2.services.readmodels import PresenceTabView
 from ra2.ui.components.contingency_table import contingency_table
 from ra2.ui.components.primitives import data_props
 from ra2.ui.components.stat_cells import metric_cell
-from ra2.ui.views.results.chrome import run_descriptor
+from ra2.ui.views.results.chrome import anonymisation_chip, run_descriptor
 
 __all__ = [
     "GOAL1_NEVER_APART",
@@ -302,16 +302,9 @@ def _per_record(view: PresenceTabView) -> None:
                 with ui.element("tr").props('data-testid="record-row"').mark("record-row"):
                     with ui.element("td").classes("td mono").style("padding:8px 12px;"):
                         ui.label(row.record_id[:18])
-                        if row.anonymised:
-                            # Required wherever text is shown (mvp-spec.md §13).
-                            chip = (
-                                ui.element("span")
-                                .classes("chip")
-                                .props('data-testid="anonymised-chip"')
-                                .mark("anonymised-chip")
-                            )
-                            with chip:
-                                ui.label("anonymised")
+                        # Required wherever text is shown (mvp-spec.md §13),
+                        # on every row and in every state (SD50).
+                        anonymisation_chip(row.anonymisation)
                     with ui.element("td").classes("td mono").style("padding:8px 12px;"):
                         ui.label(row.record_value)
                     with ui.element("td").classes("td").style("padding:8px 12px;"):

@@ -42,6 +42,8 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page, expect
 
+from ra2.infra.config import Settings
+
 pytestmark = pytest.mark.e2e
 
 #: `tests/e2e/` -> `tests/`.
@@ -69,10 +71,12 @@ ROW = '[data-testid="codelist-row"]'
 
 
 @pytest.fixture
-def delivery_root(tmp_path: Path) -> Path:
+def delivery_root(tmp_path: Path, e2e_settings: Settings) -> Path:
     """One `unfall` file, registered in place. Filenames are arbitrary on
     purpose: kind and canton come from the data (§12.5)."""
-    root = tmp_path / CORPUS_NAME
+    # Under the server's import root, one directory per test: a host path
+    # anywhere else is refused (SD49), and the root is shared by the session.
+    root = e2e_settings.import_root_path / tmp_path.name / CORPUS_NAME
     root.mkdir(parents=True)
     (root / "one.txt").write_bytes((_HAZARDS / "h08_all_empty_column" / "unfall.txt").read_bytes())
     return root

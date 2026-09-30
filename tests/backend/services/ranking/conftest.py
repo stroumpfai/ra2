@@ -19,11 +19,12 @@ from ra2.services.scoring_service import ScoringService
 
 
 class _Ids:
-    def __init__(self) -> None:
+    def __init__(self, prefix: str = "mismatch") -> None:
+        self._prefix = prefix
         self._counter = count(1)
 
     def new_id(self) -> str:
-        return f"mismatch-{next(self._counter):04d}"
+        return f"{self._prefix}-{next(self._counter):04d}"
 
 
 @pytest.fixture
@@ -31,19 +32,71 @@ async def scored(
     db_session_factory: async_sessionmaker[AsyncSession],
     frozen_clock: object,
 ) -> AsyncIterator[ScoredCorpus]:
+    yield await _scored(db_session_factory, frozen_clock, suffix="s", synthetic=False, version=1)
+
+
+@pytest.fixture
+async def scored_synthetic(
+    db_session_factory: async_sessionmaker[AsyncSession],
+    frozen_clock: object,
+) -> AsyncIterator[ScoredCorpus]:
+    """The same scored rows over a corpus marked synthetic (`SD45`)."""
+    yield await _scored(db_session_factory, frozen_clock, suffix="syn", synthetic=True, version=2)
+
+
+@pytest.fixture
+async def scored_with_reading_hazards(
+    db_session_factory: async_sessionmaker[AsyncSession],
+    frozen_clock: object,
+) -> AsyncIterator[ScoredCorpus]:
+    """SD48: a 4096 context, 2 unreadable answers and 3 prompts at the limit
+    in every run, so the counts have something to count."""
+    yield await _scored(
+        db_session_factory,
+        frozen_clock,
+        suffix="rq",
+        synthetic=False,
+        version=3,
+        context_length=4096,
+        unreadable_records=2,
+        long_prompt_records=3,
+    )
+
+
+async def _scored(
+    db_session_factory: async_sessionmaker[AsyncSession],
+    frozen_clock: object,
+    *,
+    suffix: str,
+    synthetic: bool,
+    version: int,
+    context_length: int | None = None,
+    unreadable_records: int = 0,
+    long_prompt_records: int = 0,
+) -> ScoredCorpus:
     async with db_session_factory() as session:
-        corpus = await seed_scored_corpus(session, records=40)
+        corpus = await seed_scored_corpus(
+            session,
+            suffix=suffix,
+            records=40,
+            synthetic=synthetic,
+            template_version=version,
+            context_length=context_length,
+            unreadable_records=unreadable_records,
+            long_prompt_records=long_prompt_records,
+        )
         await session.commit()
     scoring = ScoringService(
         session_factory=db_session_factory,
         ground_truth=GroundTruthRepository(),
         task_runner=None,  # type: ignore[arg-type]
         clock=frozen_clock,  # type: ignore[arg-type]
-        id_factory=_Ids(),
+        # The first corpus keeps the ids it always had; a second needs its own.
+        id_factory=_Ids("mismatch" if suffix == "s" else f"mismatch-{suffix}"),
     )
     for run_id in corpus.run_ids:
         await scoring.score_run(run_id)
-    yield corpus
+    return corpus
 
 
 @pytest.fixture

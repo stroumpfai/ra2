@@ -32,10 +32,15 @@ from urllib.parse import urlencode
 from nicegui import ui
 
 from ra2.domain.stats import TieMark
-from ra2.services.readmodels import ExtractionTabView, FeatureScoreRow
+from ra2.services.readmodels import ExtractionTabView, FeatureScoreRow, ModelColumnView
 from ra2.ui.components.primitives import data_props
 from ra2.ui.components.stat_cells import insufficient_cell, metric_cell, tie_marker
-from ra2.ui.views.results.chrome import run_descriptor
+from ra2.ui.views.results.chrome import (
+    MISMATCH_RATE_NOTE,
+    QUALITY_TITLE,
+    quality_text,
+    run_descriptor,
+)
 
 __all__ = [
     "ENCODING_CAVEAT",
@@ -142,7 +147,7 @@ def _table(
             _th("Feature", "246px")
             _th("n", "78px")
             for model in view.models:
-                _th(model.tag, None)
+                _model_th(model)
         with ui.element("tbody"):
             for row in view.features.items:
                 _row(row, view, on_toggle_feature)
@@ -187,6 +192,29 @@ def _mismatch_link(row: FeatureScoreRow, view: ExtractionTabView) -> None:
         .style("display:block;font-size:10.5px;color:var(--accent);margin-top:2px;")
     )
     link.on("click", js_handler="(e) => e.stopPropagation()")
+
+
+def _model_th(model: ModelColumnView) -> None:
+    """The model's tag, and under it whether it could read what it was given
+    (`SD48`): the figure that qualifies every number in its column."""
+    cell = (
+        ui.element("th")
+        .classes("th")
+        .style(
+            "text-align:left;padding:8px 12px;font-size:10px;text-transform:uppercase;"
+            "color:var(--ink3);border-bottom:1px solid var(--rule);"
+        )
+    )
+    with cell:
+        ui.label(model.tag)
+        data_props(
+            ui.label(quality_text(model.quality))
+            .classes("mono")
+            .props('data-testid="model-quality"')
+            .mark("model-quality")
+            .style("text-transform:none;font-size:10.5px;font-weight:400;margin-top:2px;"),
+            {"title": QUALITY_TITLE},
+        )
 
 
 def _th(label: str, width: str | None) -> None:
@@ -322,6 +350,12 @@ def _legend() -> None:
         tie_marker(TieMark.BEST)
         ui.label(TIE_LEGEND).style("font-size:11px;color:var(--ink2);")
         ui.label(TIE_LEGEND_NOTE).style("margin-left:auto;font-size:11px;color:var(--ink3);")
+    # Risk D6: under the rates, where they are first read.
+    ui.label(MISMATCH_RATE_NOTE).props('data-testid="mismatch-rate-note"').mark(
+        "mismatch-rate-note"
+    ).style(
+        "padding:9px 14px;border-top:1px solid var(--rule2);font-size:11.5px;color:var(--ink2);"
+    )
 
 
 def _by_language_card(view: ExtractionTabView) -> None:

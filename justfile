@@ -98,13 +98,16 @@ fmt:
 # ---------------------------------------------------------------------------
 
 # Show what a wipe of RA2_DATA_DIR would remove. `just reset yes` carries it out.
-reset token="":
-    uv run python scripts/reset_data.py {{token}}
+# A database holding a corpus that is not synthetic also needs
+# `destroy-real-data`: `just reset yes destroy-real-data` (SD46).
+reset *tokens:
+    uv run python scripts/reset_data.py {{tokens}}
 
 # Wipe, then seed a working state. Needs the same token: `just reset-seed yes`.
 # Extra arguments go to the seed: `just reset-seed yes --records 200`.
+# Refused outright over real data, and without `yes` nothing is seeded (SD46).
 reset-seed token="" *seed-args:
-    uv run python scripts/reset_data.py {{token}}
+    uv run python scripts/reset_data.py --for-seed {{token}}
     uv run python scripts/seed_dev.py {{seed-args}}
 
 # ---------------------------------------------------------------------------

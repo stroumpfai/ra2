@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import BinaryIO, Protocol, runtime_checkable
 
 from ra2.domain.ids import DeliveryId, FileId
-from ra2.infra.files import open_binary_writer
+from ra2.infra.files import open_binary_reader, open_binary_writer
 from ra2.infra.files import read_bytes as files_read_bytes
 
 #: Streamed in bounded chunks so `accept()` never buffers a whole upload.
@@ -142,14 +142,61 @@ class UploadedFileStore:
         path.unlink()
 
 
-class HostPathFileStore:
-    """Registers the analyst's own files in place. Never copies, never writes."""
+class HostPathRefusedError(FileStoreError):
+    """A host-path registration this store will not walk (`SD49`, risk A4).
 
-    def __init__(self, roots: Mapping[DeliveryId, Path] | None = None) -> None:
+    `reason` is a stable code, like a `FindingCode`: the message is for a
+    person and the code is for a test. Raised **before** anything is written,
+    and a walk that meets a bound stops there rather than finishing the tree.
+    """
+
+    OUTSIDE_IMPORT_ROOT = "outside_import_root"
+    TOO_MANY_FILES = "too_many_files"
+    TOO_MANY_BYTES = "too_many_bytes"
+    LINK_LEAVES_ROOT = "link_leaves_root"
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+class HostPathFileStore:
+    """Registers the analyst's own files in place. Never copies, never writes.
+
+    `SD49`, risk A4. Given an `allowed_root`, a delivery may be registered
+    from that directory or beneath it and from nowhere else. Given
+    `max_files` / `max_bytes`, the walk that hashes every file stops at the
+    first file past either. Without them it behaves as it always did, which is
+    what a test that builds its own store gets; `create_app()` always passes
+    all three, from `Settings`.
+    """
+
+    def __init__(
+        self,
+        roots: Mapping[DeliveryId, Path] | None = None,
+        *,
+        allowed_root: Path | None = None,
+        max_files: int | None = None,
+        max_bytes: int | None = None,
+    ) -> None:
         self._roots: dict[DeliveryId, Path] = dict(roots or {})
+        self._allowed_root = allowed_root
+        self._max_files = max_files
+        self._max_bytes = max_bytes
 
     def bind(self, delivery_id: DeliveryId, root: Path) -> None:
-        """Record which host directory a delivery was registered from."""
+        """Record which host directory a delivery was registered from.
+
+        Refuses a root outside `allowed_root` before anything is read. The
+        comparison is on resolved paths, so `import/../../home` and a link
+        named inside the root that points out of it are both outside.
+        """
+        if self._allowed_root is not None and not _within(root, self._allowed_root):
+            raise HostPathRefusedError(
+                HostPathRefusedError.OUTSIDE_IMPORT_ROOT,
+                f"{root} is outside the import directory {self._allowed_root}. "
+                "Copy the delivery into it, or upload the files.",
+            )
         self._roots[delivery_id] = root
 
     async def accept(self, delivery_id: DeliveryId, filename: str, content: BinaryIO) -> StoredFile:
@@ -158,8 +205,41 @@ class HostPathFileStore:
         )
 
     async def list_files(self, delivery_id: DeliveryId) -> tuple[StoredFile, ...]:
+        """Every file under the root, hashed in chunks, within the bounds.
+
+        The bounds are checked on sizes from `stat`, **before** any file is
+        hashed, and the walk stops at the first file past either. A file whose
+        real path leaves the root (a link out of it) is refused rather than
+        skipped: a skipped file would be a silent drop (Do-NOT #6).
+        """
         root = self._root_for(delivery_id)
-        return tuple(_stat_file(path, root) for path in sorted(root.rglob("*")) if path.is_file())
+        paths: list[Path] = []
+        total = 0
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if not _within(path, root):
+                raise HostPathRefusedError(
+                    HostPathRefusedError.LINK_LEAVES_ROOT,
+                    f"{path.relative_to(root).as_posix()} links outside {root}.",
+                )
+            paths.append(path)
+            total += path.stat().st_size
+            if self._max_files is not None and len(paths) > self._max_files:
+                raise HostPathRefusedError(
+                    HostPathRefusedError.TOO_MANY_FILES,
+                    f"{root} holds more than {self._max_files} files, the most one "
+                    "delivery may register (RA2_IMPORT_MAX_FILES). Is it the delivery's "
+                    "own directory?",
+                )
+            if self._max_bytes is not None and total > self._max_bytes:
+                raise HostPathRefusedError(
+                    HostPathRefusedError.TOO_MANY_BYTES,
+                    f"{root} holds more than {self._max_bytes / 1e9:g} GB, the most one "
+                    "delivery may register (RA2_IMPORT_MAX_GB). Is it the delivery's "
+                    "own directory?",
+                )
+        return tuple(_stat_file(path, root) for path in sorted(paths))
 
     async def read_bytes(self, delivery_id: DeliveryId, relative_path: str) -> bytes:
         root = self._root_for(delivery_id)
@@ -184,14 +264,27 @@ def _stat_file(path: Path, root: Path) -> StoredFile:
     rather than that final id.
     """
     relative_path = path.relative_to(root).as_posix()
-    data = files_read_bytes(path)
+    # In chunks: a delivery file can be hundreds of MB, and the digest needs
+    # none of it held at once (risk A4's "reads every file fully").
+    digest = hashlib.sha256()
+    size = 0
+    with open_binary_reader(path) as source:
+        while chunk := source.read(_CHUNK_BYTES):
+            size += len(chunk)
+            digest.update(chunk)
     return StoredFile(
         file_id=FileId(relative_path),
         filename=path.name,
         relative_path=relative_path,
-        byte_size=len(data),
-        sha256=hashlib.sha256(data).hexdigest(),
+        byte_size=size,
+        sha256=digest.hexdigest(),
     )
+
+
+def _within(path: Path, root: Path) -> bool:
+    """`path` is `root` or beneath it, compared on **resolved** paths."""
+    resolved, base = path.resolve(), root.resolve()
+    return resolved == base or base in resolved.parents
 
 
 def _resolve(root: Path, relative_path: str) -> Path:

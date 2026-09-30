@@ -272,6 +272,8 @@ class CorpusResponse(_Schema):
     delivery_id: str | None = None
     #: > 0 renders `LOCKED · N eval`; DELETE then returns 409.
     locked_by_evaluations: int = 0
+    #: `SD45` — built from invented data, by the seed or from its keys.
+    is_synthetic: bool = False
 
 
 class CorpusPage(_Schema):
@@ -861,6 +863,11 @@ class ProvenanceResponse(_Schema):
     llm_reasoning_effort: str | None = None
     #: Records this run kept in flight (SD38); `1` on every earlier run.
     llm_parallel_calls: int = 1
+    #: `SD48`: the Ollama version, the model's server-side decoding options
+    #: (`{}`: none set; `null`: not recorded) and the context it was loaded with.
+    ollama_version: str | None = None
+    server_parameters: dict[str, list[str]] | None = None
+    context_length: int | None = None
 
 
 class EvaluationResponse(_Schema):
@@ -938,12 +945,27 @@ class RunDescriptorResponse(_Schema):
     #: **every** dev-sized result wherever its numbers appear.
     is_dev: bool
     min_cell_count: int
+    #: `SD45` — the corpus is invented data; the ranking names no winner.
+    is_synthetic: bool = False
+
+
+class ReadingQualityResponse(_Schema):
+    """`SD48`: whether a run's model could read what it was given. Reported,
+    never scored. `at_context_limit` is `None` when the run did not record
+    its context, which means *unknown*, never zero."""
+
+    extractions: int
+    parse_failures: int
+    parse_failure_rate: float | None = None
+    context_length: int | None = None
+    at_context_limit: int | None = None
 
 
 class ModelColumnResponse(_Schema):
     model_id: str
     tag: str
     digest: str
+    quality: ReadingQualityResponse | None = None
 
 
 class FeatureScoreResponse(_Schema):
@@ -1063,6 +1085,8 @@ class PerRecordResponse(_Schema):
     finding: str
     language: str
     language_confidence: float
+    #: `SD50`: `anonymised_column` | `anonymised` | `not_anonymised` | `unknown`.
+    anonymisation: str = "unknown"
 
 
 class PerRecordPage(_Schema):
@@ -1108,6 +1132,8 @@ class RankingRowResponse(_Schema):
     #: run launched before the column existed — **not** `0`, which is what this
     #: field carried, hard-coded, before SD41.
     model_size_bytes: int | None = None
+    #: `SD48`: parse failures and prompts at the context limit (D1, D2).
+    quality: ReadingQualityResponse | None = None
 
 
 class SeparatingRowResponse(_Schema):
@@ -1212,6 +1238,8 @@ class MismatchResponse(_Schema):
     #: mvp-spec.md §13 — required wherever text is shown, and this row shows an
     #: evidence span.
     anonymised: bool
+    #: `SD50`: `anonymised_column` | `anonymised` | `not_anonymised` | `unknown`.
+    anonymisation: str = "unknown"
     feature_id: str
     feature_key: str
     record_value: str | None = None

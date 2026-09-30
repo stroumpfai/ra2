@@ -14,6 +14,7 @@ from typing import Final, Self
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from ra2.domain.anonymisation import DeliveredTextAnonymised
 from ra2.domain.llm import DEFAULT_REASONING_EFFORT, REASONING_EFFORTS
 
 __all__ = ["MAX_PARALLEL_CALLS", "REASONING_EFFORTS", "Settings"]
@@ -176,6 +177,27 @@ class Settings(BaseSettings):
 
     max_upload_mb: int = 512
 
+    #: `SD49`, risk A4. The one directory a host-path delivery may be
+    #: registered from, or any directory beneath it. Anything else is refused
+    #: before a file is read. Defaults to `{data_dir}/import`. **`just reset`
+    #: does not remove it**: files registered in place are the analyst's own,
+    #: so destruction step 5 stays a manual step, pointed at this directory.
+    import_root: Path | None = None
+    #: `SD49`, risk A4. Bounds on one host-path registration, which reads and
+    #: hashes every file under its root. Past either, registration is refused
+    #: and nothing is written: a home directory or a share is a mistake, not a
+    #: delivery, and a delivery is a few dozen files.
+    import_max_files: int = 200
+    import_max_gb: float = 2.0
+
+    #: `SD50`, risk B5. The supplier's answer to "is the delivered text file
+    #: anonymised?", recorded once. `unknown` until they answer, and every
+    #: delivered narrative is then marked *anonymisation unknown*, never *not
+    #: anonymised* by silence. `yes` / `no` turn that marking into
+    #: *anonymised* / *not anonymised*. A narrative taken from the
+    #: `UnfHergangTextAnonym` fallback column is marked for its source either way.
+    delivered_text_anonymised: DeliveredTextAnonymised = DeliveredTextAnonymised.UNKNOWN
+
     #: mvp-spec.md §9. Below `dev_record_max` a corpus is marked dev-sized and
     #: every view showing its numbers carries "smoke test, not a result".
     dev_record_max: int = 50
@@ -246,6 +268,23 @@ class Settings(BaseSettings):
         """The resolved SQLite file. Never `None` after validation."""
         assert self.db_path is not None
         return self.db_path
+
+    @model_validator(mode="after")
+    def _default_import_root(self) -> Self:
+        """`RA2_IMPORT_ROOT` defaults to `{data_dir}/import` (`SD49`)."""
+        if self.import_root is None:
+            object.__setattr__(self, "import_root", self.data_dir / "import")
+        return self
+
+    @property
+    def import_root_path(self) -> Path:
+        """The resolved import root. Never `None` after validation."""
+        assert self.import_root is not None
+        return self.import_root
+
+    @property
+    def import_max_bytes(self) -> int:
+        return int(self.import_max_gb * 1_000_000_000)
 
     @property
     def deliveries_dir(self) -> Path:

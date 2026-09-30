@@ -37,14 +37,20 @@ from typing import Final
 
 from nicegui import ui
 
-from ra2.services.readmodels import RankingRow, RankingTabView
+from ra2.services.readmodels import RankingRow, RankingTabView, ReadingQuality
 from ra2.ui.components.primitives import (
     data_props,
     format_gigabytes,
     format_latency_ms,
     format_tokens,
 )
-from ra2.ui.views.results.chrome import run_descriptor
+from ra2.ui.views.results.chrome import (
+    CONTEXT_NOT_RECORDED,
+    DETERMINISM_CAVEAT,
+    MISMATCH_RATE_NOTE,
+    QUALITY_TITLE,
+    run_descriptor,
+)
 
 __all__ = [
     "COMPUTATION_RULES",
@@ -159,10 +165,10 @@ def _table(view: RankingTabView) -> None:
         with (
             ui.element("div").style("overflow:auto;"),
             ui.element("table").style(
-                # 900px + the 78px VRAM column (SD41). The well is
-                # `overflow:auto`, so the table scrolls rather than collapsing
-                # a column below the width the design drew for it.
-                "min-width:978px;width:100%;border-collapse:collapse;table-layout:fixed;"
+                # 900px + the 78px VRAM column (SD41) + the 120px Unreadable
+                # column (SD48). The well is `overflow:auto`, so the table
+                # scrolls rather than collapsing a column below its width.
+                "min-width:1098px;width:100%;border-collapse:collapse;table-layout:fixed;"
             ),
         ):
             with ui.element("thead"), ui.element("tr"):
@@ -176,12 +182,15 @@ def _table(view: RankingTabView) -> None:
                     ("Time / record", "104px"),
                     ("Prompt tokens", "104px"),
                     ("VRAM", "78px"),
+                    ("Unreadable", "120px"),
                     ("Verdict", "134px"),
                 ):
                     _th(label, width)
             with ui.element("tbody"):
+                # SD45: on a synthetic corpus nothing draws the eye to rank 1.
+                leads = 0 if view.descriptor.is_synthetic else 1
                 for row in view.rows:
-                    tinted = "background:var(--accent-soft);" if row.rank == 1 else ""
+                    tinted = "background:var(--accent-soft);" if row.rank == leads else ""
                     with data_props(
                         ui.element("tr")
                         .props(f'data-testid="ranking-row" data-rank="{row.rank}"')
@@ -215,11 +224,12 @@ def _table(view: RankingTabView) -> None:
                         # spelled the same number out to seven digits.
                         _td_mono(format_tokens(row.prompt_tokens), testid="prompt-tokens")
                         _td_mono(_size_text(row.model_size_bytes), testid="vram")
+                        _quality_cell(row.quality)
                         with ui.element("td").classes("td").style("padding:8px 12px;"):
                             pill = (
                                 ui.element("span")
                                 .classes(
-                                    "pill pill-accent" if row.rank == 1 else "pill pill-neutral"
+                                    "pill pill-accent" if row.rank == leads else "pill pill-neutral"
                                 )
                                 .props('data-testid="verdict-pill"')
                                 .mark("verdict-pill")
@@ -233,6 +243,35 @@ def _table(view: RankingTabView) -> None:
         ui.label(VRAM_NOTE).props('data-testid="vram-note"').mark("vram-note").style(
             "padding:8px 14px;font-size:11.5px;color:var(--ink3);"
         )
+
+
+def _quality_cell(quality: ReadingQuality | None) -> None:
+    """Parse failures over the at-limit count (`SD48`, risks D1, D2).
+
+    Reported, never scored, beside latency and VRAM (mvp-spec.md §11.5). An
+    unknown is printed as unknown: `—` with nothing extracted, and
+    *context not recorded* when the run has no context to compare with.
+    """
+    rate = None if quality is None else quality.parse_failure_rate
+    with data_props(
+        ui.element("td")
+        .classes("td")
+        .props('data-testid="unreadable"')
+        .mark("unreadable")
+        .style("padding:8px 12px;"),
+        {"title": QUALITY_TITLE},
+    ):
+        ui.label(EMPTY_CELL if rate is None else f"{100 * rate:.1f} %").classes("mono").style(
+            "font-size:12px;"
+        )
+        if quality is not None:
+            ui.label(
+                CONTEXT_NOT_RECORDED
+                if quality.at_context_limit is None
+                else f"{quality.at_context_limit} at limit"
+            ).classes("mono").props('data-testid="at-limit"').mark("at-limit").style(
+                "font-size:10.5px;color:var(--ink3);"
+            )
 
 
 def _digest_and_size(row: RankingRow) -> str:
@@ -391,3 +430,12 @@ def _rules(view: RankingTabView) -> None:
                     corpus=view.descriptor.corpus_label,
                 )
             )
+            # SD48, risk D3: under the validity statement, because a ranking
+            # re-run on the same cfg and corpus can still move a little.
+            ui.label(DETERMINISM_CAVEAT).props('data-testid="determinism-caveat"').mark(
+                "determinism-caveat"
+            ).style("margin-top:4px;")
+            # Risk D6: where the winner is read, as well as where the rates are.
+            ui.label(MISMATCH_RATE_NOTE).props('data-testid="mismatch-rate-note"').mark(
+                "mismatch-rate-note"
+            ).style("margin-top:4px;")

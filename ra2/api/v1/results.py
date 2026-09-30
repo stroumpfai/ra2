@@ -28,6 +28,7 @@ from ra2.api.schemas import (
     FeatureScorePage,
     FeatureScoreResponse,
     ModelColumnResponse,
+    ReadingQualityResponse,
     RunDescriptorResponse,
     ScoringStatusResponse,
     TaskAcceptedResponse,
@@ -40,13 +41,21 @@ from ra2.services.readmodels import (
     Cell,
     ExtractionTabView,
     FeatureScoreRow,
+    ModelColumnView,
+    ReadingQuality,
     RunDescriptorView,
     ScoringStatusView,
     SortDir,
     SuppressedCell,
 )
 
-__all__ = ["cell_response", "descriptor_response", "router"]
+__all__ = [
+    "cell_response",
+    "descriptor_response",
+    "model_column_response",
+    "quality_response",
+    "router",
+]
 
 router = APIRouter(tags=["results"])
 
@@ -77,6 +86,28 @@ def cell_response(cell: Cell) -> CellResponse:
     )
 
 
+def quality_response(quality: ReadingQuality | None) -> ReadingQualityResponse | None:
+    """`SD48`, shared by every board that carries a run's reading quality."""
+    if quality is None:
+        return None
+    return ReadingQualityResponse(
+        extractions=quality.extractions,
+        parse_failures=quality.parse_failures,
+        parse_failure_rate=quality.parse_failure_rate,
+        context_length=quality.context_length,
+        at_context_limit=quality.at_context_limit,
+    )
+
+
+def model_column_response(view: ModelColumnView) -> ModelColumnResponse:
+    return ModelColumnResponse(
+        model_id=view.model_id,
+        tag=view.tag,
+        digest=view.digest,
+        quality=quality_response(view.quality),
+    )
+
+
 def descriptor_response(view: RunDescriptorView) -> RunDescriptorResponse:
     return RunDescriptorResponse(
         evaluation_id=view.evaluation_id,
@@ -86,6 +117,7 @@ def descriptor_response(view: RunDescriptorView) -> RunDescriptorResponse:
         config_fingerprint=view.config_fingerprint,
         is_dev=view.is_dev,
         min_cell_count=view.min_cell_count,
+        is_synthetic=view.is_synthetic,
     )
 
 
@@ -135,10 +167,7 @@ def _extraction_tab(view: ExtractionTabView, *, scored: bool) -> ExtractionTabRe
     return ExtractionTabResponse(
         scored=scored,
         descriptor=descriptor_response(view.descriptor),
-        models=[
-            ModelColumnResponse(model_id=m.model_id, tag=m.tag, digest=m.digest)
-            for m in view.models
-        ],
+        models=[model_column_response(m) for m in view.models],
         features=FeatureScorePage(
             items=[_feature_row(row) for row in view.features.items],
             total=view.features.total,

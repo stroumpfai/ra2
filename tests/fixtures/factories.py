@@ -207,6 +207,7 @@ def make_corpus_view(
     language_counts: Mapping[str, int] = MappingProxyType({}),
     delivery_id: str | None = None,
     locked_by_evaluations: int = 0,
+    is_synthetic: bool = False,
 ) -> CorpusView:
     return CorpusView(
         corpus_id=CorpusId(corpus_id),
@@ -220,6 +221,7 @@ def make_corpus_view(
         language_counts=language_counts,
         delivery_id=DeliveryId(delivery_id) if delivery_id is not None else None,
         locked_by_evaluations=locked_by_evaluations,
+        is_synthetic=is_synthetic,
     )
 
 

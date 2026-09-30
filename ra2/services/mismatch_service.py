@@ -31,6 +31,7 @@ from collections.abc import Mapping, Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ra2.domain.anonymisation import DeliveredTextAnonymised, anonymisation_marking
 from ra2.domain.ids import EvaluationId, FeatureId, MismatchId, RunId
 from ra2.domain.mismatch import MismatchTag, ReviewTally, TagFilter, TagState, tally
 from ra2.infra.clock import Clock
@@ -67,9 +68,13 @@ class MismatchService:
         *,
         session_factory: async_sessionmaker[AsyncSession],
         clock: Clock,
+        delivered_text_anonymised: DeliveredTextAnonymised = DeliveredTextAnonymised.UNKNOWN,
     ) -> None:
         self._session_factory = session_factory
         self._clock = clock
+        #: `SD50`, risk B5: the supplier's answer, as configured. Decides what
+        #: the marking may claim for a delivered narrative.
+        self._delivered = delivered_text_anonymised
 
     async def list_mismatches(
         self,
@@ -260,7 +265,7 @@ class MismatchService:
                     tag_state=tag_state,
                 ),
                 rows=Page(
-                    items=tuple(_row_view(row) for row in rows),
+                    items=tuple(_row_view(row, self._delivered) for row in rows),
                     total=total,
                     page=page,
                     page_size=page_size,
@@ -295,7 +300,7 @@ class MismatchService:
             )
             if row is None:
                 raise NotFoundError("mismatch", mismatch_id)
-            return _row_view(row)
+            return _row_view(row, self._delivered)
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +327,7 @@ async def _features_for(session: AsyncSession, evaluation_id: EvaluationId) -> l
     return list(result.scalars())
 
 
-def _row_view(row: MismatchListRow) -> MismatchRowView:
+def _row_view(row: MismatchListRow, delivered: DeliveredTextAnonymised) -> MismatchRowView:
     """The repository's row as the read model `ui/` renders.
 
     A straight mapping, deliberately: `analyst_tag` crosses **verbatim** and is
@@ -341,6 +346,7 @@ def _row_view(row: MismatchListRow) -> MismatchRowView:
         analyst_tag=row.analyst_tag,
         tagged_at=row.tagged_at,
         note=row.note,
+        anonymisation=anonymisation_marking(row.anonymised, delivered),
     )
 
 

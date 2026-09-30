@@ -167,6 +167,9 @@ thousands (`1'127'946.61`); empty string means **no value provided** (§8.6).
 
 1. Detect encoding per file (UTF-8 first, then Windows-1252). Show the analyst what
    was detected. **Fail the file on undecodable bytes** — never substitute `U+FFFD`.
+   **Fail it too on a UTF-16/32 byte-order mark or a NUL byte**, naming that
+   cause, whatever encoding the analyst chooses. A file read as Windows-1252 that
+   contains UTF-8 sequences is part mojibake; report it, with the count.
 2. Parse with a real RFC4180 parser using the file's delimiter and quote char.
 3. For any row that fails to parse, or whose field count ≠ the header's, apply
    **key-anchored recovery**: the key column (`UnfallUid`/`ObjektUid`/`PersonUid`/
@@ -201,6 +204,7 @@ Reported but non-blocking (surfaced in the import report, stored on the corpus):
   `Total Personen`) ≠ count of `person` rows via `objekt`
 - text rows with no matching `unfall` row, and `unfall` rows with no text
 - per-file detected encoding
+- UTF-8 read as Windows-1252 in a file (§4.2 step 1), with the count
 
 ### 4.4 Encoding loss — one corpus-level check, nothing more
 
@@ -537,11 +541,22 @@ the corpus size.
 - A run over a corpus below the evaluation floor is marked **dev** and every view
   showing its numbers carries a visible "smoke test, not a result" marker.
   Thresholds: dev 20–50 records; evaluation ≥ 200 (up to 3000).
+- A corpus built from **invented** data is marked **synthetic**, whatever its
+  size: by the development seed, and by any freeze whose every record key has
+  the shape only this project's generators write. Its results carry a
+  "synthetic, not a result" marker and its ranking names no winner. Provenance,
+  not size: a 3000-record seed is not dev-sized and is still invented.
 
 Every run stores: model name **and digest**, prompt template version, temperature,
 seed, **reasoning effort**, feature config id + fingerprints, corpus id + version,
-host platform, GPU name, LLM endpoint, plus per-extraction latency and token
-counts.
+host platform, GPU name, LLM endpoint, **the model server's version, the
+model's server-side decoding options, and the context window it was loaded
+with**, plus per-extraction latency and token counts.
+
+That record is necessary, not sufficient. Local GPU inference is not
+bit-identical: batching, cache reuse and floating-point order move a few
+answers between runs of the same record. Wherever a run is presented as
+reproducible, and in the evaluation report, this is said once, plainly.
 
 Jobs run in the in-process asyncio worker, are restart-safe, and report progress
 (records done / total, ETA) in the UI.
@@ -696,6 +711,11 @@ a weak extractor manufactures false "missing" flags.
 - **Overlapping confidence intervals are rendered as a tie**, not as an order.
 - Exploratory attributes take no part.
 - Every cross-corpus number, if ever shown, carries its corpus label.
+- **Each model's unreadable answers and prompts at the context limit are
+  reported, never scored**, on every Results column and in the ranking: both
+  score *missing* on every feature of their record, which is otherwise
+  indistinguishable from a model that reads badly. An at-limit count needs a
+  recorded context; without one it is *not recorded*, never zero.
 - **Latency, VRAM and the macro presence rate are reported, never scored** —
   the tie-breaker the analyst applies, not one the tool applies. The presence
   figure is in that group rather than in the ranking for §11.2's reason: there
@@ -756,8 +776,14 @@ NiceGUI, single mode, no login, everything permitted.
    drill-down showing text, extracted values, spans and the anonymisation marking.
 7. **Mismatches** — the flat list with tagging and export.
 
-**Required everywhere text is shown:** the per-record anonymisation marking.
+**Required everywhere text is shown:** the per-record anonymisation marking, on
+every record, in one of four states: *anonymised column* (the narrative came
+from `UnfHergangTextAnonym`), and for a delivered narrative *anonymised*, *not
+anonymised* or, until the supplier has said (§18), ***anonymisation unknown***.
+Never an absent marking that reads as "not anonymised".
 **Required on every dev-sized result:** the "smoke test, not a result" marker.
+**Required on every result over a synthetic corpus:** the synthetic marker, and
+no ranking verdict (§9).
 
 ---
 
@@ -870,6 +896,8 @@ The MVP is done when, on the target machine:
    breakdown carrying the encoding caveat, and Goal 3 in a separate table.
 7. The mismatch list is browsable, taggable and exportable, with evidence spans.
 8. Every run's record alone is sufficient to reproduce it: model + digest, prompt
-   version, temperature, seed, config fingerprints, corpus version.
+   version, temperature, seed, config fingerprints, corpus version, model server
+   version, server-side decoding options and loaded context. *Reproduce* means
+   re-run the same question, not obtain bit-identical answers (§9).
 9. A dev-sized run is visibly marked as a smoke test wherever its numbers appear.
 10. No network egress occurs beyond the configured LLM endpoint.

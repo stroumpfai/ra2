@@ -79,7 +79,7 @@ from ra2.ui.state import (
     set_table_state,
     table_state,
 )
-from ra2.ui.views.results.chrome import empty_card, run_descriptor
+from ra2.ui.views.results.chrome import anonymisation_chip, empty_card, run_descriptor
 from ra2.ui.views.scoring_states import NOT_SCORED_BODY as _NOT_SCORED_BODY
 from ra2.ui.views.scoring_states import NOT_SCORED_TITLE as _NOT_SCORED_TITLE
 from ra2.ui.views.scoring_states import (
@@ -926,15 +926,8 @@ def _render_record(row: MismatchRowView) -> None:
     ui.label(str(row.record_id)[:RECORD_ID_CHARS]).props('data-testid="mismatch-record"').mark(
         "mismatch-record"
     ).style("font-size:11.5px;")
-    if row.anonymised:
-        marker = (
-            ui.element("span")
-            .classes("chip")
-            .props('data-testid="anonymised-chip"')
-            .mark("anonymised-chip")
-        )
-        with marker:
-            ui.label("anonymised")
+    # Every row, every state (SD50): an absent chip would read as "no".
+    anonymisation_chip(row.anonymisation)
 
 
 def _value_label(value: str | None, testid: str) -> None:
