@@ -288,7 +288,9 @@ class ExportService:
             [
                 (
                     row.record_id,
-                    "yes" if row.anonymised else "no",
+                    # SD50: what the marking may claim, not a yes/no that
+                    # reads "no" for every narrative nobody has vouched for.
+                    row.anonymisation.value,
                     row.record_value,
                     row.finding,
                     row.language,
@@ -341,7 +343,9 @@ class ExportService:
                 (
                     row.mismatch_id,
                     row.record_id,
-                    "yes" if row.anonymised else "no",
+                    # SD50: what the marking may claim, not a yes/no that
+                    # reads "no" for every narrative nobody has vouched for.
+                    row.anonymisation.value,
                     row.feature_key,
                     row.record_value or "",
                     row.extracted_value or "",

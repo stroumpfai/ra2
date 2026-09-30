@@ -35,7 +35,12 @@ from ra2.domain.stats import TieMark
 from ra2.services.readmodels import ExtractionTabView, FeatureScoreRow, ModelColumnView
 from ra2.ui.components.primitives import data_props
 from ra2.ui.components.stat_cells import insufficient_cell, metric_cell, tie_marker
-from ra2.ui.views.results.chrome import QUALITY_TITLE, quality_text, run_descriptor
+from ra2.ui.views.results.chrome import (
+    MISMATCH_RATE_NOTE,
+    QUALITY_TITLE,
+    quality_text,
+    run_descriptor,
+)
 
 __all__ = [
     "ENCODING_CAVEAT",
@@ -345,6 +350,12 @@ def _legend() -> None:
         tie_marker(TieMark.BEST)
         ui.label(TIE_LEGEND).style("font-size:11px;color:var(--ink2);")
         ui.label(TIE_LEGEND_NOTE).style("margin-left:auto;font-size:11px;color:var(--ink3);")
+    # Risk D6: under the rates, where they are first read.
+    ui.label(MISMATCH_RATE_NOTE).props('data-testid="mismatch-rate-note"').mark(
+        "mismatch-rate-note"
+    ).style(
+        "padding:9px 14px;border-top:1px solid var(--rule2);font-size:11.5px;color:var(--ink2);"
+    )
 
 
 def _by_language_card(view: ExtractionTabView) -> None:

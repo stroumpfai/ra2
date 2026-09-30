@@ -1085,6 +1085,8 @@ class PerRecordResponse(_Schema):
     finding: str
     language: str
     language_confidence: float
+    #: `SD50`: `anonymised_column` | `anonymised` | `not_anonymised` | `unknown`.
+    anonymisation: str = "unknown"
 
 
 class PerRecordPage(_Schema):
@@ -1236,6 +1238,8 @@ class MismatchResponse(_Schema):
     #: mvp-spec.md §13 — required wherever text is shown, and this row shows an
     #: evidence span.
     anonymised: bool
+    #: `SD50`: `anonymised_column` | `anonymised` | `not_anonymised` | `unknown`.
+    anonymisation: str = "unknown"
     feature_id: str
     feature_key: str
     record_value: str | None = None

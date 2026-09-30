@@ -984,8 +984,8 @@ the last three days in which any of them can be done.*
 | 6 | **✓ §8.10** | Record the context length on the run (built from `/api/ps`, the loaded value, not `/api/show`); **flag any extraction whose returned `prompt_tokens` sits at or near the limit** — the per-extraction counts already exist (§9.4) | D1 | done |
 | 7 | **✓ §8.10** | Carry the parse-failure rate onto Results and Ranking | D2 | done |
 | 8 | **✓ §8.10** | Record model-server version and decoding options on the run; state the determinism caveat in the report template (new: `docs/evaluation-report-template.md`) | D3 | done |
-| 5 | open | Render the anonymisation marking as three states until its semantics are confirmed | B5 | 2 h |
-| 10 | open | Standing copy on Results: a mismatch rate is not a model error rate until the list is read — D6 closed by delivery, the string is still worth it | D6 | 1 h |
+| 5 | **✓ §8.12** | Render the anonymisation marking as three states until its semantics are confirmed | B5 | done |
+| 10 | **✓ §8.12** | Standing copy on Results: a mismatch rate is not a model error rate until the list is read — D6 closed by delivery, the string is still worth it | D6 | done |
 | 9 | **✓ §8.11** | Constrain `root_path` to an allowed root; bound the walk; make the server honour `Settings.host` or drop it. Host half by `SD42`; root and walk by `SD49` | A4, G3 | done |
 | **28** | open | A contract test: every `Settings` field has a reader in `ra2/`, or it does not exist | G3 | 2 h |
 | **29** | open | Helper copy under the mismatch note field, in `EXPORT_LEAVES_RA2`'s voice | B6 | 1 h |
@@ -1904,6 +1904,52 @@ and belongs in its own change.
 - **Upload-only** (row 30).
 - **Deliveries registered before this change** from outside the new root.
   They are not re-checked; the rule applies at registration.
+
+### 8.12 B5, D6 — labels that claim only what is known · closed 2026-09-30 · `fix-b5-d6-honest-labels`
+
+**Status: closed.** No schema change. See
+`contracts/amendments/fix-b5-d6-honest-labels.md` and `SD50`. The supplier
+question B5 asks the project to send is still open (`mvp-spec.md` §18). What
+changed is that the screen no longer answers it by accident.
+
+**B5: the marking (row 5).** Before, a chip reading *anonymised* appeared
+only on the rare record whose narrative came from the `UnfHergangTextAnonym`
+fallback, and every other row showed **nothing**. Nearly every record
+therefore read as *not anonymised*, a statement about personal data that
+nobody had made.
+
+Every row now carries a chip, in one of four states:
+
+| State | When |
+|---|---|
+| *anonymised column* | The narrative came from the fallback column. Named for its source, since what that column guarantees is the open question |
+| *anonymisation unknown* | A delivered narrative. The default |
+| *anonymised* / *not anonymised* | A delivered narrative, once `RA2_DELIVERED_TEXT_ANONYMISED` records the supplier's answer as `yes` or `no` |
+
+- **Why a setting rather than a column per corpus:** the answer is about the
+  supplier's text file, not about any one import. It was the project's
+  choice, 2026-09-30.
+- **CSV exports** write the state's stable value (`unknown`,
+  `anonymised_column`, ...) in the existing `anonymised` column, instead of a
+  `no` that meant "nobody said".
+- **The shared test fixture** now flags one record in five instead of all of
+  them. A fixture where every narrative came from the fallback column could
+  not show the state this finding is about.
+
+**D6: the standing copy (row 10).** D6 was closed by the delivery of the
+Mismatches view (§9.4), and the string was still worth adding.
+`MISMATCH_RATE_NOTE` now stands in two places:
+- under the extraction tab's legend, where the rates are first read;
+- in the ranking's footer, beside the validity and determinism lines.
+
+UI tests assert it on both tabs.
+
+**What this does not close.**
+- **The supplier's answer.** Until it is in, every delivered narrative says
+  *unknown*, which is the honest state and not the resolved one.
+- **The export's classification line** (`CLASSIFICATION_COMMENT`) still says
+  *non-anonymised* for every file. That stays deliberately: it is the
+  conservative handling rule, not a per-record claim.
 
 ---
 

@@ -14,6 +14,7 @@ from typing import Final, Self
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from ra2.domain.anonymisation import DeliveredTextAnonymised
 from ra2.domain.llm import DEFAULT_REASONING_EFFORT, REASONING_EFFORTS
 
 __all__ = ["MAX_PARALLEL_CALLS", "REASONING_EFFORTS", "Settings"]
@@ -188,6 +189,14 @@ class Settings(BaseSettings):
     #: delivery, and a delivery is a few dozen files.
     import_max_files: int = 200
     import_max_gb: float = 2.0
+
+    #: `SD50`, risk B5. The supplier's answer to "is the delivered text file
+    #: anonymised?", recorded once. `unknown` until they answer, and every
+    #: delivered narrative is then marked *anonymisation unknown*, never *not
+    #: anonymised* by silence. `yes` / `no` turn that marking into
+    #: *anonymised* / *not anonymised*. A narrative taken from the
+    #: `UnfHergangTextAnonym` fallback column is marked for its source either way.
+    delivered_text_anonymised: DeliveredTextAnonymised = DeliveredTextAnonymised.UNKNOWN
 
     #: mvp-spec.md §9. Below `dev_record_max` a corpus is marked dev-sized and
     #: every view showing its numbers carries "smoke test, not a result".

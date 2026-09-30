@@ -245,15 +245,19 @@ async def test_the_anonymisation_chip_is_on_every_row_that_shows_text(scored: Se
     """**mvp-spec.md §13**: "required everywhere text is shown", and every row
     here shows an evidence span.
 
-    The fixture's records are anonymised, so every row must carry the marking —
-    one chip per row, not one per page and not one on a detail view somebody
-    has to open.
+    Every row carries a chip in **every** state (SD50): a row with none would
+    read as "not anonymised" when the truth is usually "unknown". One chip
+    per row, not one per page and not one on a detail view somebody has to
+    open.
     """
     await scored.user.open(_url(scored.corpus))
     records = scored.user.find(marker="mismatch-record").elements
     chips = scored.user.find(marker="anonymised-chip").elements
     assert records
     assert len(chips) == len(records)
+    # SD50, risk B5: the fixture's mix reaches the list, and a delivered
+    # narrative nobody has vouched for says so rather than showing nothing.
+    assert {chip.props["data-marking"] for chip in chips} == {"anonymised_column", "unknown"}
 
 
 async def test_the_table_carries_the_designs_widths_and_one_flexible_column(

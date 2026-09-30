@@ -324,7 +324,10 @@ async def _seed_records(
                 language="fr" if french else "de",
                 language_confidence=0.41 if french else 0.98,
                 text_raw=FRENCH_LOSSY if french else "Schneefall, Strasse nass.",
-                text_anonymised_flag=True,
+                # SD50, risk B5: the realistic mix. Nearly every narrative
+                # comes from the text file; a few fall back to the anonymised
+                # column. A fixture of only the second hid the unknown state.
+                text_anonymised_flag=index % 5 == 0,
             )
         )
         session.add(

@@ -776,7 +776,11 @@ NiceGUI, single mode, no login, everything permitted.
    drill-down showing text, extracted values, spans and the anonymisation marking.
 7. **Mismatches** — the flat list with tagging and export.
 
-**Required everywhere text is shown:** the per-record anonymisation marking.
+**Required everywhere text is shown:** the per-record anonymisation marking, on
+every record, in one of four states: *anonymised column* (the narrative came
+from `UnfHergangTextAnonym`), and for a delivered narrative *anonymised*, *not
+anonymised* or, until the supplier has said (§18), ***anonymisation unknown***.
+Never an absent marking that reads as "not anonymised".
 **Required on every dev-sized result:** the "smoke test, not a result" marker.
 **Required on every result over a synthetic corpus:** the synthetic marker, and
 no ranking verdict (§9).

@@ -48,6 +48,7 @@ def _records_page(page: Page[PerRecordRow]) -> PerRecordPage:
             PerRecordResponse(
                 record_id=row.record_id,
                 anonymised=row.anonymised,
+                anonymisation=row.anonymisation.value,
                 record_value=row.record_value,
                 finding=row.finding,
                 language=row.language,

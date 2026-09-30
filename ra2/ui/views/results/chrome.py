@@ -18,15 +18,21 @@ from typing import Final
 from nicegui import ui
 from nicegui.element import Element
 
+from ra2.domain.anonymisation import AnonymisationMarking
 from ra2.services.readmodels import ReadingQuality, RunDescriptorView
+from ra2.ui.components.primitives import data_props
 
 __all__ = [
+    "ANONYMISATION_LABELS",
+    "ANONYMISATION_TITLES",
     "CONTEXT_NOT_RECORDED",
     "DETERMINISM_CAVEAT",
     "DEV_PILL",
+    "MISMATCH_RATE_NOTE",
     "QUALITY_TITLE",
     "RUN_PILL",
     "SYNTHETIC_PILL",
+    "anonymisation_chip",
     "empty_card",
     "quality_text",
     "run_descriptor",
@@ -81,6 +87,59 @@ def quality_text(quality: ReadingQuality | None) -> str:
     if quality.at_context_limit is None:
         return f"{unreadable} · {CONTEXT_NOT_RECORDED}"
     return f"{unreadable} · {quality.at_context_limit} at limit"
+
+
+#: Risk D6, `SD50`: `vision.md`'s "a high mismatch rate is ambiguous until
+#: someone reads the list", as standing copy wherever the rates are read. A
+#: `wrong` is the model's or the record's, and only the review tells which.
+MISMATCH_RATE_NOTE: Final = (
+    "A mismatch rate is not a model error rate until someone has read the list: "
+    "a wrong answer can be the model's or the record's. The Mismatches view is "
+    "where that is decided."
+)
+
+
+#: `SD50`, risk B5 — the one wording table for the anonymisation marking.
+#: mvp-spec.md §13 requires it wherever record text is shown, so every row
+#: carries a chip; *unknown* is a state, never an absence that reads as "no".
+ANONYMISATION_LABELS: Final[dict[AnonymisationMarking, str]] = {
+    AnonymisationMarking.ANONYMISED_COLUMN: "anonymised column",
+    AnonymisationMarking.ANONYMISED: "anonymised",
+    AnonymisationMarking.NOT_ANONYMISED: "not anonymised",
+    AnonymisationMarking.UNKNOWN: "anonymisation unknown",
+}
+#: The chip's tooltip: what each state rests on.
+ANONYMISATION_TITLES: Final[dict[AnonymisationMarking, str]] = {
+    AnonymisationMarking.ANONYMISED_COLUMN: (
+        "This narrative came from the UnfHergangTextAnonym column, because the text "
+        "file had no row for it. What that column guarantees is not yet confirmed."
+    ),
+    AnonymisationMarking.ANONYMISED: "The supplier states the delivered text is anonymised.",
+    AnonymisationMarking.NOT_ANONYMISED: (
+        "The supplier states the delivered text is not anonymised."
+    ),
+    AnonymisationMarking.UNKNOWN: (
+        "Nobody has confirmed whether the delivered text is anonymised. Treat it as if it is not."
+    ),
+}
+
+
+def anonymisation_chip(marking: AnonymisationMarking) -> Element:
+    """The per-record marking, with its state as `data-marking` (`SD50`)."""
+    tone = {
+        AnonymisationMarking.NOT_ANONYMISED: "chip danger",
+        AnonymisationMarking.UNKNOWN: "chip ink3",
+    }.get(marking, "chip")
+    chip = data_props(
+        ui.element("span")
+        .classes(tone)
+        .props('data-testid="anonymised-chip"')
+        .mark("anonymised-chip"),
+        {"data-marking": marking.value, "title": ANONYMISATION_TITLES[marking]},
+    )
+    with chip:
+        ui.label(ANONYMISATION_LABELS[marking])
+    return chip
 
 
 def run_descriptor(view: RunDescriptorView) -> Element:

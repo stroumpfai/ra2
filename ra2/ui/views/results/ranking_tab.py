@@ -47,6 +47,7 @@ from ra2.ui.components.primitives import (
 from ra2.ui.views.results.chrome import (
     CONTEXT_NOT_RECORDED,
     DETERMINISM_CAVEAT,
+    MISMATCH_RATE_NOTE,
     QUALITY_TITLE,
     run_descriptor,
 )
@@ -433,4 +434,8 @@ def _rules(view: RankingTabView) -> None:
             # re-run on the same cfg and corpus can still move a little.
             ui.label(DETERMINISM_CAVEAT).props('data-testid="determinism-caveat"').mark(
                 "determinism-caveat"
+            ).style("margin-top:4px;")
+            # Risk D6: where the winner is read, as well as where the rates are.
+            ui.label(MISMATCH_RATE_NOTE).props('data-testid="mismatch-rate-note"').mark(
+                "mismatch-rate-note"
             ).style("margin-top:4px;")

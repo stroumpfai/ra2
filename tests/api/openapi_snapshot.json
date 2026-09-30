@@ -2688,6 +2688,11 @@
             ],
             "title": "Analyst Tag"
           },
+          "anonymisation": {
+            "default": "unknown",
+            "title": "Anonymisation",
+            "type": "string"
+          },
           "anonymised": {
             "title": "Anonymised",
             "type": "boolean"
@@ -2980,6 +2985,11 @@
       "PerRecordResponse": {
         "additionalProperties": false,
         "properties": {
+          "anonymisation": {
+            "default": "unknown",
+            "title": "Anonymisation",
+            "type": "string"
+          },
           "anonymised": {
             "title": "Anonymised",
             "type": "boolean"

@@ -772,3 +772,38 @@ def test_quality_text_never_prints_an_unknown_as_zero() -> None:
         )
         == "unreadable 5.0 % · 3 at limit"
     )
+
+
+# --- SD50: honest labels (risks B5, D6) --------------------------------------
+
+
+async def test_every_record_carries_a_marking_and_unknown_is_said(scored: Scored) -> None:
+    """Risk B5. A row with no chip read as "not anonymised". Every row now
+    carries one, and a delivered narrative nobody has vouched for says
+    *anonymisation unknown*."""
+    from ra2.domain.anonymisation import AnonymisationMarking
+    from ra2.ui.views.results.chrome import ANONYMISATION_LABELS
+
+    await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}&tab=presence")
+    await scored.user.should_see(marker="record-row")
+    rows = scored.user.find(marker="record-row").elements
+    chips = scored.user.find(marker="anonymised-chip").elements
+    assert len(chips) == len(rows)
+    for chip in chips:
+        marking = AnonymisationMarking(chip.props["data-marking"])
+        # The fixture flags its fallback-column records; everything else is a
+        # delivered narrative nobody has vouched for.
+        assert marking in (AnonymisationMarking.ANONYMISED_COLUMN, AnonymisationMarking.UNKNOWN)
+    labels = {ANONYMISATION_LABELS[AnonymisationMarking(c.props["data-marking"])] for c in chips}
+    for label in labels:
+        await scored.user.should_see(label)
+
+
+async def test_the_mismatch_rate_note_stands_under_the_rates(scored: Scored) -> None:
+    """Risk D6: where the rates are first read, and where the winner is."""
+    from ra2.ui.views.results.chrome import MISMATCH_RATE_NOTE
+
+    await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}")
+    await scored.user.should_see(MISMATCH_RATE_NOTE)
+    await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}&tab=ranking")
+    await scored.user.should_see(MISMATCH_RATE_NOTE)

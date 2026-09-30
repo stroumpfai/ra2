@@ -256,14 +256,23 @@ def create_app(
     )
     # `scoring_service` satisfies `Scorer` structurally — neither read service
     # imports it directly.
-    results_service = ResultsService(session_factory=session_factory, scorer=scoring_service)
+    results_service = ResultsService(
+        session_factory=session_factory,
+        scorer=scoring_service,
+        # SD50: what the anonymisation marking may claim.
+        delivered_text_anonymised=settings.delivered_text_anonymised,
+    )
     ranking_service = RankingService(session_factory=session_factory, scorer=scoring_service)
     # --- phase 5 (M35): mismatch review ------------------------------------
     # Review's half of `mismatch` (sw-design.md §17). It takes a clock because
     # `tagged_at` is stamped on every write, and nothing else: there is no
     # scorer here and no path to one, which is §17.3's absent edge expressed in
     # the wiring as well as in the imports.
-    mismatch_service = MismatchService(session_factory=session_factory, clock=clock)
+    mismatch_service = MismatchService(
+        session_factory=session_factory,
+        clock=clock,
+        delivered_text_anonymised=settings.delivered_text_anonymised,
+    )
     # --- reset and discard (sw-design.md §18) ------------------------------
     # The same `upload_store` intake used, because the bytes it removes on a
     # delivery discard are the ones intake wrote. A host-path delivery's files

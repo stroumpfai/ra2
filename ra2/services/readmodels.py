@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
+from ra2.domain.anonymisation import AnonymisationMarking
 from ra2.domain.census import CensusBucket, TypeHint, ValueCount
 from ra2.domain.codelist_coverage import ColumnCoverage
 from ra2.domain.codes import CodeValue
@@ -1103,6 +1104,9 @@ class PerRecordRow:
     finding: str
     language: str
     language_confidence: float
+    #: `SD50`, risk B5: what the marking may claim. `anonymised` above is the
+    #: raw source fact (the fallback column); this is what is rendered.
+    anonymisation: AnonymisationMarking = AnonymisationMarking.UNKNOWN
 
 
 @dataclass(frozen=True, slots=True)
@@ -1450,6 +1454,8 @@ class MismatchRowView:
     analyst_tag: str | None
     tagged_at: datetime | None
     note: str | None
+    #: `SD50`, risk B5: what the marking may claim, rendered on every row.
+    anonymisation: AnonymisationMarking = AnonymisationMarking.UNKNOWN
 
     @property
     def tag(self) -> MismatchTag | None:

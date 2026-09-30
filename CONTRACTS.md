@@ -465,6 +465,9 @@ and one §8 entry per finding closed. The register in §4 is left as written.
 | `ra2/services/errors.py` | + `HostPathRefusedError` (422), with a stable `reason`; nothing is written when it is raised | `fix-a4-g3-host-path-intake` |
 | `ra2/infra/filestore.py` | Implementation half only: `HostPathFileStore(allowed_root=, max_files=, max_bytes=)`, the store's own `HostPathRefusedError`, a bounded walk that refuses a link out of the root, chunked hashing. The protocol is unchanged | `fix-a4-g3-host-path-intake` |
 | `tests/test_p5_contract.py` | + `HostPathRefusedError` in `POST_PHASE_5_ERRORS` | `fix-a4-g3-host-path-intake` |
+| `ra2/infra/config.py` | + `delivered_text_anonymised` (`unknown` \| `yes` \| `no`, default `unknown`): the supplier's answer about the delivered text, which decides what the anonymisation marking may claim (B5, `SD50`) | `fix-b5-d6-honest-labels` |
+| `ra2/services/readmodels.py`, `ra2/api/schemas.py` | + `anonymisation` on the per-record and mismatch rows, defaulted `unknown`; `anonymised` stays as the raw source fact. OpenAPI snapshot regenerated, additive | `fix-b5-d6-honest-labels` |
+| `ra2/services/export_service.py` | Body only: the two CSVs write the marking's stable value instead of `yes` / `no` | `fix-b5-d6-honest-labels` |
 | `.gitignore` | **unchanged, deliberately.** Adding `Unfall.csv` would be the name-shaped fix again, and it would block the hazard fixtures, which carry the same names | — |
 | `pyproject.toml`, `.importlinter`, `tests/conftest.py` | **unchanged.** No dependency, no new contract, no new root fixture | — |
 
