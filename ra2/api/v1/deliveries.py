@@ -28,7 +28,7 @@ from ra2.api.v1.discard import conflict, discard_response
 from ra2.api.v1.discard import discard_preview as to_preview
 from ra2.domain.findings import Finding
 from ra2.domain.ids import DeliveryId, FileId
-from ra2.services.errors import DeliveryCitedError, NotFoundError
+from ra2.services.errors import DeliveryCitedError, HostPathRefusedError, NotFoundError
 from ra2.services.readmodels import DeliveryFileView, DeliveryView
 
 __all__ = ["router"]
@@ -112,9 +112,13 @@ async def register_delivery(
     body: RegisterDeliveryRequest, service: DeliveryServiceDep
 ) -> DeliveryResponse:
     root_path = Path(body.root_path) if body.root_path is not None else None
-    delivery_id = await service.register(
-        body.name, source_kind=body.source_kind, root_path=root_path
-    )
+    try:
+        delivery_id = await service.register(
+            body.name, source_kind=body.source_kind, root_path=root_path
+        )
+    except HostPathRefusedError as exc:
+        # SD49: outside the import root, or past a bound. Nothing was written.
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     view = await service.get(delivery_id)
     return _delivery_response(view)
 

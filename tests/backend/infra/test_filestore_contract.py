@@ -24,6 +24,7 @@ from ra2.infra.filestore import (
     FileStore,
     FileStoreError,
     HostPathFileStore,
+    HostPathRefusedError,
     ReadOnlyFileStoreError,
     UploadedFileStore,
 )
@@ -116,3 +117,105 @@ async def test_host_path_store_raises_for_an_unbound_delivery() -> None:
     store = HostPathFileStore()
     with pytest.raises(FileStoreError):
         await store.list_files(DeliveryId("never-bound"))
+
+
+# --- SD49, risk A4: one allowed root, a bounded walk --------------------------
+
+_ID = DeliveryId("d1")
+
+
+def _tree(root: Path, files: int, size: int = 1) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    for index in range(files):
+        (root / f"f{index:03d}.txt").write_bytes(b"x" * size)
+    return root
+
+
+def test_a_root_inside_the_import_root_is_accepted(tmp_path: Path) -> None:
+    allowed = tmp_path / "import"
+    store = HostPathFileStore(allowed_root=allowed)
+
+    store.bind(_ID, _tree(allowed / "delivery", 1))
+    store.bind(DeliveryId("d2"), allowed)
+
+
+@pytest.mark.parametrize(
+    "outside",
+    [
+        lambda tmp: tmp / "elsewhere",
+        lambda tmp: tmp / "import" / ".." / "elsewhere",
+        lambda tmp: tmp,
+    ],
+)
+async def test_a_root_outside_the_import_root_is_refused_before_anything_is_read(
+    tmp_path: Path, outside: object
+) -> None:
+    """Compared on resolved paths, so `import/../elsewhere` is outside too."""
+    store = HostPathFileStore(allowed_root=tmp_path / "import")
+    root = outside(tmp_path)  # type: ignore[operator]
+
+    with pytest.raises(HostPathRefusedError) as refused:
+        store.bind(_ID, root)
+
+    assert refused.value.reason == HostPathRefusedError.OUTSIDE_IMPORT_ROOT
+    # Nothing was bound, so there is nothing to walk.
+    with pytest.raises(FileStoreError):
+        await store.list_files(_ID)
+
+
+async def test_the_walk_stops_past_the_file_count(tmp_path: Path) -> None:
+    store = HostPathFileStore(max_files=3)
+    store.bind(_ID, _tree(tmp_path / "d", 4))
+
+    with pytest.raises(HostPathRefusedError) as refused:
+        await store.list_files(_ID)
+    assert refused.value.reason == HostPathRefusedError.TOO_MANY_FILES
+
+
+async def test_the_walk_stops_past_the_byte_total(tmp_path: Path) -> None:
+    store = HostPathFileStore(max_bytes=250)
+    store.bind(_ID, _tree(tmp_path / "d", 3, size=100))
+
+    with pytest.raises(HostPathRefusedError) as refused:
+        await store.list_files(_ID)
+    assert refused.value.reason == HostPathRefusedError.TOO_MANY_BYTES
+
+
+async def test_a_tree_at_both_bounds_is_accepted(tmp_path: Path) -> None:
+    """The positive control: exactly at the limits is inside them."""
+    store = HostPathFileStore(max_files=3, max_bytes=300)
+    store.bind(_ID, _tree(tmp_path / "d", 3, size=100))
+
+    assert len(await store.list_files(_ID)) == 3
+
+
+async def test_a_link_out_of_the_root_is_refused_not_skipped(tmp_path: Path) -> None:
+    """Skipping it would be a silent drop (Do-NOT #6); reading it would read
+    outside the root the analyst was allowed to register."""
+    secret = tmp_path / "outside.txt"
+    secret.write_bytes(b"not part of the delivery")
+    root = _tree(tmp_path / "d", 1)
+    try:
+        (root / "link.txt").symlink_to(secret)
+    except OSError:
+        pytest.skip("this platform will not create a symlink without privilege")
+    store = HostPathFileStore()
+    store.bind(_ID, root)
+
+    with pytest.raises(HostPathRefusedError) as refused:
+        await store.list_files(_ID)
+    assert refused.value.reason == HostPathRefusedError.LINK_LEAVES_ROOT
+
+
+async def test_the_streamed_digest_is_the_whole_files_digest(tmp_path: Path) -> None:
+    """Hashed in chunks now, and a chunk boundary must change nothing."""
+    root = tmp_path / "d"
+    root.mkdir()
+    data = bytes(range(256)) * 9000  # past one 1 MiB chunk
+    (root / "big.bin").write_bytes(data)
+    store = HostPathFileStore()
+    store.bind(_ID, root)
+
+    (stored,) = await store.list_files(_ID)
+    assert stored.byte_size == len(data)
+    assert stored.sha256 == hashlib.sha256(data).hexdigest()

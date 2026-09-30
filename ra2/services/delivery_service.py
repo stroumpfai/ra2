@@ -19,12 +19,13 @@ from ra2.domain.parsing.analysis import ParsedFile, analyse_file
 from ra2.domain.validation import validate_delivery
 from ra2.infra.clock import Clock
 from ra2.infra.filestore import FileStore
+from ra2.infra.filestore import HostPathRefusedError as StoreRefusedError
 from ra2.infra.idgen import IdFactory
 from ra2.infra.tasks import ProgressReporter, TaskRunner
 from ra2.persistence.models import Delivery, DeliveryFile
 from ra2.persistence.repositories.delivery_repo import DeliveryRepository
 from ra2.persistence.session import session_scope
-from ra2.services.errors import NotFoundError
+from ra2.services.errors import HostPathRefusedError, NotFoundError
 from ra2.services.readmodels import DeliveryFileView, DeliveryView, Page, SortDir
 
 __all__ = ["DeliveryService"]
@@ -280,6 +281,21 @@ class DeliveryService:
             raise ValueError("an upload delivery has no root_path; files are streamed in")
 
         delivery_id = DeliveryId(self._ids.new_id())
+        try:
+            return await self._register(delivery_id, name, source_kind, root_path)
+        except StoreRefusedError as exc:
+            # SD49, risk A4. Refused at `bind` (outside the import root) or
+            # during the walk (a bound, or a link out of the root); either
+            # way the transaction below never committed, so no row exists.
+            raise HostPathRefusedError(exc.reason, str(exc)) from exc
+
+    async def _register(
+        self,
+        delivery_id: DeliveryId,
+        name: str,
+        source_kind: SourceKind,
+        root_path: Path | None,
+    ) -> DeliveryId:
         if root_path is not None and isinstance(self._host_path_store, _RootBindingStore):
             self._host_path_store.bind(delivery_id, root_path)
 

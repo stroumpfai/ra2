@@ -986,7 +986,7 @@ the last three days in which any of them can be done.*
 | 8 | **✓ §8.10** | Record model-server version and decoding options on the run; state the determinism caveat in the report template (new: `docs/evaluation-report-template.md`) | D3 | done |
 | 5 | open | Render the anonymisation marking as three states until its semantics are confirmed | B5 | 2 h |
 | 10 | open | Standing copy on Results: a mismatch rate is not a model error rate until the list is read — D6 closed by delivery, the string is still worth it | D6 | 1 h |
-| 9 | open | Constrain `root_path` to an allowed root; bound the walk; make the server honour `Settings.host` or drop it | A4, G3 | ½ d |
+| 9 | **✓ §8.11** | Constrain `root_path` to an allowed root; bound the walk; make the server honour `Settings.host` or drop it. Host half by `SD42`; root and walk by `SD49` | A4, G3 | done |
 | **28** | open | A contract test: every `Settings` field has a reader in `ra2/`, or it does not exist | G3 | 2 h |
 | **29** | open | Helper copy under the mismatch note field, in `EXPORT_LEAVES_RA2`'s voice | B6 | 1 h |
 
@@ -995,7 +995,7 @@ the last three days in which any of them can be done.*
 | # | Status | Action | Risk | Effort |
 |---|---|---|---|---|
 | 20 | **◑ §8.6** | **Rehearse the destruction procedure end to end** on `reset-seed` data. Written, never executed | B3, F1, E4 | 2 h |
-| **30** | open | **Decide host-path intake: upload-only for real deliveries.** Deletes destruction step 5 and makes `just reset yes` complete | G3, A4, B3 | decision |
+| **30** | open · §8.11 | **Decide host-path intake: upload-only for real deliveries.** Deletes destruction step 5 and makes `just reset yes` complete. *Half settled by row 9:* host-path intake stays, confined to `RA2_IMPORT_ROOT`, and `just reset` deliberately leaves that directory, so step 5 remains, with one address. Upload-only is still the open question | G3, A4, B3 | decision |
 | 15 | open | Confirm **B2 (VRAM)** and **B3 (air-gap)**. If air-gapped, build *and test* the wheel bundle and side-loaded weights **while the developer is still here** | F5, C3 | ½ d + lead time |
 | 12 | **◑ §8.6** | Deployment conditions confirmed, not merely written: disk encryption, custody, single-user, no cloud-synced data dir, loopback bind, `OLLAMA_HOST=127.0.0.1`, `OLLAMA_DEBUG` off, no tunnels | B4, A2, A3, F2 | ½ d |
 | 11 | **◑ §8.6** | The governance page — **fill in `data-handling.md` §7's ten decisions** | F1, B2, B3 | 1 d |
@@ -1858,6 +1858,52 @@ One helper feeds both boards, and a backend test asserts they agree.
   Their cards say `unknown`, and their at-limit counts say *not recorded*.
 - **Presence and Mismatches** columns do not carry the reading figures. They
   are shown where a score is shown.
+
+### 8.11 A4, G3 — host-path intake has one door · closed 2026-09-30 · `fix-a4-g3-host-path-intake`
+
+**Status: row 9 closed. Row 30 half settled; upload-only is still the
+project's to decide.** See `contracts/amendments/fix-a4-g3-host-path-intake.md`
+and `SD49`. The bind half of A4 was already closed by `SD42`.
+
+**The root.** A host-path delivery may now be registered only from
+`RA2_IMPORT_ROOT`, default `{RA2_DATA_DIR}/import`, or beneath it. The check
+runs when the root is bound, on resolved paths, and before any file is read.
+`import/../home` and a root reached through a link are both outside.
+
+**The walk.**
+- **Bounded.** At most 200 files and 2 GB (`RA2_IMPORT_MAX_FILES`,
+  `RA2_IMPORT_MAX_GB`), counted from `stat` as the walk goes. It stops at the
+  first file past either, so a home directory costs seconds, not a full read.
+- **No links out.** A file whose real path leaves the root is refused rather
+  than skipped, because a skipped file is a silent drop.
+- **Streamed.** Each file is hashed in 1 MiB chunks, where before it was read
+  whole.
+
+**Refused, not recorded.** The recommendation said "a `Finding` rather than
+an exception". The project chose a refusal with nothing written: a delivery
+row for every mistaken path would clutter the Import view and needs a
+delivery-level finding that does not exist.
+- The service raises `HostPathRefusedError`, which carries a stable `reason`.
+- The API answers 422.
+- The Import dialog shows the sentence.
+- Tests assert that no `delivery` or `delivery_file` row survives either
+  refusal.
+
+**`just reset` leaves the import root alone.** This is the project's decision
+(2026-09-30): files registered in place are the analyst's own. Destruction
+step 5 therefore stays manual, but it now has one address instead of
+"wherever the delivery was registered from" (`data-handling.md` §4.1, P5).
+
+**Found on the way, not fixed.** `HostPathFileStore` keeps each delivery's
+root in memory only, and nothing rebinds it from `delivery.root_path` at
+startup. After a restart, an analysed host-path delivery cannot be re-read,
+so it cannot be frozen. This is pre-existing, unrelated to the constraint,
+and belongs in its own change.
+
+**What this does not close.**
+- **Upload-only** (row 30).
+- **Deliveries registered before this change** from outside the new root.
+  They are not re-checked; the rule applies at registration.
 
 ---
 

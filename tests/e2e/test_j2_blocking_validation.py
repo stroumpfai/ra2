@@ -21,6 +21,8 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page, expect
 
+from ra2.infra.config import Settings
+
 pytestmark = pytest.mark.e2e
 
 #: `tests/e2e/` -> `tests/`.
@@ -33,10 +35,12 @@ STRUCTURED = '[data-card="structured"]'
 
 
 @pytest.fixture
-def delivery_root(tmp_path: Path) -> Path:
+def delivery_root(tmp_path: Path, e2e_settings: Settings) -> Path:
     """h07, verbatim: `ag_unfall.txt` and `be_unfall.txt`."""
     source = _HAZARDS / "h07_dup_uid_cross_canton"
-    root = tmp_path / "j2-delivery"
+    # Under the server's import root, one directory per test: a host path
+    # anywhere else is refused (SD49), and the root is shared by the session.
+    root = e2e_settings.import_root_path / tmp_path.name / "j2-delivery"
     root.mkdir(parents=True)
     for path in sorted(source.iterdir()):
         (root / path.name).write_bytes(path.read_bytes())

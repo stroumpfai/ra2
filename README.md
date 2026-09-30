@@ -355,6 +355,8 @@ saved value wins — the variable is then only the starting value.
 | `RA2_EVAL_RECORD_MIN` | `200` | Below this, a run is marked *dev* and every view says "smoke test, not a result". |
 | `RA2_MIN_CELL_COUNT` | `20` | The floor a **new** evaluation starts with: result cells below it render as "insufficient data". Each evaluation keeps the floor it was created with, so changing this moves the next draft and never an existing one — and a draft's own floor is set on the Evaluation screen, step 6, as **Minimum n per cell**. |
 | `RA2_MAX_UPLOAD_MB` | `512` | Upload ceiling. |
+| `RA2_IMPORT_ROOT` | `{data_dir}/import` | The one directory a **host-path** delivery may be registered from, or any directory beneath it; anything else is refused before a file is read. Copy a delivery in here, or upload it. `just reset` does **not** remove it: files registered in place are the analyst's own. |
+| `RA2_IMPORT_MAX_FILES` / `RA2_IMPORT_MAX_GB` | `200` / `2.0` | The most one host-path registration may hold. Past either it is refused, so pointing it at a home directory or a share costs seconds, not a full read. |
 | `RA2_STORAGE_SECRET` | a fixed string | NiceGUI session storage. **Not** a security boundary: the app has no login. |
 | `RA2_LOG_LEVEL` | `INFO` | The `ra2` logger, on **stderr** — no log file, so nothing to retain and nothing for `just reset` to wipe. `INFO` is what makes a long run legible: a line per record before the model is called and one after it. **A level, not a content switch** — a log line may carry ids, counts, statuses, model tags and durations, and never narrative, a prompt, model output or `unfall_uid` ([`data-handling.md` §5.1](data-handling.md)). |
 
@@ -404,7 +406,8 @@ there.**
 
 #### What you get
 
-`scripts/seed_dev.py` writes its delivery to `{RA2_DATA_DIR}/seed/` and imports
+`scripts/seed_dev.py` writes its delivery to `{RA2_IMPORT_ROOT}/seed/` (by default
+`{RA2_DATA_DIR}/import/seed/`) and imports
 it:
 
 | | |
@@ -488,7 +491,7 @@ is never what a developer's seed leans on.
 - **`just dev-agent` never sees the seed.** It mints a fresh temporary data
   directory on every run, by design. A seeded instance is `just dev` against
   the directory you seeded.
-- **`{RA2_DATA_DIR}/seed/` survives a reset.** The wipe covers the database and
+- **`{RA2_IMPORT_ROOT}/seed/` survives a reset.** The wipe covers the database and
   its WAL sidecars, `deliveries/` and `codelists/` — not the raw files the seed
   wrote, which are simply overwritten next time.
 

@@ -156,6 +156,9 @@ def throwaway_settings(
     return Settings(
         data_dir=workdir,
         db_path=workdir / "ra2.sqlite",
+        # Named for `db_path`'s reason: `RA2_IMPORT_ROOT` in the environment
+        # would otherwise refuse the seed this script writes (SD49).
+        import_root=workdir / "import",
         llm_base_url=url,
         llm_timeout_s=target.llm_timeout_s,
         llm_max_retries=target.llm_max_retries,
@@ -265,7 +268,9 @@ class _Qualifier:
         seed_dev = _sibling("seed_dev")
         scenarios = seed_dev.build_scenarios(self._plan.records)
         services = self._services(self._plan.one_slot)
-        root = seed_dev.write_delivery(self._workdir / "seed", scenarios)
+        # Under the throwaway settings' import root: a host-path delivery is
+        # refused anywhere else (SD49).
+        root = seed_dev.write_delivery(self._workdir / "import" / "seed", scenarios)
         # The seed narrates each step. That's useful from `just reset-seed`
         # and noise here, where the only output is the measurement.
         with contextlib.redirect_stdout(io.StringIO()):

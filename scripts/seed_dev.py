@@ -1108,7 +1108,9 @@ def main(argv: list[str] | None = None) -> int:
             "Point RA2_DATA_DIR at an empty directory and seed that instead."
         )
         return 3
-    delivery_root = write_delivery(settings.data_dir / "seed", scenarios)
+    # Under the import root, because a host-path delivery is refused anywhere
+    # else (SD49). `just reset` does not remove it, and neither did it `seed/`.
+    delivery_root = write_delivery(settings.import_root_path / "seed", scenarios)
     asyncio.run(seed(services, delivery_root=delivery_root, scenarios=scenarios))
     print("Seeded. Start the app with `just dev`.")
     return 0

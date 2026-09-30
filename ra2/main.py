@@ -106,7 +106,12 @@ def create_app(
     upload_store = upload_store or UploadedFileStore(
         settings.deliveries_dir, max_bytes=settings.max_upload_bytes
     )
-    host_path_store = host_path_store or HostPathFileStore()
+    host_path_store = host_path_store or HostPathFileStore(
+        # SD49, risk A4: one allowed root, and a bounded walk.
+        allowed_root=settings.import_root_path,
+        max_files=settings.import_max_files,
+        max_bytes=settings.import_max_bytes,
+    )
     language_detector = language_detector or LinguaDetector()
     census_materialiser = census_materialiser or RelationalCensusMaterialiser(ids=ids)
     # The one LLM seam (sw-design.md §15.5). `OllamaLLMClient.__init__` is

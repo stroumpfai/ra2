@@ -41,6 +41,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page, expect
 
+from ra2.infra.config import Settings
 from ra2.services.export_service import CLASSIFICATION_COMMENT, CSV_BOM, CSV_DELIMITER
 
 pytestmark = pytest.mark.e2e
@@ -93,8 +94,10 @@ CENSUS_CSV_HEADER = [
 
 
 @pytest.fixture
-def delivery_root(tmp_path: Path) -> Path:
-    root = tmp_path / "j1-delivery"
+def delivery_root(tmp_path: Path, e2e_settings: Settings) -> Path:
+    # Under the server's import root, one directory per test: a host path
+    # anywhere else is refused (SD49), and the root is shared by the session.
+    root = e2e_settings.import_root_path / tmp_path.name / "j1-delivery"
     root.mkdir(parents=True)
     for name, source in DELIVERY.items():
         (root / name).write_bytes((_HAZARDS / source).read_bytes())

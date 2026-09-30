@@ -121,9 +121,10 @@ class Seeded:
 
 
 @pytest.fixture
-def delivery_root(tmp_path: Path) -> Path:
+def delivery_root(migrated_db: Settings) -> Path:
     """`DELIVERY` on disk, byte-for-byte, ready to register as a host path."""
-    root = tmp_path / "census-delivery"
+    # Under the import root: a host path anywhere else is refused (SD49).
+    root = migrated_db.import_root_path / "census-delivery"
     root.mkdir(parents=True)
     for name, source in DELIVERY.items():
         (root / name).write_bytes((_HAZARDS / source).read_bytes())

@@ -461,6 +461,10 @@ and one §8 entry per finding closed. The register in §4 is left as written.
 | `ra2/persistence/models.py` | + `Run.ollama_version`, `Run.server_parameters_json`, `Run.context_length`, all nullable, revision `b4f2c81e6d37`, no backfill: what the digest does not pin (D1, D3) | `fix-d1-d2-d3-run-provenance` |
 | `ra2/services/readmodels.py`, `ra2/api/schemas.py` | + `ReadingQuality`/`ReadingQualityResponse` on the model columns and ranking rows; + the three fields on `ProvenanceView`/`ProvenanceResponse`. All defaulted. OpenAPI snapshot regenerated, additive only (D2, `SD48`) | `fix-d1-d2-d3-run-provenance` |
 | `tests/test_p5_contract.py` | `b4f2c81e6d37` registered in `POST_PHASE_5_REVISIONS` | `fix-d1-d2-d3-run-provenance` |
+| `ra2/infra/config.py` | + `import_root` (default `{data_dir}/import`), `import_max_files` (200), `import_max_gb` (2.0), + `import_root_path` / `import_max_bytes`. A host-path delivery could be registered from anywhere and its whole tree was read to hash it (A4, `SD49`) | `fix-a4-g3-host-path-intake` |
+| `ra2/services/errors.py` | + `HostPathRefusedError` (422), with a stable `reason`; nothing is written when it is raised | `fix-a4-g3-host-path-intake` |
+| `ra2/infra/filestore.py` | Implementation half only: `HostPathFileStore(allowed_root=, max_files=, max_bytes=)`, the store's own `HostPathRefusedError`, a bounded walk that refuses a link out of the root, chunked hashing. The protocol is unchanged | `fix-a4-g3-host-path-intake` |
+| `tests/test_p5_contract.py` | + `HostPathRefusedError` in `POST_PHASE_5_ERRORS` | `fix-a4-g3-host-path-intake` |
 | `.gitignore` | **unchanged, deliberately.** Adding `Unfall.csv` would be the name-shaped fix again, and it would block the hazard fixtures, which carry the same names | — |
 | `pyproject.toml`, `.importlinter`, `tests/conftest.py` | **unchanged.** No dependency, no new contract, no new root fixture | — |
 

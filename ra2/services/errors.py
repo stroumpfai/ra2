@@ -22,6 +22,7 @@ __all__ = [
     "EvaluationLockedError",
     "FeatureConfigFrozenError",
     "FeatureValidationError",
+    "HostPathRefusedError",
     "LlmEndpointError",
     "NotFoundError",
     "PromptTemplateCitedError",
@@ -71,6 +72,20 @@ class CorpusLockedError(ServiceError):
         super().__init__(f"corpus {corpus_id} is cited by {evaluation_count} evaluation(s)")
         self.corpus_id = corpus_id
         self.evaluation_count = evaluation_count
+
+
+class HostPathRefusedError(ServiceError):
+    """A host-path registration was refused before anything was written.
+    -> HTTP 422 (`SD49`, risk A4).
+
+    Outside `RA2_IMPORT_ROOT`, past `RA2_IMPORT_MAX_FILES` or
+    `RA2_IMPORT_MAX_GB`, or a link out of the root. `reason` is the stable
+    code a test asserts on; the message is the sentence the analyst reads.
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 class DeliveryNotAnalysedError(ServiceError):

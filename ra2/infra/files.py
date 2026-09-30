@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 __all__ = [
+    "open_binary_reader",
     "open_binary_writer",
     "read_bytes",
     "read_text",
@@ -67,3 +68,13 @@ def open_binary_writer(path: Path) -> BinaryIO:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     return path.open("wb")
+
+
+def open_binary_reader(path: Path) -> BinaryIO:
+    """Open `path` for streaming binary reads.
+
+    Used by `HostPathFileStore` to hash a registered file in bounded chunks
+    rather than reading it whole (`SD49`). Binary, so there is no encoding to
+    name (N4). Returns a context manager; the caller closes it.
+    """
+    return path.open("rb")

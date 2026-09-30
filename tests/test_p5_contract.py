@@ -280,6 +280,10 @@ POST_PHASE_5_ERRORS = {
     # refused (SD43): off loopback, malformed, a timeout below one second.
     # Carries a `SettingRefusal` code for `ui/` to word; nothing is stored.
     "SettingRefusedError",
+    # `fix/a4-g3-host-path-intake` — a host-path registration refused before
+    # anything is written (SD49): outside `RA2_IMPORT_ROOT`, past a bound, or
+    # a link out of the root. Carries a stable `reason` code.
+    "HostPathRefusedError",
 }
 
 
