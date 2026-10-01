@@ -50,6 +50,34 @@ header, not about what a value happens to contain.
 | **Loopback only** | The app binds `127.0.0.1`; the model server must too (`OLLAMA_HOST=127.0.0.1`). **Any tunnel, proxy or forwarder between RA2 and a model server is a data breach, whatever the URL says** (`risk-assesment.md` A2). |
 | **No debug logging on the model server** while real data is loaded (`OLLAMA_DEBUG` writes prompt content to its own log, outside all of this). |
 
+### 2.1 Check it once, at acceptance: did the run happen here?
+
+The loopback guard checks a URL. It cannot see an `ssh -L` forward, a reverse
+proxy or a model server passing requests on, all of which answer on
+`127.0.0.1` (`risk-assesment.md` A2). A run served from elsewhere does leave
+traces in its provenance, but only if someone looks. So, **once, deliberately,
+for the first evaluation on real data** (acceptance, M34), a person compares
+the Evaluation screen's reproducibility card with the machine, at the machine.
+
+| On the card | Check on the machine | A mismatch means |
+|---|---|---|
+| `gpu …` | The GPU actually installed (Device Manager, or the vendor's own panel) | The name came from `RA2_GPU_NAME`, or the run was not served by this GPU |
+| `<model> + <digest>` | `ollama list` shows the same tag **with the same digest** | The weights that answered are not the ones on this machine |
+| `ollama …` | `ollama --version` | The server that answered is not this machine's Ollama |
+| `context …` | `ollama ps` with the model loaded shows the same context | The model was loaded by a differently configured server |
+| `endpoint …` | `127.0.0.1` (or `::1`, `localhost`), and nothing listening on that port except Ollama | The endpoint was moved, or something else answers on it |
+| `host …` | This machine's OS and version | The run was launched elsewhere |
+
+While `ollama ps` shows the model loaded, the GPU's used memory should account
+for it (`nvidia-smi`, or the vendor's panel). A model resident in VRAM that this
+GPU does not show is a model on another machine.
+
+**Any mismatch stops the evaluation's use** until it is explained. Record the
+check, its date and who did it in the operations log (`risk-assesment.md`
+§5 row 32) and in the evaluation report (`docs/evaluation-report-template.md`
+§2). This is row 18 of the risk register: it is done by a person, once, on
+the real machine, and no code does it for you.
+
 ---
 
 ## 3. What may leave the machine
@@ -298,7 +326,7 @@ next conversation an engineering one instead of an argument.
 
 ## 7. The decisions, and who owes them
 
-Nothing above is agreed until this table is filled in.
+Nothing above is agreed until this table is filled in. **Decisions 11 and 12 come first**: A2's temptation (a tunnel to a bigger GPU) is strongest when the hardware answer arrives late, so both are owed before the evaluation corpus is cut.
 
 | # | Decision | Section | Owner | Date | Status |
 |---|---|---|---|---|---|
@@ -312,6 +340,8 @@ Nothing above is agreed until this table is filled in.
 | 8 | Incident contact and response time | §5 | | | **open** |
 | 9 | NDA cover for the reviewing domain expert | §3 | | | **open** |
 | 10 | Decommission condition | §6 | | | **open** |
+| 11 | **The GPU, and which models it can run** (`mvp-spec.md` §18 B2): the card and its VRAM, confirmed on the named machine. The largest model the evaluation compares must fit in it, model plus context: the Models card shows each model's size against the probed VRAM, and `docs/choosing-models.md` has what was measured. If the models that matter do not fit, the decision is *which models to drop* or *which hardware to obtain*. **Never a remote model server**: that is a tunnel (§2, A2) | §2 | | | **open** |
+| 12 | **Air-gapped or not** (`mvp-spec.md` §18 B3). *If air-gapped:* the Python wheels and the model weights are side-loaded, and both are built and tested on the named machine while the developer is still available (`risk-assesment.md` §5 row 15). *If not:* models are pulled from `ollama.com` during setup only, before real data is on the machine, and the machine's outbound access is otherwise what §2 says | §2 | | | **open** |
 
 **Signed:** ____________________  **Role:** ____________________  **Date:** __________
 

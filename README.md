@@ -220,6 +220,18 @@ no proxy variable, `.netrc` or `SSLKEYLOGFILE` is read, and with
 body) somewhere the guard never saw. Neither is configurable, for the same
 reason the loopback rule is not.
 
+**What neither can see is what sits behind `127.0.0.1`.** An `ssh -L`
+forward, a small reverse proxy, or a model server configured to pass requests
+on all answer on loopback, satisfy both guards, and ship every narrative to
+another machine. **Any tunnel, proxy or forwarder between RA2 and a model
+server is a data breach, whatever the URL says.** No code can enforce that,
+so it is stated here, under the endpoint field of the settings dialog, and in
+[`docs/rules.md`](docs/rules.md) §2. The pressure to break it is real: when
+the GPU here is too small for the interesting models, a tunnel to a bigger one
+is one line. The answer is a decision about the hardware, not a forward
+(`risk-assesment.md` A2). The first real evaluation's provenance is checked
+against the machine once, at acceptance (`data-handling.md` §2.1).
+
 ### VRAM and model fit
 
 RA2 reads your GPU's name and total VRAM through NVML's library bindings

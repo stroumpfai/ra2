@@ -996,7 +996,7 @@ the last three days in which any of them can be done.*
 |---|---|---|---|---|
 | 20 | **◑ §8.6** | **Rehearse the destruction procedure end to end** on `reset-seed` data. Written, never executed | B3, F1, E4 | 2 h |
 | **30** | open · §8.11 | **Decide host-path intake: upload-only for real deliveries.** Deletes destruction step 5 and makes `just reset yes` complete. *Half settled by row 9:* host-path intake stays, confined to `RA2_IMPORT_ROOT`, and `just reset` deliberately leaves that directory, so step 5 remains, with one address. Upload-only is still the open question | G3, A4, B3 | decision |
-| 15 | open | Confirm **B2 (VRAM)** and **B3 (air-gap)**. If air-gapped, build *and test* the wheel bundle and side-loaded weights **while the developer is still here** | F5, C3 | ½ d + lead time |
+| 15 | open · §8.14 | Confirm **B2 (VRAM)** and **B3 (air-gap)**. *Now `data-handling.md` §7 decisions 11 and 12, owed before the evaluation corpus is cut.* If air-gapped, build *and test* the wheel bundle and side-loaded weights **while the developer is still here** | F5, C3 | ½ d + lead time |
 | 12 | **◑ §8.6** | Deployment conditions confirmed, not merely written: disk encryption, custody, single-user, no cloud-synced data dir, loopback bind, `OLLAMA_HOST=127.0.0.1`, `OLLAMA_DEBUG` off, no tunnels | B4, A2, A3, F2 | ½ d |
 | 11 | **◑ §8.6** | The governance page — **fill in `data-handling.md` §7's ten decisions** | F1, B2, B3 | 1 d |
 | 14 | **◑ §8.6** | Decide backup vs. accepted re-run. E4 adds a second way to lose the corpus | B3, E1 | ½ d |
@@ -1013,7 +1013,7 @@ go-live gate, and M34 is still unscheduled.*
 |---|---|---|---|
 | 16 | open | Independent recomputation of one run's statistics outside this codebase | D5 |
 | 17 | open | Verify a long record is not silently truncated by the real server | D1 |
-| 18 | open | Check one run's provenance against the machine it claims to have run on | A2 |
+| 18 | open · §8.14 | Check one run's provenance against the machine it claims to have run on. *The procedure is written (`data-handling.md` §2.1) and the report template records it; a person does it once, at M34* | A2 |
 
 ### Gate 4 — standing, during operation
 
@@ -1976,6 +1976,62 @@ gate.
 **The restart defect found in §8.11** is fixed: both services restore a
 host-path delivery's binding from `delivery.root_path` before every use. See
 `contracts/amendments/fix-host-path-survives-restart.md`.
+
+### 8.14 A2 — what sits behind `127.0.0.1` · rule placed, check written 2026-10-01 · `fix-a2-tunnel-rule`
+
+**Status: every recommendation that can be met in the repository is met.
+The check itself and the two hardware decisions are a person's to do.** See
+`SD52`.
+
+A2 made three recommendations.
+
+**1. State the rule in the runbook.** The sentence already existed in
+`docs/rules.md` §2 and `data-handling.md` §2. There is still no runbook (E3),
+so the rule now also stands where the act happens:
+
+- **Under the endpoint field** of the Ollama settings dialog, **always
+  visible**. This is the one place an operator retargets the model server,
+  and a tunnel never produces the refused value the existing error waits for.
+  A UI test asserts the sentence on a healthy endpoint as well as a refused
+  one.
+- **In the README's loopback section**, the first thing an operator reads
+  about the endpoint. It says what the two guards cover, what neither can
+  see, and why the pressure to tunnel exists.
+
+**2. Check the first real evaluation's provenance against the machine (row
+18).** This is written as `data-handling.md` §2.1: field by field, the card
+against the machine, and what a mismatch means.
+
+| Card field | Compared with |
+|---|---|
+| GPU | The GPU actually installed |
+| Model digest | `ollama list` |
+| Ollama version | `ollama --version` |
+| Context length | `ollama ps` |
+| Endpoint | `127.0.0.1`, with only Ollama listening on it |
+| Host | This machine |
+
+While the model is loaded, the GPU's used memory should account for it. Any
+mismatch stops the evaluation's use until it is explained. The report
+template's §2 gains the line that records the check. **It is still open:**
+it is done once, by a person, on the real machine at M34.
+
+**3. Close B2/B3 before the evaluation corpus is cut (row 15).** Both are now
+concrete entries in `data-handling.md` §7, as decisions 11 and 12, marked as
+owed first:
+- **VRAM:** the largest compared model must fit. If the models that matter
+  do not, the decision is which models to drop or what hardware to obtain,
+  never a remote server.
+- **Air-gap:** if air-gapped, wheels and weights are side-loaded and tested
+  while the developer is available; if not, models are pulled during setup,
+  before real data arrives.
+
+**Considered and deferred.** An automatic "served here?" check: after the
+first record, compare the model's VRAM residency reported by `/api/ps` with
+this GPU's used memory, and flag a model this GPU cannot be holding. It needs
+a migration, and on CPU-only serving it can only say "cannot tell". Worth
+building if the hardware answer arrives late, which is exactly when A2 says
+the temptation is strongest.
 
 ---
 

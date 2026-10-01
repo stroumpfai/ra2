@@ -55,6 +55,7 @@ __all__ = [
     "PROBE_WORDS",
     "SAVE_REFUSAL_WORDS",
     "SAVE_REFUSED_RUN_ACTIVE",
+    "TUNNEL_WARNING",
     "ollama_settings_dialog",
     "probe_sentence",
 ]
@@ -100,6 +101,16 @@ PROBE_WORDS: Final[dict[ProbeCode, str]] = {
 #: and with a round trip, and an analyst should not have to notice that.
 ENDPOINT_INVALID_MESSAGE: Final = (
     "Must be on this machine — 127.0.0.1, ::1 or localhost. RA2 never sends data off the host."
+)
+
+#: Risk A2, `SD52`. Shown under the endpoint field **always**, not only on a
+#: bad value: the guard checks the URL, and a tunnel, proxy or port forward
+#: sits behind a URL that passes it. This is the one place an operator
+#: retargets the model server, so it is where the rule is stated. The same
+#: sentence as `docs/rules.md` §2 and `data-handling.md` §2.
+TUNNEL_WARNING: Final = (
+    "A tunnel, proxy or port forward behind 127.0.0.1 sends every narrative to "
+    "another machine. That is a data breach, whatever the URL says."
 )
 
 #: The **one rendering table** for a refused save (SD43) — the service
@@ -302,6 +313,9 @@ def ollama_settings_dialog(
                 .props('data-testid="ollama-endpoint-error"')
                 .mark("ollama-endpoint-error")
             )
+            ui.label(TUNNEL_WARNING).classes("ink3").style(
+                "font-size:11px;margin-top:4px;white-space:normal;"
+            ).props('data-testid="ollama-tunnel-warning"').mark("ollama-tunnel-warning")
         with labeled_field("Timeout (seconds)"):
             timeout_input = data_props(
                 ui.element("input")
