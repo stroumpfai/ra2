@@ -71,7 +71,7 @@ than a symbol for it.
 | 2 | **◑ §8.6** | Write the data-handling rules the app cannot enforce: outputs, retention, destruction, named owner, incident path | ~1 day, no code | **F1, B2, B3** |
 | 3 | **◑ §8.4** | Suppress or gate verbatim value samples in the census export; screen every export before it leaves the machine | ~½ day | **B1** |
 | 4 | **◑ §8.2** | Make the real-data commit guard content-shaped and run it in CI; reconsider the repository being public | ~½ day | **C1** |
-| 5 | open | Measure and bound the prompt against the model's context window before the evaluation corpus is cut | ~1 day | **D1** |
+| 5 | open · §8.10 | Measure and bound the prompt against the model's context window before the evaluation corpus is cut. *Measured: each run records the context it was loaded with, and prompts at the limit are flagged on Results and Ranking. Not bounded: nothing refuses a launch whose prompts will not fit* | ~1 day | **D1** |
 
 Nothing found here calls the architecture into question. Items 1, 3 and 4 are
 small fixes to controls that already exist; item 2 is the gap that no amount of
@@ -89,7 +89,7 @@ the register was graded for a project being *built* and the project is now being
 |---|---|---|---|---|
 | 21 | **✔ closed** | **`hide_parameters=True`** — a database error wrote the narrative and `unfall_uid` into `run.error` **and into the log** (reproduced). Fixed at the engine, with a provoked-`IntegrityError` test and a positive control (`contracts/amendments/fix-a5-bound-parameters.md`) | — | **A5** |
 | 23·24 | **✓ §8.8** | An intake mojibake canary and the mixed-encoding fixture — a mixed-encoding delivery was silently corrupted (reproduced). It is still corrupted, since nothing can repair it, but it is now **reported**, per file and on the corpus, and `h15` pins it. Row 22 (G2) closed with it | — | **G1, G4** |
-| 11·15 | **◑ §8.6** | Fill in `data-handling.md` §7's ten decisions and close `mvp-spec.md` §18's B1–B4. **No longer pending — late**, and four of them gate work that cannot be done afterwards (§6) | ~1 day, no code | **F1, B3, C3** |
+| 11·15 | **◑ §8.6** · §8.14 | Fill in `data-handling.md` §7's decisions (twelve since 2026-10-01: B2 and B3 are now decisions 11 and 12) and close `mvp-spec.md` §18's B1–B4. **No longer pending — late**, and four of them gate work that cannot be done afterwards (§6) | ~1 day, no code | **F1, B3, C3** |
 | 31 | open | **A stated support path** — what may be copied off the machine when something breaks. The developer is reachable rather than resident, and §9.1.1 is the chain that makes this the dominant technical residual. **Item 21 broke link 5 and did not break the chain**: a screenshot, a hand-typed description and the export all still carry content | ~2 h, no code | **C2, E3** |
 | 26·32 | **open · 26 ✓ §8.9** | Correct and **gate** the README; start an operations log from the first real run. The README half is done and gated; the operations log (32) is not | ~½ day | **F6, E3, F4** |
 
@@ -972,6 +972,12 @@ than a symbol for it.
 *These become impossible afterwards. Roughly three days in total, and they are
 the last three days in which any of them can be done.*
 
+> **Gate 1 is complete (2026-10-01).** Every row below is done (§8.8–§8.13).
+> The two exceptions are rows that name more than their own work: row 6
+> records and flags the context, but nothing bounds a launch by it (§1's
+> first-pass row 5, Gate 3's row 17); row 9's half of row 30 is settled and
+> upload-only is still open.
+
 | # | Status | Action | Risk | Effort |
 |---|---|---|---|---|
 | **21** | **✔ closed** | **`hide_parameters=True` on `create_async_engine`**, plus a provoked-`IntegrityError` test with a positive control, and §5.1 of `data-handling.md` stating that the list is enforced at the engine as well as at the call sites. `SD39`; `contracts/amendments/fix-a5-bound-parameters.md` | **A5** | **done** |
@@ -987,7 +993,7 @@ the last three days in which any of them can be done.*
 | 5 | **✓ §8.12** | Render the anonymisation marking as three states until its semantics are confirmed | B5 | done |
 | 10 | **✓ §8.12** | Standing copy on Results: a mismatch rate is not a model error rate until the list is read — D6 closed by delivery, the string is still worth it | D6 | done |
 | 9 | **✓ §8.11** | Constrain `root_path` to an allowed root; bound the walk; make the server honour `Settings.host` or drop it. Host half by `SD42`; root and walk by `SD49` | A4, G3 | done |
-| **28** | **✓ §8.11** | A contract test: every `Settings` field has a reader in `ra2/`, or it does not exist. **Built as `SD42`** (`tests/test_settings_have_readers.py`, described under G3's *Built*); this row was never updated. Every setting added since (`import_*`, `delivered_text_anonymised`) passes it | G3 | done |
+| **28** | **✓ §8.13** | A contract test: every `Settings` field has a reader in `ra2/`, or it does not exist. **Built as `SD42`** (`tests/test_settings_have_readers.py`, described under G3's *Built*); this row was never updated. Every setting added since (`import_*`, `delivered_text_anonymised`) passes it | G3 | done |
 | **29** | **✓ §8.13** | Helper copy under the mismatch note field, in `EXPORT_LEAVES_RA2`'s voice. **There is no note field on the screen**: built as the API field's description, plus `data-handling.md` §3 rule 5 and the `tagged_by` proposal | B6 | done |
 
 ### Gate 2 — before real data lands on the machine
@@ -998,7 +1004,7 @@ the last three days in which any of them can be done.*
 | **30** | open · §8.11 | **Decide host-path intake: upload-only for real deliveries.** Deletes destruction step 5 and makes `just reset yes` complete. *Half settled by row 9:* host-path intake stays, confined to `RA2_IMPORT_ROOT`, and `just reset` deliberately leaves that directory, so step 5 remains, with one address. Upload-only is still the open question | G3, A4, B3 | decision |
 | 15 | open · §8.14 | Confirm **B2 (VRAM)** and **B3 (air-gap)**. *Now `data-handling.md` §7 decisions 11 and 12, owed before the evaluation corpus is cut.* If air-gapped, build *and test* the wheel bundle and side-loaded weights **while the developer is still here** | F5, C3 | ½ d + lead time |
 | 12 | **◑ §8.6** | Deployment conditions confirmed, not merely written: disk encryption, custody, single-user, no cloud-synced data dir, loopback bind, `OLLAMA_HOST=127.0.0.1`, `OLLAMA_DEBUG` off, no tunnels | B4, A2, A3, F2 | ½ d |
-| 11 | **◑ §8.6** | The governance page — **fill in `data-handling.md` §7's ten decisions** | F1, B2, B3 | 1 d |
+| 11 | **◑ §8.6** | The governance page — **fill in `data-handling.md` §7's decisions**: twelve since 2026-10-01, decisions 11 (GPU) and 12 (air-gap) owed first (§8.14) | F1, B2, B3 | 1 d |
 | 14 | **◑ §8.6** | Decide backup vs. accepted re-run. E4 adds a second way to lose the corpus | B3, E1 | ½ d |
 | 13 | open · §8.6 | Extend the NDA or equivalent to the reviewing domain expert before Goal 3's review | B2 | — |
 | 3 | **✓ §8.3** | **Move real data off the development checkout** — C2's second recommendation, now near-free (§9.4). Closes C2 and C4 together | C2, C4 | ½ d |
@@ -1040,6 +1046,17 @@ go-live gate, and M34 is still unscheduled.*
 **Questions 1-4 and 6-8 are now carried as the decision table in
 [`data-handling.md`](../data-handling.md) §7**, with owner and date columns to
 fill in. They are repeated here as the review left them.
+
+> **Update, 2026-10-01.** Where each question now stands:
+> - **Question 4 (air-gap)** and the **B2 GPU question** are decisions 12 and
+>   11 in that table, written concretely and marked as owed first (§8.14).
+> - **Question 5 (`UnfHergangTextAnonym`)** has somewhere to land.
+>   `RA2_DELIVERED_TEXT_ANONYMISED` records the supplier's answer; until it
+>   is set, every delivered narrative is marked *anonymisation unknown*
+>   (§8.12). The email itself is still unsent as far as this repository
+>   knows.
+> - **All twelve rows** of the table are still blank. The second-pass note
+>   below stands, with two more rows.
 
 > **Second pass, 2026-09-23 — these are no longer pending, they are late.**
 > All ten rows of `data-handling.md` §7 are still blank, and `mvp-spec.md`
