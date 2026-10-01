@@ -468,6 +468,8 @@ and one §8 entry per finding closed. The register in §4 is left as written.
 | `ra2/infra/config.py` | + `delivered_text_anonymised` (`unknown` \| `yes` \| `no`, default `unknown`): the supplier's answer about the delivered text, which decides what the anonymisation marking may claim (B5, `SD50`) | `fix-b5-d6-honest-labels` |
 | `ra2/services/readmodels.py`, `ra2/api/schemas.py` | + `anonymisation` on the per-record and mismatch rows, defaulted `unknown`; `anonymised` stays as the raw source fact. OpenAPI snapshot regenerated, additive | `fix-b5-d6-honest-labels` |
 | `ra2/services/export_service.py` | Body only: the two CSVs write the marking's stable value instead of `yes` / `no` | `fix-b5-d6-honest-labels` |
+| `ra2/infra/filestore.py`, `ra2/services/delivery_service.py`, `ra2/services/corpus_service.py` | + `HostPathFileStore.restore`, + `delivery_service.store_for`, used by both services: a host-path binding lived in memory only, so after a restart an analysed host-path delivery could not be frozen. No signature changes | `fix-host-path-survives-restart` |
+| `ra2/api/schemas.py` | + `NOTE_LEAVES_RA2`, the description of `TagMismatchRequest.note`: the only place a note is written, and it is exported verbatim (B6, `SD51`). OpenAPI snapshot: one description line | `fix-host-path-survives-restart` |
 | `.gitignore` | **unchanged, deliberately.** Adding `Unfall.csv` would be the name-shaped fix again, and it would block the hazard fixtures, which carry the same names | — |
 | `pyproject.toml`, `.importlinter`, `tests/conftest.py` | **unchanged.** No dependency, no new contract, no new root fixture | — |
 

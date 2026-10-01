@@ -520,3 +520,73 @@ async def test_freeze_reads_a_host_path_delivery_in_place(
     async with db_session_factory() as session:
         assert await session.scalar(select(func.count()).select_from(ObjektRow)) == 2
         assert await session.scalar(select(func.count()).select_from(PersonRow)) == 2
+
+
+async def test_an_analysed_host_path_delivery_freezes_after_a_restart(
+    delivery_service,
+    hazards_dir,
+    db_session_factory,
+    census_materialiser,
+    language_detector,
+    upload_store,
+    task_runner,
+    clock,
+    ids,
+    run_upgrade_head,
+):
+    """Analyse today, freeze tomorrow. A host-path store keeps its bindings in
+    memory, so a restarted process knew no delivery and the freeze failed with
+    "no host path registered". A **fresh** store here is that restart; the
+    binding is restored from `delivery.root_path` (`store_for`)."""
+    from ra2.infra.filestore import HostPathFileStore
+    from ra2.services.corpus_service import CorpusService
+    from ra2.services.delivery_service import DeliveryService
+
+    delivery_id = await delivery_service.register(
+        "AG on disk", source_kind=SourceKind.HOST_PATH, root_path=hazards_dir / "h10_count_mismatch"
+    )
+    await delivery_service.analyse(delivery_id)
+
+    restarted_store = HostPathFileStore()
+    restarted = CorpusService(
+        session_factory=db_session_factory,
+        census_materialiser=census_materialiser,
+        language_detector=language_detector,
+        upload_store=upload_store,
+        host_path_store=restarted_store,
+        task_runner=task_runner,
+        clock=clock,
+        ids=ids,
+        settings=run_upgrade_head,
+    )
+    corpus_id = await restarted.freeze(delivery_id, name="after a restart")
+    assert (await restarted.get(corpus_id)).record_count == 1
+
+    # And the delivery side reads it too: a re-analyse after the restart.
+    restarted_deliveries = DeliveryService(
+        session_factory=db_session_factory,
+        upload_store=upload_store,
+        host_path_store=restarted_store,
+        task_runner=task_runner,
+        clock=clock,
+        ids=ids,
+    )
+    await restarted_deliveries.analyse(delivery_id)
+    view = await restarted_deliveries.get(delivery_id)
+    assert all(row.row_count for row in view.files)
+
+
+async def test_a_restored_binding_is_not_rechecked_against_the_import_root(tmp_path):
+    """SD49's root applies at registration. A delivery registered before it,
+    or before the root moved, stays readable rather than becoming a dead row."""
+    from ra2.domain.ids import DeliveryId
+    from ra2.infra.filestore import HostPathFileStore
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "f.txt").write_bytes(b"x")
+    store = HostPathFileStore(allowed_root=tmp_path / "import")
+
+    store.restore(DeliveryId("old"), elsewhere)
+
+    assert await store.read_bytes(DeliveryId("old"), "f.txt") == b"x"

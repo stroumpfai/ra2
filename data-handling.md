@@ -69,7 +69,7 @@ That line is a label. This section is the rule.
 | **File findings** | Row keys and parse detail | **DECISION REQUIRED** |
 | **Presence / per-record lists** | Record keys and per-feature outcomes | **DECISION REQUIRED** |
 | **Run scores** | Aggregated metrics per feature | **DECISION REQUIRED** |
-| **Run mismatches** (discard dialog) | `record_value`, `extracted_value`, **`evidence_span`**, `analyst_tag` | **Verbatim narrative.** Named recipients only |
+| **Run mismatches** (discard dialog) | `record_value`, `extracted_value`, **`evidence_span`**, `analyst_tag`, **`note`** | **Verbatim narrative.** Named recipients only |
 | **Mismatch review list** | The same, plus the anonymisation marking | **Verbatim narrative.** Named recipients only |
 
 **Standing rules, pending those decisions:**
@@ -86,6 +86,18 @@ That line is a label. This section is the rule.
 4. **An export you no longer need is deleted**, from Downloads and from
    wherever you copied it. §4 step 6 is the end-of-PoC version of the same
    sentence.
+5. **A mismatch `note` is free text and is exported verbatim** in both
+   mismatch CSVs (risk B6). Write what you concluded, not what the narrative
+   says: *"record says wet, text says dry"*, never the sentence itself. A note
+   is written through the API only (there is no field on the screen), and its
+   field description says the same.
+
+> **DECISION REQUIRED — proposed: accept (B6).** A tag records `tagged_at`
+> but **not `tagged_by`**, and a retag overwrites the previous one with no
+> history. The Goal 3 tally is therefore not reconstructible from the machine.
+> That is right for one analyst on one machine, and wrong the moment a second
+> reviewer joins (F3). Proposed: accept it for the PoC, and re-open it
+> deliberately if a second reviewer is added, rather than by drift.
 
 ---
 

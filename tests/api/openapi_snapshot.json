@@ -4270,6 +4270,7 @@
                 "type": "null"
               }
             ],
+            "description": "Exported verbatim in both mismatch CSVs. Write what you concluded, not what the narrative says: a sentence quoted here leaves RA2's control with the file.",
             "title": "Note"
           },
           "tag": {
