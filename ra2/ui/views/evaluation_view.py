@@ -105,6 +105,7 @@ from typing import Final, cast
 from nicegui import ui
 from nicegui.element import Element
 
+from ra2.domain.context_fit import ContextFit, ContextSource
 from ra2.domain.extraction import EvaluationSize, RunStatus
 from ra2.domain.ids import (
     CorpusId,
@@ -922,6 +923,7 @@ class _EvaluationPage:
             if models and self._view is None:
                 _empty_line(MODELS_UNSAVED_MESSAGE)
             self._endpoint_line()
+            self._context_summary(models)
 
     def _no_models_message(self) -> str:
         """Why the list is empty, not one sentence for three different causes.
@@ -957,7 +959,7 @@ class _EvaluationPage:
                 "border-bottom:1px solid var(--rule2);min-width:0;"
                 + ("opacity:.55;" if choice.disabled else "")
             ),
-            {"data-model": choice.tag},
+            {"data-model": choice.tag, "data-context": _context_state(choice)},
         ):
             tick(
                 checked=choice.selected,
@@ -969,9 +971,15 @@ class _EvaluationPage:
                 ui.label(choice.tag).classes("mono").props('data-testid="model-tag"').mark(
                     "model-tag"
                 ).style("font-size:12px;overflow:hidden;text-overflow:ellipsis;")
-                ui.label(self._size_line(choice)).classes(
-                    "mono warn" if choice.disabled else "mono ink3"
-                ).props('data-testid="model-size"').mark("model-size").style("font-size:10.5px;")
+                size = (
+                    ui.label(self._size_line(choice))
+                    .classes("mono warn" if choice.disabled else "mono ink3")
+                    .props('data-testid="model-size"')
+                    .mark("model-size")
+                    .style("font-size:10.5px;")
+                )
+                if choice.context_too_small:
+                    data_props(size, {"title": CONTEXT_TOOLTIP})
                 self._qualification_line(choice)
 
     def _qualification_line(self, choice: ModelChoiceView) -> None:
@@ -1007,7 +1015,9 @@ class _EvaluationPage:
         judgement (sw-design.md §15.6), never re-derived here.
         """
         size = format_gigabytes(choice.size_bytes)
-        if not choice.disabled:
+        if choice.fits_vram is not False:
+            if choice.context_too_small and choice.context_fit is not None:
+                return _context_refusal(choice.context_fit)
             return f"digest {choice.digest} · {size}"
         vram = self._connection.gpu_vram_bytes if self._connection is not None else None
         limit = UNKNOWN_VALUE if vram is None else format_gigabytes(vram)
@@ -1034,6 +1044,22 @@ class _EvaluationPage:
                 stroke=1.8,
                 on_click=_sync(self._open_settings),
             )
+
+    def _context_summary(self, models: Sequence[ModelChoiceView]) -> None:
+        """`SD53`: one line under the card, outside the 260px well, saying what
+        the context check could and could not decide. Absent when nothing was
+        computed (a view rebuilt by the progress timer, or no models)."""
+        fits = [m.context_fit for m in models if m.context_fit is not None]
+        if not fits:
+            return
+        data_props(
+            ui.label(_context_summary_text(fits))
+            .classes("mono ink3")
+            .props('data-testid="context-summary"')
+            .mark("context-summary")
+            .style("font-size:10.5px;margin-top:3px;white-space:normal;"),
+            {"title": CONTEXT_TOOLTIP},
+        )
 
     def _endpoint_line(self) -> None:
         """The endpoint line, **below** the card, carrying the unreachable
@@ -2227,6 +2253,51 @@ def _server_options_text(parameters: Mapping[str, tuple[str, ...]] | None) -> st
     if not parameters:
         return "none"
     return " + ".join(f"{key} {value}" for key, values in parameters.items() for value in values)
+
+
+#: `SD53`, risk D1: what the context line on each model row rests on.
+CONTEXT_TOOLTIP: Final = (
+    "The longest record this run will read, as a prompt, plus room for the answer, "
+    "against the context this model is known to load with: measured by an earlier run "
+    "here, or set by its Modelfile. The server truncates a prompt that does not fit, and "
+    "the model is then scored on text it never read. Never compared with the model's "
+    "trained maximum, which the server rarely uses."
+)
+#: Shown when no context is known for the model: nothing is refused on a guess.
+CONTEXT_UNKNOWN: Final = "context: cannot check"
+
+
+def _context_state(choice: ModelChoiceView) -> str:
+    """The row's `data-context`: `fits`, `too-small`, `unknown`, or `none`
+    when the check was not computed for this view."""
+    fit = choice.context_fit
+    if fit is None:
+        return "none"
+    return {True: "fits", False: "too-small", None: "unknown"}[fit.fits]
+
+
+def _context_refusal(fit: ContextFit) -> str:
+    """The size line of a model whose known context is too small, in the
+    VRAM refusal's shape: `context 512 (Modelfile) — too small for ≈ 1 400`."""
+    assert fit.context_length is not None and fit.needed_tokens is not None
+    source = "measured" if fit.source is ContextSource.MEASURED else "Modelfile"
+    return (
+        f"context {format_count(fit.context_length)} ({source}) — too small for "
+        f"≈ {format_count(fit.needed_tokens)}"
+    )
+
+
+def _context_summary_text(fits: Sequence[ContextFit]) -> str:
+    """`Longest prompt ≈ 1 400 tokens with the answer · context known for 2 of 3`."""
+    needed = next((f.needed_tokens for f in fits if f.needed_tokens is not None), None)
+    if needed is None:
+        return CONTEXT_UNKNOWN + " — no prompt to estimate yet"
+    known = sum(1 for f in fits if f.fits is not None)
+    tail = "" if known == len(fits) else f"; {CONTEXT_UNKNOWN} for the rest"
+    return (
+        f"Longest prompt ≈ {format_count(needed)} tokens with the answer · context "
+        f"known for {known} of {len(fits)}{tail}"
+    )
 
 
 def _corpus_label(corpus: CorpusView) -> str:

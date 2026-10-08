@@ -2189,3 +2189,77 @@ async def test_an_unmeasured_model_is_still_selectable(seeded: Seeded) -> None:
     assert _all_text(user, "models-count").endswith("1 selected")
     drafts = await seeded.services.evaluation.list_evaluations()
     assert any(draft.selected_models == (FITS_A,) for draft in drafts)
+
+
+# --- SD53: the longest prompt against each model's known context ----------------
+
+
+@pytest.fixture
+async def context_checked(
+    app_factory: Callable[..., FastAPI], migrated_db: Settings
+) -> AsyncIterator[Seeded]:
+    """FITS_A's Modelfile asks for a 512-token context, too small for the
+    prompt plus the answer reserve; FITS_B's asks for 65 536."""
+    catalog = StaticModelCatalog(
+        parameters={FITS_A: {"num_ctx": ("512",)}, FITS_B: {"num_ctx": ("65536",)}}
+    )
+    async for value in _mounted(app_factory, name="context", model_catalog=catalog):
+        # The shared seed's corpus is a bare row; a prompt needs a record.
+        async with value.app.state.session_factory() as session:
+            session.add(
+                Record(
+                    id=RecordId("rec-context-1"),
+                    corpus_id=value.corpus_id,
+                    unfall_uid="UID00001",
+                    language="de",
+                    language_confidence=0.99,
+                    text_raw="Fahrzeug A bremste, Fahrzeug B fuhr auf.",
+                )
+            )
+            await session.commit()
+        yield value
+
+
+async def test_a_context_too_small_for_the_longest_prompt_disables_the_row(
+    context_checked: Seeded,
+) -> None:
+    """Risk D1, `SD53`: the VRAM refusal's treatment, in the VRAM refusal's
+    place. The reason replaces the size line, so the row keeps the three
+    lines the 260px well is drawn for (README §2: four rows)."""
+    user = context_checked.user
+    await user.open("/evaluation")
+
+    small = _model_row(user, FITS_A)
+    assert small._props["data-disabled"] == "true"
+    assert small._props["data-context"] == "too-small"
+    size = next(d for d in small.descendants() if d._props.get("data-testid") == "model-size")
+    assert "warn" in size._classes
+    text = _own_text(size)
+    assert text.startswith("context 512 (Modelfile) — too small for ≈ ")
+    assert "VRAM" not in text
+    assert not [d for d in small.descendants() if d._props.get("data-testid") == "model-context"]
+
+    roomy = _model_row(user, FITS_B)
+    assert roomy._props["data-disabled"] == "false"
+    assert roomy._props["data-context"] == "fits"
+
+    summary = _all_text(user, "context-summary")
+    assert summary.startswith("Longest prompt ≈ ")
+    # FITS_A and FITS_B have a Modelfile context; OVER_VRAM has none.
+    assert "context known for 2 of 3" in summary
+
+
+async def test_an_unknown_context_says_cannot_check_and_leaves_the_row_live(
+    seeded: Seeded,
+) -> None:
+    """The shared seed's corpus has no records, so there is no prompt to
+    estimate: the summary says so, and nothing is refused on a guess."""
+    from ra2.ui.views.evaluation_view import CONTEXT_UNKNOWN
+
+    user = seeded.user
+    await user.open("/evaluation")
+
+    row = _model_row(user, FITS_A)
+    assert row._props["data-disabled"] == "false"
+    assert row._props["data-context"] == "unknown"
+    assert _all_text(user, "context-summary").startswith(CONTEXT_UNKNOWN)

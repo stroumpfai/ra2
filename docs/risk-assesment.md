@@ -71,7 +71,7 @@ than a symbol for it.
 | 2 | **◑ §8.6** | Write the data-handling rules the app cannot enforce: outputs, retention, destruction, named owner, incident path | ~1 day, no code | **F1, B2, B3** |
 | 3 | **◑ §8.4** | Suppress or gate verbatim value samples in the census export; screen every export before it leaves the machine | ~½ day | **B1** |
 | 4 | **◑ §8.2** | Make the real-data commit guard content-shaped and run it in CI; reconsider the repository being public | ~½ day | **C1** |
-| 5 | open · §8.10 | Measure and bound the prompt against the model's context window before the evaluation corpus is cut. *Measured: each run records the context it was loaded with, and prompts at the limit are flagged on Results and Ranking. Not bounded: nothing refuses a launch whose prompts will not fit* | ~1 day | **D1** |
+| 5 | **✓ §8.15** | Measure and bound the prompt against the model's context window before the evaluation corpus is cut. *Measured (§8.10): each run records the context it was loaded with, and prompts at the limit are flagged. Bounded (§8.15): a model whose known context cannot hold the longest prompt is refused at launch. Who sets the context, and the check against the real server (Gate 3 row 17), remain* | ~1 day | **D1** |
 
 Nothing found here calls the architecture into question. Items 1, 3 and 4 are
 small fixes to controls that already exist; item 2 is the gap that no amount of
@@ -973,10 +973,10 @@ than a symbol for it.
 the last three days in which any of them can be done.*
 
 > **Gate 1 is complete (2026-10-01).** Every row below is done (§8.8–§8.13).
-> The two exceptions are rows that name more than their own work: row 6
-> records and flags the context, but nothing bounds a launch by it (§1's
-> first-pass row 5, Gate 3's row 17); row 9's half of row 30 is settled and
-> upload-only is still open.
+> Two rows name more than their own work. Row 6 records and flags the
+> context, and since 2026-10-08 a launch is also bounded by it (§8.15); the
+> check against the real server is still Gate 3's row 17. Row 9's half of
+> row 30 is settled, and upload-only is still open.
 
 | # | Status | Action | Risk | Effort |
 |---|---|---|---|---|
@@ -2049,6 +2049,47 @@ this GPU's used memory, and flag a model this GPU cannot be holding. It needs
 a migration, and on CPU-only serving it can only say "cannot tell". Worth
 building if the hardware answer arrives late, which is exactly when A2 says
 the temptation is strongest.
+
+### 8.15 D1 — the launch is bounded by the context · closed 2026-10-08 · `fix-d1-launch-context-check`
+
+**Status: D1's second recommendation is closed.** It said: "Validate at
+evaluation setup: estimate the prompt for the corpus's longest narrative and
+refuse to launch above a budget." See `SD53`.
+
+**The check.**
+- **The prompt side.** The prompt is estimated for the longest record the run
+  will read (the first `RA2_DEV_RECORD_MAX` by id for a Dev run, the whole
+  corpus otherwise), through the same preview the Prompts screen uses.
+- **The context side.** The model's context is the strongest number on hand:
+  what an earlier run of the same tag and digest was loaded with on this host
+  (`SD48`), else the Modelfile's `num_ctx`.
+- **The rule.** A model fits when the estimated prompt plus 1 024 answer
+  tokens stays within 90 % of that context, below the 95 % that §8.10 flags
+  after the fact.
+- **The result.** A model known not to fit is disabled on the Models card,
+  with the reason on its row, and refused at launch with a sentence naming
+  the numbers. It is the same pattern as a model too big for the VRAM.
+
+**What it refuses to guess.** The model's **trained maximum** is never used:
+the server's default context is usually far smaller, so a check against the
+maximum would pass exactly the prompts that get truncated. With no measured
+or configured context, the row says *context: cannot check* and nothing is
+refused. That will be the common state on a fresh machine until the first
+run of each model has been measured. The first run of a model with no
+Modelfile `num_ctx` is therefore unchecked, and §8.10's after-the-fact count
+is what catches it.
+
+**Cost.** One prompt preview per view load, and one `/api/show` per catalogue
+model that has no measured context. Nothing is asked on the progress timer:
+a test asserts that `/api/show` is not called there.
+
+**What this does not close.**
+- **Who sets the context** (recommendation 3), still `sw-design.md` §15.8.
+- **The check against the real server** (recommendation 4, Gate 3's row 17),
+  a person's job at M34.
+- **The estimate is an estimate**, about four characters per token. The 90 %
+  margin absorbs the error that has been seen; an exact count needs the
+  model's tokenizer, which the stack does not carry.
 
 ---
 

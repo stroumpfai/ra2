@@ -696,6 +696,14 @@ class ModelChoiceResponse(_Schema):
     fits_vram: bool | None = None
     selected: bool = False
     qualification: QualificationCardResponse | None = None
+    #: `SD53`, risk D1. `context_fits` is `null` when it cannot be checked
+    #: (no known context, or no prompt to estimate yet); only `false` refuses.
+    context_fits: bool | None = None
+    context_length: int | None = None
+    #: `measured` | `modelfile`, or `null` when no context is known.
+    context_source: str | None = None
+    #: The longest prompt's estimate plus the answer reserve.
+    context_needed_tokens: int | None = None
 
 
 class ConnectionResponse(_Schema):

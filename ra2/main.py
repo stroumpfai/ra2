@@ -210,6 +210,8 @@ def create_app(
         ids=ids,
         settings=settings,
         connection=settings_service,
+        # SD53: the longest record's prompt, estimated for the context check.
+        prompt_preview=prompt_service,
     )
     # `prompt_service` satisfies `PromptResolver` (services/protocols.py)
     # structurally — `run_service` never imports it directly. It arrives as a

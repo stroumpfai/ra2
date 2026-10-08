@@ -241,6 +241,24 @@ models that cannot fit. If there is no NVIDIA GPU, the answer is an honest
 non-NVIDIA host you can declare the figure yourself with `RA2_GPU_VRAM_GB` and
 `RA2_GPU_NAME`.
 
+### Context and the longest prompt
+
+Ollama **truncates** a prompt longer than the model's context rather than
+refusing it, and the model then answers about text it never saw. So the
+Models card checks whether the prompt for the **longest record the run will
+read** (estimated, plus 1 024 tokens for the answer) stays within 90 % of each
+model's context. A model **known** not to fit is disabled, its size line says
+why (*context 512 (Modelfile) — too small for ≈ 1 400*), and it is refused at
+launch, exactly like one too big for the VRAM. One line under the card gives
+the estimate and how many models' contexts are known.
+
+"Known" means one of two things: an earlier run of the same model and digest
+was loaded with that context **on this host**, or the model's Modelfile sets
+`num_ctx`. Otherwise the row says *context: cannot check*, and nothing is
+refused on a guess: the model's trained maximum is never used, because the
+server's default context is usually far smaller. After a run, prompts that
+reached the limit are counted on Results and Ranking regardless.
+
 ### If the endpoint is unreachable
 
 The Models card empties, the reason appears next to the endpoint line, and

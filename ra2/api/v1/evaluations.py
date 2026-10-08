@@ -98,7 +98,12 @@ def _connection_response(view: ConnectionView) -> ConnectionResponse:
 
 def _model_choice_response(view: ModelChoiceView) -> ModelChoiceResponse:
     card = view.qualification
+    fit = view.context_fit
     return ModelChoiceResponse(
+        context_fits=None if fit is None else fit.fits,
+        context_length=None if fit is None else fit.context_length,
+        context_source=None if fit is None or fit.source is None else fit.source.value,
+        context_needed_tokens=None if fit is None else fit.needed_tokens,
         tag=view.tag,
         digest=view.digest,
         size_bytes=view.size_bytes,
