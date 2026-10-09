@@ -71,7 +71,7 @@ than a symbol for it.
 | 2 | **◑ §8.6** | Write the data-handling rules the app cannot enforce: outputs, retention, destruction, named owner, incident path | ~1 day, no code | **F1, B2, B3** |
 | 3 | **◑ §8.4** | Suppress or gate verbatim value samples in the census export; screen every export before it leaves the machine | ~½ day | **B1** |
 | 4 | **◑ §8.2** | Make the real-data commit guard content-shaped and run it in CI; reconsider the repository being public | ~½ day | **C1** |
-| 5 | open | Measure and bound the prompt against the model's context window before the evaluation corpus is cut | ~1 day | **D1** |
+| 5 | **✓ §8.15** | Measure and bound the prompt against the model's context window before the evaluation corpus is cut. *Measured (§8.10): each run records the context it was loaded with, and prompts at the limit are flagged. Bounded (§8.15): a model whose known context cannot hold the longest prompt is refused at launch. Who sets the context, and the check against the real server (Gate 3 row 17), remain* | ~1 day | **D1** |
 
 Nothing found here calls the architecture into question. Items 1, 3 and 4 are
 small fixes to controls that already exist; item 2 is the gap that no amount of
@@ -89,7 +89,7 @@ the register was graded for a project being *built* and the project is now being
 |---|---|---|---|---|
 | 21 | **✔ closed** | **`hide_parameters=True`** — a database error wrote the narrative and `unfall_uid` into `run.error` **and into the log** (reproduced). Fixed at the engine, with a provoked-`IntegrityError` test and a positive control (`contracts/amendments/fix-a5-bound-parameters.md`) | — | **A5** |
 | 23·24 | **✓ §8.8** | An intake mojibake canary and the mixed-encoding fixture — a mixed-encoding delivery was silently corrupted (reproduced). It is still corrupted, since nothing can repair it, but it is now **reported**, per file and on the corpus, and `h15` pins it. Row 22 (G2) closed with it | — | **G1, G4** |
-| 11·15 | **◑ §8.6** | Fill in `data-handling.md` §7's ten decisions and close `mvp-spec.md` §18's B1–B4. **No longer pending — late**, and four of them gate work that cannot be done afterwards (§6) | ~1 day, no code | **F1, B3, C3** |
+| 11·15 | **◑ §8.6** · §8.14 | Fill in `data-handling.md` §7's decisions (twelve since 2026-10-01: B2 and B3 are now decisions 11 and 12) and close `mvp-spec.md` §18's B1–B4. **No longer pending — late**, and four of them gate work that cannot be done afterwards (§6) | ~1 day, no code | **F1, B3, C3** |
 | 31 | open | **A stated support path** — what may be copied off the machine when something breaks. The developer is reachable rather than resident, and §9.1.1 is the chain that makes this the dominant technical residual. **Item 21 broke link 5 and did not break the chain**: a screenshot, a hand-typed description and the export all still carry content | ~2 h, no code | **C2, E3** |
 | 26·32 | **open · 26 ✓ §8.9** | Correct and **gate** the README; start an operations log from the first real run. The README half is done and gated; the operations log (32) is not | ~½ day | **F6, E3, F4** |
 
@@ -972,6 +972,12 @@ than a symbol for it.
 *These become impossible afterwards. Roughly three days in total, and they are
 the last three days in which any of them can be done.*
 
+> **Gate 1 is complete (2026-10-01).** Every row below is done (§8.8–§8.13).
+> Two rows name more than their own work. Row 6 records and flags the
+> context, and since 2026-10-08 a launch is also bounded by it (§8.15); the
+> check against the real server is still Gate 3's row 17. Row 9's half of
+> row 30 is settled, and upload-only is still open.
+
 | # | Status | Action | Risk | Effort |
 |---|---|---|---|---|
 | **21** | **✔ closed** | **`hide_parameters=True` on `create_async_engine`**, plus a provoked-`IntegrityError` test with a positive control, and §5.1 of `data-handling.md` stating that the list is enforced at the engine as well as at the call sites. `SD39`; `contracts/amendments/fix-a5-bound-parameters.md` | **A5** | **done** |
@@ -987,7 +993,7 @@ the last three days in which any of them can be done.*
 | 5 | **✓ §8.12** | Render the anonymisation marking as three states until its semantics are confirmed | B5 | done |
 | 10 | **✓ §8.12** | Standing copy on Results: a mismatch rate is not a model error rate until the list is read — D6 closed by delivery, the string is still worth it | D6 | done |
 | 9 | **✓ §8.11** | Constrain `root_path` to an allowed root; bound the walk; make the server honour `Settings.host` or drop it. Host half by `SD42`; root and walk by `SD49` | A4, G3 | done |
-| **28** | **✓ §8.11** | A contract test: every `Settings` field has a reader in `ra2/`, or it does not exist. **Built as `SD42`** (`tests/test_settings_have_readers.py`, described under G3's *Built*); this row was never updated. Every setting added since (`import_*`, `delivered_text_anonymised`) passes it | G3 | done |
+| **28** | **✓ §8.13** | A contract test: every `Settings` field has a reader in `ra2/`, or it does not exist. **Built as `SD42`** (`tests/test_settings_have_readers.py`, described under G3's *Built*); this row was never updated. Every setting added since (`import_*`, `delivered_text_anonymised`) passes it | G3 | done |
 | **29** | **✓ §8.13** | Helper copy under the mismatch note field, in `EXPORT_LEAVES_RA2`'s voice. **There is no note field on the screen**: built as the API field's description, plus `data-handling.md` §3 rule 5 and the `tagged_by` proposal | B6 | done |
 
 ### Gate 2 — before real data lands on the machine
@@ -996,9 +1002,9 @@ the last three days in which any of them can be done.*
 |---|---|---|---|---|
 | 20 | **◑ §8.6** | **Rehearse the destruction procedure end to end** on `reset-seed` data. Written, never executed | B3, F1, E4 | 2 h |
 | **30** | open · §8.11 | **Decide host-path intake: upload-only for real deliveries.** Deletes destruction step 5 and makes `just reset yes` complete. *Half settled by row 9:* host-path intake stays, confined to `RA2_IMPORT_ROOT`, and `just reset` deliberately leaves that directory, so step 5 remains, with one address. Upload-only is still the open question | G3, A4, B3 | decision |
-| 15 | open | Confirm **B2 (VRAM)** and **B3 (air-gap)**. If air-gapped, build *and test* the wheel bundle and side-loaded weights **while the developer is still here** | F5, C3 | ½ d + lead time |
+| 15 | open · §8.14 | Confirm **B2 (VRAM)** and **B3 (air-gap)**. *Now `data-handling.md` §7 decisions 11 and 12, owed before the evaluation corpus is cut.* If air-gapped, build *and test* the wheel bundle and side-loaded weights **while the developer is still here** | F5, C3 | ½ d + lead time |
 | 12 | **◑ §8.6** | Deployment conditions confirmed, not merely written: disk encryption, custody, single-user, no cloud-synced data dir, loopback bind, `OLLAMA_HOST=127.0.0.1`, `OLLAMA_DEBUG` off, no tunnels | B4, A2, A3, F2 | ½ d |
-| 11 | **◑ §8.6** | The governance page — **fill in `data-handling.md` §7's ten decisions** | F1, B2, B3 | 1 d |
+| 11 | **◑ §8.6** | The governance page — **fill in `data-handling.md` §7's decisions**: twelve since 2026-10-01, decisions 11 (GPU) and 12 (air-gap) owed first (§8.14) | F1, B2, B3 | 1 d |
 | 14 | **◑ §8.6** | Decide backup vs. accepted re-run. E4 adds a second way to lose the corpus | B3, E1 | ½ d |
 | 13 | open · §8.6 | Extend the NDA or equivalent to the reviewing domain expert before Goal 3's review | B2 | — |
 | 3 | **✓ §8.3** | **Move real data off the development checkout** — C2's second recommendation, now near-free (§9.4). Closes C2 and C4 together | C2, C4 | ½ d |
@@ -1013,7 +1019,7 @@ go-live gate, and M34 is still unscheduled.*
 |---|---|---|---|
 | 16 | open | Independent recomputation of one run's statistics outside this codebase | D5 |
 | 17 | open | Verify a long record is not silently truncated by the real server | D1 |
-| 18 | open | Check one run's provenance against the machine it claims to have run on | A2 |
+| 18 | open · §8.14 | Check one run's provenance against the machine it claims to have run on. *The procedure is written (`data-handling.md` §2.1) and the report template records it; a person does it once, at M34* | A2 |
 
 ### Gate 4 — standing, during operation
 
@@ -1040,6 +1046,17 @@ go-live gate, and M34 is still unscheduled.*
 **Questions 1-4 and 6-8 are now carried as the decision table in
 [`data-handling.md`](../data-handling.md) §7**, with owner and date columns to
 fill in. They are repeated here as the review left them.
+
+> **Update, 2026-10-01.** Where each question now stands:
+> - **Question 4 (air-gap)** and the **B2 GPU question** are decisions 12 and
+>   11 in that table, written concretely and marked as owed first (§8.14).
+> - **Question 5 (`UnfHergangTextAnonym`)** has somewhere to land.
+>   `RA2_DELIVERED_TEXT_ANONYMISED` records the supplier's answer; until it
+>   is set, every delivered narrative is marked *anonymisation unknown*
+>   (§8.12). The email itself is still unsent as far as this repository
+>   knows.
+> - **All twelve rows** of the table are still blank. The second-pass note
+>   below stands, with two more rows.
 
 > **Second pass, 2026-09-23 — these are no longer pending, they are late.**
 > All ten rows of `data-handling.md` §7 are still blank, and `mvp-spec.md`
@@ -1976,6 +1993,103 @@ gate.
 **The restart defect found in §8.11** is fixed: both services restore a
 host-path delivery's binding from `delivery.root_path` before every use. See
 `contracts/amendments/fix-host-path-survives-restart.md`.
+
+### 8.14 A2 — what sits behind `127.0.0.1` · rule placed, check written 2026-10-01 · `fix-a2-tunnel-rule`
+
+**Status: every recommendation that can be met in the repository is met.
+The check itself and the two hardware decisions are a person's to do.** See
+`SD52`.
+
+A2 made three recommendations.
+
+**1. State the rule in the runbook.** The sentence already existed in
+`docs/rules.md` §2 and `data-handling.md` §2. There is still no runbook (E3),
+so the rule now also stands where the act happens:
+
+- **Under the endpoint field** of the Ollama settings dialog, **always
+  visible**. This is the one place an operator retargets the model server,
+  and a tunnel never produces the refused value the existing error waits for.
+  A UI test asserts the sentence on a healthy endpoint as well as a refused
+  one.
+- **In the README's loopback section**, the first thing an operator reads
+  about the endpoint. It says what the two guards cover, what neither can
+  see, and why the pressure to tunnel exists.
+
+**2. Check the first real evaluation's provenance against the machine (row
+18).** This is written as `data-handling.md` §2.1: field by field, the card
+against the machine, and what a mismatch means.
+
+| Card field | Compared with |
+|---|---|
+| GPU | The GPU actually installed |
+| Model digest | `ollama list` |
+| Ollama version | `ollama --version` |
+| Context length | `ollama ps` |
+| Endpoint | `127.0.0.1`, with only Ollama listening on it |
+| Host | This machine |
+
+While the model is loaded, the GPU's used memory should account for it. Any
+mismatch stops the evaluation's use until it is explained. The report
+template's §2 gains the line that records the check. **It is still open:**
+it is done once, by a person, on the real machine at M34.
+
+**3. Close B2/B3 before the evaluation corpus is cut (row 15).** Both are now
+concrete entries in `data-handling.md` §7, as decisions 11 and 12, marked as
+owed first:
+- **VRAM:** the largest compared model must fit. If the models that matter
+  do not, the decision is which models to drop or what hardware to obtain,
+  never a remote server.
+- **Air-gap:** if air-gapped, wheels and weights are side-loaded and tested
+  while the developer is available; if not, models are pulled during setup,
+  before real data arrives.
+
+**Considered and deferred.** An automatic "served here?" check: after the
+first record, compare the model's VRAM residency reported by `/api/ps` with
+this GPU's used memory, and flag a model this GPU cannot be holding. It needs
+a migration, and on CPU-only serving it can only say "cannot tell". Worth
+building if the hardware answer arrives late, which is exactly when A2 says
+the temptation is strongest.
+
+### 8.15 D1 — the launch is bounded by the context · closed 2026-10-08 · `fix-d1-launch-context-check`
+
+**Status: D1's second recommendation is closed.** It said: "Validate at
+evaluation setup: estimate the prompt for the corpus's longest narrative and
+refuse to launch above a budget." See `SD53`.
+
+**The check.**
+- **The prompt side.** The prompt is estimated for the longest record the run
+  will read (the first `RA2_DEV_RECORD_MAX` by id for a Dev run, the whole
+  corpus otherwise), through the same preview the Prompts screen uses.
+- **The context side.** The model's context is the strongest number on hand:
+  what an earlier run of the same tag and digest was loaded with on this host
+  (`SD48`), else the Modelfile's `num_ctx`.
+- **The rule.** A model fits when the estimated prompt plus 1 024 answer
+  tokens stays within 90 % of that context, below the 95 % that §8.10 flags
+  after the fact.
+- **The result.** A model known not to fit is disabled on the Models card,
+  with the reason on its row, and refused at launch with a sentence naming
+  the numbers. It is the same pattern as a model too big for the VRAM.
+
+**What it refuses to guess.** The model's **trained maximum** is never used:
+the server's default context is usually far smaller, so a check against the
+maximum would pass exactly the prompts that get truncated. With no measured
+or configured context, the row says *context: cannot check* and nothing is
+refused. That will be the common state on a fresh machine until the first
+run of each model has been measured. The first run of a model with no
+Modelfile `num_ctx` is therefore unchecked, and §8.10's after-the-fact count
+is what catches it.
+
+**Cost.** One prompt preview per view load, and one `/api/show` per catalogue
+model that has no measured context. Nothing is asked on the progress timer:
+a test asserts that `/api/show` is not called there.
+
+**What this does not close.**
+- **Who sets the context** (recommendation 3), still `sw-design.md` §15.8.
+- **The check against the real server** (recommendation 4, Gate 3's row 17),
+  a person's job at M34.
+- **The estimate is an estimate**, about four characters per token. The 90 %
+  margin absorbs the error that has been seen; an exact count needs the
+  model's tokenizer, which the stack does not carry.
 
 ---
 

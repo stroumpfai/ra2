@@ -2835,6 +2835,50 @@
         "additionalProperties": false,
         "description": "One row of the Models card.\n\n`fits_vram` is `null` when the host's VRAM is unknown \u2014 not a failure:\nevery model stays selectable and the design's disabled row does not occur.",
         "properties": {
+          "context_fits": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Fits"
+          },
+          "context_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Length"
+          },
+          "context_needed_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Needed Tokens"
+          },
+          "context_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Source"
+          },
           "digest": {
             "title": "Digest",
             "type": "string"

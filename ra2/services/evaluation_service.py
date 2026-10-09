@@ -34,12 +34,13 @@ import platform
 import statistics
 from collections.abc import Mapping, Sequence
 from datetime import datetime
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ra2.domain.codes import CodeValue as DomainCodeValue
+from ra2.domain.context_fit import ContextFit, ContextSource, modelfile_context
 from ra2.domain.extraction import EvaluationSize, RunStatus
 from ra2.domain.feature import Grain, Kind, ValueType, requires_codelist
 from ra2.domain.fingerprint import FingerprintInput, compute_fingerprint
@@ -93,6 +94,7 @@ from ra2.services.errors import (
     EvaluationLockedError,
     FeatureValidationError,
     NotFoundError,
+    ServiceError,
 )
 from ra2.services.protocols import ConnectionSettings
 from ra2.services.readmodels import (
@@ -105,6 +107,7 @@ from ra2.services.readmodels import (
     Page,
     ProvenanceView,
     QualificationCardView,
+    ResolvedPromptView,
     RunProgressView,
     RunView,
     SortDir,
@@ -116,6 +119,7 @@ __all__ = [
     "CONNECTION_REASON_TIMED_OUT",
     "CONNECTION_REASON_UNREACHABLE",
     "EVAL_ERROR_CONFIG_NOT_FROZEN",
+    "EVAL_ERROR_CONTEXT_TOO_SMALL",
     "EVAL_ERROR_ENDPOINT_UNREACHABLE",
     "EVAL_ERROR_ENUM_NO_CODELIST",
     "EVAL_ERROR_ENUM_NO_LABEL_IN_LANGUAGE",
@@ -187,6 +191,14 @@ EVAL_ERROR_MODEL_NOT_AVAILABLE: Final = (
 #: sw-design.md §15.6 — only ever raised when the VRAM is actually *known*.
 EVAL_ERROR_MODEL_EXCEEDS_VRAM: Final = (
     "{tag}: {size_gb:.1f} GB exceeds the host's {vram_gb:.1f} GB of VRAM."
+)
+#: `SD53`, risk D1 — only ever raised when the context is actually *known*
+#: (measured on this host, or set by the Modelfile). The server would truncate
+#: the prompt and the model would score text it never read.
+EVAL_ERROR_CONTEXT_TOO_SMALL: Final = (
+    "{tag}: the longest record's prompt needs about {needed:,} tokens with room for the "
+    "answer, more than 90 % of its {context:,}-token context ({source}). The server would "
+    "truncate it, and the model would be scored on text it never read."
 )
 #: mvp-spec.md §7: "A feature whose column has no mapping, or whose mapped
 #: attribute has no code table, and whose type is `enum` cannot be run — hard
@@ -275,6 +287,21 @@ def snapshot_from_json(payload: str) -> tuple[DomainCodeValue, ...]:
     )
 
 
+class _PromptPreview(Protocol):
+    """What the context check needs of `PromptService` (`SD53`): one prompt
+    resolved for one record, with its token estimate. Structural, so this
+    module never imports `prompt_service`."""
+
+    async def preview(
+        self,
+        prompt_template_id: PromptTemplateId,
+        feature_config_id: FeatureConfigId,
+        record_id: RecordId,
+        *,
+        language: str,
+    ) -> ResolvedPromptView: ...
+
+
 class EvaluationService:
     def __init__(
         self,
@@ -287,9 +314,13 @@ class EvaluationService:
         ids: IdFactory,
         settings: Settings,
         connection: ConnectionSettings,
+        prompt_preview: _PromptPreview | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._model_catalog = model_catalog
+        #: `SD53`. Resolves the longest record's prompt for the context check.
+        #: `None` checks nothing: every model reads *cannot check*.
+        self._prompt_preview = prompt_preview
         self._endpoint_prober = endpoint_prober
         self._gpu_probe = gpu_probe
         self._clock = clock
@@ -331,7 +362,13 @@ class EvaluationService:
         :raises NotFoundError: no such evaluation.
         """
         connection = connection if connection is not None else await self.connection_status()
-        models = models if models is not None else await self._model_choices(connection)
+        if models is None:
+            # SD53: the context check rides with a fresh catalogue only, so it
+            # runs on view load and refresh and never on the progress timer.
+            # Models handed back keep the fit they were given.
+            models = await self._with_context_fit(
+                evaluation_id, await self._model_choices(connection)
+            )
         async with self._session_factory() as session:
             evaluation = await self._require(session, evaluation_id)
             return await self._view(session, evaluation, connection, models)
@@ -619,6 +656,9 @@ class EvaluationService:
         # per launch, not per record.
         ollama_version = await self._model_catalog.version()
         server_parameters = await self._server_parameters(evaluation_id, models)
+        # SD53: decided again at launch, from the same /api/show answers the
+        # run will pin, rather than trusted from whatever the view last held.
+        models = await self._with_context_fit(evaluation_id, models, parameters=server_parameters)
 
         async with session_scope(self._session_factory) as session:
             evaluation = await self._editable(session, evaluation_id)
@@ -852,6 +892,98 @@ class EvaluationService:
         if validation_errors:
             raise FeatureValidationError(validation_errors)
 
+    async def _with_context_fit(
+        self,
+        evaluation_id: EvaluationId,
+        models: Sequence[ModelChoiceView],
+        *,
+        parameters: Mapping[str, Mapping[str, tuple[str, ...]] | None] | None = None,
+    ) -> tuple[ModelChoiceView, ...]:
+        """Each model with whether the longest prompt fits its known context.
+
+        The context is the strongest number on hand: what an earlier run of
+        this tag **and digest** was loaded with on this host, else the
+        Modelfile's `num_ctx`, else nothing (*cannot check*). `parameters`
+        is the launch's own `/api/show` answers; a model it does not name is
+        not asked again there. With no prompt to estimate yet, no endpoint
+        call is made at all.
+        """
+        if not models:
+            return tuple(models)
+        estimate = await self._longest_prompt_estimate(evaluation_id)
+        if estimate is None:
+            unknown = ContextFit(prompt_tokens=None, context_length=None, source=None)
+            return tuple(dataclasses.replace(choice, context_fit=unknown) for choice in models)
+        measured = await self._measured_contexts()
+        fitted: list[ModelChoiceView] = []
+        for choice in models:
+            context = measured.get((choice.tag, choice.digest))
+            source: ContextSource | None = ContextSource.MEASURED
+            if context is None:
+                if parameters is not None:
+                    shown = parameters.get(choice.tag)
+                else:
+                    shown = await self._model_catalog.parameters(choice.tag)
+                context = modelfile_context(shown)
+                source = ContextSource.MODELFILE if context is not None else None
+            fitted.append(
+                dataclasses.replace(
+                    choice,
+                    context_fit=ContextFit(
+                        prompt_tokens=estimate, context_length=context, source=source
+                    ),
+                )
+            )
+        return tuple(fitted)
+
+    async def _longest_prompt_estimate(self, evaluation_id: EvaluationId) -> int | None:
+        """The token estimate of the prompt for the longest narrative the run
+        will read: the first `RA2_DEV_RECORD_MAX` records for a Dev run, the
+        whole corpus otherwise. If the longest fits, every record does.
+
+        `None` when there is nothing to resolve yet: no template chosen, an
+        empty scope, or no previewer wired.
+        """
+        if self._prompt_preview is None:
+            return None
+        async with self._session_factory() as session:
+            evaluation = await session.get(Evaluation, evaluation_id)
+            if evaluation is None or evaluation.prompt_template_id is None:
+                return None
+            scope = select(Record.id).where(Record.corpus_id == evaluation.corpus_id)
+            if EvaluationSize(evaluation.size) is EvaluationSize.DEV:
+                scope = scope.order_by(Record.id).limit(self._settings.dev_record_max)
+            longest = await session.scalar(
+                select(Record.id)
+                .where(Record.id.in_(scope.scalar_subquery()))
+                .order_by(func.length(func.coalesce(Record.text_raw, "")).desc(), Record.id)
+                .limit(1)
+            )
+            if longest is None:
+                return None
+            template_id = PromptTemplateId(evaluation.prompt_template_id)
+            config_id = FeatureConfigId(evaluation.feature_config_id)
+            language = evaluation.prompt_language
+        try:
+            resolved = await self._prompt_preview.preview(
+                template_id, config_id, RecordId(longest), language=language
+            )
+        except ServiceError:
+            return None
+        return resolved.token_estimate
+
+    async def _measured_contexts(self) -> dict[tuple[str, str], int]:
+        """`(tag, digest) -> context` from the latest run on this host that
+        recorded one (`SD48`). The same weights loaded by the same server
+        are the best evidence of the context the next run will get."""
+        async with self._session_factory() as session:
+            rows = await session.execute(
+                select(Run.model_name, Run.model_digest, Run.context_length)
+                .where(Run.context_length.is_not(None))
+                .order_by(Run.started_at, Run.id)
+            )
+            return {(tag, digest): int(context) for tag, digest, context in rows.all()}
+
     async def _server_parameters(
         self, evaluation_id: EvaluationId, models: Sequence[ModelChoiceView]
     ) -> dict[str, Mapping[str, tuple[str, ...]] | None]:
@@ -899,6 +1031,9 @@ class EvaluationService:
                 continue
             if choice.fits_vram is False:
                 validation_errors.append(_exceeds_vram(choice, connection.gpu_vram_bytes))
+                continue
+            if choice.context_too_small:
+                validation_errors.append(_exceeds_context(choice))
                 continue
             chosen.append(choice)
         if validation_errors:
@@ -1155,6 +1290,7 @@ class EvaluationService:
                     fits_vram=choice.fits_vram,
                     selected=choice.tag in set(selected),
                     qualification=_scoped(choice.qualification, total),
+                    context_fit=choice.context_fit,
                 )
                 for choice in models
             ),
@@ -1319,6 +1455,19 @@ def _draft_view(evaluation: Evaluation) -> EvaluationDraftView:
         selected_models=_selected_models(evaluation),
         launched_at=evaluation.launched_at,
         min_cell_count=evaluation.min_cell_count,
+    )
+
+
+def _exceeds_context(choice: ModelChoiceView) -> str:
+    """The message behind a `context_too_small` verdict (`SD53`). Reached only
+    when both the estimate and the context are known."""
+    fit = choice.context_fit
+    assert fit is not None and fit.needed_tokens is not None and fit.context_length is not None
+    return EVAL_ERROR_CONTEXT_TOO_SMALL.format(
+        tag=choice.tag,
+        needed=fit.needed_tokens,
+        context=fit.context_length,
+        source="measured on this host" if fit.source is ContextSource.MEASURED else "its Modelfile",
     )
 
 

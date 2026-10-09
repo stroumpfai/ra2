@@ -900,4 +900,8 @@ The MVP is done when, on the target machine:
    version, server-side decoding options and loaded context. *Reproduce* means
    re-run the same question, not obtain bit-identical answers (§9).
 9. A dev-sized run is visibly marked as a smoke test wherever its numbers appear.
+   A model whose **known** context (measured on this host, or set by its
+   Modelfile) cannot hold the longest prompt in the run's scope plus room for
+   the answer is refused at launch, like one too large for the VRAM. An
+   unknown context never refuses.
 10. No network egress occurs beyond the configured LLM endpoint.

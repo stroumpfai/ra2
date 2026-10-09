@@ -71,6 +71,7 @@ from ra2.ui.components.feature_sets_table import feature_sets_table
 from ra2.ui.components.ollama_settings import (
     ENDPOINT_INVALID_MESSAGE,
     PROBE_WORDS,
+    TUNNEL_WARNING,
     ollama_settings_dialog,
     probe_sentence,
 )
@@ -2362,3 +2363,34 @@ async def test_the_mismatch_table_does_not_wrap_at_1024px(user):
     wrapped = [e for e in _all(user) if e.tag == "td" and "td-wrap" in e.classes]
     assert len(wrapped) == 1
     await user.should_see("standing in water")
+
+
+async def test_the_tunnel_warning_stands_under_the_endpoint_whatever_its_value(user):
+    """Risk A2, `SD52`. The loopback guard checks the URL, and a tunnel or
+    proxy sits behind a URL that passes it. So the rule is stated **always**,
+    on a healthy endpoint as well as a refused one, in the one place an
+    operator retargets the model server."""
+    dialogs: list[ui.dialog] = []
+
+    def build() -> None:
+        dialogs.append(
+            cast(
+                ui.dialog,
+                ollama_settings_dialog(
+                    settings=_CONNECTION,
+                    on_save=_recording_save([]),
+                    on_refresh=lambda: None,
+                    on_test=_ok_probe,
+                ),
+            )
+        )
+
+    page("/t/ollama/tunnel", build)
+    await user.open("/t/ollama/tunnel")
+    dialogs[0].open()
+
+    (warning,) = user.find(marker="ollama-tunnel-warning").elements
+    assert warning.text == TUNNEL_WARNING
+    user.find(marker="ollama-endpoint").trigger("change", args=_OFF_HOST)
+    (warning,) = user.find(marker="ollama-tunnel-warning").elements
+    assert warning.text == TUNNEL_WARNING

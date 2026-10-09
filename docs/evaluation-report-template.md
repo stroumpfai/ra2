@@ -39,6 +39,17 @@ card ("Stored on every run"). A field the card reads as `unknown` is written
 |---|---|---|
 | | | |
 
+**Served here, checked.** *For the first evaluation on real data: the card
+compared with the machine, field by field, as `data-handling.md` §2.1 lists
+(GPU, `ollama list` digests, `ollama --version`, `ollama ps` context, the
+endpoint, the host). Write the date, who checked, and the result. A mismatch
+means this report is not issued until it is explained.* There was no tunnel,
+proxy or port forward between RA2 and the model server.
+
+| Checked on | By | Result |
+|---|---|---|
+| | | |
+
 ## 3. Can each model read what it was given?
 
 *From the Ranking tab's **Unreadable** column, or the line under each model

@@ -19,6 +19,7 @@ from ra2.domain.anonymisation import AnonymisationMarking
 from ra2.domain.census import CensusBucket, TypeHint, ValueCount
 from ra2.domain.codelist_coverage import ColumnCoverage
 from ra2.domain.codes import CodeValue
+from ra2.domain.context_fit import ContextFit
 from ra2.domain.delivery import DeliveryStatus, FileKind, SourceKind
 from ra2.domain.extraction import EvaluationSize, RunStatus
 from ra2.domain.feature import DerivationSpec, Grain, Kind, MatchingRule, ValueType
@@ -509,12 +510,22 @@ class ModelChoiceView:
     selected: bool = False
     #: SD40. `None` means never qualified on this host: the row still ticks.
     qualification: QualificationCardView | None = None
+    #: `SD53`, risk D1: whether the longest prompt in the run's scope fits
+    #: this model's known context. `None` when not computed (the progress
+    #: timer never asks); a `ContextFit` whose `fits` is `None` means
+    #: *cannot check*, which never disables the row.
+    context_fit: ContextFit | None = None
+
+    @property
+    def context_too_small(self) -> bool:
+        """Known, from a measured or configured context, not to fit."""
+        return self.context_fit is not None and self.context_fit.fits is False
 
     @property
     def disabled(self) -> bool:
-        """`opacity:.55` with the size line in `--warn` — only when we
-        actually know the model does not fit."""
-        return self.fits_vram is False
+        """`opacity:.55` — only when we **know** the model cannot be used:
+        too big for the VRAM, or a context too small for the longest prompt."""
+        return self.fits_vram is False or self.context_too_small
 
 
 @dataclass(frozen=True, slots=True)
