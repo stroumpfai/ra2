@@ -454,10 +454,14 @@ async def test_catalogue_selects_nothing(
 
 def test_every_unreachable_status_has_a_reason() -> None:
     """`connection_status` reads `_CONNECTION_REASONS[status]` with `[]` for
-    anything that is not `REACHABLE`, so a status added without an entry is a
-    `KeyError` on the Evaluation view's load path and nowhere else.
+    anything that is not a non-failure, so a status added without an entry is
+    a `KeyError` on the Evaluation view's load path and nowhere else.
 
-    `REACHABLE` is excluded because it is the one state with nothing to
-    explain — the view renders the word alone and the reason line is absent.
+    `REACHABLE` and `UNCHECKED` are excluded because neither is a failure:
+    one has nothing to explain, and the other has not been asked yet (SD55).
+    The view renders the word alone and the reason line is absent.
     """
-    assert set(_CONNECTION_REASONS) == set(EndpointStatus) - {EndpointStatus.REACHABLE}
+    assert set(_CONNECTION_REASONS) == set(EndpointStatus) - {
+        EndpointStatus.REACHABLE,
+        EndpointStatus.UNCHECKED,
+    }

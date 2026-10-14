@@ -27,6 +27,7 @@ Hence key-sorted, compact, `ensure_ascii=False`, and the codes ordered by
 `code` — the M0-D8 convention `matching_rule_json` already follows.
 """
 
+import asyncio
 import dataclasses
 import json
 import logging
@@ -233,10 +234,14 @@ CONNECTION_REASON_TIMED_OUT: Final = (
     "Raise RA2_LLM_TIMEOUT_S, or pick a model that answers faster."
 )
 
-#: Every `EndpointStatus` but `REACHABLE`, which has no reason to give.
-#: Exhaustive by test rather than by convention: this is a dict keyed on an
-#: enum and read with `[]`, so a member added without an entry here is a
-#: `KeyError` on the Evaluation view's load path and nowhere else.
+#: The statuses that are not failures, so they have no reason to give:
+#: reachable, and not asked yet (SD55).
+_NO_REASON: Final = frozenset({EndpointStatus.REACHABLE, EndpointStatus.UNCHECKED})
+
+#: Every other `EndpointStatus`. Exhaustive by test rather than by
+#: convention: this is a dict keyed on an enum and read with `[]`, so a
+#: member added without an entry here is a `KeyError` on the Evaluation
+#: view's load path and nowhere else.
 _CONNECTION_REASONS: Final[dict[EndpointStatus, str]] = {
     EndpointStatus.UNREACHABLE: CONNECTION_REASON_UNREACHABLE,
     EndpointStatus.TIMED_OUT: CONNECTION_REASON_TIMED_OUT,
@@ -343,6 +348,7 @@ class EvaluationService:
         *,
         connection: ConnectionView | None = None,
         models: Sequence[ModelChoiceView] | None = None,
+        probe: bool = True,
     ) -> EvaluationView:
         """One whole Evaluation screen: setup, models, connection, progress,
         runs and provenance.
@@ -359,16 +365,27 @@ class EvaluationService:
         "nothing supplied" would put the probe back on the timer for exactly
         the endpoint least able to answer it.
 
+        `probe=False` **never touches the endpoint** (SD55). Whatever was not
+        handed back reads as not asked yet: an `UNCHECKED` connection and no
+        models. That is the Evaluation view's first paint, which must not wait
+        on a socket. Windows takes 2 s to refuse a closed loopback port, and
+        NiceGUI gives a page 3 s to build. Launch stays disabled, because only
+        `REACHABLE` enables it.
+
         :raises NotFoundError: no such evaluation.
         """
-        connection = connection if connection is not None else await self.connection_status()
-        if models is None:
+        if not probe:
+            if connection is None:
+                connection = await self.connection_status(probe=False)
+            models = () if models is None else models
+        elif models is None:
             # SD53: the context check rides with a fresh catalogue only, so it
             # runs on view load and refresh and never on the progress timer.
             # Models handed back keep the fit they were given.
-            models = await self._with_context_fit(
-                evaluation_id, await self._model_choices(connection)
-            )
+            fresh = await self._catalogue(evaluation_id, connection)
+            connection, models = fresh.connection, fresh.models
+        elif connection is None:
+            connection = await self.connection_status()
         async with self._session_factory() as session:
             evaluation = await self._require(session, evaluation_id)
             return await self._view(session, evaluation, connection, models)
@@ -514,42 +531,65 @@ class EvaluationService:
                 selected = _selected_models(evaluation)
         return list(await self._model_choices(selected=selected))
 
-    async def catalogue(self) -> CatalogueView:
-        """The endpoint's models and its connection line, **without an
-        evaluation**.
+    async def catalogue(self, evaluation_id: EvaluationId | None = None) -> CatalogueView:
+        """The endpoint's models and its connection line, with or **without
+        an evaluation**.
 
         The Models card needs two facts that belong to two different owners:
         what the endpoint offers (the endpoint's) and which of them are ticked
-        (the evaluation's). `get()` serves the card once an evaluation exists;
-        this serves it before one does — on a fresh install, or any time
-        before "Save draft" — where the catalogue is just as knowable and used
-        to render as empty.
+        (the evaluation's). This serves the first half. Before an evaluation
+        exists (a fresh install, or any time before "Save draft") the
+        catalogue is just as knowable, and it used to render as empty.
 
-        **One `reachable()` and one `models()`**, because the connection is
-        passed into `_model_choices` rather than re-fetched: `list_models()`
-        asks for its own, so `connection_status()` + `list_models()` would
-        cost three round trips for two facts. This mirrors `get()`, which has
-        always done it the cheap way.
+        With `evaluation_id`, each row also carries its context fit against
+        that evaluation's longest prompt (SD53). That is the half of `get()`
+        that asks the endpoint, so the Evaluation view can paint everything
+        else first and ask this second (SD55). The ticks are still not here:
+        hand the models to `get()`, which reads them off the evaluation.
+
+        **One `reachable()` and one `models()`, asked at once.** Both read
+        `/api/tags`, and the adapter answers the pair with one request, so a
+        dead endpoint costs one refusal rather than two in a row.
         """
-        connection = await self.connection_status()
-        return CatalogueView(connection=connection, models=await self._model_choices(connection))
+        return await self._catalogue(evaluation_id, None)
 
-    async def connection_status(self) -> ConnectionView:
+    async def _catalogue(
+        self, evaluation_id: EvaluationId | None, connection: ConnectionView | None
+    ) -> CatalogueView:
+        connection, models = await self._fresh_models(connection)
+        if evaluation_id is not None:
+            models = await self._with_context_fit(evaluation_id, models)
+        return CatalogueView(connection=connection, models=models)
+
+    async def connection_status(self, *, probe: bool = True) -> ConnectionView:
         """Endpoint, timeout, reachability and the probe's GPU answer.
 
         Re-checked on view load and when the settings dialog's "refresh" is
         pressed — **never on a timer** (plan-phase-3.md C3).
+
+        `probe=False` asks neither the endpoint nor the GPU. It reports the
+        configured endpoint as `UNCHECKED`, for a screen that has to paint
+        before either answers (SD55).
         """
+        if not probe:
+            return ConnectionView(
+                endpoint=self._connection.endpoint,
+                status=EndpointStatus.UNCHECKED,
+                timeout_s=self._connection.timeout_s,
+            )
         # One `reachable()` per call, and this method is only ever called from
         # a view load, a refresh or a launch. `StaticModelCatalog.
-        # reachable_calls` is what pins that in the tests.
-        status = await self._model_catalog.reachable()
-        gpu = self._gpu_probe.describe()
+        # reachable_calls` is what pins that in the tests. NVML is a blocking
+        # `ctypes` call, so it runs in a thread beside the socket rather than
+        # stalling every other client's event loop.
+        status, gpu = await asyncio.gather(
+            self._model_catalog.reachable(), asyncio.to_thread(self._gpu_probe.describe)
+        )
         return ConnectionView(
             endpoint=self._connection.endpoint,
             status=status,
             timeout_s=self._connection.timeout_s,
-            reason=None if status is EndpointStatus.REACHABLE else _CONNECTION_REASONS[status],
+            reason=None if status in _NO_REASON else _CONNECTION_REASONS[status],
             gpu_name=None if gpu is None else gpu.name,
             gpu_vram_bytes=None if gpu is None else gpu.total_vram_bytes,
         )
@@ -648,14 +688,14 @@ class EvaluationService:
         """
         # Asked before the transaction opens, not inside it: it is a socket
         # call, and nothing holds a transaction open across one (§15.3).
-        connection = await self.connection_status()
-        catalogue = await self._model_catalog.models()
+        connection, catalogue = await self._endpoint_state()
         models = self._judge(catalogue, connection)
         # Always asked now: SD48 pins it on every run as provenance, and the
         # parallel-calls gate (SD40) reads the same answer. One round trip
         # per launch, not per record.
-        ollama_version = await self._model_catalog.version()
-        server_parameters = await self._server_parameters(evaluation_id, models)
+        ollama_version, server_parameters = await asyncio.gather(
+            self._model_catalog.version(), self._server_parameters(evaluation_id, models)
+        )
         # SD53: decided again at launch, from the same /api/show answers the
         # run will pin, rather than trusted from whatever the view last held.
         models = await self._with_context_fit(evaluation_id, models, parameters=server_parameters)
@@ -788,10 +828,32 @@ class EvaluationService:
             for model in catalogue
         )
 
+    async def _endpoint_state(
+        self, connection: ConnectionView | None = None
+    ) -> tuple[ConnectionView, tuple[ModelInfo, ...]]:
+        """The connection line and the raw catalogue, asked **concurrently**.
+
+        A connection already in hand is not asked again. Otherwise both
+        questions go out together. They read the same `/api/tags`, which the
+        adapter serves with one request (SD55), so the screen waits one round
+        trip and not two in a row. That difference is 2 s on Windows, where a
+        refused loopback connect takes that long.
+        """
+        if connection is not None:
+            return connection, await self._model_catalog.models()
+        return await asyncio.gather(self.connection_status(), self._model_catalog.models())
+
+    async def _fresh_models(
+        self, connection: ConnectionView | None = None
+    ) -> tuple[ConnectionView, tuple[ModelChoiceView, ...]]:
+        connection, catalogue = await self._endpoint_state(connection)
+        return connection, await self._model_choices(connection, catalogue=catalogue)
+
     async def _model_choices(
         self,
         connection: ConnectionView | None = None,
         *,
+        catalogue: Sequence[ModelInfo] | None = None,
         selected: Sequence[str] = (),
         qualified: bool = True,
     ) -> tuple[ModelChoiceView, ...]:
@@ -805,9 +867,14 @@ class EvaluationService:
         reached from a view load or a refresh, never from the progress timer,
         which hands its models back to `get()` instead. The Ollama version is
         asked here, and only when the map has an entry above 1.
+
+        A `catalogue` the caller already fetched is judged as given; otherwise
+        it is asked for alongside any missing connection (`_endpoint_state`).
         """
-        connection = connection or await self.connection_status()
-        catalogue = await self._model_catalog.models()
+        if catalogue is None:
+            connection, catalogue = await self._endpoint_state(connection)
+        elif connection is None:
+            connection = await self.connection_status()
         chosen = set(selected)
         cards: dict[str, QualificationCardView | None] = {}
         if qualified and catalogue:
@@ -875,9 +942,12 @@ class EvaluationService:
         unreachable endpoint the catalogue is empty and nothing is refused,
         because that is ignorance, not a verdict. Same for an unknown VRAM.
         """
-        connection = await self.connection_status()
+        connection, catalogue = await self._endpoint_state()
         choices = {
-            choice.tag: choice for choice in await self._model_choices(connection, qualified=False)
+            choice.tag: choice
+            for choice in await self._model_choices(
+                connection, catalogue=catalogue, qualified=False
+            )
         }
         # Named `validation_errors`, not `errors`: `tests/unit/parsing/
         # test_no_lenient_decoding.py` bans the token `errors =` anywhere
@@ -915,15 +985,21 @@ class EvaluationService:
             unknown = ContextFit(prompt_tokens=None, context_length=None, source=None)
             return tuple(dataclasses.replace(choice, context_fit=unknown) for choice in models)
         measured = await self._measured_contexts()
+        if parameters is None:
+            # One `/api/show` per model with no measured context, all at once
+            # rather than one after another (SD55). A catalogue of a dozen
+            # tags was a dozen sequential round trips on every view load.
+            unmeasured = [m.tag for m in models if (m.tag, m.digest) not in measured]
+            answers = await asyncio.gather(
+                *(self._model_catalog.parameters(tag) for tag in unmeasured)
+            )
+            parameters = dict(zip(unmeasured, answers, strict=True))
         fitted: list[ModelChoiceView] = []
         for choice in models:
             context = measured.get((choice.tag, choice.digest))
             source: ContextSource | None = ContextSource.MEASURED
             if context is None:
-                if parameters is not None:
-                    shown = parameters.get(choice.tag)
-                else:
-                    shown = await self._model_catalog.parameters(choice.tag)
+                shown = parameters.get(choice.tag)
                 context = modelfile_context(shown)
                 source = ContextSource.MODELFILE if context is not None else None
             fitted.append(
@@ -998,7 +1074,10 @@ class EvaluationService:
             evaluation = await session.get(Evaluation, evaluation_id)
             tags = _selected_models(evaluation) if evaluation is not None else ()
         offered = {choice.tag for choice in models}
-        return {tag: await self._model_catalog.parameters(tag) for tag in tags if tag in offered}
+        asked = [tag for tag in tags if tag in offered]
+        # Concurrently: one `/api/show` per model, and the launch waits on all.
+        answers = await asyncio.gather(*(self._model_catalog.parameters(tag) for tag in asked))
+        return dict(zip(asked, answers, strict=True))
 
     def _launch_models(
         self,

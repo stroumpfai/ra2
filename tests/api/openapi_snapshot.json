@@ -1596,7 +1596,8 @@
           "reachable",
           "unreachable",
           "timed_out",
-          "refused_not_loopback"
+          "refused_not_loopback",
+          "unchecked"
         ],
         "title": "EndpointStatus",
         "type": "string"

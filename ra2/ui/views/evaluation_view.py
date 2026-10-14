@@ -120,6 +120,7 @@ from ra2.domain.qualification import QualificationState
 from ra2.services.container import Services
 from ra2.services.errors import (
     FeatureValidationError,
+    NotFoundError,
     RunActiveError,
     ServiceError,
     SettingRefusedError,
@@ -458,6 +459,7 @@ ENDPOINT_WORDS: Final[dict[EndpointStatus, str]] = {
     EndpointStatus.UNREACHABLE: "unreachable",
     EndpointStatus.TIMED_OUT: "timed out",
     EndpointStatus.REFUSED_NOT_LOOPBACK: "refused — not loopback",
+    EndpointStatus.UNCHECKED: "checking…",
 }
 
 #: Undesigned states, in the tone README's "Loading / empty / error" section
@@ -477,6 +479,10 @@ NO_MODELS_MESSAGE: Final = "No models — the endpoint has none. Pull one with �
 #: empty. Which refusal it was — unreachable, or not loopback — is on the
 #: reason line under the card, so it is not repeated here.
 NO_MODELS_UNREACHABLE_MESSAGE: Final = "No models — the endpoint could not be asked."
+#: The first paint, before the endpoint has answered (SD55). It is not
+#: "no models": nothing is known yet, and the line under the card says
+#: "checking…" until it is.
+NO_MODELS_CHECKING_MESSAGE: Final = "Asking the endpoint for its models…"
 NO_RECORDS_MESSAGE: Final = "This corpus has no records to preview a prompt against."
 NO_RUNS_MESSAGE: Final = "No runs yet — Launch queues one per selected model."
 NO_PROVENANCE_MESSAGE: Final = "Nothing stored yet — provenance is written when a run starts."
@@ -505,6 +511,14 @@ def register(services: Services) -> None:
     @ui.page(_ITEM.path)
     async def _page() -> None:
         page = _EvaluationPage(services)
+        page.frame()
+        # SD55: everything after this point may wait on the endpoint, and
+        # NiceGUI gives a page function 3 s (`response_timeout`) to return
+        # before it serves an error page instead. Awaiting the connection
+        # hands the frame to the browser now and finishes the build over the
+        # websocket. Windows takes 2 s to refuse a closed loopback port, so
+        # with Ollama down the old build took about 4 s and never rendered.
+        await ui.context.client.connected()
         await page.build()
 
 
@@ -542,10 +556,17 @@ class _EvaluationPage:
         self._poll: ui.timer | None = None
         #: The open settings dialog, so "refresh" can close it.
         self._settings_dialog: ui.dialog | None = None
+        #: Which `reload` owns the screen. The endpoint half of a load can take
+        #: seconds, and an action started meanwhile begins a newer load; the
+        #: older one's answer is then dropped rather than painted over it.
+        self._load_seq = 0
 
     # --- lifecycle -----------------------------------------------------------
 
-    async def build(self) -> None:
+    def frame(self) -> None:
+        """The shell and the empty columns: everything that reads neither the
+        database nor the endpoint, so the page function can return at once
+        (SD55). `build` fills them once the browser is connected."""
         data_dir_view = self._services.lifecycle.data_dir()
         with shell(
             title=_ITEM.title,
@@ -556,8 +577,15 @@ class _EvaluationPage:
             content_padding=CONTENT_PADDING,
             content_gap=CONTENT_GAP,
         ):
-            self._root = ui.element("div").style(
-                "display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;"
+            # `data-loading` is `true` from the frame until the latest load's
+            # endpoint half has painted (SD55). It is the page's own state,
+            # in `data-settled`'s register: something can wait on it without
+            # reading a word on screen.
+            self._root = (
+                ui.element("div")
+                .props('data-testid="evaluation-page" data-loading="true"')
+                .mark("evaluation-page")
+                .style("display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;")
             )
             with self._root:
                 self._toolbar = (
@@ -566,7 +594,15 @@ class _EvaluationPage:
                 self._setup_slot, self._progress_slot = master_detail_split(
                     list_extra=SETUP_LIST_EXTRA, detail_extra=PROGRESS_DETAIL_EXTRA
                 )
-        await self.reload()
+
+    async def build(self) -> None:
+        """Fill the frame: the database half first, then the endpoint half.
+
+        `reload`'s two halves, with polling started between them. A run in
+        flight starts ticking as soon as its cards are on screen, not once
+        the endpoint has answered.
+        """
+        seq = await self._read_local()
         # A run already in flight when this page opens must tick too. Polling
         # used to start only from Launch and Resume, so the tab that submitted
         # the work updated and every other view of it did not: reload the
@@ -578,6 +614,7 @@ class _EvaluationPage:
         # on a page with nothing running.
         if not self._settled:
             self._start_polling()
+        await self._read_endpoint(seq)
 
     async def reload(self) -> None:
         """Re-read everything this view shows, then redraw.
@@ -587,8 +624,22 @@ class _EvaluationPage:
         for running the body inside `_root` rather than inside whichever
         element fired the event: `_root` is built once and never cleared, so
         it outlives every redraw and every button in it.
+
+        **Two halves, painted in turn** (SD55). The database half is
+        milliseconds. The endpoint half is a socket that can take seconds to
+        fail, and on Windows always does when Ollama is down. The screen does
+        not wait on it: until the endpoint answers, the Models card shows the
+        endpoint state it already held, or `UNCHECKED` on a first load.
         """
-        assert self._root is not None  # built in `build()`, before any reload
+        await self._read_endpoint(await self._read_local())
+
+    async def _read_local(self) -> int:
+        """Everything but the endpoint: read and paint. Returns this load's
+        sequence number, for `_read_endpoint` to check before it paints."""
+        assert self._root is not None  # built in `frame()`, before any read
+        self._load_seq += 1
+        seq = self._load_seq
+        self._root.props('data-loading="true"')
         with self._root:
             self._corpora = (
                 await self._services.corpus.list_corpora(
@@ -604,12 +655,12 @@ class _EvaluationPage:
             self._templates = tuple(await self._services.prompt.list_versions())
             self._view = await self._current_evaluation()
             if self._view is None:
-                # `catalogue()` rather than `connection_status()`: the card can
-                # list what the endpoint offers long before an evaluation row
-                # exists, and one call fetches both facts.
-                catalogue = await self._services.evaluation.catalogue()
-                self._connection = catalogue.connection
-                self._models = catalogue.models
+                if self._connection is None:
+                    # A first load: name the endpoint, and say it has not
+                    # been asked yet. `_read_endpoint` asks.
+                    self._connection = await self._services.evaluation.connection_status(
+                        probe=False
+                    )
                 self._runs = None
                 self._all_runs = ()
             else:
@@ -633,6 +684,52 @@ class _EvaluationPage:
                 ).items
                 self._scored_runs = await self._read_scored(evaluation_id)
             self._render()
+        return seq
+
+    async def _read_endpoint(self, seq: int) -> None:
+        """The endpoint half: ask once, then repaint the setup column.
+
+        Only the setup column, because it holds everything the endpoint
+        decides: the Models card, the endpoint line and Launch. Repainting the
+        toolbar and the progress column would cost a redraw and change
+        nothing on screen.
+
+        `catalogue(evaluation_id)` asks the endpoint once, with each row's
+        context fit (SD53). `get()` is then handed that answer, so it reads
+        the ticks and `can_launch` off the evaluation without asking again.
+        Launch is read from the service, never derived here (CLAUDE.md #7).
+
+        A newer load (`_load_seq`) may have started while the socket was
+        open, and that load owns the screen. So does a page that was closed
+        meanwhile. In both cases the answer is dropped, not painted, and
+        `data-loading` is left for the load that owns the screen to clear.
+        """
+        view = self._view
+        evaluation_id = None if view is None else view.draft.evaluation_id
+        fresh = await self._services.evaluation.catalogue(evaluation_id)
+        if seq != self._load_seq:
+            return
+        if evaluation_id is not None:
+            try:
+                view = await self._services.evaluation.get(
+                    evaluation_id, connection=fresh.connection, models=fresh.models
+                )
+            except NotFoundError:
+                # Discarded while the endpoint was being asked. The discard
+                # began its own load, and that load is what the screen shows.
+                return
+            if seq != self._load_seq:
+                return
+        if self._root is None or self._root.is_deleted or self._setup_slot is None:
+            return
+        self._view = view
+        self._connection = fresh.connection
+        self._models = fresh.models if view is None else view.models
+        with self._root:
+            self._setup_slot.clear()
+            with self._setup_slot:
+                self._render_setup()
+        self._root.props('data-loading="false"')
 
     async def refresh_progress(self) -> None:
         """Re-read only what a run in flight changes, and redraw only that
@@ -654,15 +751,21 @@ class _EvaluationPage:
         templates are not re-read at all: a run in flight cannot change any of
         them. What is left is the progress cards, the runs table and the
         provenance line — all of them counts over committed rows.
+
+        `probe=False` makes that a guarantee at the seam rather than a
+        consequence of what happens to be handed back (SD55). A tick that
+        lands while the endpoint half of a load is still out hands back
+        `UNCHECKED`, and must not ask in its place.
         """
-        if self._view is None or self._connection is None or self._progress_slot is None:
-            # Nothing has been loaded yet, so there is no cheap refresh to do
-            # and nothing to hand back. A full read is the honest fallback.
+        if self._view is None or self._progress_slot is None:
+            # Nothing has been loaded yet, so there is no cheap refresh to do.
+            # A full read is the honest fallback. A missing connection is not
+            # a reason for one: `probe=False` reads it as `UNCHECKED`.
             await self.reload()
             return
         evaluation_id = self._view.draft.evaluation_id
         self._view = await self._services.evaluation.get(
-            evaluation_id, connection=self._connection, models=self._models
+            evaluation_id, connection=self._connection, models=self._models, probe=False
         )
         state = table_state(
             RUNS_TABLE, sort_key="started_at", sort_dir=SortDir.DESC, page_size=PAGE_SIZE
@@ -716,12 +819,17 @@ class _EvaluationPage:
                 feature_config_id=str(chosen.feature_config_id),
             )
         )
-        return await self._services.evaluation.get(chosen.evaluation_id)
+        # Without asking the endpoint (SD55): whatever endpoint state this
+        # page already holds is handed back, and on a first load there is
+        # none, so the read says `UNCHECKED`. `_read_endpoint` asks next.
+        return await self._services.evaluation.get(
+            chosen.evaluation_id, connection=self._connection, models=self._models, probe=False
+        )
 
     # --- rendering -----------------------------------------------------------
 
     def _render(self) -> None:
-        # Both are built in `build()`, before anything can render.
+        # All three are built in `frame()`, before anything can render.
         assert self._toolbar is not None
         assert self._setup_slot is not None
         assert self._progress_slot is not None
@@ -935,6 +1043,8 @@ class _EvaluationPage:
         underneath the card already names which of the two refusals it was.
         """
         connection = self._connection
+        if connection is not None and connection.status is EndpointStatus.UNCHECKED:
+            return NO_MODELS_CHECKING_MESSAGE
         if connection is not None and not connection.is_reachable:
             return NO_MODELS_UNREACHABLE_MESSAGE
         return NO_MODELS_MESSAGE
@@ -1069,9 +1179,13 @@ class _EvaluationPage:
             return
         word = ENDPOINT_WORDS[connection.status]
         with ui.element("div").style("margin-top:6px;display:flex;flex-direction:column;gap:3px;"):
+            # `data-status` so a test or the E2E waits on the state, never on
+            # the word: the first paint says `unchecked` (SD55).
             ui.label(f"endpoint {_endpoint_text(connection.endpoint)} · {word}").classes(
                 "mono ink3"
-            ).props('data-testid="endpoint-line"').mark("endpoint-line").style("font-size:10.5px;")
+            ).props(f'data-testid="endpoint-line" data-status="{connection.status.value}"').mark(
+                "endpoint-line"
+            ).style("font-size:10.5px;")
             if connection.reason is not None:
                 ui.label(connection.reason).classes("danger").props(
                     'data-testid="endpoint-reason"'
@@ -2047,6 +2161,7 @@ class _EvaluationPage:
         # The dialog closes itself on `None`; forget the handle first so a
         # later refresh does not close it twice.
         self._settings_dialog = None
+        self._forget_endpoint()
         await self.reload()
         return None
 
@@ -2057,7 +2172,20 @@ class _EvaluationPage:
         if self._settings_dialog is not None:
             self._settings_dialog.close()
             self._settings_dialog = None
+        self._forget_endpoint()
         await self.reload()
+
+    def _forget_endpoint(self) -> None:
+        """Drop the endpoint state this page holds, so the next load's first
+        paint says `UNCHECKED` rather than the old answer (SD55).
+
+        Every other reload hands its last answer back, so a sort or a tick
+        does not flash the Models card to "checking…". Save and refresh are
+        the two actions that make that answer stale. After Save it describes
+        a different endpoint, and repainting it would show the old URL marked
+        reachable until the new one answers."""
+        self._connection = None
+        self._models = ()
 
     async def _preview_prompt(self) -> None:
         """ "Preview prompt" resolves the pinned inputs against the first

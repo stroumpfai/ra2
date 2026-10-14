@@ -182,6 +182,15 @@ class EndpointStatus(StrEnum):
     #: Refused before a socket was opened: the configured `base_url` is not
     #: loopback (N1, sw-design.md §15.5). There is deliberately no opt-out.
     REFUSED_NOT_LOOPBACK = "refused_not_loopback"
+    #: **Not asked yet.** A read that was told not to probe
+    #: (`EvaluationService.get(..., probe=False)`) says so instead of guessing.
+    #: That is how the Evaluation view renders its database half before the
+    #: endpoint answers. Windows takes 2 s to refuse a closed loopback port,
+    #: and a page that waited for that could not be built inside NiceGUI's 3 s
+    #: `response_timeout` (SD55). `ModelCatalog.reachable()` never returns it,
+    #: and it is never a failure, so it carries no reason. It does not enable
+    #: Launch: only `REACHABLE` does.
+    UNCHECKED = "unchecked"
 
 
 @runtime_checkable

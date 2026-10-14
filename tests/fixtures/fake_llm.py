@@ -93,6 +93,7 @@ __all__ = [
     "DEFAULT_MODELS",
     "DEFAULT_OLLAMA_VERSION",
     "FakeLLMClient",
+    "GatedModelCatalog",
     "StaticConnectionSettings",
     "StaticEndpointProber",
     "StaticModelCatalog",
@@ -394,6 +395,60 @@ class StaticModelCatalog:
         if self._status is not EndpointStatus.REACHABLE:
             return None
         return self.context_lengths.get(tag)
+
+
+class GatedModelCatalog(StaticModelCatalog):
+    """A `StaticModelCatalog` whose `/api/tags` and `/api/show` reads wait
+    for the test (SD55).
+
+    The honest model of an endpoint that is slow to answer, or that Windows
+    takes 2 s to refuse. `waiting` counts the calls that have **entered** and
+    not yet been let through, per method. Two calls waiting at once is what
+    proves they were asked concurrently: asked one after the other, the second
+    cannot start until the first is released.
+
+    Open by default, so a test can set up through the service first and close
+    the gate only for the part it is about.
+    """
+
+    GATED: Final = ("reachable", "models", "parameters")
+
+    def __init__(self, models: Sequence[ModelInfo] = DEFAULT_MODELS) -> None:
+        super().__init__(models)
+        self.gates: dict[str, asyncio.Event] = {name: asyncio.Event() for name in self.GATED}
+        self.waiting: dict[str, int] = dict.fromkeys(self.GATED, 0)
+        for gate in self.gates.values():
+            gate.set()
+
+    def hold(self, *names: str) -> None:
+        """Make the named reads (all three by default) wait from now on."""
+        for name in names or self.GATED:
+            self.gates[name].clear()
+
+    def answer(self, *names: str) -> None:
+        """Let the named reads through: the waiting ones and every later one.
+        Not `release`, which is the protocol's own verb for unloading."""
+        for name in names or self.GATED:
+            self.gates[name].set()
+
+    async def _hold(self, name: str) -> None:
+        self.waiting[name] += 1
+        try:
+            await self.gates[name].wait()
+        finally:
+            self.waiting[name] -= 1
+
+    async def reachable(self) -> EndpointStatus:
+        await self._hold("reachable")
+        return await super().reachable()
+
+    async def models(self) -> tuple[ModelInfo, ...]:
+        await self._hold("models")
+        return await super().models()
+
+    async def parameters(self, tag: str) -> Mapping[str, tuple[str, ...]] | None:
+        await self._hold("parameters")
+        return await super().parameters(tag)
 
 
 class StaticEndpointProber:
