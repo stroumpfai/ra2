@@ -471,6 +471,12 @@ and one §8 entry per finding closed. The register in §4 is left as written.
 | `ra2/infra/filestore.py`, `ra2/services/delivery_service.py`, `ra2/services/corpus_service.py` | + `HostPathFileStore.restore`, + `delivery_service.store_for`, used by both services: a host-path binding lived in memory only, so after a restart an analysed host-path delivery could not be frozen. No signature changes | `fix-host-path-survives-restart` |
 | `ra2/api/schemas.py` | + `NOTE_LEAVES_RA2`, the description of `TagMismatchRequest.note`: the only place a note is written, and it is exported verbatim (B6, `SD51`). OpenAPI snapshot: one description line | `fix-host-path-survives-restart` |
 | `ra2/services/readmodels.py`, `ra2/api/schemas.py` | + `ModelChoiceView.context_fit` / `.context_too_small`, and `disabled` covers both refusals; + four optional context fields on `ModelChoiceResponse`. A model whose known context cannot hold the longest prompt is refused at launch (D1, `SD53`). OpenAPI snapshot: additive | `fix-d1-launch-context-check` |
+| `ra2/domain/llm.py` | + `EndpointStatus.UNCHECKED`: *not asked yet*. The Evaluation screen's first paint says it instead of guessing, because with Ollama down on Windows the page could not be built inside NiceGUI's 3 s `response_timeout` (`SD55`). It has no reason and does not enable Launch. `tests/api/openapi_snapshot.json` regenerated: one enum value, additive | `fix-evaluation-first-paint` |
+| `ra2/services/evaluation_service.py` | `get(..., probe=True)`, `connection_status(*, probe=True)`, `catalogue(evaluation_id=None)`, all defaulted. `probe=False` touches neither the endpoint nor the GPU. Reachability and the catalogue are gathered, and so is every model's `/api/show` (`SD55`) | `fix-evaluation-first-paint` |
+| `ra2/ui/views/evaluation_view.py` | **The page function awaits `client.connected()`, and a load paints twice**: the database half with the endpoint `UNCHECKED`, then the setup column once it answers. `data-loading` on `evaluation-page`, `data-status` on the endpoint line, `_load_seq` against overtaken answers, `_forget_endpoint` on Save and refresh (`SD55`) | `fix-evaluation-first-paint` |
+| `tests/fixtures/fake_llm.py` | + `GatedModelCatalog`: tags and show reads that wait for the test, the honest model of an endpoint slow to answer or slow to refuse (`SD55`) | `fix-evaluation-first-paint` |
+| `ra2/services/evaluation_service.py` | + `select_model(evaluation_id, tag, *, selected)`: one model set on or off, the rest of the selection read from disk, under `_draft_lock`, which `update_draft` also takes. `_reject_infeasible` asks the GPU first and the endpoint only when the VRAM is known. `update_draft` judges before its transaction opens, not inside it (`SD56`) | `fix-evaluation-model-tick` |
+| `ra2/ui/views/evaluation_view.py` | **A step that cannot change the endpoint's answer redraws without asking it**: `redraw()` beside `reload()`, `_PROMPT_FIELDS`. A tick calls `select_model` with the opposite of the tick on screen. `_local_seq` drops an overtaken database read, the progress timer's included, and `_endpoint_seq` replaces `_load_seq` for asks. An endpoint answer equal to what is painted (`_painted`) rebuilds nothing (`SD56`) | `fix-evaluation-model-tick` |
 | `.gitignore` | **unchanged, deliberately.** Adding `Unfall.csv` would be the name-shaped fix again, and it would block the hazard fixtures, which carry the same names | — |
 | `pyproject.toml`, `.importlinter`, `tests/conftest.py` | **unchanged.** No dependency, no new contract, no new root fixture | — |
 
@@ -897,6 +903,32 @@ keeps every variable as the seed, so a host with no rows behaves as before.
 | `ra2/persistence/repositories/settings_repo.py` | `add` and `latest`, and no update or delete (Stage 2) |
 | `ra2/infra/connection.py` | `OllamaConnection`: the delegating `LLMClient` + `ModelCatalog` and its `rebind`, which builds both adapters before swapping either, so a refused URL swaps nothing (Stage 3) |
 | `ra2/persistence/migrations/versions/…_store_the_settings_an_analyst_changes.py` | `app_setting`, additive, no existing row touched. Registered in `tests/test_p5_contract.py`'s `POST_PHASE_5_REVISIONS` (Stage 2) |
+
+---
+
+## Mismatches layout and the evaluation picker, a slice
+
+`fix-mismatches-layout-and-picker`, on top of `fix-d1-launch-context-check`.
+**No Wave 0, no frozen file, no migration and no amendment**: two views, the
+Results package's shared chrome, one stylesheet rule, and their tests. No
+service and no read model changed: `EvaluationService.list_evaluations` and
+`EvaluationDraftView.is_launched` already answered everything the picker and
+the chip need (`SD54`).
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/ui/views/results/chrome.py` | + `evaluation_picker` (moved from Results' `_picker_list`, with the link target as a parameter), `evaluation_chip`, `launched`, `EVALUATION_NAME_CHARS`; + `MENU_STYLE`, `MENU_ITEM_STYLE`, `MENU_ITEM_ON_STYLE`, moved from `mismatches_view` so the two screens open one dropdown panel |
+| `ra2/ui/views/results/__init__.py` | The picker is the shared one; the tab strip carries the evaluation chip on the right, with negative margins so the strip keeps its height. `_picker_list` and `_launched_label` go to `chrome.py` |
+| `ra2/ui/views/mismatches_view.py` | The empty state lists launched evaluations (`EMPTY_BODY` reworded, + `EMPTY_BODY_NONE`); the toolbar is two rows, identity then filters (`TOOLBAR_ROW_STYLE`, `GROUP_STYLE`), with the evaluation chip first; the table has `TABLE_MIN_WIDTH` (956 + `SPAN_MIN_WIDTH_PX` 200); "In record" / "Extracted" replace "Record value" / "Extracted value"; the tally sentence is built inside its card |
+| `ra2/ui/theme.py` | `.td-wrap` only undoes `nowrap`; the three-line clamp moves to `.td-wrap > *`, so the cell stays `display:table-cell` |
+| `tests/ui/test_components.py` | The `.td-wrap` rule test asserts the split, and that the cell rule carries no `display` |
+| `tests/ui/test_mismatches_view.py` | The picker test asserts the list and its links, not only the card. + table floor, header labels, the two toolbar rows, the evaluation chip, the tally sentence inside its card |
+| `tests/ui/test_results_view.py` | + the picker's links point at Results; + the tab strip's evaluation chip |
+| `tests/e2e/test_results_j14_mismatches.py` | + the sidebar → picker → list path, and at 1280px: the span cell's box matches its row, the span keeps its floor, the well scrolls, no header overflows, every tally sentence is inside a tally card |
+| `sw-design.md` | `SD54` |
+| `plan-phase-5.md` | §3.2's column table records the two shortened labels in place, as `P5-D5` did for the widths |
 
 ---
 

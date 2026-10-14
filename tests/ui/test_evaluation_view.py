@@ -45,7 +45,7 @@ from nicegui.testing.general import nicegui_reset_globals
 from nicegui.testing.user import User
 from nicegui.testing.user_interaction import UserInteraction
 from sqlalchemy import delete, select, update
-from tests.fixtures.fake_llm import DEFAULT_MODELS, StaticModelCatalog
+from tests.fixtures.fake_llm import DEFAULT_MODELS, GatedModelCatalog, StaticModelCatalog
 
 import ra2.ui.views.evaluation_view as evaluation_view
 from ra2.domain.extraction import EvaluationSize, RunStatus
@@ -289,7 +289,13 @@ async def _mounted_bare(
                     transport=httpx.ASGITransport(app), base_url="http://test"
                 ) as client,
             ):
-                yield User(client)
+                user = User(client)
+                yield user
+                # `_quiesce`'s load half; nothing here seeds a run to settle.
+                for _ in range(500):
+                    if not _loading(user):
+                        break
+                    await asyncio.sleep(0.01)
         finally:
             os.environ.pop("NICEGUI_USER_SIMULATION", None)
             _restore_nicegui_functions()
@@ -357,8 +363,13 @@ async def _quiesce(value: Seeded) -> None:
     # The timer reads the settled state on its next tick and deactivates
     # itself; this waits for that tick rather than assuming it. Bounded the
     # way `_until` is, and silent when it expires.
+    #
+    # A load is the same hazard (SD55). An action's `reload` paints its
+    # database half, which is what the test waited on, and then reads the
+    # endpoint and the evaluation again. A test that ends in between leaves
+    # that read holding a connection.
     for _ in range(500):
-        if not _polling(value.user):
+        if not _polling(value.user) and not _loading(value.user):
             return
         await asyncio.sleep(0.01)
 
@@ -576,6 +587,30 @@ async def _until(predicate: Callable[[], bool]) -> None:
     raise AssertionError("condition never became true")
 
 
+def _loading(user: User) -> bool:
+    """Whether a load is still out: the root's `data-loading` (SD55).
+
+    `False` when no page was ever opened, for `_polling`'s reason and with
+    its narrow `except`."""
+    try:
+        roots = _find(user, "evaluation-page")
+    except ValueError:
+        return False
+    return any(root._props.get("data-loading") == "true" for root in roots)
+
+
+async def _open_evaluation(user: User) -> None:
+    """Open the page and wait for **both halves** of its load (SD55).
+
+    The page function returns once the frame is drawn, and the build goes on
+    over the websocket: the database half, then the endpoint half. So
+    `User.open` returns before either is on screen, and a test that looked
+    straight away would see an empty column.
+    """
+    await user.open("/evaluation")
+    await _until(lambda: not _loading(user))
+
+
 # --- the six numbered steps ---------------------------------------------------
 
 
@@ -583,7 +618,7 @@ async def test_the_setup_column_renders_all_six_numbered_steps(seeded: Seeded) -
     """README §2, "Setup column — six numbered steps": each is `.lbl`
     "N · Title" plus its control and an optional explanatory line."""
     user = seeded.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Evaluation")
 
     labels = _all_text(user, "step-label")
@@ -642,7 +677,7 @@ async def test_step_five_persists_the_reasoning_effort_as_it_is_chosen(
     no longer shows.
     """
     user = seeded.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Evaluation")
 
     (select,) = _find(user, "reasoning-select")
@@ -662,7 +697,7 @@ async def test_step_six_persists_the_floor_as_it_is_typed(seeded: Seeded) -> Non
     product (`SD42`). Saved on change like every other step, so the value the
     launch pins is the value on screen."""
     user = seeded.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Evaluation")
 
     user.find(marker="floor-input").trigger("change", args="3")
@@ -680,7 +715,7 @@ async def test_a_floor_below_one_is_refused_and_the_stored_floor_stays(seeded: S
     used to show for every such refusal — and to put the stored value back
     rather than show one that was never saved."""
     user = seeded.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Evaluation")
     before = (await seeded.services.evaluation.get(seeded.draft.evaluation_id)).draft
 
@@ -700,7 +735,7 @@ async def test_a_launched_evaluation_cannot_change_the_reasoning_effort(
     effort is one of them — `run.llm_reasoning_effort` is what provenance
     reports."""
     user = launched.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Evaluation")
 
     (select,) = _find(user, "reasoning-select")
@@ -714,7 +749,7 @@ async def test_the_toolbar_pins_the_inputs_and_right_aligns_without_a_spacer(
     `margin-left:auto` — **not** a `flex:1` spacer, which breaks right
     alignment when the row wraps."""
     user = seeded.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
 
     pinned = _all_text(user, "pinned-inputs")
     assert pinned.endswith(evaluation_view.PINNED_SUFFIX)
@@ -735,7 +770,7 @@ async def test_the_split_never_wraps_and_the_setup_column_hugs_its_content(
     columns to their 320px / 360px floors.
     """
     user = seeded.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
 
     # The never-wrap rule lives in the one stylesheet, so it is asserted there.
     assert ".split{flex:1;min-height:0;display:flex;flex-wrap:nowrap;}" in theme.STYLESHEET
@@ -760,7 +795,7 @@ async def test_a_model_that_exceeds_vram_is_disabled_and_says_why(seeded: Seeded
     """README §2 step 4: `opacity:.55` with the size line in `--warn`
     ("42.5 GB — exceeds 24 GB VRAM"), and the tick inert."""
     user = seeded.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
 
     row = _model_row(user, OVER_VRAM)
     assert row._props["data-disabled"] == "true"
@@ -786,7 +821,7 @@ async def test_a_model_that_exceeds_vram_is_disabled_and_says_why(seeded: Seeded
 async def test_the_launch_label_counts_the_selected_models(seeded: Seeded) -> None:
     """README §2: "Launch 3 runs" — "the count follows the model selection"."""
     user = seeded.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     assert _all_text(user, "launch") == "Launch 0 runs"
     (launch,) = _find(user, "launch")
     assert _is_disabled(launch), "nothing selected — `can_launch` is False"
@@ -817,7 +852,7 @@ async def test_an_unreachable_endpoint_disables_launch_and_says_why_beside_the_l
     notifications: list[str] = []
     ui.notify = lambda message, *_args, **_kwargs: notifications.append(str(message))
 
-    await user.open("/evaluation")
+    await _open_evaluation(user)
 
     assert "unreachable" in _all_text(user, "endpoint-line")
     reason = _all_text(user, "endpoint-reason")
@@ -883,7 +918,7 @@ async def test_the_runs_table_renders_its_five_columns_and_three_row_states(
         started_at=None,
     )
 
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Runs in this evaluation")
 
     widths = {
@@ -964,7 +999,7 @@ async def test_a_dev_sized_run_paints_the_row_and_carries_the_dev_marker(
         started_at=datetime(2026, 9, 3, 16, 40, 52, tzinfo=UTC),
     )
 
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Runs in this evaluation")
 
     (status,) = _find(user, "run-status")
@@ -1020,7 +1055,7 @@ async def test_an_interrupted_run_offers_resume(
         error="interrupted: the process died while this run was executing",
     )
 
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Runs in this evaluation")
 
     assert _statuses(user) == {RunStatus.INTERRUPTED.value}
@@ -1050,7 +1085,7 @@ async def test_the_progress_column_places_a_card_per_run_and_the_reproducibility
     """README §2, "Progress column": the header line, one per-model card, and
     the reproducibility card naming every field mvp-spec.md §19.8 requires."""
     user = seeded.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
 
     assert _all_text(user, "progress-caption") == evaluation_view.PROGRESS_CAPTION
     # No runs yet: the standard empty note, and no provenance to claim.
@@ -1067,7 +1102,7 @@ async def test_the_progress_column_places_a_card_per_run_and_the_reproducibility
         status=RunStatus.DONE,
         started_at=FROZEN_NOW,
     )
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Runs in this evaluation")
 
     cards = _find(user, "progress-card")
@@ -1112,7 +1147,7 @@ async def test_the_models_footer_gear_opens_the_connection_settings(seeded: Seed
     """README §2 step 4: "a 24×24 gear icon button on the right opening
     **Ollama connection settings**". The dialog itself is L3's."""
     user = seeded.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
 
     gear = next(
         e
@@ -1143,7 +1178,7 @@ async def test_the_settings_dialog_save_stores_the_endpoint(seeded: Seeded) -> N
     the Models card's endpoint line shows the new endpoint with no restart —
     read back from the service, not from what was typed."""
     user = seeded.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await _open_connection_settings(user)
     saved = "http://127.0.0.1:11999/v1"
     assert seeded.services.settings.endpoint != saved
@@ -1164,7 +1199,7 @@ async def test_a_refused_save_is_worded_in_the_dialog(seeded: Seeded) -> None:
     words for that code under Save, not `str()` of an exception (the bug the
     floor's control found in `_update`)."""
     user = seeded.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     before = seeded.services.settings.endpoint
     await _open_connection_settings(user)
 
@@ -1190,7 +1225,7 @@ async def test_a_save_during_a_run_is_refused_in_words(launched: Seeded) -> None
         started_at=FROZEN_NOW,
     )
     user = launched.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     before = launched.services.settings.endpoint
     await _open_connection_settings(user)
 
@@ -1230,7 +1265,7 @@ async def _assert_empty_state(seeded: Seeded) -> None:
         await session.execute(delete(Evaluation))
         await session.commit()
 
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Evaluation")
 
     assert _all_text(user, "pinned-inputs") == evaluation_view.NO_SETUP_MESSAGE
@@ -1283,7 +1318,7 @@ async def test_an_unlaunched_draft_offers_save_draft_and_no_second_create(
     offers the second press.
     """
     user = seeded.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Evaluation")
 
     (save,) = _find(user, "save-draft")
@@ -1316,7 +1351,7 @@ async def test_a_launched_evaluation_says_why_the_setup_column_is_locked(
     locked by the same fact, and it is not step 4's fact to state.
     """
     user = launched.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Evaluation")
 
     (note,) = _find(user, "launched-note")
@@ -1349,7 +1384,7 @@ async def test_new_evaluation_clones_a_launched_one_into_an_editable_draft(
     """
     user = launched.user
     services = launched.services
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Evaluation")
 
     assert not _find(user, "save-draft")
@@ -1403,7 +1438,7 @@ async def test_the_models_card_lists_the_catalogue_with_no_evaluation(
     Which models the endpoint offers is the *endpoint's* fact. Only the ticks
     belong to the evaluation.
     """
-    await unsaved.open("/evaluation")
+    await _open_evaluation(unsaved)
     await unsaved.should_see("Evaluation")
 
     assert len(_find(unsaved, "model-row")) == len(DEFAULT_MODELS)
@@ -1419,7 +1454,7 @@ async def test_the_models_are_not_selectable_before_a_draft_is_saved(
     Withheld *visibly*: `_toggle_model` has always returned early without an
     evaluation, which meant a live-looking tick that swallowed the click.
     """
-    await unsaved.open("/evaluation")
+    await _open_evaluation(unsaved)
     await unsaved.should_see("Evaluation")
 
     ticks = _find(unsaved, "tick")
@@ -1439,7 +1474,7 @@ async def test_an_unreachable_endpoint_does_not_claim_an_empty_catalogue(
     endpoint with nothing asked of it.
     """
     user = unsaved_and_unreachable
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Evaluation")
 
     notes = _all_text(user, "empty-note")
@@ -1457,13 +1492,198 @@ async def test_a_reachable_endpoint_with_nothing_pulled_says_how_to_fix_it(
     """Reachable and genuinely empty — an ordinary fresh install. The message
     names the fix rather than only the symptom."""
     async for user in _mounted_bare(app_factory, model_catalog=StaticModelCatalog(models=())):
-        await user.open("/evaluation")
+        await _open_evaluation(user)
         await user.should_see("Evaluation")
 
         notes = _all_text(user, "empty-note")
         assert evaluation_view.NO_MODELS_MESSAGE in notes
         assert evaluation_view.NO_MODELS_UNREACHABLE_MESSAGE not in notes
         assert "reachable" in _all_text(user, "endpoint-line")
+
+
+def _endpoint_status(user: User) -> str:
+    (line,) = _find(user, "endpoint-line")
+    return str(line._props["data-status"])
+
+
+@pytest.fixture
+async def slow_endpoint(
+    app_factory: Callable[..., FastAPI], migrated_db: Settings
+) -> AsyncIterator[tuple[Seeded, GatedModelCatalog]]:
+    """An endpoint that answers only when the test says so: Ollama down on
+    Windows, where a closed loopback port takes 2 s to refuse (SD55)."""
+    catalog = GatedModelCatalog()
+    async for value in _mounted(app_factory, name="slow", model_catalog=catalog):
+        yield value, catalog
+
+
+async def test_the_page_paints_before_the_endpoint_answers(
+    slow_endpoint: tuple[Seeded, GatedModelCatalog],
+) -> None:
+    """The reported crash: *"The page took longer than the response_timeout
+    of 3.0 seconds to build"*, every time Ollama was down on Windows.
+
+    With `/api/tags` held, the old page function never returned. NiceGUI
+    served its error page after 3 s and `User.open` failed on the status. Now
+    the database half is on screen with the endpoint still unasked: an
+    unchecked line, no claim about models, and Launch shut, though the
+    evaluation is otherwise launchable. Once the endpoint answers, the same
+    page completes, having asked it **once**.
+    """
+    seeded, catalog = slow_endpoint
+    user = seeded.user
+    await seeded.services.evaluation.update_draft(
+        seeded.draft.evaluation_id, selected_models=(FITS_A,)
+    )
+    asked = (catalog.reachable_calls, catalog.models_calls)
+    catalog.hold("reachable", "models")
+
+    await user.open("/evaluation")
+    await _until(lambda: bool(_find(user, "step-6")))
+
+    assert _loading(user)
+    assert _endpoint_status(user) == EndpointStatus.UNCHECKED.value
+    assert evaluation_view.ENDPOINT_WORDS[EndpointStatus.UNCHECKED] in _all_text(
+        user, "endpoint-line"
+    )
+    assert not _find(user, "endpoint-reason")
+    notes = _all_text(user, "empty-note")
+    assert evaluation_view.NO_MODELS_CHECKING_MESSAGE in notes
+    assert evaluation_view.NO_MODELS_UNREACHABLE_MESSAGE not in notes
+    (launch,) = _find(user, "launch")
+    assert _is_disabled(launch)
+    # The database half really is there, not only the frame.
+    assert seeded.config.name in _all_text(user, "pinned-inputs")
+
+    catalog.answer()
+    await _until(lambda: not _loading(user))
+
+    assert _endpoint_status(user) == EndpointStatus.REACHABLE.value
+    assert len(_find(user, "model-row")) == len(DEFAULT_MODELS)
+    (launch,) = _find(user, "launch")
+    assert not _is_disabled(launch)
+    assert (catalog.reachable_calls, catalog.models_calls) == (asked[0] + 1, asked[1] + 1)
+
+
+@pytest.fixture
+async def slow_fresh_install(
+    app_factory: Callable[..., FastAPI], migrated_db: Settings
+) -> AsyncIterator[tuple[User, GatedModelCatalog]]:
+    catalog = GatedModelCatalog()
+    async for user in _mounted_bare(app_factory, model_catalog=catalog):
+        yield user, catalog
+
+
+async def test_a_fresh_install_paints_before_the_endpoint_answers(
+    slow_fresh_install: tuple[User, GatedModelCatalog],
+) -> None:
+    """The same, with no evaluation yet. That path reached the catalogue
+    through `catalogue()` rather than `get()`, and timed out the same way."""
+    user, catalog = slow_fresh_install
+    catalog.hold("reachable", "models")
+
+    await user.open("/evaluation")
+    await _until(lambda: bool(_find(user, "endpoint-line")))
+
+    assert _endpoint_status(user) == EndpointStatus.UNCHECKED.value
+    assert evaluation_view.NO_MODELS_CHECKING_MESSAGE in _all_text(user, "empty-note")
+
+    catalog.answer()
+    await _until(lambda: not _loading(user))
+    assert _endpoint_status(user) == EndpointStatus.REACHABLE.value
+    assert len(_find(user, "model-row")) == len(DEFAULT_MODELS)
+
+
+def _asked(catalog: GatedModelCatalog) -> tuple[int, int, int]:
+    return (catalog.reachable_calls, catalog.models_calls, catalog.parameters_calls)
+
+
+async def test_a_tick_asks_the_endpoint_only_to_judge_it(
+    slow_endpoint: tuple[Seeded, GatedModelCatalog],
+) -> None:
+    """Reported from a CPU-only host: the model list was slow to react to a
+    tick, and the endpoint line flickered (SD56).
+
+    Every tick reloaded the whole view, endpoint included. The setup column
+    was repainted at once and then again once `/api/tags` and every
+    `/api/show` had answered, 2–3 s later on that host. Now a tick is a
+    database write and one redraw. The fixture host knows its VRAM (24 GB),
+    so adding a model asks the catalogue once to judge its size. Removing one
+    asks nothing at all, which is checked with every read held.
+    """
+    seeded, catalog = slow_endpoint
+    user = seeded.user
+    await _open_evaluation(user)
+    before = _asked(catalog)
+    # The context fit's `/api/show`: only a reload asks it.
+    catalog.hold("parameters")
+
+    _one(user, _model_tick(user, FITS_A)).click()
+    await _until(lambda: _all_text(user, "launch") == "Launch 1 run")
+
+    assert not _loading(user), "no endpoint half was started"
+    assert _asked(catalog) == (before[0] + 1, before[1] + 1, before[2])
+
+    catalog.hold()
+    _one(user, _model_tick(user, FITS_A)).click()
+    await _until(lambda: _all_text(user, "launch") == "Launch 0 runs")
+
+    assert not _loading(user)
+    assert _asked(catalog) == (before[0] + 1, before[1] + 1, before[2])
+    assert _endpoint_status(user) == EndpointStatus.REACHABLE.value
+    catalog.answer()
+
+
+async def test_only_a_step_that_moves_the_longest_prompt_asks_the_endpoint_again(
+    slow_endpoint: tuple[Seeded, GatedModelCatalog],
+) -> None:
+    """`_PROMPT_FIELDS` (SD56). The reasoning effort cannot change what the
+    endpoint says, so with every read held it saves and redraws all the
+    same. Dev size narrows the scope to the first records, which can change
+    the longest prompt and so the context fit, so it asks once."""
+    seeded, catalog = slow_endpoint
+    user = seeded.user
+    await _open_evaluation(user)
+    before = _asked(catalog)
+    catalog.hold()
+
+    _pick_select(user, "reasoning-select", "high")
+    await _until(lambda: _selected_option(user, "reasoning-select") == "high")
+
+    assert not _loading(user)
+    assert _asked(catalog) == before
+
+    catalog.answer()
+    dev = _find(user, "sel-radio")[1]
+    _one(user, dev).click()
+    await _until(lambda: catalog.models_calls > before[1])
+    await _until(lambda: not _loading(user))
+
+    assert _asked(catalog)[:2] == (before[0] + 1, before[1] + 1)
+
+
+async def test_a_tick_on_a_stale_screen_keeps_the_model_another_tab_ticked(
+    seeded: Seeded,
+) -> None:
+    """The tick sends one model and the state it was clicked to (SD56).
+
+    It used to send the whole selection, worked out from the evaluation this
+    screen last read. Any read older than the selection on disk (another
+    tab, or a timer read from before the previous click was saved) then
+    overwrote it, and a model the analyst had just ticked or unticked flipped
+    back.
+    """
+    user = seeded.user
+    await _open_evaluation(user)
+    evaluation_id = seeded.draft.evaluation_id
+    await seeded.services.evaluation.update_draft(evaluation_id, selected_models=(FITS_B,))
+    assert _all_text(user, "launch") == "Launch 0 runs", "this screen has not seen it"
+
+    _one(user, _model_tick(user, FITS_A)).click()
+    await _until(lambda: _all_text(user, "launch") == "Launch 2 runs")
+
+    view = await seeded.services.evaluation.get(evaluation_id, probe=False)
+    assert set(view.draft.selected_models) == {FITS_A, FITS_B}
 
 
 async def test_refresh_picks_up_a_model_that_appeared(
@@ -1478,7 +1698,7 @@ async def test_refresh_picks_up_a_model_that_appeared(
     """
     catalog = StaticModelCatalog(status=EndpointStatus.UNREACHABLE)
     async for user in _mounted_bare(app_factory, model_catalog=catalog):
-        await user.open("/evaluation")
+        await _open_evaluation(user)
         await user.should_see("Evaluation")
         assert not _find(user, "model-row")
 
@@ -1529,7 +1749,7 @@ async def test_the_evaluation_discard_sits_in_the_runs_card_and_not_in_the_toolb
     holds is the creation affordance an analyst presses routinely.
     """
     await _seed_two_done_runs(seeded)
-    await seeded.user.open("/evaluation")
+    await _open_evaluation(seeded.user)
     await seeded.user.should_see(marker="evaluation-discard")
 
     (action,) = _find(seeded.user, "evaluation-discard")
@@ -1554,7 +1774,7 @@ async def test_the_dialog_sums_the_evaluations_runs_and_says_export_is_per_run(
     await _seed_two_done_runs(seeded)
     await _seed_mismatch(seeded.app, mismatch_id="m-1", run_id="r-0401", corpus_id=seeded.corpus_id)
     await _seed_mismatch(seeded.app, mismatch_id="m-2", run_id="r-0402", corpus_id=seeded.corpus_id)
-    await seeded.user.open("/evaluation")
+    await _open_evaluation(seeded.user)
     await seeded.user.should_see(marker="evaluation-discard")
 
     seeded.user.find(marker="evaluation-discard").click()
@@ -1577,7 +1797,7 @@ async def test_exporting_before_discarding_writes_one_pair_of_files_per_run(
     await _seed_two_done_runs(seeded)
     await _seed_mismatch(seeded.app, mismatch_id="m-1", run_id="r-0401", corpus_id=seeded.corpus_id)
 
-    await seeded.user.open("/evaluation")
+    await _open_evaluation(seeded.user)
     await seeded.user.should_see(marker="evaluation-discard")
     names = _record_downloads(seeded.user, monkeypatch)
     seeded.user.find(marker="evaluation-discard").click()
@@ -1600,7 +1820,7 @@ async def test_discarding_an_evaluation_removes_it_and_leaves_the_view_usable(
     """The happy path: the row goes, and the screen behind it is the empty
     state with the creation affordance — not a dead end (`SD32`)."""
     await _seed_two_done_runs(seeded)
-    await seeded.user.open("/evaluation")
+    await _open_evaluation(seeded.user)
     await seeded.user.should_see(marker="evaluation-discard")
 
     seeded.user.find(marker="evaluation-discard").click()
@@ -1648,7 +1868,7 @@ async def test_an_active_run_blocks_the_evaluation_discard_and_the_dialog_says_w
         status=RunStatus.QUEUED,
         started_at=None,
     )
-    await seeded.user.open("/evaluation")
+    await _open_evaluation(seeded.user)
     await seeded.user.should_see(marker="evaluation-discard")
 
     # The queued row offers nothing; the header still does.
@@ -1677,7 +1897,7 @@ async def test_tagged_work_is_named_and_discard_anyway_forces_it(seeded: Seeded)
         corpus_id=seeded.corpus_id,
         tag="hallucination",
     )
-    await seeded.user.open("/evaluation")
+    await _open_evaluation(seeded.user)
     await seeded.user.should_see(marker="evaluation-discard")
 
     seeded.user.find(marker="evaluation-discard").click()
@@ -1721,7 +1941,7 @@ async def test_an_interrupted_run_offers_the_reason_it_stopped_for(seeded: Seede
         error="llm endpoint http://127.0.0.1:11434/v1: timed_out",
     )
 
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Runs in this evaluation")
 
     (log,) = _find(user, "run-log")
@@ -1745,7 +1965,7 @@ async def test_a_run_that_finished_cleanly_offers_no_log(seeded: Seeded) -> None
         started_at=datetime(2026, 9, 4, 10, 4, 5, tzinfo=UTC),
     )
 
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Runs in this evaluation")
 
     assert _find(user, "run-log") == []
@@ -1777,7 +1997,7 @@ async def test_two_dev_runs_in_different_states_render_different_status_cells(
             started_at=datetime(2026, 9, 5, 9, 0, 0, tzinfo=UTC),
         )
 
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Runs in this evaluation")
 
     words = sorted(_own_text(e) for e in _find(user, "run-status"))
@@ -1878,7 +2098,7 @@ async def test_a_test_that_leaves_a_run_queued_does_not_leave_the_page_polling(
         status=RunStatus.QUEUED,
         started_at=None,
     )
-    await seeded.user.open("/evaluation")
+    await _open_evaluation(seeded.user)
     await seeded.user.should_see("Runs in this evaluation")
     assert _polling(seeded.user), (
         "a queued run leaves the page polling — nothing to close otherwise"
@@ -1912,7 +2132,7 @@ async def test_the_progress_poll_never_re_probes_the_endpoint(
     seeded, catalog = polling
     user = seeded.user
 
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Runs in this evaluation")
 
     # A view load *does* probe — that half of C3 is the permitted half.
@@ -1942,7 +2162,7 @@ async def test_a_page_opened_while_a_run_is_in_flight_polls(
     seeded, _ = polling
     user = seeded.user
 
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Runs in this evaluation")
 
     assert _timers(user), "an unsettled view polls without anyone pressing anything"
@@ -1957,7 +2177,7 @@ async def test_the_poll_backs_off_once_the_handshake_is_over(
     seeded, _ = polling
     user = seeded.user
 
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Runs in this evaluation")
 
     (timer,) = _timers(user)
@@ -1980,7 +2200,7 @@ async def test_an_active_run_offers_stop_and_an_inactive_one_offers_discard(
     seeded, _ = polling
     user = seeded.user
 
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Runs in this evaluation")
 
     assert len(_find(user, "run-stop")) == 1
@@ -2004,7 +2224,7 @@ async def test_pressing_stop_reaches_the_service_with_this_runs_id(
     timing it out of a UI test is what made that assertion flaky."""
     seeded, _ = polling
     user = seeded.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Runs in this evaluation")
 
     stopped: list[str] = []
@@ -2044,7 +2264,7 @@ async def test_the_poll_never_stops_on_a_tick_that_read_across_a_commit(
     seeded, _ = polling
     user = seeded.user
 
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     await user.should_see("Runs in this evaluation")
     assert _statuses(user) == {RunStatus.QUEUED.value}
 
@@ -2153,7 +2373,7 @@ async def test_each_qualification_state_renders_its_line(
             _qualification(FITS_A, digest, gate=GateVerdict.FAILS_SERVER)
         )
 
-    await seeded.user.open("/evaluation")
+    await _open_evaluation(seeded.user)
 
     line = _qualification_line(seeded.user, FITS_A)
     assert line._props["data-state"] == state
@@ -2177,7 +2397,7 @@ async def test_each_qualification_state_renders_its_line(
 async def test_an_unmeasured_model_is_still_selectable(seeded: Seeded) -> None:
     """ "Not measured" is information, not a refusal: the tick still works."""
     user = seeded.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
     assert _qualification_line(user, FITS_A)._props["data-state"] == "unmeasured"
 
     _one(user, _model_tick(user, FITS_A)).click()
@@ -2227,7 +2447,7 @@ async def test_a_context_too_small_for_the_longest_prompt_disables_the_row(
     place. The reason replaces the size line, so the row keeps the three
     lines the 260px well is drawn for (README §2: four rows)."""
     user = context_checked.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
 
     small = _model_row(user, FITS_A)
     assert small._props["data-disabled"] == "true"
@@ -2257,7 +2477,7 @@ async def test_an_unknown_context_says_cannot_check_and_leaves_the_row_live(
     from ra2.ui.views.evaluation_view import CONTEXT_UNKNOWN
 
     user = seeded.user
-    await user.open("/evaluation")
+    await _open_evaluation(user)
 
     row = _model_row(user, FITS_A)
     assert row._props["data-disabled"] == "false"

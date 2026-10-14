@@ -16,6 +16,7 @@ So the header now reads "Runs" once nothing is moving, and a card whose run
 dead end this whole fix is about.
 """
 
+import asyncio
 import os
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from itertools import count
 import httpx
 import pytest
 from fastapi import FastAPI
+from nicegui import ui
 from nicegui.testing.general import nicegui_reset_globals
 from nicegui.testing.user import User
 from tests.fixtures.scored_corpus import ScoredCorpus, seed_scored_corpus
@@ -39,6 +41,24 @@ from ra2.ui.views.evaluation_view import (
 )
 
 pytestmark = pytest.mark.ui
+
+
+async def _open_evaluation(user: User) -> None:
+    """Open the page and wait for both halves of its load (SD55): the page
+    function returns once the frame is drawn, so `User.open` returns before
+    the cards are on screen. The root's `data-loading` clears once the last
+    half has painted."""
+    await user.open("/evaluation")
+    for _ in range(500):
+        roots = [
+            e
+            for e in user.find(kind=ui.element).elements
+            if e._props.get("data-testid") == "evaluation-page"
+        ]
+        if roots and all(root._props.get("data-loading") == "false" for root in roots):
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("the Evaluation page never finished loading")
 
 
 class _Ids:
@@ -95,7 +115,7 @@ async def finished(
 
 
 async def test_a_scored_run_carries_the_link_to_its_board(finished: Finished) -> None:
-    await finished.user.open("/evaluation")
+    await _open_evaluation(finished.user)
 
     await finished.user.should_see(marker="progress-results-link")
     links = finished.user.find(marker="progress-results-link").elements
@@ -110,7 +130,7 @@ async def test_the_header_stops_saying_in_progress_once_nothing_is(
     """The design's wording is kept for the state the design drew — a run in
     flight — and dropped for the state it does not: every card `done`, under
     a header that says the opposite."""
-    await finished.user.open("/evaluation")
+    await _open_evaluation(finished.user)
 
     (title,) = finished.user.find(marker="progress-title").elements
     assert str(title._text) == PROGRESS_TITLE_SETTLED

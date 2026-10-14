@@ -232,7 +232,7 @@ def test_j10_launch_an_evaluation_and_watch_it_finish(
     _seed_active_template(page, server_url)
     evaluation_id = _seed_draft(page, server_url, corpus_id=corpus_id, config_id=config_id)
 
-    page.goto(f"{server_url}/evaluation")
+    _open_evaluation(page, server_url)
     expect(page.locator('[data-testid="view-title"]')).to_have_text("Evaluation")
 
     # --- the setup column, as the design draws it -----------------------------
@@ -463,10 +463,31 @@ def _redrawn(page: Page, testid: str, action: Callable[[], object]) -> None:
     selector = f'[data-testid="{testid}"]'
     page.evaluate("s => { document.querySelector(s).__ra2Stale = true; }", selector)
     action()
+    # A reload paints twice, the database half and then the endpoint half
+    # (SD55). The first fresh element is the first paint, so this also waits
+    # for the second: until then the column is about to be replaced again.
+    # Most controls only redraw (SD56), which paints once and asks nothing,
+    # so `data-loading` is already `false` and the fresh element is enough.
     page.wait_for_function(
-        "s => { const e = document.querySelector(s); return !!e && !e.__ra2Stale; }",
+        """s => {
+            const e = document.querySelector(s);
+            const root = document.querySelector('[data-testid="evaluation-page"]');
+            return !!e && !e.__ra2Stale && !!root && root.dataset.loading === 'false';
+        }""",
         arg=selector,
         timeout=TIMEOUT_MS,
+    )
+
+
+def _open_evaluation(page: Page, server_url: str) -> None:
+    """Go to the Evaluation screen and wait until **both halves** of its load
+    have painted (SD55). The page arrives as a frame, the database half
+    follows over the websocket and the endpoint half after that. An element
+    found before the second half lands is one it is about to replace, and a
+    click on it is dropped."""
+    page.goto(f"{server_url}/evaluation")
+    expect(page.locator('[data-testid="evaluation-page"]')).to_have_attribute(
+        "data-loading", "false", timeout=TIMEOUT_MS
     )
 
 
@@ -555,6 +576,12 @@ def _clone_of(page: Page, server_url: str, *, corpus_id: str, besides: str) -> d
 
 
 def _select_model(page: Page, tag: str) -> None:
+    # A load whose endpoint half is still out may repaint the column under the
+    # click, and a click on a button being replaced is dropped. That made this
+    # step flaky right after "New evaluation" (SD56).
+    expect(page.locator('[data-testid="evaluation-page"]')).to_have_attribute(
+        "data-loading", "false", timeout=TIMEOUT_MS
+    )
     page.locator(f'[data-testid="model-row"][data-model="{tag}"] [data-testid="tick"]').click()
     expect(
         page.locator(f'[data-testid="model-row"][data-model="{tag}"] [data-testid="tick"]')
@@ -577,7 +604,7 @@ def test_j10_the_connection_settings_dialog_opens_unclipped_at_1024px(
     other journey on the session-scoped server.
     """
     page.set_viewport_size({"width": 1024, "height": 800})
-    page.goto(f"{server_url}/evaluation")
+    _open_evaluation(page, server_url)
     expect(page.locator('[data-testid="view-title"]')).to_have_text("Evaluation")
 
     page.click('[aria-label="Ollama connection settings"]')
@@ -646,7 +673,7 @@ def test_j10_a_saved_endpoint_shows_without_a_restart(page: Page, server_url: st
     dialog and the view rebuilds the column after the call returns, and a
     check for the new text alone can pass on the old line's last frame.
     """
-    page.goto(f"{server_url}/evaluation")
+    _open_evaluation(page, server_url)
     expect(page.locator('[data-testid="view-title"]')).to_have_text("Evaluation")
     line = page.locator('[data-testid="endpoint-line"]')
     expect(line).to_contain_text("127.0.0.1:11434/v1")

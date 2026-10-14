@@ -2261,11 +2261,16 @@ def test_the_evidence_span_cell_wraps_to_three_lines_at_the_existing_table_scale
     the R2 failure mode this rule sits closest to.
     """
     assert ".td-wrap{" in STYLESHEET
-    rule = STYLESHEET.split(".td-wrap{")[1].split("}")[0]
+    cell = STYLESHEET.split(".td-wrap{")[1].split("}")[0]
+    rule = STYLESHEET.split(".td-wrap > *{")[1].split("}")[0]
     #: `.td` is `nowrap`; the modifier is what undoes it, so a cell without it
     #: behaves exactly as every other table cell in the app does.
     assert "white-space:nowrap" in STYLESHEET.split(".td{")[1].split("}")[0]
-    assert "white-space:normal;" in rule
+    assert "white-space:normal;" in cell
+    #: `SD54`: the cell stays a table cell. A `display` on the `<td>` pulls it
+    #: out of the row, so its rule stopped short and its text sat at the top.
+    assert "display" not in cell
+    assert "font-size" not in cell
     assert "-webkit-line-clamp:3;" in rule
     assert "line-clamp:3;" in rule
     #: The clamp is by line count; `max-height` bounds the row wherever the

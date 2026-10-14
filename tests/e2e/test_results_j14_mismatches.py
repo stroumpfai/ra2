@@ -50,7 +50,7 @@ from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
 from ra2.persistence.session import create_engine
 from ra2.services.export_service import CLASSIFICATION_COMMENT, CSV_BOM, CSV_DELIMITER
 from ra2.services.scoring_service import ScoringService
-from ra2.ui.views.mismatches_view import TAG_LABELS
+from ra2.ui.views.mismatches_view import SPAN_MIN_WIDTH_PX, TAG_LABELS
 
 pytestmark = pytest.mark.e2e
 
@@ -245,3 +245,54 @@ def test_j14_a_tag_can_be_cleared_and_the_tally_follows(
     expect(pressed).to_have_count(0)
     sentences = page.locator('[data-testid="tally-sentence"]').all_inner_texts()
     assert all(not s.startswith("of ") for s in sentences), sentences
+
+
+def test_j14_the_sidebar_reaches_the_list_and_the_grid_holds_together(
+    page: Page, server_url: str, review_evaluation: ScoredCorpus
+) -> None:
+    """`SD54`: the evaluation picker, and the four layout defects only a
+    browser can see.
+
+    - The sidebar entry arrives with no evaluation. It used to end on a card
+      pointing back at Results; now the list is under it.
+    - The evidence span cell is a real table cell: its bottom edge is the
+      row's, and it is centred like its neighbours.
+    - At a 1280px window the span keeps its floor and the well scrolls
+      sideways, instead of the span collapsing to a word.
+    - Each tally sentence sits inside its card.
+    """
+    evaluation_id = str(review_evaluation.evaluation_id)
+    page.set_viewport_size({"width": 1280, "height": 800})
+
+    # --- the sidebar entry lands on a list, and the list leads here ----------
+    page.goto(f"{server_url}/mismatches")
+    expect(page.locator('[data-testid="evaluation-picker"]')).to_be_visible()
+    page.click(f'[data-testid="picker-evaluation"][href="/mismatches?evaluation={evaluation_id}"]')
+    expect(page.locator(TABLE)).to_be_visible()
+    expect(page.locator('[data-chip="evaluation"]')).to_be_visible()
+
+    # --- the span cell belongs to its row ------------------------------------
+    first = page.locator(f"{TABLE} tbody tr").first
+    span_cell = first.locator("td.td-wrap")
+    feature_cell = first.locator("td").first
+    assert span_cell.evaluate("e => getComputedStyle(e).display") == "table-cell"
+    span_box = span_cell.bounding_box()
+    feature_box = feature_cell.bounding_box()
+    assert span_box is not None and feature_box is not None
+    assert abs(span_box["y"] - feature_box["y"]) < 1
+    assert abs(span_box["height"] - feature_box["height"]) < 1
+
+    # --- 1280px: the span keeps its floor, the well scrolls ------------------
+    assert span_box["width"] >= SPAN_MIN_WIDTH_PX
+    well = page.locator(TABLE).locator("xpath=..")
+    assert well.evaluate("e => e.scrollWidth > e.clientWidth"), "the well should scroll sideways"
+    for header in page.locator(f"{TABLE} th").all():
+        assert header.evaluate("e => e.scrollWidth <= e.clientWidth"), header.inner_text()
+
+    # --- every tally sentence is inside a tally card -------------------------
+    sentences = page.locator('[data-testid="tally-sentence"]')
+    expect(sentences).not_to_have_count(0)
+    assert (
+        sentences.count()
+        == page.locator('[data-card="tally"] [data-testid="tally-sentence"]').count()
+    )

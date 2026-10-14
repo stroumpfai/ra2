@@ -99,6 +99,7 @@ there is still exactly one provider client per adapter — which is the whole of
 Do-NOT #1.
 """
 
+import asyncio
 import time
 from typing import Any, Protocol, cast
 
@@ -540,6 +541,18 @@ class OllamaModelCatalog:
     Separate from the client because the Evaluation view asks for the
     catalogue before any run exists, and a catalogue call must never be able
     to look like an extraction call in a log.
+
+    **Reads are bounded by `PROBE_TIMEOUT_S`, not by `RA2_LLM_TIMEOUT_S`**
+    (SD55). The configured timeout is sized for a model that is thinking,
+    600 s by default. Tags, version, `ps` and `show` are metadata lookups
+    that answer in milliseconds or not at all, and a screen waits on them.
+    `release` keeps the configured bound, because unloading a large model
+    is real work and the qualifier checks `loaded()` afterwards anyway.
+
+    **Concurrent `/api/tags` reads share one request.** `reachable()` and
+    `models()` are one fact asked two ways, and the service asks both at
+    once. This is not a cache: once the request settles, the next call asks
+    again, so "re-checked on view load" stays true.
     """
 
     def __init__(
@@ -560,8 +573,11 @@ class OllamaModelCatalog:
         self._show_url = native_api_url(base_url, _NATIVE_SHOW_PATH)
         self._generate_url = native_api_url(base_url, _NATIVE_GENERATE_PATH)
         self._client = _build_client(
-            base_url=base_url, timeout_s=timeout_s, http_client=http_client
+            base_url=base_url, timeout_s=min(timeout_s, PROBE_TIMEOUT_S), http_client=http_client
         )
+        #: The `/api/tags` request in flight, if any. Callers arriving while
+        #: it runs await it instead of opening a second socket.
+        self._tags_in_flight: asyncio.Task[_OllamaTags | None] | None = None
 
     @property
     def base_url(self) -> str:
@@ -639,7 +655,12 @@ class OllamaModelCatalog:
         answer that matters, and an unreachable endpoint holds nothing."""
         try:
             await self._client.post(
-                self._generate_url, body={"model": tag, "keep_alive": 0}, cast_to=_OllamaDone
+                self._generate_url,
+                body={"model": tag, "keep_alive": 0},
+                cast_to=_OllamaDone,
+                # The one catalogue call that does work rather than look
+                # something up, so it keeps the configured bound.
+                options={"timeout": float(self._timeout_s)},
             )
         except openai.APIConnectionError, openai.APIStatusError, ValueError, TypeError:
             return
@@ -647,7 +668,18 @@ class OllamaModelCatalog:
     async def _fetch_tags(self) -> _OllamaTags | None:
         """`None` for every failure — connection refused, a timeout, a 500, a
         body that is not the shape we expect. The distinction between them is
-        not one the view can act on, and the view is the only caller."""
+        not one the view can act on, and the view is the only caller.
+
+        Joins a request already in flight rather than starting a second one
+        (class docstring). `shield`, so a caller that is cancelled — a page
+        closed mid-load — does not cancel the request the others await."""
+        task = self._tags_in_flight
+        if task is None or task.done():
+            task = asyncio.ensure_future(self._get_tags())
+            self._tags_in_flight = task
+        return await asyncio.shield(task)
+
+    async def _get_tags(self) -> _OllamaTags | None:
         try:
             return await self._client.get(self._tags_url, cast_to=_OllamaTags)
         except openai.APIConnectionError, openai.APIStatusError, ValueError, TypeError:

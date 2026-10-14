@@ -54,6 +54,7 @@ from ra2.domain.mismatch import MismatchTag, ReviewTally, TagFilter, TagState
 from ra2.services.container import Services
 from ra2.services.errors import NotFoundError, RunNotScoreableError
 from ra2.services.readmodels import (
+    EvaluationDraftView,
     MismatchListView,
     MismatchRowView,
     ReviewTallyView,
@@ -79,7 +80,17 @@ from ra2.ui.state import (
     set_table_state,
     table_state,
 )
-from ra2.ui.views.results.chrome import anonymisation_chip, empty_card, run_descriptor
+from ra2.ui.views.results.chrome import (
+    MENU_ITEM_ON_STYLE,
+    MENU_ITEM_STYLE,
+    MENU_STYLE,
+    anonymisation_chip,
+    empty_card,
+    evaluation_chip,
+    evaluation_picker,
+    launched,
+    run_descriptor,
+)
 from ra2.ui.views.scoring_states import NOT_SCORED_BODY as _NOT_SCORED_BODY
 from ra2.ui.views.scoring_states import NOT_SCORED_TITLE as _NOT_SCORED_TITLE
 from ra2.ui.views.scoring_states import (
@@ -154,9 +165,18 @@ CLEAR_LABEL: Final = "Clear tag"
 TALLY_TITLE: Final = "Review tally · per feature"
 
 EMPTY_TITLE: Final = "No evaluation selected."
+#: Results' sentence, because it is now Results' list underneath it (`SD54`).
+#: This said "Open one from Results" over nothing at all, so the sidebar entry,
+#: which always arrives with no evaluation, was a dead end.
 EMPTY_BODY: Final = (
-    "Mismatches are reviewed one evaluation at a time. Open one from Results, "
-    "or follow a run from the Evaluation view."
+    "Mismatches are reviewed one evaluation at a time. Pick a launched evaluation "
+    "below, or follow a feature's drill-down from Results."
+)
+#: The same card when there is nothing to list, so the sentence above never
+#: points at an empty space.
+EMPTY_BODY_NONE: Final = (
+    "Mismatches are reviewed one evaluation at a time, and no evaluation has been "
+    "launched yet. Set one up on the Evaluation view and launch it."
 )
 #: **One sentence, two screens.** This module had its own "Not scored yet."
 #: and its own body; Results had another pair, and this plan would have made
@@ -181,24 +201,34 @@ EMPTY_CELL: Final = "—"
 
 # --- layout, the Census toolbar's own inline styles --------------------------
 
-TOOLBAR_STYLE: Final = "display:flex;align-items:center;gap:10px;flex-wrap:wrap;"
+#: **Two rows, each with one job** (`SD54`). This was one wrapping row of two
+#: wrapping groups, and below about 1900px it broke wherever the widths fell:
+#: the run descriptor and Export landed on a second line by accident. The
+#: identity row says *what* the list is (evaluation, run, when it finished,
+#: corpus and config). The filter row says *which part of it* is shown, and
+#: carries what acts on that part, the export.
+TOOLBAR_STYLE: Final = "display:flex;flex-direction:column;gap:10px;"
+#: `space-between` rather than `margin-left:auto` on the right group: when a
+#: narrow window wraps a row, the wrapped half starts under the left edge like
+#: a second line of the same row, instead of sitting alone at the far right.
+TOOLBAR_ROW_STYLE: Final = (
+    "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;"
+)
+GROUP_STYLE: Final = "display:flex;align-items:center;gap:10px;flex:none;"
 LEFT_GROUP_STYLE: Final = (
     "display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;position:relative;"
 )
 RIGHT_GROUP_STYLE: Final = "display:flex;align-items:center;gap:10px;margin-left:auto;flex:none;"
 TALLY_ROW_STYLE: Final = "display:flex;gap:14px;flex-wrap:wrap;"
 
-_MENU_STYLE: Final = (
-    "position:absolute;top:100%;left:0;margin-top:4px;z-index:20;min-width:100%;"
-    "display:flex;flex-direction:column;padding:4px 0;background:var(--surface);"
-    "border:1px solid var(--rule);border-radius:3px;"
-)
-_MENU_ITEM_STYLE: Final = (
-    "display:block;width:100%;text-align:left;background:none;border:none;"
-    "padding:5px 10px;font-family:var(--mono);font-size:11px;color:var(--ink);"
-    "cursor:pointer;white-space:nowrap;"
-)
-_MENU_ITEM_ON_STYLE: Final = "background:var(--accent-soft);font-weight:500;"
+#: The six fixed widths (956px) plus the least the evidence span may have.
+#: Without a floor, `table-layout:fixed` gave the span whatever the fixed
+#: columns left, about 46px at a 1280px window, so the one field §19's
+#: criterion 7 names was squeezed to a word. With it, a narrow window scrolls
+#: the table sideways in its well rather than collapsing a column, the rule
+#: the Evaluation runs table already follows (`SD54`).
+SPAN_MIN_WIDTH_PX: Final = 200
+TABLE_MIN_WIDTH: Final = f"{956 + SPAN_MIN_WIDTH_PX}px"
 
 
 def tally_sentence(tally: ReviewTally) -> str:
@@ -254,6 +284,8 @@ class _MismatchesPage:
         #: (`plan-scoring-visibility-follow-ups.md` Part 1).
         self._statuses: tuple[ScoringStatusView, ...] = ()
         self._missing = ""
+        #: The launched evaluations, for the picker and the evaluation chip.
+        self._drafts: tuple[EvaluationDraftView, ...] = ()
         self._open_menu: str | None = None
         self._toolbar: Element | None = None
         self._table_slot: Element | None = None
@@ -320,6 +352,7 @@ class _MismatchesPage:
         self._view = None
         self._statuses = ()
         self._missing = ""
+        self._drafts = tuple(launched(await self._services.evaluation.list_evaluations()))
         if state.evaluation_id:
             evaluation_id = EvaluationId(state.evaluation_id)
             try:
@@ -360,11 +393,19 @@ class _MismatchesPage:
 
         view = self._view
         if view is None:
-            with self._table_slot:
+            # **With the list under it** (`SD54`), as Results has had since
+            # its own version of this defect: a card telling the analyst to
+            # pick an evaluation must have something to pick from.
+            with (
+                self._table_slot,
+                ui.element("div").style("display:flex;flex-direction:column;gap:12px;"),
+            ):
                 empty_card(
                     EMPTY_TITLE if not self._missing else f"No evaluation {self._missing}.",
-                    EMPTY_BODY,
+                    EMPTY_BODY if self._drafts else EMPTY_BODY_NONE,
                 )
+                if self._drafts:
+                    evaluation_picker(self._drafts, path=_ITEM.path)
             return
         # **The toolbar first, and unconditionally.** It carries the run
         # chip, so a screen that drops it because *this* run has no scores
@@ -489,17 +530,25 @@ class _MismatchesPage:
     # --- the filter toolbar -------------------------------------------------
 
     def _filter_toolbar(self, view: MismatchListView) -> None:
-        with ui.element("div").style(LEFT_GROUP_STYLE):
-            self._run_chip(view)
-            self._feature_chip(view)
-            self._tag_chip()
-            ui.label(TOOLBAR_CAPTION).props('data-testid="toolbar-caption"').style(
-                "font-size:12px;color:var(--ink2);"
-            )
-        with ui.element("div").style(RIGHT_GROUP_STYLE):
-            self._scored_at(view)
-            run_descriptor(view.descriptor)
-            self._export_button()
+        """The identity row, then the filter row (`TOOLBAR_STYLE`)."""
+        with ui.element("div").props('data-testid="toolbar-identity"').style(TOOLBAR_ROW_STYLE):
+            with ui.element("div").style(LEFT_GROUP_STYLE):
+                evaluation_chip(
+                    self._drafts, current=mismatches_state().evaluation_id, path=_ITEM.path
+                )
+                self._run_chip(view)
+            with ui.element("div").style(GROUP_STYLE):
+                self._scored_at(view)
+                run_descriptor(view.descriptor)
+        with ui.element("div").props('data-testid="toolbar-filters"').style(TOOLBAR_ROW_STYLE):
+            with ui.element("div").style(LEFT_GROUP_STYLE):
+                self._feature_chip(view)
+                self._tag_chip()
+                ui.label(TOOLBAR_CAPTION).props('data-testid="toolbar-caption"').style(
+                    "font-size:12px;color:var(--ink2);"
+                )
+            with ui.element("div").style(RIGHT_GROUP_STYLE):
+                self._export_button()
 
     def _run_chip(self, view: MismatchListView) -> None:
         """Which run this list shows.
@@ -613,7 +662,7 @@ class _MismatchesPage:
             with data_props(
                 ui.element("div")
                 .props(f'role="listbox" data-testid="menu-{name}"')
-                .style(_MENU_STYLE),
+                .style(MENU_STYLE),
                 {"aria-label": aria_label},
             ):
                 for value, option_text, selected in options:
@@ -626,7 +675,7 @@ class _MismatchesPage:
                             f'data-testid="option-{name}"'
                         )
                         .mark(f"option-{name}")
-                        .style(_MENU_ITEM_STYLE + (_MENU_ITEM_ON_STYLE if selected else "")),
+                        .style(MENU_ITEM_STYLE + (MENU_ITEM_ON_STYLE if selected else "")),
                         #: The value as well as the menu, so a test — and a
                         #: deep link a person pastes — can name the option it
                         #: means rather than the first one drawn.
@@ -662,7 +711,7 @@ class _MismatchesPage:
                     empty_message=NO_MATCHES_MESSAGE,
                     wide=True,
                     testid="table-mismatches",
-                )
+                ).style(f"min-width:{TABLE_MIN_WIDTH};")
             pagination_row(
                 state=state,
                 total=view.rows.total,
@@ -689,6 +738,12 @@ class _MismatchesPage:
         what found that; no layer below a browser could. The 60px comes back
         from the two value columns, which hold enum codes and had it to spare,
         so the fixed total is unchanged at 956px (`P5-D5`).
+
+        **Two labels are shorter than §3.2's** (`SD54`). "Record value" and
+        "Extracted value" are wider than a 110px column at the header's
+        letter-spacing, and `.th` does not clip, so the second ran into
+        "Evidence span". "In record" and "Extracted" fit, and the CSV keeps
+        its own column names.
         """
         return (
             ColumnSpec(
@@ -714,14 +769,14 @@ class _MismatchesPage:
             ),
             ColumnSpec(
                 key="record_value",
-                label="Record value",
+                label="In record",
                 width="110px",
                 cell_class="mono td-clip",
                 render=lambda row: _value_label(row.record_value, "mismatch-record-value"),
             ),
             ColumnSpec(
                 key="extracted_value",
-                label="Extracted value",
+                label="Extracted",
                 width="110px",
                 cell_class="mono td-clip",
                 render=lambda row: _value_label(row.extracted_value, "mismatch-extracted-value"),
@@ -800,22 +855,23 @@ class _MismatchesPage:
         (§17.4).
         """
         for entry in tallies:
-            with (
-                data_props(
-                    card(flex="1", extra="padding:0;min-width:220px;").props('data-card="tally"'),
-                    {"data-feature": entry.feature_id},
-                ),
-                card_header(title=entry.feature_key, count=f"{entry.tally.total} mismatches"),
+            # The sentence is the card's body. It was built after the card's
+            # `with` had closed, so it rendered as a loose flex item between
+            # the cards, which also stretched each card to a different width.
+            with data_props(
+                card(flex="1", extra="padding:0;min-width:220px;").props('data-card="tally"'),
+                {"data-feature": entry.feature_id},
             ):
-                pass
-            with ui.element("div").style("padding:10px 14px;"):
-                data_props(
-                    ui.label(tally_sentence(entry.tally))
-                    .props('data-testid="tally-sentence"')
-                    .mark("tally-sentence")
-                    .style("font-size:12.5px;color:var(--ink2);"),
-                    {"data-feature": entry.feature_id},
-                )
+                with card_header(title=entry.feature_key, count=f"{entry.tally.total} mismatches"):
+                    pass
+                with ui.element("div").style("padding:10px 14px;"):
+                    data_props(
+                        ui.label(tally_sentence(entry.tally))
+                        .props('data-testid="tally-sentence"')
+                        .mark("tally-sentence")
+                        .style("font-size:12.5px;color:var(--ink2);"),
+                        {"data-feature": entry.feature_id},
+                    )
 
     # --- handlers -----------------------------------------------------------
     #

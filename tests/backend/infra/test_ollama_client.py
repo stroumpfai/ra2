@@ -11,6 +11,7 @@ on, one guard in one constructor is the whole of N1 (plan-phase-3.md R4).
 """
 
 import ast
+import asyncio
 import json
 from collections import deque
 from collections.abc import Sequence
@@ -941,6 +942,112 @@ async def test_a_500_from_the_endpoint_is_unreachable_too() -> None:
 
     assert await catalog.reachable() is EndpointStatus.UNREACHABLE
     assert await catalog.models() == ()
+
+
+async def test_reachability_and_the_models_asked_together_share_one_request(
+    stub: StubOllama,
+) -> None:
+    """SD55: one fact asked two ways, so one `/api/tags`. On Windows a closed
+    loopback port takes 2 s to refuse, and the service asks both at once."""
+    catalog = OllamaModelCatalog(base_url=LOOPBACK_URL, http_client=stub.http_client())
+
+    status, models = await asyncio.gather(catalog.reachable(), catalog.models())
+
+    assert status is EndpointStatus.REACHABLE
+    assert len(models) == 2
+    assert len(stub.tags_urls) == 1
+
+
+async def test_a_settled_tags_request_is_never_reused(stub: StubOllama) -> None:
+    """Joining a request in flight is not a cache. Once it settles, the next
+    call asks again, so "re-checked on view load" stays true: an endpoint
+    that came back is found by the next load."""
+    catalog = OllamaModelCatalog(base_url=LOOPBACK_URL, http_client=stub.http_client())
+
+    await catalog.reachable()
+    await catalog.models()
+
+    assert len(stub.tags_urls) == 2
+
+
+async def test_a_cancelled_caller_does_not_cancel_the_request_the_others_await() -> None:
+    """A page closed mid-load cancels its own wait, and must not take the
+    shared request down with it for every other caller."""
+    entered = asyncio.Event()
+    answer = asyncio.Event()
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        entered.set()
+        await answer.wait()
+        return httpx2.Response(200, json=TAGS_BODY)
+
+    catalog = OllamaModelCatalog(
+        base_url=LOOPBACK_URL, http_client=env_blind_client(httpx2.MockTransport(handle))
+    )
+    leaving = asyncio.ensure_future(catalog.reachable())
+    staying = asyncio.ensure_future(catalog.models())
+    await entered.wait()
+    leaving.cancel()
+    answer.set()
+
+    assert len(await staying) == 2
+    with pytest.raises(asyncio.CancelledError):
+        await leaving
+
+
+def _read_timeout(request: httpx2.Request) -> float | None:
+    timeout = request.extensions.get("timeout") or {}
+    return cast("float | None", timeout.get("read"))
+
+
+async def test_catalogue_reads_are_bounded_by_the_probe_timeout_not_the_llm_timeout() -> None:
+    """SD55: `RA2_LLM_TIMEOUT_S` (600 s by default) is sized for a model that
+    is thinking. Tags, version, `ps` and `show` are metadata, and a screen
+    waits on them."""
+    seen: dict[str, float | None] = {}
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        seen[request.url.path] = _read_timeout(request)
+        body: dict[str, Any] = TAGS_BODY if request.url.path.endswith("/api/tags") else {}
+        return httpx2.Response(200, json=body)
+
+    catalog = OllamaModelCatalog(
+        base_url=LOOPBACK_URL,
+        timeout_s=600,
+        http_client=env_blind_client(httpx2.MockTransport(handle)),
+    )
+    await catalog.models()
+    await catalog.version()
+    await catalog.loaded()
+    await catalog.parameters("qwen3:8b")
+    await catalog.release("qwen3:8b")
+
+    assert seen == {
+        "/api/tags": PROBE_TIMEOUT_S,
+        "/api/version": PROBE_TIMEOUT_S,
+        "/api/ps": PROBE_TIMEOUT_S,
+        "/api/show": PROBE_TIMEOUT_S,
+        # The one call that does work, so it keeps the configured bound.
+        "/api/generate": 600,
+    }
+
+
+async def test_a_configured_timeout_below_the_probe_bound_still_wins() -> None:
+    """The lower of the two, as the connection test takes it."""
+    seen: list[float | None] = []
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        seen.append(_read_timeout(request))
+        return httpx2.Response(200, json=TAGS_BODY)
+
+    catalog = OllamaModelCatalog(
+        base_url=LOOPBACK_URL,
+        timeout_s=2,
+        http_client=env_blind_client(httpx2.MockTransport(handle)),
+    )
+    await catalog.models()
+
+    assert seen == [2]
 
 
 async def test_reachable_never_answers_refused_not_loopback() -> None:

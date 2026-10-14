@@ -365,6 +365,8 @@ happens today whenever Ollama is not running on Windows. The rest of the check
 ran with a stand-in on port 11999 that accepts and hangs up, which fails fast
 and lets the page build. Nothing but endpoints, ids, statuses and the dialog's
 own sentences was printed, and the temp dir was removed (Do-NOT #13).
+**Since fixed** by `SD55` (`fix-evaluation-first-paint`): the page answers
+before it asks, and asks once.
 
 ---
 

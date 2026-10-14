@@ -35,12 +35,15 @@ from ra2.persistence.models import Mismatch
 from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
 from ra2.services.scoring_service import ScoringService
 from ra2.ui.views.mismatches_view import (
+    EMPTY_BODY,
     NO_MATCHES_MESSAGE,
     NO_MISMATCHES_BODY,
     NO_MISMATCHES_TITLE,
     NOT_SCORED_TITLE,
     NOTHING_REVIEWED,
     OTHER_LABEL,
+    SPAN_MIN_WIDTH_PX,
+    TABLE_MIN_WIDTH,
     TAG_LABELS,
     tally_sentence,
 )
@@ -186,6 +189,11 @@ async def _until(predicate: Callable[[], bool], what: str) -> None:
     raise AssertionError(f"{what} never became true")
 
 
+def _markers_in(element: Element) -> set[str]:
+    """Every marker on `element` or anything inside it."""
+    return {marker for e in (element, *element.descendants()) for marker in e._markers}
+
+
 def _pressed(user: User) -> list[Element]:
     """Every tag segment showing as chosen, across every row."""
     return [e for e in _find(user, "seg-option") if e._props.get("aria-pressed") == "true"]
@@ -274,6 +282,57 @@ async def test_the_table_carries_the_designs_widths_and_one_flexible_column(
     ]
     assert widths == ["180px", "190px", "110px", "110px", None, "270px", "96px"]
     assert widths.count(None) == 1
+
+
+async def test_the_table_scrolls_rather_than_collapsing_the_evidence_span(
+    scored: Seeded,
+) -> None:
+    """`SD54`. The six fixed columns are 956px, and `table-layout:fixed` gave
+    the span whatever was left, about 46px at a 1280px window. A floor on the
+    table makes a narrow window scroll the well sideways instead."""
+    await scored.user.open(_url(scored.corpus))
+    (table,) = scored.user.find(marker="table-mismatches").elements
+    assert table._style["min-width"] == TABLE_MIN_WIDTH
+    assert int(TABLE_MIN_WIDTH.removesuffix("px")) - 956 == SPAN_MIN_WIDTH_PX
+
+
+async def test_the_two_value_headers_fit_their_columns(scored: Seeded) -> None:
+    """`SD54`. "Extracted value" ran into "Evidence span" in a 110px column;
+    the shorter labels fit, and the column keys, which the CSV and the sort
+    use, did not move."""
+    await scored.user.open(_url(scored.corpus))
+    await scored.user.should_see("In record")
+    await scored.user.should_see("Extracted")
+    await scored.user.should_not_see("Extracted value")
+
+
+async def test_the_toolbar_is_an_identity_row_then_a_filter_row(scored: Seeded) -> None:
+    """`SD54`. One wrapping row of two wrapping groups broke wherever the
+    widths fell. Now the first row says what the list is, and the second
+    which part of it is shown and what acts on that part."""
+    await scored.user.open(_url(scored.corpus))
+    (identity,) = _find(scored.user, "toolbar-identity")
+    (filters,) = _find(scored.user, "toolbar-filters")
+    assert {"chip-evaluation", "chip-run", "run-finished-at", "run-descriptor"} <= _markers_in(
+        identity
+    )
+    assert {"chip-feature", "chip-tag", "export-csv"} <= _markers_in(filters)
+    assert "chip-run" not in _markers_in(filters)
+
+
+async def test_the_evaluation_chip_switches_to_another_evaluation(scored: Seeded) -> None:
+    """`SD54`. Every way into this screen used to go through Results; the chip
+    is the way to another evaluation from here. Its options are links, so
+    choosing one is the same navigation the picker makes, and `build` resets
+    the filters a different evaluation invalidates."""
+    evaluation_id = str(scored.corpus.evaluation_id)
+    await scored.user.open(_url(scored.corpus))
+    await scored.user.should_not_see(marker="option-evaluation")
+    _one(scored.user, _marked(scored.user, "chip-evaluation")[0]).click()
+    await scored.user.should_see(marker="option-evaluation")
+    (option,) = _marked(scored.user, "option-evaluation")
+    assert option._props["href"] == f"/mismatches?evaluation={evaluation_id}"
+    assert option._props["aria-current"] == "true"
 
 
 async def test_the_toolbar_says_when_the_run_finished(scored: Seeded) -> None:
@@ -434,6 +493,19 @@ async def test_the_tally_strip_agrees_with_the_rendered_rows(scored: Seeded) -> 
     assert len(scored.user.find(marker="mismatch-feature").elements) == rows
 
 
+async def test_each_tally_sentence_is_inside_its_own_card(scored: Seeded) -> None:
+    """`SD54`. The sentence was built after the card's `with` had closed, so it
+    rendered as a loose item between the cards. It belongs to the card that
+    names its feature."""
+    await scored.user.open(_url(scored.corpus))
+    cards = [e for e in _find(scored.user, "card") if e._props.get("data-card") == "tally"]
+    assert cards
+    for tally_card in cards:
+        (sentence,) = [e for e in tally_card.descendants() if "tally-sentence" in e._markers]
+        assert sentence._props["data-feature"] == tally_card._props["data-feature"]
+    assert len(_marked(scored.user, "tally-sentence")) == len(cards)
+
+
 async def test_the_tally_uses_the_specs_own_words(scored: Seeded) -> None:
     """`C4`. mvp-spec.md §12's example says **"record error"** where the enum
     says `structured_data_error`, and both have to be right at once — which is
@@ -465,10 +537,18 @@ def test_the_tally_sentence_is_the_specs_own_shape() -> None:
 
 async def test_without_an_evaluation_the_view_offers_the_picker(scored: Seeded) -> None:
     """The first state: nothing is selected. The same empty card the Results
-    view uses, so the two read as one app."""
+    view uses, so the two read as one app — **and the list under it**
+    (`SD54`). This asserted the card alone, and the card alone was the
+    defect: the sidebar entry always arrives here, and the card told the
+    analyst to go somewhere else."""
     await scored.user.open("/mismatches")
     await scored.user.should_see(marker="results-empty")
+    await scored.user.should_see(EMPTY_BODY)
     await scored.user.should_not_see(marker="table-mismatches")
+    links = scored.user.find(marker="picker-evaluation").elements
+    assert {e.props["href"] for e in links} == {
+        f"/mismatches?evaluation={scored.corpus.evaluation_id}"
+    }
 
 
 async def test_a_finished_run_nobody_scored_says_the_pass_did_not_finish(

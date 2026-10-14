@@ -18,7 +18,8 @@ descriptor and no way to choose it. `/results?evaluation=<id>`, with the
 standard empty card listing launched evaluations when the parameter is absent
 or unknown (plan-phase-4.md C7) — and phase 3's Evaluation view left its
 runs-table run-id link pointing at a deliberate placeholder route, which is the
-link that lands here.
+link that lands here. Once a board is open, the evaluation chip on the tab
+strip switches it; the list and the chip are shared with Mismatches (`SD54`).
 
 **The header carries `NavItem.description`, not the design's board subtitle.**
 The board says "Extraction and presence scores for one evaluation."; `NAV_ITEMS`
@@ -49,7 +50,6 @@ the expanded feature, the page and the sort live in `app.storage.client`.
 """
 
 from collections.abc import Sequence
-from datetime import datetime
 from typing import Final
 
 from nicegui import ui
@@ -59,10 +59,14 @@ from ra2.domain.ids import EvaluationId, RunId
 from ra2.services.container import Services
 from ra2.services.errors import NotFoundError, RunNotScoreableError
 from ra2.services.readmodels import EvaluationDraftView, ScoringStatusView, SortDir
-from ra2.ui.components import format_local
 from ra2.ui.shell import item_for_key, shell
 from ra2.ui.state import ResultsState, results_state, set_results_state
-from ra2.ui.views.results.chrome import empty_card
+from ra2.ui.views.results.chrome import (
+    empty_card,
+    evaluation_chip,
+    evaluation_picker,
+    launched,
+)
 from ra2.ui.views.results.extraction_tab import render_extraction_tab
 from ra2.ui.views.results.presence_tab import render_presence_tab
 from ra2.ui.views.results.ranking_tab import render_ranking_tab
@@ -251,13 +255,14 @@ class _ResultsPage:
                 await self._render_picker(missing=state.evaluation_id)
             return
         self._statuses = statuses
+        drafts = launched(await self._services.evaluation.list_evaluations())
         #: The runs a Re-score would help: a pass that wrote nothing, and one
         #: that wrote some of it. Never a run still in flight — `submit_rescore`
         #: refuses that, and offering it would be a button that 409s.
         unscored = [s for s in statuses if s.scoring_stalled or s.scoring_incomplete]
 
         with self._body:
-            self._render_tab_strip()
+            self._render_tab_strip(drafts)
             content = ui.element("div").style(
                 "flex:1;min-height:0;min-width:0;display:flex;flex-direction:column;"
             )
@@ -468,7 +473,12 @@ class _ResultsPage:
 
     # --- chrome ------------------------------------------------------------
 
-    def _render_tab_strip(self) -> None:
+    def _render_tab_strip(self, drafts: Sequence[EvaluationDraftView]) -> None:
+        """The three tabs, and on the right the evaluation they read (`SD54`).
+
+        The chip is the board's way out to another evaluation. Without it the
+        picker was reachable only by removing `?evaluation=` from the URL.
+        """
         assert self._state is not None
         strip = (
             ui.element("div")
@@ -499,6 +509,10 @@ class _ResultsPage:
                 )
                 with button:
                     ui.label(label)
+        # Negative margins so the chip does not set the strip's height: the
+        # tabs' own 9px underline gap does, as it did before the chip.
+        with strip, ui.element("div").style("margin:-6px 0 -6px auto;flex:none;"):
+            evaluation_chip(drafts, current=self._state.evaluation_id, path=_ITEM.path)
 
     async def _render_picker(self, *, missing: str = "") -> None:
         """The index the design does not draw (C7) — **with the list in it**.
@@ -514,7 +528,7 @@ class _ResultsPage:
         runs, so it has no board, and offering it would be a link to another
         empty state.
         """
-        drafts = [d for d in await self._services.evaluation.list_evaluations() if d.is_launched]
+        drafts = launched(await self._services.evaluation.list_evaluations())
         with ui.element("div").style(
             "padding:18px 28px;display:flex;flex-direction:column;gap:12px;"
         ):
@@ -523,45 +537,4 @@ class _ResultsPage:
                 EMPTY_BODY if drafts else EMPTY_BODY_NONE,
             )
             if drafts:
-                self._picker_list(drafts)
-
-    def _picker_list(self, drafts: Sequence[EvaluationDraftView]) -> None:
-        """One row per launched evaluation: its name, when it was launched,
-        and the models it ran. Enough to tell two apart, which is all this
-        has to do — the board itself carries the full identity line."""
-        with (
-            ui.element("div")
-            .classes("card")
-            .props('data-testid="evaluation-picker"')
-            .mark("evaluation-picker")
-            .style("display:flex;flex-direction:column;")
-        ):
-            for index, draft in enumerate(drafts):
-                border = "" if index == 0 else "border-top:1px solid var(--rule);"
-                with ui.element("div").style(
-                    f"{border}padding:11px 16px;display:flex;align-items:baseline;"
-                    "gap:12px;min-width:0;"
-                ):
-                    link = ui.link(
-                        text=draft.name or str(draft.evaluation_id),
-                        target=f"/results?evaluation={draft.evaluation_id}",
-                    )
-                    link.classes(remove="nicegui-link", add="mono")
-                    link.props('data-testid="picker-evaluation"').mark("picker-evaluation")
-                    link.style("font-size:12.5px;color:var(--ink);")
-                    ui.label(_launched_label(draft.launched_at)).classes("mono ink3").props(
-                        'data-testid="picker-launched"'
-                    ).style("font-size:11px;")
-                    if draft.selected_models:
-                        ui.label(" · ".join(draft.selected_models)).classes("mono ink3").props(
-                            'data-testid="picker-models"'
-                        ).style(
-                            "font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
-                        )
-
-
-def _launched_label(launched_at: datetime | None) -> str:
-    """`dd.mm.yy - hh:mm:ss`, the timestamp format the runs table already
-    uses (`evaluation_view.TIMESTAMP_FORMAT`). `None` cannot happen on a
-    launched evaluation, and says so rather than rendering an empty cell."""
-    return "—" if launched_at is None else format_local(launched_at, "%d.%m.%y - %H:%M:%S")
+                evaluation_picker(drafts, path=_ITEM.path)
