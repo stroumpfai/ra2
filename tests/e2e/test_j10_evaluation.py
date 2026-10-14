@@ -466,6 +466,8 @@ def _redrawn(page: Page, testid: str, action: Callable[[], object]) -> None:
     # A reload paints twice, the database half and then the endpoint half
     # (SD55). The first fresh element is the first paint, so this also waits
     # for the second: until then the column is about to be replaced again.
+    # Most controls only redraw (SD56), which paints once and asks nothing,
+    # so `data-loading` is already `false` and the fresh element is enough.
     page.wait_for_function(
         """s => {
             const e = document.querySelector(s);
@@ -574,6 +576,12 @@ def _clone_of(page: Page, server_url: str, *, corpus_id: str, besides: str) -> d
 
 
 def _select_model(page: Page, tag: str) -> None:
+    # A load whose endpoint half is still out may repaint the column under the
+    # click, and a click on a button being replaced is dropped. That made this
+    # step flaky right after "New evaluation" (SD56).
+    expect(page.locator('[data-testid="evaluation-page"]')).to_have_attribute(
+        "data-loading", "false", timeout=TIMEOUT_MS
+    )
     page.locator(f'[data-testid="model-row"][data-model="{tag}"] [data-testid="tick"]').click()
     expect(
         page.locator(f'[data-testid="model-row"][data-model="{tag}"] [data-testid="tick"]')

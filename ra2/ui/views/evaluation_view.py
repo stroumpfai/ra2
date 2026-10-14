@@ -120,7 +120,6 @@ from ra2.domain.qualification import QualificationState
 from ra2.services.container import Services
 from ra2.services.errors import (
     FeatureValidationError,
-    NotFoundError,
     RunActiveError,
     ServiceError,
     SettingRefusedError,
@@ -447,6 +446,15 @@ POLL_FAST_S: Final = 0.2
 POLL_SETTLED_S: Final = 2.0
 POLL_FAST_TICKS: Final = 15
 
+#: The draft fields that decide the longest prompt in scope, which each
+#: model's context fit is measured against (SD53): which records, which
+#: template and set resolve them, in which language, and Dev or Full. A step
+#: that changes one `reload`s, so the fit is asked again. Every other step
+#: only `redraw`s, and asks the endpoint nothing (SD56).
+_PROMPT_FIELDS: Final = frozenset(
+    {"corpus_id", "feature_config_id", "prompt_template_id", "prompt_language", "size"}
+)
+
 #: The design's dev-sized marker (README §2), now a chip **beside** the status
 #: word rather than in place of it — `_status_marker` has the reasoning.
 DEV_MARKER: Final = "DEV"
@@ -556,10 +564,26 @@ class _EvaluationPage:
         self._poll: ui.timer | None = None
         #: The open settings dialog, so "refresh" can close it.
         self._settings_dialog: ui.dialog | None = None
-        #: Which `reload` owns the screen. The endpoint half of a load can take
-        #: seconds, and an action started meanwhile begins a newer load; the
-        #: older one's answer is then dropped rather than painted over it.
-        self._load_seq = 0
+        #: Which database read owns the screen (SD56). Every `_read_local`
+        #: takes the next number and paints only if no later read has started.
+        #: The progress timer checks it too. A read that is overtaken is
+        #: dropped, state and paint alike, so an older answer can never be
+        #: painted over a newer one.
+        self._local_seq = 0
+        #: Which endpoint ask is the newest (SD55). The endpoint half of a load
+        #: can take seconds, and an ask overtaken by a later one is dropped.
+        self._endpoint_seq = 0
+        #: Whether an ask is out whose answer is not on screen yet. It is what
+        #: `data-loading` says, and `frame()` starts it `true`.
+        self._asking = True
+        #: A full read started and has not painted. The setup-only read that
+        #: overtakes it paints everything instead, or its paint would be lost.
+        self._full_pending = False
+        #: What the setup column was last painted from: evaluation, connection
+        #: and models. An endpoint answer equal to it repaints nothing (SD56).
+        self._painted: (
+            tuple[EvaluationView | None, ConnectionView | None, tuple[ModelChoiceView, ...]] | None
+        ) = None
 
     # --- lifecycle -----------------------------------------------------------
 
@@ -577,8 +601,8 @@ class _EvaluationPage:
             content_padding=CONTENT_PADDING,
             content_gap=CONTENT_GAP,
         ):
-            # `data-loading` is `true` from the frame until the latest load's
-            # endpoint half has painted (SD55). It is the page's own state,
+            # `data-loading` is `true` from the frame until the newest endpoint
+            # ask has been answered and painted (SD55). It is the page's own state,
             # in `data-settled`'s register: something can wait on it without
             # reading a word on screen.
             self._root = (
@@ -602,7 +626,8 @@ class _EvaluationPage:
         flight starts ticking as soon as its cards are on screen, not once
         the endpoint has answered.
         """
-        seq = await self._read_local()
+        seq = self._ask()
+        await self._read_local()
         # A run already in flight when this page opens must tick too. Polling
         # used to start only from Launch and Resume, so the tab that submitted
         # the work updated and every other view of it did not: reload the
@@ -617,7 +642,8 @@ class _EvaluationPage:
         await self._read_endpoint(seq)
 
     async def reload(self) -> None:
-        """Re-read everything this view shows, then redraw.
+        """Re-read everything this view shows, **endpoint included**, then
+        redraw.
 
         One place reads, so no handler has to work out which half of the page
         its action invalidated — `import_view.reload`'s shape, and its reason
@@ -630,18 +656,61 @@ class _EvaluationPage:
         fail, and on Windows always does when Ollama is down. The screen does
         not wait on it: until the endpoint answers, the Models card shows the
         endpoint state it already held, or `UNCHECKED` on a first load.
-        """
-        await self._read_endpoint(await self._read_local())
 
-    async def _read_local(self) -> int:
-        """Everything but the endpoint: read and paint. Returns this load's
-        sequence number, for `_read_endpoint` to check before it paints."""
+        **Only for an action that can change the endpoint's answer** (SD56):
+        a load, refresh and Save, and whatever changes the evaluation on
+        screen or its longest prompt, which the context fit is measured
+        against (`_PROMPT_FIELDS`). Everything else calls `redraw`. A tick
+        here cost a second `/api/tags` and `/api/show` round trip and a
+        second rebuild of the setup column, 2–3 s after the first, on a
+        screen the analyst was still clicking.
+        """
+        seq = self._ask()
+        await self._read_local()
+        await self._read_endpoint(seq)
+
+    async def redraw(self) -> None:
+        """Re-read the database, hand back the endpoint state this view
+        holds, and redraw. **Asks the endpoint nothing** (SD56).
+
+        For every action whose effect is all on disk: a tick, a seed, a sort.
+        The endpoint's answer cannot have changed because of one, and
+        `launch()` asks it again anyway before anything is queued.
+        """
+        await self._read_local()
+
+    def _ask(self) -> int:
+        """Start an endpoint ask: take its number and say `data-loading`."""
         assert self._root is not None  # built in `frame()`, before any read
-        self._load_seq += 1
-        seq = self._load_seq
+        self._endpoint_seq += 1
+        self._asking = True
         self._root.props('data-loading="true"')
+        return self._endpoint_seq
+
+    async def _read_local(self, *, setup_only: bool = False) -> None:
+        """Everything but the endpoint: read, then paint, **unless a later
+        read started meanwhile** (`_local_seq`, SD56).
+
+        Read into locals and assigned only if this read still owns the
+        screen. An overtaken read used to assign as it went, so it could put
+        an older evaluation (or the endpoint state it was handed before an
+        answer arrived) back over a newer one. A tick worked out from that
+        older evaluation then undid the click before it.
+
+        `setup_only` repaints the setup column alone: that is what the
+        endpoint decides. `_full_pending` turns it back into a full paint
+        when it overtook a full read that never painted.
+        """
+        assert self._root is not None  # built in `frame()`, before any read
+        self._local_seq += 1
+        seq = self._local_seq
+        if not setup_only:
+            self._full_pending = True
+        scored = self._scored_runs
+        runs: Page[RunView] | None = None
+        all_runs: tuple[RunView, ...] = ()
         with self._root:
-            self._corpora = (
+            corpora = (
                 await self._services.corpus.list_corpora(
                     sort_key="imported_at",
                     sort_dir=SortDir.DESC,
@@ -649,42 +718,54 @@ class _EvaluationPage:
                     page_size=RUNS_SUMMARY_CAP,
                 )
             ).items
-            self._sets = tuple(
-                s for s in await self._services.feature.list_configs() if s.is_frozen
-            )
-            self._templates = tuple(await self._services.prompt.list_versions())
-            self._view = await self._current_evaluation()
-            if self._view is None:
-                if self._connection is None:
+            sets = tuple(s for s in await self._services.feature.list_configs() if s.is_frozen)
+            templates = tuple(await self._services.prompt.list_versions())
+            view = await self._current_evaluation()
+            connection, models = self._connection, self._models
+            if view is None:
+                if connection is None:
                     # A first load: name the endpoint, and say it has not
                     # been asked yet. `_read_endpoint` asks.
-                    self._connection = await self._services.evaluation.connection_status(
-                        probe=False
-                    )
-                self._runs = None
-                self._all_runs = ()
+                    connection = await self._services.evaluation.connection_status(probe=False)
             else:
-                self._connection = self._view.connection
-                self._models = self._view.models
-                evaluation_id = self._view.draft.evaluation_id
+                connection, models = view.connection, view.models
+                evaluation_id = view.draft.evaluation_id
                 state = table_state(
                     RUNS_TABLE, sort_key="started_at", sort_dir=SortDir.DESC, page_size=PAGE_SIZE
                 )
-                self._runs = await self._services.run.list_runs(
+                runs = await self._services.run.list_runs(
                     evaluation_id,
                     page=state.page,
                     page_size=state.page_size,
                     sort_key=state.sort_key,
                     sort_dir=state.sort_dir,
                 )
-                self._all_runs = (
+                all_runs = (
                     await self._services.run.list_runs(
                         evaluation_id, page=1, page_size=RUNS_SUMMARY_CAP
                     )
                 ).items
-                self._scored_runs = await self._read_scored(evaluation_id)
-            self._render()
-        return seq
+                scored = await self._read_scored(evaluation_id)
+            if seq != self._local_seq or self._root.is_deleted:
+                return
+            self._corpora, self._sets, self._templates = corpora, sets, templates
+            self._view, self._connection, self._models = view, connection, models
+            self._runs, self._all_runs, self._scored_runs = runs, all_runs, scored
+            painted = (view, connection, models)
+            if setup_only and not self._full_pending:
+                # The endpoint's answer, and usually it is the one already on
+                # screen. Rebuilding the column anyway replaces every button
+                # in it, and a click that lands on one as it goes is dropped.
+                if painted != self._painted:
+                    assert self._setup_slot is not None  # built in `frame()`
+                    self._setup_slot.clear()
+                    with self._setup_slot:
+                        self._render_setup()
+            else:
+                self._full_pending = False
+                self._render()
+            self._painted = painted
+        self._root.props(f'data-loading="{"true" if self._asking else "false"}"')
 
     async def _read_endpoint(self, seq: int) -> None:
         """The endpoint half: ask once, then repaint the setup column.
@@ -695,41 +776,27 @@ class _EvaluationPage:
         nothing on screen.
 
         `catalogue(evaluation_id)` asks the endpoint once, with each row's
-        context fit (SD53). `get()` is then handed that answer, so it reads
-        the ticks and `can_launch` off the evaluation without asking again.
-        Launch is read from the service, never derived here (CLAUDE.md #7).
+        context fit (SD53). The answer becomes the state this view holds, and
+        a database read hands it to `get()`, which reads the ticks and
+        `can_launch` off the evaluation without asking again. Launch is read
+        from the service, never derived here (CLAUDE.md #7).
 
-        A newer load (`_load_seq`) may have started while the socket was
-        open, and that load owns the screen. So does a page that was closed
-        meanwhile. In both cases the answer is dropped, not painted, and
-        `data-loading` is left for the load that owns the screen to clear.
+        A newer ask (`_endpoint_seq`) may have started while the socket was
+        open, and its answer is the one to show, so this one is dropped. A
+        database read started meanwhile does not drop it (SD56): the answer
+        is stored first, so any read after that hands it back, and the one
+        this starts overtakes any read that began before it arrived.
         """
         view = self._view
         evaluation_id = None if view is None else view.draft.evaluation_id
         fresh = await self._services.evaluation.catalogue(evaluation_id)
-        if seq != self._load_seq:
+        if seq != self._endpoint_seq:
             return
-        if evaluation_id is not None:
-            try:
-                view = await self._services.evaluation.get(
-                    evaluation_id, connection=fresh.connection, models=fresh.models
-                )
-            except NotFoundError:
-                # Discarded while the endpoint was being asked. The discard
-                # began its own load, and that load is what the screen shows.
-                return
-            if seq != self._load_seq:
-                return
-        if self._root is None or self._root.is_deleted or self._setup_slot is None:
+        if self._root is None or self._root.is_deleted:
             return
-        self._view = view
-        self._connection = fresh.connection
-        self._models = fresh.models if view is None else view.models
-        with self._root:
-            self._setup_slot.clear()
-            with self._setup_slot:
-                self._render_setup()
-        self._root.props('data-loading="false"')
+        self._connection, self._models = fresh.connection, fresh.models
+        self._asking = False
+        await self._read_local(setup_only=True)
 
     async def refresh_progress(self) -> None:
         """Re-read only what a run in flight changes, and redraw only that
@@ -756,31 +823,40 @@ class _EvaluationPage:
         consequence of what happens to be handed back (SD55). A tick that
         lands while the endpoint half of a load is still out hands back
         `UNCHECKED`, and must not ask in its place.
+
+        **Dropped if a database read starts while it reads** (`_local_seq`,
+        SD56). That read began after whatever the analyst just did was
+        saved, and this one may have begun before, so painting or keeping
+        it would put the older evaluation back.
         """
         if self._view is None or self._progress_slot is None:
             # Nothing has been loaded yet, so there is no cheap refresh to do.
-            # A full read is the honest fallback. A missing connection is not
-            # a reason for one: `probe=False` reads it as `UNCHECKED`.
-            await self.reload()
+            # A database read is the honest fallback, and never one that asks
+            # the endpoint: this is the timer (C3).
+            await self.redraw()
             return
+        seq = self._local_seq
         evaluation_id = self._view.draft.evaluation_id
-        self._view = await self._services.evaluation.get(
+        view = await self._services.evaluation.get(
             evaluation_id, connection=self._connection, models=self._models, probe=False
         )
         state = table_state(
             RUNS_TABLE, sort_key="started_at", sort_dir=SortDir.DESC, page_size=PAGE_SIZE
         )
-        self._runs = await self._services.run.list_runs(
+        runs = await self._services.run.list_runs(
             evaluation_id,
             page=state.page,
             page_size=state.page_size,
             sort_key=state.sort_key,
             sort_dir=state.sort_dir,
         )
-        self._all_runs = (
+        all_runs = (
             await self._services.run.list_runs(evaluation_id, page=1, page_size=RUNS_SUMMARY_CAP)
         ).items
-        self._scored_runs = await self._read_scored(evaluation_id)
+        scored = await self._read_scored(evaluation_id)
+        if seq != self._local_seq or self._progress_slot.is_deleted:
+            return
+        self._view, self._runs, self._all_runs, self._scored_runs = view, runs, all_runs, scored
         self._progress_slot.clear()
         with self._progress_slot:
             self._render_progress()
@@ -1075,7 +1151,7 @@ class _EvaluationPage:
                 checked=choice.selected,
                 label=f"Select {choice.tag}",
                 disabled=disabled,
-                on_change=None if disabled else _toggle(self._toggle_model, choice.tag),
+                on_change=None if disabled else _toggle(self._toggle_model, choice),
             )
             with ui.element("div").style("display:flex;flex-direction:column;min-width:0;"):
                 ui.label(choice.tag).classes("mono").props('data-testid="model-tag"').mark(
@@ -1630,31 +1706,41 @@ class _EvaluationPage:
 
     async def _pick_corpus(self, value: str) -> None:
         if self._view is None:
+            # Remembered, not saved: with no evaluation there is no prompt
+            # to fit, so the endpoint has nothing new to say.
             self._remember(corpus_id=value)
-            await self.reload()
+            await self.redraw()
             return
         await self._update(corpus_id=CorpusId(value))
 
     async def _pick_feature_set(self, value: str) -> None:
         if self._view is None:
             self._remember(feature_config_id=value)
-            await self.reload()
+            await self.redraw()
             return
         await self._update(feature_config_id=FeatureConfigId(value))
 
     async def _pick_template(self, value: str) -> None:
         await self._update(prompt_template_id=PromptTemplateId(value))
 
-    async def _toggle_model(self, tag: str) -> None:
+    async def _toggle_model(self, choice: ModelChoiceView) -> None:
+        """Send the one model clicked and the state it was clicked to: the
+        opposite of the tick the analyst saw (SD56).
+
+        Not the whole list worked out from `_view`. `_view` is the last read,
+        and a read that began before the previous click was saved put that
+        click's model back. What the analyst saw is the one thing a click is
+        unambiguously about.
+        """
         view = self._view
         if view is None:
             return
-        selected = list(view.draft.selected_models)
-        if tag in selected:
-            selected.remove(tag)
-        else:
-            selected.append(tag)
-        await self._update(selected_models=tuple(selected))
+        await self._persist(
+            self._services.evaluation.select_model(
+                view.draft.evaluation_id, choice.tag, selected=not choice.selected
+            )
+        )
+        await self.redraw()
 
     async def _pick_temperature(self, value: str) -> None:
         await self._update(temperature=float(value))
@@ -1669,7 +1755,7 @@ class _EvaluationPage:
             # A non-integer never reaches the service; the redraw puts the
             # stored seed back in the box, which is the honest answer to
             # "what is this run's seed".
-            await self.reload()
+            await self.redraw()
             return
         await self._update(seed=seed)
 
@@ -1680,7 +1766,7 @@ class _EvaluationPage:
         try:
             floor = int(value)
         except ValueError:
-            await self.reload()
+            await self.redraw()
             return
         await self._update(min_cell_count=floor)
 
@@ -1690,12 +1776,26 @@ class _EvaluationPage:
     async def _update(self, **changes: object) -> None:
         """Persist one step. Every step saves as it is chosen (module
         docstring), so `EvaluationView.can_launch` is never out of step with
-        what is on screen."""
+        what is on screen.
+
+        Then `reload` if the step moves the longest prompt, which the context
+        fit is measured against, and `redraw` otherwise (SD56)."""
         view = self._view
         if view is None:
             return
+        await self._persist(
+            self._services.evaluation.update_draft(view.draft.evaluation_id, **changes)  # type: ignore[arg-type]
+        )
+        if changes.keys() & _PROMPT_FIELDS:
+            await self.reload()
+        else:
+            await self.redraw()
+
+    async def _persist(self, write: Awaitable[object]) -> None:
+        """Await one draft write; a refusal becomes a toast, and the redraw
+        that follows puts the stored value back on screen."""
         try:
-            await self._services.evaluation.update_draft(view.draft.evaluation_id, **changes)  # type: ignore[arg-type]
+            await write
         except FeatureValidationError as exc:
             # The service's sentences, not the exception's count: `SD36` made
             # each refusal a sentence naming the repair, and "1 feature
@@ -1705,7 +1805,6 @@ class _EvaluationPage:
             ui.notify(" ".join(exc.validation_errors), type="negative")
         except ServiceError as exc:
             ui.notify(str(exc), type="negative")
-        await self.reload()
 
     async def _save_draft(self) -> None:
         """Re-save an **existing, unlaunched** draft.
@@ -1727,7 +1826,7 @@ class _EvaluationPage:
             ui.notify(DRAFT_SAVED_MESSAGE, type="positive")
         except ServiceError as exc:
             ui.notify(str(exc), type="negative")
-        await self.reload()
+        await self.redraw()
 
     async def _new_evaluation(self) -> None:
         """Create an evaluation and make it the one this client is looking at.
@@ -2088,12 +2187,12 @@ class _EvaluationPage:
 
     async def _sort_runs(self, key: str) -> None:
         self._set_runs_state(self._runs_state().toggled(key))
-        await self.reload()
+        await self.redraw()
 
     async def _page_runs(self, page: int) -> None:
         state = self._runs_state()
         self._set_runs_state(TableState(state.sort_key, state.sort_dir, page, state.page_size))
-        await self.reload()
+        await self.redraw()
 
     # --- dialogs -------------------------------------------------------------
 

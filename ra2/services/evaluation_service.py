@@ -335,6 +335,11 @@ class EvaluationService:
         #: value when the analyst saved one, the `Settings` seed when not.
         #: Never read off `self._settings`: that is the bootstrap value.
         self._connection = connection
+        #: Serialises draft writes in this process (SD56). `select_model` reads
+        #: the selection and writes it back, and the driver opens no
+        #: transaction until the write, so two clicks in flight could each
+        #: read the same list and the second would drop the first's model.
+        self._draft_lock = asyncio.Lock()
 
     async def list_evaluations(self) -> list[EvaluationDraftView]:
         """Every evaluation, drafts included, newest first."""
@@ -468,7 +473,11 @@ class EvaluationService:
             floor is below 1; nothing changed.
         :raises NotFoundError: no such evaluation, or a cited row is missing.
         """
-        async with session_scope(self._session_factory) as session:
+        # Judged before the transaction opens, not inside it: it can be a
+        # socket call, and nothing holds a transaction open across one (§15.3).
+        if selected_models is not None:
+            await self._reject_infeasible(selected_models)
+        async with self._draft_lock, session_scope(self._session_factory) as session:
             evaluation = await self._editable(session, evaluation_id)
             if name is not None:
                 evaluation.name = name
@@ -511,8 +520,46 @@ class EvaluationService:
             if size is not None:
                 evaluation.size = size
             if selected_models is not None:
-                await self._reject_infeasible(selected_models)
                 evaluation.selected_models_json = json.dumps(list(selected_models), **_JSON_KWARGS)  # type: ignore[arg-type]
+            await session.flush()
+            return _draft_view(evaluation)
+
+    async def select_model(
+        self, evaluation_id: EvaluationId, tag: str, *, selected: bool
+    ) -> EvaluationDraftView:
+        """Tick or untick **one** model, leaving the rest of the selection as
+        it is on disk. **Draft only.**
+
+        A click names one model and the state it should be in, so that is
+        what is sent. The Evaluation view used to send the whole list,
+        worked out from whatever it had last read. A read taken before an
+        earlier click was saved then put that click's model back, or took it
+        away (SD56). The read and the write happen under `_draft_lock`, so
+        two clicks in flight cannot overwrite each other here either.
+
+        Only a model being **added** is judged, as `update_draft` judges a
+        whole list. Removing one can make nothing infeasible. Judging asks
+        the endpoint only when the host's VRAM is known (`_reject_infeasible`),
+        so on a host without an NVIDIA GPU a tick asks it nothing.
+
+        Idempotent: ticking a ticked model, or unticking an unticked one,
+        writes the selection unchanged.
+
+        :raises EvaluationLockedError: `launched_at` is set; nothing changed.
+        :raises FeatureValidationError: the model exceeds the host's VRAM;
+            nothing changed.
+        :raises NotFoundError: no such evaluation.
+        """
+        if selected:
+            await self._reject_infeasible((tag,))
+        async with self._draft_lock, session_scope(self._session_factory) as session:
+            evaluation = await self._editable(session, evaluation_id)
+            models = list(_selected_models(evaluation))
+            if not selected:
+                models = [model for model in models if model != tag]
+            elif tag not in models:
+                models.append(tag)
+            evaluation.selected_models_json = json.dumps(models, **_JSON_KWARGS)  # type: ignore[arg-type]
             await session.flush()
             return _draft_view(evaluation)
 
@@ -941,7 +988,14 @@ class EvaluationService:
         Only a model the endpoint actually offers is judged: with an
         unreachable endpoint the catalogue is empty and nothing is refused,
         because that is ignorance, not a verdict. Same for an unknown VRAM.
+
+        So the VRAM is asked first, and with none known the endpoint is not
+        asked at all (SD56): no answer it gave could refuse anything. That
+        is every tick on a host without an NVIDIA GPU, where `/api/tags` was
+        a second or more of waiting for a verdict that was always "fine".
         """
+        if await asyncio.to_thread(self._gpu_probe.describe) is None:
+            return
         connection, catalogue = await self._endpoint_state()
         choices = {
             choice.tag: choice

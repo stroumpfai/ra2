@@ -1594,6 +1594,98 @@ async def test_a_fresh_install_paints_before_the_endpoint_answers(
     assert len(_find(user, "model-row")) == len(DEFAULT_MODELS)
 
 
+def _asked(catalog: GatedModelCatalog) -> tuple[int, int, int]:
+    return (catalog.reachable_calls, catalog.models_calls, catalog.parameters_calls)
+
+
+async def test_a_tick_asks_the_endpoint_only_to_judge_it(
+    slow_endpoint: tuple[Seeded, GatedModelCatalog],
+) -> None:
+    """Reported from a CPU-only host: the model list was slow to react to a
+    tick, and the endpoint line flickered (SD56).
+
+    Every tick reloaded the whole view, endpoint included. The setup column
+    was repainted at once and then again once `/api/tags` and every
+    `/api/show` had answered, 2–3 s later on that host. Now a tick is a
+    database write and one redraw. The fixture host knows its VRAM (24 GB),
+    so adding a model asks the catalogue once to judge its size. Removing one
+    asks nothing at all, which is checked with every read held.
+    """
+    seeded, catalog = slow_endpoint
+    user = seeded.user
+    await _open_evaluation(user)
+    before = _asked(catalog)
+    # The context fit's `/api/show`: only a reload asks it.
+    catalog.hold("parameters")
+
+    _one(user, _model_tick(user, FITS_A)).click()
+    await _until(lambda: _all_text(user, "launch") == "Launch 1 run")
+
+    assert not _loading(user), "no endpoint half was started"
+    assert _asked(catalog) == (before[0] + 1, before[1] + 1, before[2])
+
+    catalog.hold()
+    _one(user, _model_tick(user, FITS_A)).click()
+    await _until(lambda: _all_text(user, "launch") == "Launch 0 runs")
+
+    assert not _loading(user)
+    assert _asked(catalog) == (before[0] + 1, before[1] + 1, before[2])
+    assert _endpoint_status(user) == EndpointStatus.REACHABLE.value
+    catalog.answer()
+
+
+async def test_only_a_step_that_moves_the_longest_prompt_asks_the_endpoint_again(
+    slow_endpoint: tuple[Seeded, GatedModelCatalog],
+) -> None:
+    """`_PROMPT_FIELDS` (SD56). The reasoning effort cannot change what the
+    endpoint says, so with every read held it saves and redraws all the
+    same. Dev size narrows the scope to the first records, which can change
+    the longest prompt and so the context fit, so it asks once."""
+    seeded, catalog = slow_endpoint
+    user = seeded.user
+    await _open_evaluation(user)
+    before = _asked(catalog)
+    catalog.hold()
+
+    _pick_select(user, "reasoning-select", "high")
+    await _until(lambda: _selected_option(user, "reasoning-select") == "high")
+
+    assert not _loading(user)
+    assert _asked(catalog) == before
+
+    catalog.answer()
+    dev = _find(user, "sel-radio")[1]
+    _one(user, dev).click()
+    await _until(lambda: catalog.models_calls > before[1])
+    await _until(lambda: not _loading(user))
+
+    assert _asked(catalog)[:2] == (before[0] + 1, before[1] + 1)
+
+
+async def test_a_tick_on_a_stale_screen_keeps_the_model_another_tab_ticked(
+    seeded: Seeded,
+) -> None:
+    """The tick sends one model and the state it was clicked to (SD56).
+
+    It used to send the whole selection, worked out from the evaluation this
+    screen last read. Any read older than the selection on disk (another
+    tab, or a timer read from before the previous click was saved) then
+    overwrote it, and a model the analyst had just ticked or unticked flipped
+    back.
+    """
+    user = seeded.user
+    await _open_evaluation(user)
+    evaluation_id = seeded.draft.evaluation_id
+    await seeded.services.evaluation.update_draft(evaluation_id, selected_models=(FITS_B,))
+    assert _all_text(user, "launch") == "Launch 0 runs", "this screen has not seen it"
+
+    _one(user, _model_tick(user, FITS_A)).click()
+    await _until(lambda: _all_text(user, "launch") == "Launch 2 runs")
+
+    view = await seeded.services.evaluation.get(evaluation_id, probe=False)
+    assert set(view.draft.selected_models) == {FITS_A, FITS_B}
+
+
 async def test_refresh_picks_up_a_model_that_appeared(
     app_factory: Callable[..., FastAPI], migrated_db: Settings
 ) -> None:
