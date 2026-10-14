@@ -900,6 +900,32 @@ keeps every variable as the seed, so a host with no rows behaves as before.
 
 ---
 
+## Mismatches layout and the evaluation picker, a slice
+
+`fix-mismatches-layout-and-picker`, on top of `fix-d1-launch-context-check`.
+**No Wave 0, no frozen file, no migration and no amendment**: two views, the
+Results package's shared chrome, one stylesheet rule, and their tests. No
+service and no read model changed: `EvaluationService.list_evaluations` and
+`EvaluationDraftView.is_launched` already answered everything the picker and
+the chip need (`SD54`).
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/ui/views/results/chrome.py` | + `evaluation_picker` (moved from Results' `_picker_list`, with the link target as a parameter), `evaluation_chip`, `launched`, `EVALUATION_NAME_CHARS`; + `MENU_STYLE`, `MENU_ITEM_STYLE`, `MENU_ITEM_ON_STYLE`, moved from `mismatches_view` so the two screens open one dropdown panel |
+| `ra2/ui/views/results/__init__.py` | The picker is the shared one; the tab strip carries the evaluation chip on the right, with negative margins so the strip keeps its height. `_picker_list` and `_launched_label` go to `chrome.py` |
+| `ra2/ui/views/mismatches_view.py` | The empty state lists launched evaluations (`EMPTY_BODY` reworded, + `EMPTY_BODY_NONE`); the toolbar is two rows, identity then filters (`TOOLBAR_ROW_STYLE`, `GROUP_STYLE`), with the evaluation chip first; the table has `TABLE_MIN_WIDTH` (956 + `SPAN_MIN_WIDTH_PX` 200); "In record" / "Extracted" replace "Record value" / "Extracted value"; the tally sentence is built inside its card |
+| `ra2/ui/theme.py` | `.td-wrap` only undoes `nowrap`; the three-line clamp moves to `.td-wrap > *`, so the cell stays `display:table-cell` |
+| `tests/ui/test_components.py` | The `.td-wrap` rule test asserts the split, and that the cell rule carries no `display` |
+| `tests/ui/test_mismatches_view.py` | The picker test asserts the list and its links, not only the card. + table floor, header labels, the two toolbar rows, the evaluation chip, the tally sentence inside its card |
+| `tests/ui/test_results_view.py` | + the picker's links point at Results; + the tab strip's evaluation chip |
+| `tests/e2e/test_results_j14_mismatches.py` | + the sidebar → picker → list path, and at 1280px: the span cell's box matches its row, the span keeps its floor, the well scrolls, no header overflows, every tally sentence is inside a tally card |
+| `sw-design.md` | `SD54` |
+| `plan-phase-5.md` | §3.2's column table records the two shortened labels in place, as `P5-D5` did for the widths |
+
+---
+
 ## Phase 5 — owner: M35 (Wave 0), amendment only
 
 Re-established at tag `p5-frozen`, the same way M27 established the phase-4

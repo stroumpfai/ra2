@@ -122,11 +122,41 @@ async def test_results_without_an_evaluation_shows_the_picker(user: User) -> Non
     await user.should_see(marker="results-empty")
 
 
+async def test_the_picker_lists_the_launched_evaluation_and_links_to_its_board(
+    scored: Scored,
+) -> None:
+    """The list under the card, shared with Mismatches since `SD54`: each row
+    links to **this** screen, not to whichever screen the list was written for."""
+    await scored.user.open("/results")
+    await scored.user.should_see(marker="evaluation-picker")
+    links = scored.user.find(marker="picker-evaluation").elements
+    assert {e.props["href"] for e in links} == {
+        f"/results?evaluation={scored.corpus.evaluation_id}"
+    }
+
+
 async def test_the_tab_strip_offers_all_three_tabs(scored: Scored) -> None:
     """One route, three tabs, one sidebar entry."""
     await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}")
     tabs = scored.user.find(marker="results-tab").elements
     assert {e.props["data-tab"] for e in tabs} == {"extraction", "presence", "ranking"}
+
+
+async def test_an_open_board_can_switch_to_another_evaluation(scored: Scored) -> None:
+    """`SD54`. The picker was reachable only with no `?evaluation=` in the URL,
+    so once a board was open there was no way to another one but editing the
+    address. The tab strip carries a chip whose options are links back here."""
+    evaluation_id = str(scored.corpus.evaluation_id)
+    await scored.user.open(f"/results?evaluation={evaluation_id}")
+    await scored.user.should_see(marker="chip-evaluation")
+    #: Closed until asked: the panel is in the DOM but not on screen.
+    await scored.user.should_not_see(marker="option-evaluation")
+
+    scored.user.find(marker="chip-evaluation").click()
+    await scored.user.should_see(marker="option-evaluation")
+    (option,) = scored.user.find(marker="option-evaluation").elements
+    assert option.props["href"] == f"/results?evaluation={evaluation_id}"
+    assert option.props["aria-current"] == "true"
 
 
 async def test_every_tab_carries_the_run_descriptor(scored: Scored) -> None:

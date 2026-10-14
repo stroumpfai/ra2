@@ -11,15 +11,23 @@ module is the answer the cycle was pointing at.
 Everything here exists once rather than three times for the reason R11 names:
 the three tabs must not drift into three slightly different headers on one
 screen.
+
+**The evaluation picker is here too, and so is the chip that switches it**
+(`SD54`). Results and Mismatches both read one evaluation at a time, and both
+reach it the same two ways — a list when none is named, a chip once one is —
+so the two screens cannot end up choosing an evaluation differently.
 """
 
+from collections.abc import Sequence
+from datetime import datetime
 from typing import Final
 
 from nicegui import ui
 from nicegui.element import Element
 
 from ra2.domain.anonymisation import AnonymisationMarking
-from ra2.services.readmodels import ReadingQuality, RunDescriptorView
+from ra2.services.readmodels import EvaluationDraftView, ReadingQuality, RunDescriptorView
+from ra2.ui.components import chip, format_local
 from ra2.ui.components.primitives import data_props
 
 __all__ = [
@@ -28,12 +36,18 @@ __all__ = [
     "CONTEXT_NOT_RECORDED",
     "DETERMINISM_CAVEAT",
     "DEV_PILL",
+    "MENU_ITEM_ON_STYLE",
+    "MENU_ITEM_STYLE",
+    "MENU_STYLE",
     "MISMATCH_RATE_NOTE",
     "QUALITY_TITLE",
     "RUN_PILL",
     "SYNTHETIC_PILL",
     "anonymisation_chip",
     "empty_card",
+    "evaluation_chip",
+    "evaluation_picker",
+    "launched",
     "quality_text",
     "run_descriptor",
 ]
@@ -208,3 +222,139 @@ def empty_card(title: str, body: str) -> Element:
         ui.label(title).style("font-size:13.5px;font-weight:600;color:var(--ink);")
         ui.label(body).style("font-size:12.5px;color:var(--ink2);")
     return card
+
+
+# --- choosing an evaluation (SD54) -------------------------------------------
+
+#: The Census toolbar's dropdown panel. It used to be private to Mismatches; it
+#: lives here now so the evaluation chip on both screens opens the same panel
+#: as the run, feature and tag chips beside it, instead of a near-copy of it.
+MENU_STYLE: Final = (
+    "position:absolute;top:100%;left:0;margin-top:4px;z-index:20;min-width:100%;"
+    "display:flex;flex-direction:column;padding:4px 0;background:var(--surface);"
+    "border:1px solid var(--rule);border-radius:3px;"
+)
+MENU_ITEM_STYLE: Final = (
+    "display:block;width:100%;text-align:left;background:none;border:none;"
+    "padding:5px 10px;font-family:var(--mono);font-size:11px;color:var(--ink);"
+    "cursor:pointer;white-space:nowrap;"
+)
+MENU_ITEM_ON_STYLE: Final = "background:var(--accent-soft);font-weight:500;"
+
+#: How much of an evaluation's name the chip holds. `.chip` is `nowrap`, so an
+#: analyst's long name would otherwise push every control after it off the row.
+#: The panel and the picker show the full name.
+EVALUATION_NAME_CHARS: Final = 40
+
+
+def launched(drafts: Sequence[EvaluationDraftView]) -> list[EvaluationDraftView]:
+    """The evaluations worth offering, in the service's order (newest first).
+
+    Launched only: an unlaunched draft has no runs, so it has no board and no
+    mismatches, and offering it would be a link to another empty state.
+    """
+    return [draft for draft in drafts if draft.is_launched]
+
+
+def evaluation_picker(drafts: Sequence[EvaluationDraftView], *, path: str) -> Element:
+    """One row per launched evaluation: its name, when it was launched and the
+    models it ran. Enough to tell two apart, which is all this has to do; the
+    screen it opens carries the full identity line.
+
+    Moved here from Results when Mismatches needed the same list (`SD54`). Each
+    row links to `path?evaluation=<id>`, so it is a real link: it opens in a new
+    tab and survives being copied.
+    """
+    picker = (
+        ui.element("div")
+        .classes("card")
+        .props('data-testid="evaluation-picker"')
+        .mark("evaluation-picker")
+        .style("display:flex;flex-direction:column;")
+    )
+    with picker:
+        for index, draft in enumerate(drafts):
+            border = "" if index == 0 else "border-top:1px solid var(--rule);"
+            with ui.element("div").style(
+                f"{border}padding:11px 16px;display:flex;align-items:baseline;gap:12px;min-width:0;"
+            ):
+                link = ui.link(
+                    text=draft.name or str(draft.evaluation_id),
+                    target=f"{path}?evaluation={draft.evaluation_id}",
+                )
+                link.classes(remove="nicegui-link", add="mono")
+                link.props('data-testid="picker-evaluation"').mark("picker-evaluation")
+                link.style("font-size:12.5px;color:var(--ink);")
+                ui.label(_launched_label(draft.launched_at)).classes("mono ink3").props(
+                    'data-testid="picker-launched"'
+                ).style("font-size:11px;")
+                if draft.selected_models:
+                    ui.label(" · ".join(draft.selected_models)).classes("mono ink3").props(
+                        'data-testid="picker-models"'
+                    ).style(
+                        "font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                    )
+    return picker
+
+
+def evaluation_chip(drafts: Sequence[EvaluationDraftView], *, current: str, path: str) -> Element:
+    """`evaluation · <name> ▼`: switch evaluations without leaving the screen.
+
+    Before this, the picker was reachable only with **no** evaluation in the
+    URL. Once a board or a list was open, the one way to another evaluation was
+    to strip the query string by hand, so on Mismatches the sidebar entry,
+    which always lands with none, was a dead end and every other route went
+    through Results (`SD54`).
+
+    The options are **links**, not handlers: choosing one is navigating to
+    `path?evaluation=<id>`, and each page's own `build` already resets what a
+    different evaluation invalidates. The panel opens and closes in place and
+    holds no state beyond its own visibility, so it needs no storage key.
+    """
+    selected = next((d for d in drafts if str(d.evaluation_id) == current), None)
+    name = current if selected is None else (selected.name or current)
+    if len(name) > EVALUATION_NAME_CHARS:
+        name = name[: EVALUATION_NAME_CHARS - 1] + "…"
+
+    wrapper = ui.element("div").style("position:relative;display:inline-flex;")
+    with wrapper:
+
+        def toggle() -> None:
+            panel.set_visibility(not panel.visible)
+            button.props(f'aria-expanded="{"true" if panel.visible else "false"}"')
+
+        button = chip(f"evaluation · {name}", label="Evaluation", on_click=toggle)
+        button.props('data-chip="evaluation" aria-haspopup="true" aria-expanded="false"').mark(
+            "chip", "chip-evaluation"
+        )
+        panel = data_props(
+            ui.element("div").props('data-testid="menu-evaluation"').style(MENU_STYLE),
+            {"aria-label": "Evaluation"},
+        )
+        panel.set_visibility(False)
+        with panel:
+            for draft in drafts:
+                on = str(draft.evaluation_id) == current
+                current_flag = "true" if on else "false"
+                option = ui.link(
+                    text=draft.name or str(draft.evaluation_id),
+                    target=f"{path}?evaluation={draft.evaluation_id}",
+                )
+                option.classes(remove="nicegui-link", add="mono")
+                data_props(
+                    option.props(
+                        f'data-testid="option-evaluation" aria-current="{current_flag}"'
+                    ).mark("option-evaluation"),
+                    {"data-option": str(draft.evaluation_id)},
+                )
+                option.style(
+                    MENU_ITEM_STYLE + "text-decoration:none;" + (MENU_ITEM_ON_STYLE if on else "")
+                )
+    return wrapper
+
+
+def _launched_label(launched_at: datetime | None) -> str:
+    """`dd.mm.yy - hh:mm:ss`, the timestamp format the runs table already
+    uses (`evaluation_view.TIMESTAMP_FORMAT`). `None` cannot happen on a
+    launched evaluation, and says so rather than rendering an empty cell."""
+    return "—" if launched_at is None else format_local(launched_at, "%d.%m.%y - %H:%M:%S")

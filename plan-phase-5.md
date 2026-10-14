@@ -241,11 +241,16 @@ one flexible column is the span.
 |---|---|---|
 | Feature | 180px | the feature key, mono |
 | Record | 190px | truncated record id, mono, + the `anonymised` chip |
-| Record value | ~~140px~~ **110px** | authoritative, always (§12) |
-| Extracted value | ~~140px~~ **110px** | what the model said |
+| ~~Record value~~ **In record** | ~~140px~~ **110px** | authoritative, always (§12) |
+| ~~Extracted value~~ **Extracted** | ~~140px~~ **110px** | what the model said |
 | Evidence span | flexible | wrapped, three lines (Q6) |
 | Tag | ~~210px~~ **270px** | the three-way `segmented_control` + clear |
 | Reviewed | 96px | `tagged_at` date, or `—` |
+
+**And two of the labels, by `SD54`.** At 110px, "Record value" and
+"Extracted value" are wider than their columns at the header's letter-spacing,
+and `.th` does not clip, so the second ran into "Evidence span". The keys and
+the CSV headers are unchanged.
 
 **Two of these widths were wrong, and `P5-D5` corrects them in place.** The
 three-way control renders **290px** wide at the component kit's own segment

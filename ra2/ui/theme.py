@@ -410,6 +410,13 @@ _UTILITIES_P4: Final = """
 #: the only cross-browser way to clamp by line count and is supported
 #: unprefixed nowhere useful, so both spellings are written; `max-height` is
 #: the fallback that bounds the row even where neither applies.
+#:
+#: **The clamp is on the cell's content, never on the `<td>`** (`SD54`). It was
+#: on the `<td>`, and `display:-webkit-box` there stops the element being a
+#: table cell: the browser wraps it in an anonymous cell, so its bottom rule
+#: stopped short of the row's, its text sat at the top of a centred row, and
+#: the column lost its share of the width. `.td-wrap` itself now only undoes
+#: `.td`'s `nowrap`, and the cell keeps `display:table-cell`.
 _UTILITIES_P5: Final = """
 .seg-clear{color:var(--ink3);padding:6px 9px;font-size:12px;line-height:1;}
 .seg-tight .seg-btn{padding:6px 7px;}
@@ -417,8 +424,9 @@ _UTILITIES_P5: Final = """
 .seg-clear:hover{color:var(--ink);}
 .seg-clear.disabled{color:var(--rule);cursor:default;}
 .seg-clear.disabled:hover{color:var(--rule);}
-.td-wrap{
-  white-space:normal;overflow:hidden;line-height:1.35;max-height:calc(3 * 1.35em);
+.td-wrap{white-space:normal;}
+.td-wrap > *{
+  overflow:hidden;line-height:1.35;max-height:calc(3 * 1.35em);
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3;
 }
 """
