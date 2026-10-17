@@ -108,6 +108,22 @@ __all__ = [
     "RunProgressResponse",
     "RunResponse",
     "ScoringStatusResponse",
+    "ScrubCountResponse",
+    "ScrubEntryPage",
+    "ScrubEntryResponse",
+    "ScrubHitResponse",
+    "ScrubImportErrorItem",
+    "ScrubImportErrorResponse",
+    "ScrubImportResponse",
+    "ScrubListResponse",
+    "ScrubMostHitResponse",
+    "ScrubNoticeResponse",
+    "ScrubPreviewResponse",
+    "ScrubRuleResponse",
+    "ScrubRulesetResponse",
+    "ScrubTryRequest",
+    "ScrubTryResponse",
+    "ScrubVersionResponse",
     "SelectFileRequest",
     "SeparatingRowResponse",
     "SlotResponse",
@@ -265,6 +281,20 @@ class CreateCorpusRequest(_Schema):
     delivery_id: str
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
+    #: sw-design.md §19.7: the scrub rule-set version the dry run showed.
+    #: Omitted, the active one. A version that does not exist is a 404.
+    scrub_ruleset_id: str | None = None
+
+
+class ScrubCountResponse(_Schema):
+    """One scrub rule's count over a freeze or a dry run (§19.7)."""
+
+    rule_id: str
+    tag: str
+    #: `mandatory`, `imported` or `list`.
+    source: str
+    hits: int
+    records: int
 
 
 class CorpusResponse(_Schema):
@@ -285,6 +315,12 @@ class CorpusResponse(_Schema):
     locked_by_evaluations: int = 0
     #: `SD45` — built from invented data, by the seed or from its keys.
     is_synthetic: bool = False
+    #: `SD62`. `False` only for a corpus frozen before scrubbing existed:
+    #: its narratives are verbatim. The `NOT SCRUBBED` chip.
+    scrubbed: bool = False
+    #: The analyst's rule-set version; `None` when only the mandatory rules ran.
+    scrub_version: int | None = None
+    scrub_counts: list[ScrubCountResponse] = Field(default_factory=list)
 
 
 class CorpusPage(_Schema):
@@ -1371,3 +1407,136 @@ class TagMismatchRequest(_Schema):
     #: Risk B6: the one free-text channel into an export, and the API is the
     #: only place a note can be written, so the warning is on the field.
     note: str | None = Field(default=None, description=NOTE_LEAVES_RA2)
+
+
+# ===========================================================================
+# /api/v1/scrub  (sw-design.md §19)
+# ===========================================================================
+
+
+class ScrubRuleResponse(_Schema):
+    rule_id: str
+    tag: str
+    pattern: str
+    #: `mandatory` or `imported`.
+    source: str
+    description: str = ""
+    must_match: list[str]
+    must_not_match: list[str] = Field(default_factory=list)
+
+
+class ScrubNoticeResponse(_Schema):
+    """Reported at import, never refused: a BOM, duplicates, short entries."""
+
+    code: str
+    count: int
+    #: Up to five affected list entries. Public data, never record text.
+    examples: list[str] = Field(default_factory=list)
+
+
+class ScrubListResponse(_Schema):
+    scrub_list_id: str
+    #: `regex`, `firstname`, `lastname` or `whitelist`.
+    kind: str
+    filename: str
+    sha256: str
+    imported_at: datetime
+    entry_count: int
+    notices: list[ScrubNoticeResponse] = Field(default_factory=list)
+
+
+class ScrubRulesetResponse(_Schema):
+    """What the next freeze applies. `ruleset_id` and `version` are `None`
+    before anything was imported: the mandatory rules still run."""
+
+    ruleset_id: str | None = None
+    version: int | None = None
+    created_at: datetime | None = None
+    fingerprint: str
+    mandatory_version: int
+    rules: list[ScrubRuleResponse]
+    lists: list[ScrubListResponse]
+    protected: list[str]
+
+
+class ScrubVersionResponse(_Schema):
+    ruleset_id: str
+    version: int
+    created_at: datetime
+    fingerprint: str
+    #: Kind -> filename, for the files the version has.
+    components: dict[str, str]
+    corpus_count: int
+
+
+class ScrubImportResponse(_Schema):
+    ruleset: ScrubRulesetResponse
+    #: The file was already the active one of its kind: no version was made.
+    no_change: bool = False
+    notices: list[ScrubNoticeResponse] = Field(default_factory=list)
+
+
+class ScrubImportErrorItem(_Schema):
+    #: A stable `ScrubImportErrorCode` value. Wording is the UI's.
+    code: str
+    rule_id: str | None = None
+    detail: dict[str, str] = Field(default_factory=dict)
+
+
+class ScrubImportErrorResponse(_Schema):
+    """422 from a refused import or removal. **Nothing was written.**"""
+
+    import_errors: list[ScrubImportErrorItem]
+
+
+class ScrubEntryResponse(_Schema):
+    entry: str
+    #: What the scrubber compares the entry by.
+    key: str
+
+
+class ScrubEntryPage(_Schema):
+    items: list[ScrubEntryResponse]
+    meta: PageMeta
+
+
+class ScrubTryRequest(_Schema):
+    """One sentence to scrub with the active rules. **Stored nowhere and
+    logged nowhere**, because it may be real narrative typed in to test."""
+
+    text: str = Field(max_length=10_000)
+
+
+class ScrubHitResponse(_Schema):
+    rule_id: str
+    tag: str
+    placeholder: str
+    start: int
+    end: int
+
+
+class ScrubTryResponse(_Schema):
+    text: str
+    hits: list[ScrubHitResponse]
+    #: The rule that timed out, when one did; `text` is then empty.
+    timed_out_rule: str | None = None
+
+
+class ScrubMostHitResponse(_Schema):
+    #: A list entry's key. Public data; floored at `MOST_HIT_FLOOR` hits.
+    entry: str
+    hits: int
+
+
+class ScrubPreviewResponse(_Schema):
+    """A dry run over a delivery's selected files. Nothing was written."""
+
+    ruleset_id: str | None = None
+    version: int | None = None
+    fingerprint: str
+    counts: list[ScrubCountResponse]
+    most_hit: list[ScrubMostHitResponse]
+    records: int
+    records_changed: int
+    #: The rule a freeze would time out on (`TEXT_SCRUB_TIMEOUT`), if any.
+    timed_out_rule: str | None = None

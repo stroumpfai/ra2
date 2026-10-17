@@ -53,6 +53,20 @@
         "title": "Body_import_codelist_api_v1_codelists_import_post",
         "type": "object"
       },
+      "Body_import_list_api_v1_scrub_lists__kind__post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_list_api_v1_scrub_lists__kind__post",
+        "type": "object"
+      },
       "Body_upload_file_api_v1_deliveries__delivery_id__files_post": {
         "properties": {
           "file": {
@@ -931,6 +945,29 @@
             "title": "Record Count",
             "type": "integer"
           },
+          "scrub_counts": {
+            "items": {
+              "$ref": "#/components/schemas/ScrubCountResponse"
+            },
+            "title": "Scrub Counts",
+            "type": "array"
+          },
+          "scrub_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scrub Version"
+          },
+          "scrubbed": {
+            "default": false,
+            "title": "Scrubbed",
+            "type": "boolean"
+          },
           "version": {
             "title": "Version",
             "type": "integer"
@@ -970,6 +1007,17 @@
             "minLength": 1,
             "title": "Name",
             "type": "string"
+          },
+          "scrub_ruleset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scrub Ruleset Id"
           }
         },
         "required": [
@@ -2486,6 +2534,17 @@
         ],
         "title": "KeepEvaluationRequest",
         "type": "object"
+      },
+      "ListKind": {
+        "description": "The four files an analyst can import into a rule set.",
+        "enum": [
+          "regex",
+          "firstname",
+          "lastname",
+          "whitelist"
+        ],
+        "title": "ListKind",
+        "type": "string"
       },
       "MapColumnRequest": {
         "additionalProperties": false,
@@ -4197,6 +4256,576 @@
           "is_scoreable"
         ],
         "title": "ScoringStatusResponse",
+        "type": "object"
+      },
+      "ScrubCountResponse": {
+        "additionalProperties": false,
+        "description": "One scrub rule's count over a freeze or a dry run (\u00a719.7).",
+        "properties": {
+          "hits": {
+            "title": "Hits",
+            "type": "integer"
+          },
+          "records": {
+            "title": "Records",
+            "type": "integer"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "tag": {
+            "title": "Tag",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_id",
+          "tag",
+          "source",
+          "hits",
+          "records"
+        ],
+        "title": "ScrubCountResponse",
+        "type": "object"
+      },
+      "ScrubEntryPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScrubEntryResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PageMeta"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
+        ],
+        "title": "ScrubEntryPage",
+        "type": "object"
+      },
+      "ScrubEntryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "entry": {
+            "title": "Entry",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry",
+          "key"
+        ],
+        "title": "ScrubEntryResponse",
+        "type": "object"
+      },
+      "ScrubHitResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "end": {
+            "title": "End",
+            "type": "integer"
+          },
+          "placeholder": {
+            "title": "Placeholder",
+            "type": "string"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "start": {
+            "title": "Start",
+            "type": "integer"
+          },
+          "tag": {
+            "title": "Tag",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_id",
+          "tag",
+          "placeholder",
+          "start",
+          "end"
+        ],
+        "title": "ScrubHitResponse",
+        "type": "object"
+      },
+      "ScrubImportErrorItem": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Detail",
+            "type": "object"
+          },
+          "rule_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rule Id"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "ScrubImportErrorItem",
+        "type": "object"
+      },
+      "ScrubImportErrorResponse": {
+        "additionalProperties": false,
+        "description": "422 from a refused import or removal. **Nothing was written.**",
+        "properties": {
+          "import_errors": {
+            "items": {
+              "$ref": "#/components/schemas/ScrubImportErrorItem"
+            },
+            "title": "Import Errors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "import_errors"
+        ],
+        "title": "ScrubImportErrorResponse",
+        "type": "object"
+      },
+      "ScrubImportResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "no_change": {
+            "default": false,
+            "title": "No Change",
+            "type": "boolean"
+          },
+          "notices": {
+            "items": {
+              "$ref": "#/components/schemas/ScrubNoticeResponse"
+            },
+            "title": "Notices",
+            "type": "array"
+          },
+          "ruleset": {
+            "$ref": "#/components/schemas/ScrubRulesetResponse"
+          }
+        },
+        "required": [
+          "ruleset"
+        ],
+        "title": "ScrubImportResponse",
+        "type": "object"
+      },
+      "ScrubListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "entry_count": {
+            "title": "Entry Count",
+            "type": "integer"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "imported_at": {
+            "format": "date-time",
+            "title": "Imported At",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "notices": {
+            "items": {
+              "$ref": "#/components/schemas/ScrubNoticeResponse"
+            },
+            "title": "Notices",
+            "type": "array"
+          },
+          "scrub_list_id": {
+            "title": "Scrub List Id",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scrub_list_id",
+          "kind",
+          "filename",
+          "sha256",
+          "imported_at",
+          "entry_count"
+        ],
+        "title": "ScrubListResponse",
+        "type": "object"
+      },
+      "ScrubMostHitResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "entry": {
+            "title": "Entry",
+            "type": "string"
+          },
+          "hits": {
+            "title": "Hits",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entry",
+          "hits"
+        ],
+        "title": "ScrubMostHitResponse",
+        "type": "object"
+      },
+      "ScrubNoticeResponse": {
+        "additionalProperties": false,
+        "description": "Reported at import, never refused: a BOM, duplicates, short entries.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "examples": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Examples",
+            "type": "array"
+          }
+        },
+        "required": [
+          "code",
+          "count"
+        ],
+        "title": "ScrubNoticeResponse",
+        "type": "object"
+      },
+      "ScrubPreviewResponse": {
+        "additionalProperties": false,
+        "description": "A dry run over a delivery's selected files. Nothing was written.",
+        "properties": {
+          "counts": {
+            "items": {
+              "$ref": "#/components/schemas/ScrubCountResponse"
+            },
+            "title": "Counts",
+            "type": "array"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "most_hit": {
+            "items": {
+              "$ref": "#/components/schemas/ScrubMostHitResponse"
+            },
+            "title": "Most Hit",
+            "type": "array"
+          },
+          "records": {
+            "title": "Records",
+            "type": "integer"
+          },
+          "records_changed": {
+            "title": "Records Changed",
+            "type": "integer"
+          },
+          "ruleset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ruleset Id"
+          },
+          "timed_out_rule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timed Out Rule"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "fingerprint",
+          "counts",
+          "most_hit",
+          "records",
+          "records_changed"
+        ],
+        "title": "ScrubPreviewResponse",
+        "type": "object"
+      },
+      "ScrubRuleResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "must_match": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Must Match",
+            "type": "array"
+          },
+          "must_not_match": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Must Not Match",
+            "type": "array"
+          },
+          "pattern": {
+            "title": "Pattern",
+            "type": "string"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "tag": {
+            "title": "Tag",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_id",
+          "tag",
+          "pattern",
+          "source",
+          "must_match"
+        ],
+        "title": "ScrubRuleResponse",
+        "type": "object"
+      },
+      "ScrubRulesetResponse": {
+        "additionalProperties": false,
+        "description": "What the next freeze applies. `ruleset_id` and `version` are `None`\nbefore anything was imported: the mandatory rules still run.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "lists": {
+            "items": {
+              "$ref": "#/components/schemas/ScrubListResponse"
+            },
+            "title": "Lists",
+            "type": "array"
+          },
+          "mandatory_version": {
+            "title": "Mandatory Version",
+            "type": "integer"
+          },
+          "protected": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Protected",
+            "type": "array"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/ScrubRuleResponse"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
+          "ruleset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ruleset Id"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "fingerprint",
+          "mandatory_version",
+          "rules",
+          "lists",
+          "protected"
+        ],
+        "title": "ScrubRulesetResponse",
+        "type": "object"
+      },
+      "ScrubTryRequest": {
+        "additionalProperties": false,
+        "description": "One sentence to scrub with the active rules. **Stored nowhere and\nlogged nowhere**, because it may be real narrative typed in to test.",
+        "properties": {
+          "text": {
+            "maxLength": 10000,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "ScrubTryRequest",
+        "type": "object"
+      },
+      "ScrubTryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/ScrubHitResponse"
+            },
+            "title": "Hits",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "timed_out_rule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timed Out Rule"
+          }
+        },
+        "required": [
+          "text",
+          "hits"
+        ],
+        "title": "ScrubTryResponse",
+        "type": "object"
+      },
+      "ScrubVersionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "components": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Components",
+            "type": "object"
+          },
+          "corpus_count": {
+            "title": "Corpus Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "ruleset_id": {
+            "title": "Ruleset Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ruleset_id",
+          "version",
+          "created_at",
+          "fingerprint",
+          "components",
+          "corpus_count"
+        ],
+        "title": "ScrubVersionResponse",
         "type": "object"
       },
       "SelectFileRequest": {
@@ -8553,6 +9182,314 @@
         "summary": "Export Scores",
         "tags": [
           "runs"
+        ]
+      }
+    },
+    "/api/v1/scrub/active": {
+      "get": {
+        "operationId": "active_api_v1_scrub_active_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScrubRulesetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Active",
+        "tags": [
+          "scrub"
+        ]
+      }
+    },
+    "/api/v1/scrub/lists/{kind}": {
+      "delete": {
+        "operationId": "remove_list_api_v1_scrub_lists__kind__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ListKind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScrubImportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScrubImportErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "summary": "Remove List",
+        "tags": [
+          "scrub"
+        ]
+      },
+      "post": {
+        "description": "\u00a719.7: checked whole, with the mandatory rules and the active set's\nother files; refused whole, or a new version.",
+        "operationId": "import_list_api_v1_scrub_lists__kind__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ListKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_list_api_v1_scrub_lists__kind__post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScrubImportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScrubImportErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "summary": "Import List",
+        "tags": [
+          "scrub"
+        ]
+      }
+    },
+    "/api/v1/scrub/lists/{kind}/entries": {
+      "get": {
+        "operationId": "entries_api_v1_scrub_lists__kind__entries_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ListKind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScrubEntryPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Entries",
+        "tags": [
+          "scrub"
+        ]
+      }
+    },
+    "/api/v1/scrub/preview": {
+      "get": {
+        "description": "The dry run (\u00a719.7): what `POST /corpora` would count for this\ndelivery's selected files. Nothing is written.",
+        "operationId": "preview_api_v1_scrub_preview_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "title": "Delivery Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scrub_ruleset_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrub Ruleset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScrubPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview",
+        "tags": [
+          "scrub"
+        ]
+      }
+    },
+    "/api/v1/scrub/try": {
+      "post": {
+        "operationId": "try_text_api_v1_scrub_try_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScrubTryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScrubTryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Try Text",
+        "tags": [
+          "scrub"
+        ]
+      }
+    },
+    "/api/v1/scrub/versions": {
+      "get": {
+        "operationId": "versions_api_v1_scrub_versions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScrubVersionResponse"
+                  },
+                  "title": "Response Versions Api V1 Scrub Versions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Versions",
+        "tags": [
+          "scrub"
         ]
       }
     },

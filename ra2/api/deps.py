@@ -30,6 +30,7 @@ from ra2.services.ranking_service import RankingService
 from ra2.services.results_service import ResultsService
 from ra2.services.run_service import RunService
 from ra2.services.scoring_service import ScoringService
+from ra2.services.scrub_service import ScrubService
 
 __all__ = [
     "CensusServiceDep",
@@ -43,6 +44,7 @@ __all__ = [
     "MismatchServiceDep",
     "PromptServiceDep",
     "RunServiceDep",
+    "ScrubServiceDep",
     "TaskRunnerDep",
     "get_services",
 ]
@@ -114,6 +116,10 @@ def get_ranking_service(services: Annotated[Services, Depends(get_services)]) ->
     return services.ranking
 
 
+def get_scrub_service(services: Annotated[Services, Depends(get_services)]) -> ScrubService:
+    return services.scrub
+
+
 DeliveryServiceDep = Annotated[DeliveryService, Depends(get_delivery_service)]
 CorpusServiceDep = Annotated[CorpusService, Depends(get_corpus_service)]
 CensusServiceDep = Annotated[CensusService, Depends(get_census_service)]
@@ -128,4 +134,5 @@ MismatchServiceDep = Annotated[MismatchService, Depends(get_mismatch_service)]
 ScoringServiceDep = Annotated[ScoringService, Depends(get_scoring_service)]
 ResultsServiceDep = Annotated[ResultsService, Depends(get_results_service)]
 RankingServiceDep = Annotated[RankingService, Depends(get_ranking_service)]
+ScrubServiceDep = Annotated[ScrubService, Depends(get_scrub_service)]
 TaskRunnerDep = Annotated[TaskRunner, Depends(get_task_runner)]
