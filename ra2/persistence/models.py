@@ -71,9 +71,12 @@ from ra2.domain.ids import (
     QualificationId,
     RecordId,
     RunId,
+    ScrubListId,
+    ScrubRulesetId,
 )
 from ra2.domain.llm import DEFAULT_REASONING_EFFORT
 from ra2.domain.scoring import ScoreMetric
+from ra2.domain.scrub import ListKind
 
 __all__ = [
     "AppSetting",
@@ -105,6 +108,8 @@ __all__ = [
     "Record",
     "Run",
     "Score",
+    "ScrubList",
+    "ScrubRuleset",
     "UnfallRow",
     "UtcDateTime",
 ]
@@ -187,6 +192,8 @@ class Base(DeclarativeBase):
         ExtractionId: String(_ID_LEN),
         MismatchId: String(_ID_LEN),
         QualificationId: String(_ID_LEN),
+        ScrubListId: String(_ID_LEN),
+        ScrubRulesetId: String(_ID_LEN),
         FileKind: String(16),
         SourceKind: String(16),
         DeliveryStatus: String(16),
@@ -197,6 +204,7 @@ class Base(DeclarativeBase):
         RunStatus: String(16),
         EvaluationSize: String(16),
         ScoreMetric: String(32),
+        ListKind: String(16),
         datetime: UtcDateTime(),
         str: Text(),
         int: Integer(),
@@ -356,6 +364,21 @@ class Corpus(Base):
     #: SD4 — the design's "de 2 812 · fr 1 402 · it 396", serialised as
     #: `{"de": 2812, "fr": 1402, "it": 396}`.
     language_counts_json: Mapped[str | None] = mapped_column(default=None)
+
+    #: sw-design.md §19.4, `SD62`. The analyst's rule set this corpus was
+    #: scrubbed with; `None` when none was imported and only the mandatory
+    #: rules ran. **Deliberately not a foreign key**: SQLite can add or drop a
+    #: column carrying one only by rebuilding `corpus`, and a rebuild under
+    #: `foreign_keys=ON` cascades through `record` (revision `5b93f1f9617a`).
+    #: A rule set has no delete path, so the reference cannot dangle.
+    scrub_ruleset_id: Mapped[ScrubRulesetId | None] = mapped_column(default=None)
+    #: `compute_rules_fingerprint` of everything that ran at freeze, mandatory
+    #: rules included. **`None` means the corpus was frozen before scrubbing
+    #: existed**, and its narratives are verbatim: the `NOT SCRUBBED` chip.
+    scrub_fingerprint: Mapped[str | None] = mapped_column(String(64), default=None)
+    #: The mandatory rules as applied, snapshotted (`SD63`), so the corpus
+    #: still says which ones it got after `scrub_mandatory.py` changes.
+    scrub_mandatory_json: Mapped[str | None] = mapped_column(default=None)
 
     #: `passive_deletes=True`: a corpus delete lets SQLite's own `ON DELETE
     #: CASCADE` (every FK down this tree declares it, and `session.py` turns
@@ -1455,3 +1478,83 @@ class AppSetting(Base):
     #: JSON, so one column holds a URL and an integer alike.
     value_json: Mapped[str]
     changed_at: Mapped[datetime]
+
+
+# ===========================================================================
+# Narrative scrubbing — sw-design.md §19. Both tables are IMMUTABLE: an
+# import adds rows, never edits them (Do-NOT #2's reasoning, applied here).
+# ===========================================================================
+
+
+class ScrubList(Base):
+    """One imported scrub file: a rule TOML or a name list (§19.4).
+
+    The decoded text is stored whole, so a rule set can always be rebuilt from
+    the database alone and the Scrubbing screen can show exactly what was
+    imported. **Reused by `(kind, sha256)`**: importing the same file twice is
+    one row, and two rule-set versions that share a list share the row.
+
+    Public data (name lists, the analyst's own rules), but never committed to
+    the repository (`SD63`, `docs/rules.md`).
+    """
+
+    __tablename__ = "scrub_list"
+    __table_args__ = (
+        UniqueConstraint("kind", "sha256", name="uq_scrub_list_kind_sha256"),
+        CheckConstraint(
+            "kind IN ('regex', 'firstname', 'lastname', 'whitelist')", name="kind_known"
+        ),
+        CheckConstraint("entry_count >= 0", name="entry_count_non_negative"),
+    )
+
+    id: Mapped[ScrubListId] = mapped_column(primary_key=True)
+    kind: Mapped[ListKind]
+    #: The uploaded filename. Display only, like `code_table_import.source_file`.
+    filename: Mapped[str] = mapped_column(String(400))
+    #: sha256 of the uploaded bytes: the reuse key.
+    sha256: Mapped[str] = mapped_column(String(64))
+    imported_at: Mapped[datetime]
+    #: Accepted entries for a list; rules for a rule file.
+    entry_count: Mapped[int]
+    #: The file as decoded, byte-for-byte reversible (`.encode("utf-8")` gives
+    #: back the upload, BOM included). Never rewritten.
+    content_text: Mapped[str]
+    #: The import's `ListNotice`s, serialised: what was reported, never refused.
+    import_report_json: Mapped[str]
+
+
+class ScrubRuleset(Base):
+    """One version of the analyst's scrub rule set (§19.4, `SD63`).
+
+    **IMMUTABLE. An import is an `INSERT` at `version + 1`** with one component
+    swapped, never an `UPDATE`, so a corpus citing version 3 keeps meaning
+    exactly what it meant. The highest version is the active one; there is no
+    activation step. Any component may be absent: a set with only a whitelist
+    is legal, if useless.
+    """
+
+    __tablename__ = "scrub_ruleset"
+    __table_args__ = (
+        UniqueConstraint("version", name="uq_scrub_ruleset_version"),
+        CheckConstraint("version >= 1", name="version_positive"),
+    )
+
+    id: Mapped[ScrubRulesetId] = mapped_column(primary_key=True)
+    version: Mapped[int]
+    created_at: Mapped[datetime]
+    #: `compute_rules_fingerprint` over this version's imported components
+    #: alone. The corpus's `scrub_fingerprint` is the one that also covers the
+    #: mandatory rules as they were at freeze.
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    regex_list_id: Mapped[ScrubListId | None] = mapped_column(
+        ForeignKey("scrub_list.id", ondelete="RESTRICT"), default=None
+    )
+    firstname_list_id: Mapped[ScrubListId | None] = mapped_column(
+        ForeignKey("scrub_list.id", ondelete="RESTRICT"), default=None
+    )
+    lastname_list_id: Mapped[ScrubListId | None] = mapped_column(
+        ForeignKey("scrub_list.id", ondelete="RESTRICT"), default=None
+    )
+    whitelist_id: Mapped[ScrubListId | None] = mapped_column(
+        ForeignKey("scrub_list.id", ondelete="RESTRICT"), default=None
+    )

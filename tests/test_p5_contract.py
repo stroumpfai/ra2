@@ -169,6 +169,11 @@ POST_PHASE_5_REVISIONS = {
     # released (G3). Additive, nullable, no backfill: `NULL` is "nobody marked
     # it", which is true of every row that exists before it.
     "20261017_1200_3ce2190bd859_keep_an_evaluation.py",
+    # `feat/text-scrubbing` — `scrub_list`, `scrub_ruleset` and three nullable
+    # `corpus` columns (SD62, SD63). No backfill: a corpus frozen before it
+    # was frozen verbatim, and `scrub_fingerprint IS NULL` says exactly that.
+    # `corpus` is altered in place both ways, never rebuilt.
+    "20261018_0900_5b93f1f9617a_scrub_the_narratives.py",
 }
 
 
