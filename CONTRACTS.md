@@ -932,6 +932,26 @@ the chip need (`SD54`).
 
 ---
 
+## The Results identity row, a slice
+
+`fix-results-identity-row`, on top of `SD56`. **No Wave 0, no frozen file, no
+migration and no amendment**: the Results package and its tests. No service
+and no read model changed: every tab's view already carried the
+`RunDescriptorView` the row shows (`SD57`).
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/ui/views/results/__init__.py` | + an identity row above the tab strip (`results-identity`, `IDENTITY_ROW_STYLE`): the evaluation chip first, the run descriptor on the right, as on Mismatches. The chip leaves the tab strip, and with it the negative margins. The active tab's view is read before the chrome (`_read_active_tab`, `_render_board`, `_shows_board`), because the descriptor arrives with it. No descriptor on a scoring card, which reads no view |
+| `ra2/ui/views/results/extraction_tab.py` · `presence_tab.py` · `ranking_tab.py` | The `run_descriptor` call leaves the card header and the verdict banner. Render signatures unchanged |
+| `tests/ui/test_results_view.py` | + the identity row leads with the chip, holds the one descriptor, and sits above the tabs, on all three tabs |
+| `tests/ui/test_results_visibility.py` | + a scoring card keeps the chip and shows no descriptor |
+| `tests/e2e/test_results_j11_to_j13.py` | J11's descriptor test: one descriptor, in the identity row, the chip above the first tab at the same gutter |
+| `sw-design.md` | `SD57` |
+
+---
+
 ## Phase 5 — owner: M35 (Wave 0), amendment only
 
 Re-established at tag `p5-frozen`, the same way M27 established the phase-4

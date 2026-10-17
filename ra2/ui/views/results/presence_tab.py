@@ -37,7 +37,7 @@ from ra2.services.readmodels import PresenceTabView
 from ra2.ui.components.contingency_table import contingency_table
 from ra2.ui.components.primitives import data_props
 from ra2.ui.components.stat_cells import metric_cell
-from ra2.ui.views.results.chrome import anonymisation_chip, run_descriptor
+from ra2.ui.views.results.chrome import anonymisation_chip
 
 __all__ = [
     "GOAL1_NEVER_APART",
@@ -136,7 +136,6 @@ def _model_row(
             f"n = labelled cases · Wilson 95 % · cells under n = "
             f"{view.descriptor.min_cell_count} suppressed"
         ).classes("mono").style("margin-left:auto;font-size:11px;color:var(--ink3);")
-        run_descriptor(view.descriptor)
 
 
 def _rate_table(view: PresenceTabView) -> None:

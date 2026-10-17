@@ -49,7 +49,6 @@ from ra2.ui.views.results.chrome import (
     DETERMINISM_CAVEAT,
     MISMATCH_RATE_NOTE,
     QUALITY_TITLE,
-    run_descriptor,
 )
 
 __all__ = [
@@ -129,14 +128,10 @@ def _verdict(view: RankingTabView) -> None:
             "padding:12px 14px;display:flex;align-items:flex-start;gap:12px;"
         )
     )
-    with banner:
-        with ui.element("div").style("display:flex;flex-direction:column;gap:3px;"):
-            ui.label(view.verdict_headline).style(
-                "font-size:13.5px;font-weight:600;color:var(--ink);"
-            )
-            if view.verdict_detail:
-                ui.label(view.verdict_detail).style("font-size:12.5px;color:var(--ink2);")
-        run_descriptor(view.descriptor)
+    with banner, ui.element("div").style("display:flex;flex-direction:column;gap:3px;"):
+        ui.label(view.verdict_headline).style("font-size:13.5px;font-weight:600;color:var(--ink);")
+        if view.verdict_detail:
+            ui.label(view.verdict_detail).style("font-size:12.5px;color:var(--ink2);")
 
 
 def _table(view: RankingTabView) -> None:

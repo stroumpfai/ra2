@@ -18,6 +18,7 @@ from itertools import count
 import httpx
 import pytest
 from fastapi import FastAPI
+from nicegui.element import Element
 from nicegui.testing.general import nicegui_reset_globals
 from nicegui.testing.user import User
 from sqlalchemy import update
@@ -145,7 +146,7 @@ async def test_the_tab_strip_offers_all_three_tabs(scored: Scored) -> None:
 async def test_an_open_board_can_switch_to_another_evaluation(scored: Scored) -> None:
     """`SD54`. The picker was reachable only with no `?evaluation=` in the URL,
     so once a board was open there was no way to another one but editing the
-    address. The tab strip carries a chip whose options are links back here."""
+    address. The identity row carries a chip whose options are links back here."""
     evaluation_id = str(scored.corpus.evaluation_id)
     await scored.user.open(f"/results?evaluation={evaluation_id}")
     await scored.user.should_see(marker="chip-evaluation")
@@ -166,6 +167,33 @@ async def test_every_tab_carries_the_run_descriptor(scored: Scored) -> None:
         await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}&tab={tab}")
         await scored.user.should_see(marker="run-descriptor")
         await scored.user.should_see(marker="cfg-chip")
+
+
+def _markers_in(element: Element) -> set[str]:
+    """Every marker on `element` or anything inside it."""
+    return {marker for e in (element, *element.descendants()) for marker in e._markers}
+
+
+async def test_the_identity_row_leads_with_the_evaluation_as_on_mismatches(
+    scored: Scored,
+) -> None:
+    """`SD57`. The chip sat at the far right of the tab strip, while Mismatches
+    puts it first on the left. Now a row above the tabs holds it first and
+    the run descriptor on its right, on every tab, and the descriptor is
+    stated **once**, not again in the tab's card header."""
+    for tab in ("extraction", "presence", "ranking"):
+        await scored.user.open(f"/results?evaluation={scored.corpus.evaluation_id}&tab={tab}")
+        (identity,) = scored.user.find(marker="results-identity").elements
+        (strip,) = scored.user.find(marker="results-tabs").elements
+        children = list(identity.default_slot.children)
+        assert "chip-evaluation" in _markers_in(children[0])
+        assert "run-descriptor" in _markers_in(children[-1])
+        assert len(scored.user.find(marker="run-descriptor").elements) == 1
+        assert not {"chip-evaluation", "run-descriptor"} & _markers_in(strip)
+        # Above the tabs: the two are siblings, and the row comes first.
+        slot = identity.parent_slot
+        assert slot is not None
+        assert slot.children.index(identity) < slot.children.index(strip)
 
 
 async def test_a_full_sized_run_shows_the_run_pill_not_the_dev_marker(scored: Scored) -> None:

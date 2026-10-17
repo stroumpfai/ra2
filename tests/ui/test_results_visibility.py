@@ -119,6 +119,19 @@ async def test_a_run_link_opens_that_runs_board(unscored: Unscored) -> None:
     await unscored.user.should_see(marker="results-tabs")
 
 
+async def test_a_scoring_card_keeps_the_evaluation_chip_but_no_descriptor(
+    unscored: Unscored,
+) -> None:
+    """`SD57`. The identity row is drawn in every state, so the way out to
+    another evaluation never depends on this one having scores. The run
+    descriptor arrives with a board's view, and a scoring card reads none."""
+    await unscored.user.open(f"/results?evaluation={unscored.corpus.evaluation_id}")
+
+    await unscored.user.should_see(marker="results-identity")
+    await unscored.user.should_see(marker="chip-evaluation")
+    await unscored.user.should_not_see(marker="run-descriptor")
+
+
 async def test_the_picker_lists_the_evaluations_it_tells_you_to_pick(
     unscored: Unscored,
 ) -> None:
