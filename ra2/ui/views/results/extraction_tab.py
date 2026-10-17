@@ -39,7 +39,6 @@ from ra2.ui.views.results.chrome import (
     MISMATCH_RATE_NOTE,
     QUALITY_TITLE,
     quality_text,
-    run_descriptor,
 )
 
 __all__ = [
@@ -111,7 +110,8 @@ def render_extraction_tab(
 
 
 def _header(view: ExtractionTabView) -> None:
-
+    """The card's own title and its suppression rule. The run descriptor is
+    the page's identity row now, once for all three tabs (`SD57`)."""
     with ui.element("div").style(
         "padding:11px 14px;border-bottom:1px solid var(--rule);display:flex;"
         "align-items:center;gap:10px;"
@@ -129,7 +129,6 @@ def _header(view: ExtractionTabView) -> None:
         )
         with rule:
             ui.label(SUPPRESSION_RULE.format(floor=view.descriptor.min_cell_count))
-        run_descriptor(view.descriptor)
 
 
 def _table(

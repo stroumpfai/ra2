@@ -175,6 +175,18 @@ def test_j11_every_tab_carries_the_run_descriptor_and_the_cfg_chip(
         expect(page.locator('[data-testid="run-descriptor"]')).to_be_visible()
         expect(page.locator('[data-testid="cfg-chip"]')).to_be_visible()
         expect(page.locator('[data-testid="run-pill"]')).to_have_attribute("data-dev", "false")
+        # `SD57`: once, in the identity row above the tabs, with the
+        # evaluation chip at the left gutter where Mismatches has it.
+        expect(page.locator('[data-testid="run-descriptor"]')).to_have_count(1)
+        identity = page.locator('[data-testid="results-identity"]')
+        expect(identity.locator('[data-testid="run-descriptor"]')).to_be_visible()
+        chip = identity.locator('[data-chip="evaluation"]').bounding_box()
+        first_tab = page.locator('[data-testid="results-tab"]').first.bounding_box()
+        descriptor = identity.locator('[data-testid="run-descriptor"]').bounding_box()
+        assert chip is not None and first_tab is not None and descriptor is not None
+        assert chip["y"] + chip["height"] <= first_tab["y"]
+        assert abs(chip["x"] - first_tab["x"]) <= 1
+        assert descriptor["x"] > chip["x"] + chip["width"]
 
 
 def test_j11_clicking_a_feature_row_opens_exactly_one_breakdown(

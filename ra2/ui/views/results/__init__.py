@@ -18,8 +18,10 @@ descriptor and no way to choose it. `/results?evaluation=<id>`, with the
 standard empty card listing launched evaluations when the parameter is absent
 or unknown (plan-phase-4.md C7) — and phase 3's Evaluation view left its
 runs-table run-id link pointing at a deliberate placeholder route, which is the
-link that lands here. Once a board is open, the evaluation chip on the tab
-strip switches it; the list and the chip are shared with Mismatches (`SD54`).
+link that lands here. Once a board is open, the evaluation chip switches it;
+the list and the chip are shared with Mismatches (`SD54`). The chip sits first
+in an identity row above the tabs, with the run descriptor on its right, as on
+Mismatches (`SD57`).
 
 **The header carries `NavItem.description`, not the design's board subtitle.**
 The board says "Extraction and presence scores for one evaluation."; `NAV_ITEMS`
@@ -58,7 +60,14 @@ from nicegui.element import Element
 from ra2.domain.ids import EvaluationId, RunId
 from ra2.services.container import Services
 from ra2.services.errors import NotFoundError, RunNotScoreableError
-from ra2.services.readmodels import EvaluationDraftView, ScoringStatusView, SortDir
+from ra2.services.readmodels import (
+    EvaluationDraftView,
+    ExtractionTabView,
+    PresenceTabView,
+    RankingTabView,
+    ScoringStatusView,
+    SortDir,
+)
 from ra2.ui.shell import item_for_key, shell
 from ra2.ui.state import ResultsState, results_state, set_results_state
 from ra2.ui.views.results.chrome import (
@@ -66,6 +75,7 @@ from ra2.ui.views.results.chrome import (
     evaluation_chip,
     evaluation_picker,
     launched,
+    run_descriptor,
 )
 from ra2.ui.views.results.extraction_tab import render_extraction_tab
 from ra2.ui.views.results.presence_tab import render_presence_tab
@@ -138,6 +148,17 @@ EMPTY_BODY_NONE = (
 #: (`plan-scoring-visibility-follow-ups.md` Part 1). Tests and any other
 #: reader keep importing them from this module.
 
+#: Mismatches' `TOOLBAR_ROW_STYLE`, on the tab strip's surface and gutter.
+#: No bottom padding and no rule: the strip below supplies both, so the row
+#: and the tabs read as one header (`SD57`).
+IDENTITY_ROW_STYLE: Final = (
+    "flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;"
+    "flex-wrap:wrap;padding:11px 28px 0;background:var(--surface);"
+)
+
+#: What one tab's board is drawn from. Each carries the run descriptor.
+type _Board = ExtractionTabView | PresenceTabView | RankingTabView
+
 #: How many runs one evaluation's ordinals are read from — `evaluation_view`'s
 #: `RUNS_SUMMARY_CAP`, for its reason: the ordinal is a property of the whole
 #: set, so it cannot be taken from a page of it.
@@ -162,6 +183,19 @@ def register(services: Services) -> None:
         """
         page = _ResultsPage(services)
         await page.build(evaluation=evaluation, run=run, tab=tab)
+
+
+def _shows_board(statuses: Sequence[ScoringStatusView]) -> bool:
+    """Whether the board renders: none of the four scoring cards applies.
+
+    `reload`'s card chain, asked as one question so the board can be read
+    before the chrome above it is drawn.
+    """
+    if statuses and not any(s.is_scoreable for s in statuses):
+        return False
+    if any(s.running for s in statuses):
+        return False
+    return any(s.is_scored for s in statuses)
 
 
 class _ResultsPage:
@@ -260,9 +294,14 @@ class _ResultsPage:
         #: that wrote some of it. Never a run still in flight — `submit_rescore`
         #: refuses that, and offering it would be a button that 409s.
         unscored = [s for s in statuses if s.scoring_stalled or s.scoring_incomplete]
+        # **Read before the chrome is drawn** (`SD57`): the identity row above
+        # the tabs carries the run descriptor, and the descriptor arrives with
+        # the active tab's view.
+        board = await self._read_active_tab(evaluation_id) if _shows_board(statuses) else None
 
         with self._body:
-            self._render_tab_strip(drafts)
+            self._render_identity_row(drafts, board)
+            self._render_tab_strip()
             content = ui.element("div").style(
                 "flex:1;min-height:0;min-width:0;display:flex;flex-direction:column;"
             )
@@ -271,11 +310,20 @@ class _ResultsPage:
             # `STALLED_TITLE`). Each says *which*: "no results", "not enough
             # data for results", "not yet" and "it stopped" are four different
             # facts about the run, and the last two shared a sentence.
-            if statuses and not any(s.is_scoreable for s in statuses):
+            if board is not None:
+                # **Also when the boards render.** An evaluation runs several
+                # models and each is scored by its own pass, so one model's
+                # pass can fail while the others succeed — and then the board
+                # draws a column of blanks for it, which reads as a model that
+                # answered nothing rather than one nobody scored. The strip
+                # says which, and offers the same control.
+                await self._render_rescore(unscored, note=PARTIAL_NOTE)
+                self._render_board(board)
+            elif statuses and not any(s.is_scoreable for s in statuses):
                 empty_card(NOTHING_SCOREABLE_TITLE, NOTHING_SCOREABLE_BODY)
             elif any(s.running for s in statuses):
                 empty_card(SCORING_TITLE, SCORING_BODY)
-            elif not any(s.is_scored for s in statuses):
+            else:
                 # Three different facts, not one. A run that has not finished
                 # is waiting; a finished run with no rows did not run its
                 # pass; a finished run with *some* rows stopped part-way. The
@@ -287,15 +335,6 @@ class _ResultsPage:
                 else:
                     empty_card(INCOMPLETE_TITLE, INCOMPLETE_BODY)
                 await self._render_rescore(unscored)
-            else:
-                # **Also when the boards render.** An evaluation runs several
-                # models and each is scored by its own pass, so one model's
-                # pass can fail while the others succeed — and then the board
-                # draws a column of blanks for it, which reads as a model that
-                # answered nothing rather than one nobody scored. The strip
-                # says which, and offers the same control.
-                await self._render_rescore(unscored, note=PARTIAL_NOTE)
-                await self._render_active_tab(evaluation_id)
         self._start_polling()
 
     async def _render_rescore(
@@ -417,30 +456,36 @@ class _ResultsPage:
             return False
         return True
 
-    async def _render_active_tab(self, evaluation_id: EvaluationId) -> None:
+    async def _read_active_tab(self, evaluation_id: EvaluationId) -> _Board:
+        """The active tab's view, read whole before anything is drawn."""
         assert self._state is not None
         state = self._state
         if state.tab == "presence":
-            presence = await self._services.results.presence_tab(
+            return await self._services.results.presence_tab(
                 evaluation_id,
                 model_id=state.presence_model_id or None,
                 feature_key=state.presence_feature_key or None,
             )
-            render_presence_tab(view=presence, on_select_model=self._select_model)
-        elif state.tab == "ranking":
-            render_ranking_tab(view=await self._services.ranking.ranking_tab(evaluation_id))
+        if state.tab == "ranking":
+            return await self._services.ranking.ranking_tab(evaluation_id)
+        return await self._services.results.extraction_tab(
+            evaluation_id,
+            expanded_feature_id=(
+                None if state.expanded_feature_id is None else state.expanded_feature_id  # type: ignore[arg-type]
+            ),
+            page=1,
+            page_size=10,
+            sort_key="name",
+            sort_dir=SortDir.ASC,
+        )
+
+    def _render_board(self, board: _Board) -> None:
+        if isinstance(board, PresenceTabView):
+            render_presence_tab(view=board, on_select_model=self._select_model)
+        elif isinstance(board, RankingTabView):
+            render_ranking_tab(view=board)
         else:
-            extraction = await self._services.results.extraction_tab(
-                evaluation_id,
-                expanded_feature_id=(
-                    None if state.expanded_feature_id is None else state.expanded_feature_id  # type: ignore[arg-type]
-                ),
-                page=1,
-                page_size=10,
-                sort_key="name",
-                sort_dir=SortDir.ASC,
-            )
-            render_extraction_tab(view=extraction, on_toggle_feature=self._toggle_feature)
+            render_extraction_tab(view=board, on_toggle_feature=self._toggle_feature)
 
     # --- handlers ----------------------------------------------------------
 
@@ -473,12 +518,35 @@ class _ResultsPage:
 
     # --- chrome ------------------------------------------------------------
 
-    def _render_tab_strip(self, drafts: Sequence[EvaluationDraftView]) -> None:
-        """The three tabs, and on the right the evaluation they read (`SD54`).
+    def _render_identity_row(
+        self, drafts: Sequence[EvaluationDraftView], board: _Board | None
+    ) -> None:
+        """Which evaluation the tabs read, and what it was run on (`SD57`).
 
-        The chip is the board's way out to another evaluation. Without it the
-        picker was reachable only by removing `?evaluation=` from the URL.
+        Mismatches' identity row, so the two Review screens put the evaluation
+        in the same place: the chip first on the left, the run descriptor on
+        the right. The chip is the board's way out to another evaluation
+        (`SD54`); the descriptor is "a score without its config is not a
+        result" (README, Shared chrome), stated once for all three tabs rather
+        than in each tab's card header.
+
+        No descriptor without a board: the scoring states draw no scores, and
+        the descriptor arrives with the tab's view, which they do not read.
         """
+        assert self._state is not None
+        row = (
+            ui.element("div")
+            .props('data-testid="results-identity"')
+            .mark("results-identity")
+            .style(IDENTITY_ROW_STYLE)
+        )
+        with row:
+            evaluation_chip(drafts, current=self._state.evaluation_id, path=_ITEM.path)
+            if board is not None:
+                run_descriptor(board.descriptor)
+
+    def _render_tab_strip(self) -> None:
+        """The three tabs, as the design draws them (README, Shared chrome)."""
         assert self._state is not None
         strip = (
             ui.element("div")
@@ -509,10 +577,6 @@ class _ResultsPage:
                 )
                 with button:
                     ui.label(label)
-        # Negative margins so the chip does not set the strip's height: the
-        # tabs' own 9px underline gap does, as it did before the chip.
-        with strip, ui.element("div").style("margin:-6px 0 -6px auto;flex:none;"):
-            evaluation_chip(drafts, current=self._state.evaluation_id, path=_ITEM.path)
 
     async def _render_picker(self, *, missing: str = "") -> None:
         """The index the design does not draw (C7) — **with the list in it**.
