@@ -955,6 +955,37 @@ and no read model changed: every tab's view already carried the
 
 ---
 
+## Deleting an evaluation from the front end, a slice
+
+`feat/evaluation-switcher`, by `plan-delete-evaluation.md` (P1 and P2). **One
+amendment** (`contracts/amendments/feat-evaluation-switcher.md`), applied in the
+same commit. No migration and no API change. The design is `sw-design.md`
+`SD59`.
+
+### Amended files (already frozen)
+
+| File | Change | Amendment |
+|---|---|---|
+| `ra2/services/readmodels.py` | + `DiscardPreviewView.launched_at`, `.models`, `.inputs`, all defaulted. `api/v1/discard.py` maps fields one by one, so `DiscardPreview` and the OpenAPI snapshot are unchanged | `feat-evaluation-switcher` |
+| `ra2/ui/views/evaluation_view.py` | The page takes `?evaluation=<id>`; `_current_evaluation` uses it once and returns the evaluation list too; the toolbar's left group opens with `evaluation_chip`; `_follow_in_url` keeps the URL on the evaluation on screen; + `EVALUATION_NOT_FOUND_MESSAGE`, `EVALUATION_PARAM` | `feat-evaluation-switcher` |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/services/lifecycle_service.py` | `evaluation_preview` fills the three fields; + `_evaluation_inputs` |
+| `ra2/ui/components/discard_dialog.py` | + `discard-identity` for an evaluation: launched (or `NEVER_LAUNCHED`), models, inputs, id. + `launched_line` |
+| `ra2/ui/views/results/chrome.py` | `evaluation_chip`'s options carry the launch time or `DRAFT_OPTION` beside the name, on all three screens |
+| `tests/backend/services/lifecycle/test_discard.py` | + the preview's when, what and models; two same-named evaluations preview differently; a draft is never launched and names no prompt; a run preview carries none of it |
+| `tests/ui/test_evaluation_view.py` | + the chip leads the toolbar and lists every evaluation with its launch; the URL opens the one it names; a stale id falls back and says so; the URL follows "New evaluation"; an older evaluation is discarded from its own URL; the dialog's identity lines. The toolbar's one-button test counts `.btn` |
+| `tests/ui/test_discard_dialog.py` | + a never-launched evaluation; a run shows no identity |
+| `tests/ui/test_results_view.py` | The chip option carries the launch time |
+| `tests/e2e/test_j10_evaluation.py` | The toolbar's one-button check counts `button.btn`, for the UI test's reason |
+| `sw-design.md` | `SD59`; §18.5 |
+| `plan-delete-evaluation.md` | new: the propositions, and this slice's scope |
+
+---
+
 ## Phase 5 — owner: M35 (Wave 0), amendment only
 
 Re-established at tag `p5-frozen`, the same way M27 established the phase-4

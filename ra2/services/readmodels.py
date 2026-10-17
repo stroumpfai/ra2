@@ -1340,6 +1340,18 @@ class DiscardPreviewView:
     cited_by: int = 0
     """Corpora frozen from this delivery. Non-zero means the discard is
     refused outright (§18.2); there is no `force` for this one."""
+    # --- which evaluation (SD59) ---------------------------------------------
+    #
+    # An evaluation's name is not unique and a new one takes its feature set's
+    # (SD32), so `label` alone can name ten evaluations at once. These three
+    # are what tell them apart in the dialog. Facts, not sentences: the dialog
+    # formats the time in the host's zone (SD37). Empty on the other two kinds.
+    launched_at: datetime | None = None
+    """When the evaluation was launched. `None` on a draft that never was."""
+    models: tuple[str, ...] = ()
+    """The models its runs used, distinct and sorted. `()` with no runs."""
+    inputs: str = ""
+    """What it pins: "<corpus> · v1 · <feature set> · v2 · prompt v3"."""
 
     @property
     def has_exportable(self) -> bool:

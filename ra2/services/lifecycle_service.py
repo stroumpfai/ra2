@@ -35,7 +35,7 @@ from ra2.domain.extraction import RunStatus
 from ra2.domain.ids import DeliveryId, EvaluationId, FeatureId, RecordId, RunId
 from ra2.infra.config import Settings
 from ra2.infra.filestore import FileStore, FileStoreError
-from ra2.persistence.models import Evaluation, Feature, Run
+from ra2.persistence.models import Corpus, Evaluation, Feature, FeatureConfig, PromptTemplate, Run
 from ra2.persistence.repositories.delivery_repo import DeliveryRepository
 from ra2.persistence.repositories.evaluation_repo import EvaluationRepository
 from ra2.persistence.repositories.mismatch_repo import MismatchRepository
@@ -144,6 +144,9 @@ class LifecycleService:
                 files=0,
                 active=active is not None,
                 active_detail=None if active is None else active.active_detail,
+                launched_at=evaluation.launched_at,
+                models=tuple(sorted({run.model_name for run in runs})),
+                inputs=await self._evaluation_inputs(session, evaluation),
             )
 
     async def delivery_preview(self, delivery_id: DeliveryId) -> DiscardPreviewView:
@@ -359,6 +362,24 @@ class LifecycleService:
             active=active,
             active_detail=f"{run_id} is {status.value}" if active else None,
         )
+
+    @staticmethod
+    async def _evaluation_inputs(session: AsyncSession, evaluation: Evaluation) -> str:
+        """What an evaluation pins, in the labels its own screen uses:
+        "<corpus> · v1 · <feature set> · v2 · prompt v3" (SD59).
+
+        All three are `RESTRICT`, so the corpus and the feature set are always
+        there. A draft may not have chosen a prompt yet, and then says nothing
+        about one rather than inventing a version.
+        """
+        corpus = await session.get(Corpus, evaluation.corpus_id)
+        config = await session.get(FeatureConfig, evaluation.feature_config_id)
+        parts = [f"{row.name} · v{row.version}" for row in (corpus, config) if row is not None]
+        if evaluation.prompt_template_id is not None:
+            template = await session.get(PromptTemplate, evaluation.prompt_template_id)
+            if template is not None:
+                parts.append(f"prompt v{template.version}")
+        return " · ".join(parts)
 
     async def _require_run(self, session: AsyncSession, run_id: RunId) -> Run:
         run = await RunRepository(session).get(run_id)

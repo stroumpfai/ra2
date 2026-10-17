@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.backend.services.lifecycle.conftest import TAGGED, ScoredWorld
+from tests.fixtures.scored_corpus import seed_scored_corpus
 
 from ra2.domain.extraction import RunStatus
 from ra2.domain.ids import DeliveryId, EvaluationId, RunId
@@ -82,6 +83,86 @@ async def test_evaluation_preview_sums_its_runs(
     assert whole.extractions == sum(p.extractions for p in per_run)
     assert whole.scores == sum(p.scores for p in per_run)
     assert whole.tagged_mismatches == sum(p.tagged_mismatches for p in per_run)
+
+
+# --- which evaluation the dialog is about (SD59) --------------------------
+
+
+async def test_the_evaluation_preview_says_when_what_and_with_which_models(
+    lifecycle_service: LifecycleService,
+    scored: ScoredWorld,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    whole = await lifecycle_service.evaluation_preview(scored.corpus.evaluation_id)
+
+    async with db_session_factory() as session:
+        row = await session.get(Evaluation, scored.corpus.evaluation_id)
+        assert row is not None
+        launched_at = row.launched_at
+    assert launched_at is not None
+    assert whole.launched_at == launched_at
+    # Distinct and sorted, not in run order: a fact about the set.
+    assert whole.models == ("mistral-small:24b", "qwen3:14b")
+    assert whole.inputs == f"{scored.corpus.corpus_name} · v1 · features s · v1 · prompt v1"
+
+
+async def test_two_evaluations_sharing_a_name_preview_differently(
+    lifecycle_service: LifecycleService,
+    scored: ScoredWorld,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The hazard itself: a new evaluation takes its feature set's name (SD32),
+    so the name the label leads with can name two evaluations at once."""
+    async with db_session_factory() as session:
+        other = await seed_scored_corpus(
+            session, suffix="t", records=4, template_version=2, models=("qwen3:14b",)
+        )
+        row = await session.get(Evaluation, other.evaluation_id)
+        assert row is not None
+        row.name = "evaluation s"
+        await session.commit()
+
+    first = await lifecycle_service.evaluation_preview(scored.corpus.evaluation_id)
+    second = await lifecycle_service.evaluation_preview(other.evaluation_id)
+
+    assert first.label.split(" · ")[0] == second.label.split(" · ")[0] == "evaluation s"
+    assert first.target_id != second.target_id
+    assert first.models != second.models
+    assert first.inputs != second.inputs
+
+
+async def test_a_draft_previews_as_never_launched_and_names_no_prompt(
+    lifecycle_service: LifecycleService,
+    scored: ScoredWorld,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    draft_id = EvaluationId("eval-draft")
+    async with db_session_factory() as session:
+        session.add(
+            Evaluation(
+                id=draft_id,
+                name="evaluation s",
+                corpus_id=scored.corpus.corpus_id,
+                feature_config_id=scored.corpus.feature_config_id,
+            )
+        )
+        await session.commit()
+
+    preview = await lifecycle_service.evaluation_preview(draft_id)
+
+    assert preview.launched_at is None
+    assert preview.models == ()
+    assert preview.inputs == f"{scored.corpus.corpus_name} · v1 · features s · v1"
+
+
+async def test_run_and_delivery_previews_carry_no_evaluation_identity(
+    lifecycle_service: LifecycleService, scored: ScoredWorld
+) -> None:
+    preview = await lifecycle_service.run_preview(scored.tagged_run_id)
+
+    assert preview.launched_at is None
+    assert preview.models == ()
+    assert preview.inputs == ""
 
 
 async def test_missing_run_is_not_found(lifecycle_service: LifecycleService) -> None:

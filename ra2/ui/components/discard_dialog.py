@@ -24,7 +24,7 @@ from nicegui import ui
 from nicegui.element import Element
 
 from ra2.services.readmodels import DiscardPreviewView
-from ra2.ui.components.primitives import dialog_card
+from ra2.ui.components.primitives import dialog_card, format_local
 
 __all__ = [
     "DISCARD_IRREVERSIBLE",
@@ -32,7 +32,9 @@ __all__ = [
     "EXPORT_LEAVES_RA2",
     "EXPORT_PER_RUN",
     "EXPORT_PROMPT",
+    "NEVER_LAUNCHED",
     "discard_dialog",
+    "launched_line",
     "loss_line",
     "tagged_sentence",
 ]
@@ -74,6 +76,23 @@ EXPORT_LEAVES_RA2 = (
 #: So the honest answer is N pairs of files, and the dialog says so before the
 #: analyst presses rather than after N downloads have started.
 EXPORT_PER_RUN = "One pair of files per run — its scores and its mismatches, named by run id."
+
+
+#: An evaluation's line when it has no launch time to show (SD59). Said,
+#: because a blank line beside a launched evaluation's date is the one
+#: difference between two same-named rows an analyst might be choosing between.
+NEVER_LAUNCHED = "draft · never launched"
+#: The runs table's and the evaluation picker's timestamp, so one evaluation
+#: reads the same in all three places.
+_LAUNCHED_FORMAT = "%d.%m.%y - %H:%M:%S"
+
+
+def launched_line(preview: DiscardPreviewView) -> str:
+    """ "launched 14.10.26 - 10:42:07", in the host's zone (SD37), or
+    `NEVER_LAUNCHED`. Only meaningful for an evaluation."""
+    if preview.launched_at is None:
+        return NEVER_LAUNCHED
+    return f"launched {format_local(preview.launched_at, _LAUNCHED_FORMAT)}"
 
 
 def loss_line(preview: DiscardPreviewView) -> str:
@@ -148,6 +167,8 @@ def discard_dialog(
         ui.label(preview.label).classes("mono ink2").props('data-testid="discard-target"').mark(
             "discard-target"
         ).style("font-size:11.5px;word-break:break-all;")
+        if preview.kind == "evaluation":
+            _evaluation_identity(preview)
 
         ui.label(loss_line(preview)).classes("mono").props('data-testid="discard-loss"').mark(
             "discard-loss"
@@ -238,3 +259,30 @@ def discard_dialog(
                 # warning is a deliberate act and not the same click.
                 ui.label("Discard anyway" if forced else "Discard")
     return dialog
+
+
+def _evaluation_identity(preview: DiscardPreviewView) -> None:
+    """Which evaluation, beyond its name (SD59).
+
+    The name is not unique, and a new evaluation takes its feature set's
+    (SD32), so "Discard evaluation Weather & conditions" can describe ten rows.
+    When it was launched, what it ran and what it pins are what differ, and
+    the id is what the URL and every log line call it. Each fact arrives from
+    the service; this only lays them out.
+    """
+    with (
+        ui.element("div")
+        .props('data-testid="discard-identity"')
+        .mark("discard-identity")
+        .style("display:flex;flex-direction:column;gap:2px;margin-top:-6px;")
+    ):
+        lines = [("discard-launched", launched_line(preview))]
+        if preview.models:
+            lines.append(("discard-models", " · ".join(preview.models)))
+        if preview.inputs:
+            lines.append(("discard-inputs", preview.inputs))
+        lines.append(("discard-id", preview.target_id))
+        for testid, text in lines:
+            ui.label(text).classes("mono ink3").props(f'data-testid="{testid}"').mark(testid).style(
+                "font-size:11px;word-break:break-all;"
+            )

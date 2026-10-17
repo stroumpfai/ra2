@@ -36,6 +36,7 @@ __all__ = [
     "CONTEXT_NOT_RECORDED",
     "DETERMINISM_CAVEAT",
     "DEV_PILL",
+    "DRAFT_OPTION",
     "MENU_ITEM_ON_STYLE",
     "MENU_ITEM_STYLE",
     "MENU_STYLE",
@@ -310,6 +311,11 @@ def evaluation_chip(drafts: Sequence[EvaluationDraftView], *, current: str, path
     `path?evaluation=<id>`, and each page's own `build` already resets what a
     different evaluation invalidates. The panel opens and closes in place and
     holds no state beyond its own visibility, so it needs no storage key.
+
+    **Each option carries its launch time beside its name** (`SD59`). A new
+    evaluation takes its feature set's name (`SD32`), so a list of names alone
+    can read the same on every row. The Evaluation screen passes drafts too,
+    and a draft says so instead of a time.
     """
     selected = next((d for d in drafts if str(d.evaluation_id) == current), None)
     name = current if selected is None else (selected.name or current)
@@ -337,7 +343,7 @@ def evaluation_chip(drafts: Sequence[EvaluationDraftView], *, current: str, path
                 on = str(draft.evaluation_id) == current
                 current_flag = "true" if on else "false"
                 option = ui.link(
-                    text=draft.name or str(draft.evaluation_id),
+                    text=f"{draft.name or draft.evaluation_id} · {_option_when(draft)}",
                     target=f"{path}?evaluation={draft.evaluation_id}",
                 )
                 option.classes(remove="nicegui-link", add="mono")
@@ -351,6 +357,15 @@ def evaluation_chip(drafts: Sequence[EvaluationDraftView], *, current: str, path
                     MENU_ITEM_STYLE + "text-decoration:none;" + (MENU_ITEM_ON_STYLE if on else "")
                 )
     return wrapper
+
+
+#: What a chip option says in place of a launch time (`SD59`).
+DRAFT_OPTION: Final = "draft"
+
+
+def _option_when(draft: EvaluationDraftView) -> str:
+    """The chip option's second half: when it was launched, or `DRAFT_OPTION`."""
+    return DRAFT_OPTION if draft.launched_at is None else _launched_label(draft.launched_at)
 
 
 def _launched_label(launched_at: datetime | None) -> str:
