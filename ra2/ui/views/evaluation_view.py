@@ -36,7 +36,7 @@ rather than from a task counter a restart can disagree with (§15 F6). So the
 timer re-reads `EvaluationService.get()` and stops when no run is `queued` or
 `running` — one polling loop, no websocket, no SSE.
 
-**Four places this file departs from the drawn board, all deliberate:**
+**Five places this file departs from the drawn board, all deliberate:**
 
 - *Step 2's note is not rendered at all.* The design reads "Freezes when the
   first run executes", which stopped being true at phase 2 — `mvp-spec.md` §9
@@ -65,6 +65,10 @@ timer re-reads `EvaluationService.get()` and stops when no run is `queued` or
   evaluation that already exists, so it draws neither; without them a launched
   evaluation is a dead end with nothing on screen saying why, and the "clone
   into a new evaluation" its own step-2 copy prescribes has nowhere to go.
+- *The toolbar's left group opens with the evaluation chip* Results and
+  Mismatches use, and the page takes `?evaluation=<id>` (`SD59`). The design
+  shows one evaluation and no way to another, so every evaluation but the
+  newest was unreachable here, and so was the discard in its runs card.
 
 **Three components this view places but does not implement** —
 `progress_card`, `ollama_settings_dialog` and `prompt_preview_panel` — are
@@ -101,6 +105,7 @@ view keeps only the handle it needs to close it on "refresh".
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Final, cast
+from urllib.parse import urlencode
 
 from nicegui import ui
 from nicegui.element import Element
@@ -128,6 +133,7 @@ from ra2.services.readmodels import (
     ConnectionProbeView,
     ConnectionView,
     CorpusView,
+    EvaluationDraftView,
     EvaluationView,
     FeatureSetSummary,
     ModelChoiceView,
@@ -180,7 +186,7 @@ from ra2.ui.state import (
     set_table_state,
     table_state,
 )
-from ra2.ui.views.results.chrome import DETERMINISM_CAVEAT
+from ra2.ui.views.results.chrome import DETERMINISM_CAVEAT, evaluation_chip
 
 __all__ = [
     "CONTENT_GAP",
@@ -189,6 +195,8 @@ __all__ = [
     "DEV_MARKER",
     "DISCARD_EVALUATION_LABEL",
     "ENDPOINT_WORDS",
+    "EVALUATION_NOT_FOUND_MESSAGE",
+    "EVALUATION_PARAM",
     "FLOOR_LABEL",
     "LAUNCHED_MESSAGE",
     "MODELS_UNSAVED_MESSAGE",
@@ -500,9 +508,17 @@ UNSAVED_MESSAGE: Final = "“New evaluation” pins the prompt, the decoding set
 MODELS_UNSAVED_MESSAGE: Final = "“New evaluation” first — the ticks need a row to record into."
 DRAFT_SAVED_MESSAGE: Final = "Draft saved."
 EVALUATION_CREATED_MESSAGE: Final = "New evaluation created."
-#: After the row is gone. Named, because with no switcher the screen is about
-#: to show a *different* evaluation and the analyst is owed the reason.
+#: After the row is gone. Named, because the screen is about to show a
+#: *different* evaluation and the analyst is owed the reason.
 EVALUATION_DISCARDED_MESSAGE: Final = "Discarded evaluation {name}."
+#: `?evaluation=` named nothing, so the screen shows the newest instead (SD59).
+#: Usually a link to an evaluation that has since been discarded.
+EVALUATION_NOT_FOUND_MESSAGE: Final = (
+    "No evaluation {evaluation_id} — it may have been discarded. Showing the newest."
+)
+#: The query parameter this view reads (`_page`) and writes (`_follow_in_url`),
+#: the one Results and Mismatches read too (SD54).
+EVALUATION_PARAM: Final = "evaluation"
 #: Why the setup column is read-only, and the way out. Rendered **over the
 #: whole column**, not beside step 4: the lock is not step 4's, and three of
 #: its neighbours were equally silent about it (SD32).
@@ -517,8 +533,17 @@ EMPTY_CELL: Final = "—"
 
 def register(services: Services) -> None:
     @ui.page(_ITEM.path)
-    async def _page() -> None:
-        page = _EvaluationPage(services)
+    async def _page(evaluation: str = "") -> None:
+        """`/evaluation`, optionally `?evaluation=<id>` (SD59).
+
+        The parameter is the only thing that outlives a reload:
+        `app.storage.client` starts empty on every page load (SD54), so
+        without it a reload always landed on the newest evaluation, and an
+        older one could not be opened here at all. The view writes the
+        parameter back (`_follow_in_url`), so a reload and a copied link land
+        on the evaluation that was on screen.
+        """
+        page = _EvaluationPage(services, requested=evaluation)
         page.frame()
         # SD55: everything after this point may wait on the endpoint, and
         # NiceGUI gives a page function 3 s (`response_timeout`) to return
@@ -538,9 +563,17 @@ class _EvaluationPage:
     last read from a service; it is never the source of truth for any of it.
     """
 
-    def __init__(self, services: Services) -> None:
+    def __init__(self, services: Services, *, requested: str = "") -> None:
         self._services = services
+        #: The URL's `?evaluation=`, consumed by the first read that resolves
+        #: an evaluation (`_current_evaluation`). Later reads follow the
+        #: remembered id, which is then the same one.
+        self._requested = requested
+        #: What the URL names now, so `_follow_in_url` writes only a change.
+        self._url_evaluation = requested
         self._view: EvaluationView | None = None
+        #: Every evaluation, drafts included, newest first: the chip's options.
+        self._drafts: tuple[EvaluationDraftView, ...] = ()
         self._corpora: tuple[CorpusView, ...] = ()
         self._sets: tuple[FeatureSetSummary, ...] = ()
         self._templates: tuple[PromptTemplateView, ...] = ()
@@ -720,7 +753,7 @@ class _EvaluationPage:
             ).items
             sets = tuple(s for s in await self._services.feature.list_configs() if s.is_frozen)
             templates = tuple(await self._services.prompt.list_versions())
-            view = await self._current_evaluation()
+            view, drafts = await self._current_evaluation()
             connection, models = self._connection, self._models
             if view is None:
                 if connection is None:
@@ -749,6 +782,7 @@ class _EvaluationPage:
             if seq != self._local_seq or self._root.is_deleted:
                 return
             self._corpora, self._sets, self._templates = corpora, sets, templates
+            self._drafts = drafts
             self._view, self._connection, self._models = view, connection, models
             self._runs, self._all_runs, self._scored_runs = runs, all_runs, scored
             painted = (view, connection, models)
@@ -765,7 +799,24 @@ class _EvaluationPage:
                 self._full_pending = False
                 self._render()
             self._painted = painted
+            self._follow_in_url(view)
         self._root.props(f'data-loading="{"true" if self._asking else "false"}"')
+
+    def _follow_in_url(self, view: EvaluationView | None) -> None:
+        """Keep `?evaluation=` naming the evaluation on screen (SD59).
+
+        `replace`, not `push`, as `features_view` mirrors its corpus pick: the
+        screen moving to another evaluation after "New evaluation" or a
+        discard is not a navigation the back button should have to walk, and
+        a real navigation would rebuild the page. Without it, a reload after
+        "New evaluation" would open the evaluation the URL still named.
+        """
+        current = "" if view is None else str(view.draft.evaluation_id)
+        if current == self._url_evaluation:
+            return
+        self._url_evaluation = current
+        query = f"?{urlencode({EVALUATION_PARAM: current})}" if current else ""
+        ui.navigate.history.replace(f"{_ITEM.path}{query}")
 
     async def _read_endpoint(self, seq: int) -> None:
         """The endpoint half: ask once, then repaint the setup column.
@@ -873,20 +924,32 @@ class _EvaluationPage:
         statuses = await self._services.results.scoring_status(evaluation_id)
         return frozenset(status.run_id for status in statuses if status.is_scored)
 
-    async def _current_evaluation(self) -> EvaluationView | None:
-        """The evaluation this tab is looking at.
+    async def _current_evaluation(
+        self,
+    ) -> tuple[EvaluationView | None, tuple[EvaluationDraftView, ...]]:
+        """The evaluation this tab is looking at, and every evaluation the
+        chip can switch to.
 
-        The design shows exactly one evaluation and has no switcher. This picks
-        the one remembered per client — so a redraw cannot silently move the
-        analyst to a different one — falling back to the newest that exists, in
+        The URL's `?evaluation=` first, once (SD59). Then the one remembered
+        per client, so a redraw cannot silently move the analyst to a
+        different one. Then the newest that exists, in
         `import_view._current_delivery`'s shape and for its reason.
+
+        A requested id that names nothing (a discarded evaluation, a stale
+        link) falls through to the newest **and says so**: the screen is
+        about to show a different evaluation from the one asked for.
         """
         setup = evaluation_setup()
-        drafts = await self._services.evaluation.list_evaluations()
+        drafts = tuple(await self._services.evaluation.list_evaluations())
+        requested, self._requested = self._requested, ""
+        if requested and all(str(d.evaluation_id) != requested for d in drafts):
+            ui.notify(EVALUATION_NOT_FOUND_MESSAGE.format(evaluation_id=requested))
+            requested = ""
         if not drafts:
             set_evaluation_setup(EvaluationSetup())
-            return None
-        remembered = next((d for d in drafts if str(d.evaluation_id) == setup.evaluation_id), None)
+            return None, drafts
+        wanted = requested or setup.evaluation_id
+        remembered = next((d for d in drafts if str(d.evaluation_id) == wanted), None)
         chosen = remembered if remembered is not None else drafts[0]
         set_evaluation_setup(
             EvaluationSetup(
@@ -898,9 +961,10 @@ class _EvaluationPage:
         # Without asking the endpoint (SD55): whatever endpoint state this
         # page already holds is handed back, and on a first load there is
         # none, so the read says `UNCHECKED`. `_read_endpoint` asks next.
-        return await self._services.evaluation.get(
+        view = await self._services.evaluation.get(
             chosen.evaluation_id, connection=self._connection, models=self._models, probe=False
         )
+        return view, drafts
 
     # --- rendering -----------------------------------------------------------
 
@@ -924,6 +988,14 @@ class _EvaluationPage:
     def _render_toolbar(self) -> None:
         view = self._view
         with ui.element("div").style(LEFT_GROUP_STYLE):
+            if view is not None:
+                # First, as on Results and Mismatches (SD57), and the way to
+                # every other evaluation, the one discard can then reach
+                # (SD59). Drafts included: an unlaunched one is reachable
+                # nowhere else.
+                evaluation_chip(
+                    self._drafts, current=str(view.draft.evaluation_id), path=_ITEM.path
+                )
             label = "" if view is None else view.feature_config_label
             ui.label(f"{label}{PINNED_SUFFIX}" if label else NO_SETUP_MESSAGE).classes(
                 "mono ink2"
@@ -973,8 +1045,9 @@ class _EvaluationPage:
         the label never has to describe an act the press cannot perform: with
         no evaluation there is nothing to save, after a launch there is
         nothing left to edit, and on an unlaunched draft a *second* draft
-        would be debris — the one on screen is already fully editable, and
-        this view has no switcher to find the other one with again.
+        would be debris — the one on screen is already fully editable. The
+        chip can reach the other one now (SD59), but it would still be one
+        more row to tell apart, for nothing.
         """
         view = self._view
         return view is not None and not view.draft.is_launched

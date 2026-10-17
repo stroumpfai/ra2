@@ -29,6 +29,7 @@ from ra2.ui.components.discard_dialog import (
     DISCARD_KEEPS,
     EXPORT_LEAVES_RA2,
     EXPORT_PROMPT,
+    NEVER_LAUNCHED,
     discard_dialog,
     loss_line,
 )
@@ -214,3 +215,40 @@ def test_the_loss_line_drops_what_is_zero() -> None:
     assert loss_line(_preview(runs=1, extractions=1, scores=1, mismatches=1)) == (
         "1 run · 1 extraction · 1 score · 1 mismatch"
     )
+
+
+# --- which evaluation (SD59) ------------------------------------------------
+
+
+async def test_an_evaluation_that_never_launched_says_so_and_shows_its_id(user: User) -> None:
+    """Two same-named evaluations differ in when, what and which models; a
+    draft's "when" is that it never was, said rather than left blank."""
+    _page(
+        "/d/draft",
+        _preview(
+            kind="evaluation",
+            target_id="eval-7f3a",
+            label="Weather & conditions · 0 run(s)",
+            runs=0,
+            extractions=0,
+            scores=0,
+            mismatches=0,
+            inputs="corpus · v1 · Weather & conditions · v2",
+        ),
+    )
+    await user.open("/d/draft")
+
+    await user.should_see(marker="discard-identity")
+    await user.should_see(NEVER_LAUNCHED)
+    await user.should_see("corpus · v1 · Weather & conditions · v2")
+    await user.should_see("eval-7f3a")
+    # No runs, so no models line rather than an empty one.
+    await user.should_not_see(marker="discard-models")
+
+
+async def test_a_run_carries_no_evaluation_identity(user: User) -> None:
+    _page("/d/run-identity", _preview())
+    await user.open("/d/run-identity")
+
+    await user.should_see(marker="discard-target")
+    await user.should_not_see(marker="discard-identity")

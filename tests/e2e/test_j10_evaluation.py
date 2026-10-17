@@ -427,7 +427,8 @@ def test_j10_launch_an_evaluation_and_watch_it_finish(
     # still carries exactly one secondary button, and it is "Save draft".
     discard = page.locator('[data-testid="evaluation-discard"]')
     expect(discard).to_have_text(evaluation_view.DISCARD_EVALUATION_LABEL)
-    expect(page.locator('[data-testid="evaluation-toolbar"] button')).to_have_count(1)
+    # `.btn`: the evaluation chip is a `<button>` too (SD59), not a press SD32 counts.
+    expect(page.locator('[data-testid="evaluation-toolbar"] button.btn')).to_have_count(1)
     discard.click()
 
     # The clone has no runs, so this is the dialog's "nothing to export" state.

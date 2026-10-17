@@ -23,7 +23,7 @@ from nicegui.testing.general import nicegui_reset_globals
 from nicegui.testing.user import User
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from tests.fixtures.scored_corpus import WEATHER, ScoredCorpus, seed_scored_corpus
+from tests.fixtures.scored_corpus import NOW, WEATHER, ScoredCorpus, seed_scored_corpus
 
 from ra2.infra.clock import Clock
 from ra2.infra.config import Settings
@@ -31,7 +31,7 @@ from ra2.persistence.models import Run
 from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
 from ra2.services.container import Services
 from ra2.services.scoring_service import ScoringService
-from ra2.ui.components import format_gigabytes, format_latency_ms, format_tokens
+from ra2.ui.components import format_gigabytes, format_latency_ms, format_local, format_tokens
 from ra2.ui.views.results.chrome import DEV_PILL, RUN_PILL
 from ra2.ui.views.results.extraction_tab import (
     ENCODING_CAVEAT,
@@ -158,6 +158,11 @@ async def test_an_open_board_can_switch_to_another_evaluation(scored: Scored) ->
     (option,) = scored.user.find(marker="option-evaluation").elements
     assert option.props["href"] == f"/results?evaluation={evaluation_id}"
     assert option.props["aria-current"] == "true"
+    # The launch time beside the name (SD59): a new evaluation takes its
+    # feature set's name, so the name alone can repeat down the list.
+    assert (
+        getattr(option, "text", "") == f"evaluation s · {format_local(NOW, '%d.%m.%y - %H:%M:%S')}"
+    )
 
 
 async def test_every_tab_carries_the_run_descriptor(scored: Scored) -> None:

@@ -41,6 +41,7 @@ import pytest
 from fastapi import FastAPI
 from nicegui import ui
 from nicegui.element import Element
+from nicegui.functions.navigate import History
 from nicegui.testing.general import nicegui_reset_globals
 from nicegui.testing.user import User
 from nicegui.testing.user_interaction import UserInteraction
@@ -77,7 +78,7 @@ from ra2.ui import theme
 from ra2.ui.components import format_local
 from ra2.ui.components.discard_dialog import EXPORT_PER_RUN
 from ra2.ui.components.ollama_settings import SAVE_REFUSAL_WORDS, SAVE_REFUSED_RUN_ACTIVE
-from ra2.ui.views.results.chrome import DETERMINISM_CAVEAT
+from ra2.ui.views.results.chrome import DETERMINISM_CAVEAT, DRAFT_OPTION
 
 pytestmark = pytest.mark.ui
 
@@ -599,15 +600,18 @@ def _loading(user: User) -> bool:
     return any(root._props.get("data-loading") == "true" for root in roots)
 
 
-async def _open_evaluation(user: User) -> None:
+async def _open_evaluation(user: User, evaluation_id: str | None = None) -> None:
     """Open the page and wait for **both halves** of its load (SD55).
 
     The page function returns once the frame is drawn, and the build goes on
     over the websocket: the database half, then the endpoint half. So
     `User.open` returns before either is on screen, and a test that looked
     straight away would see an empty column.
+
+    `evaluation_id` opens `?evaluation=<id>`, the chip's link (SD59).
     """
-    await user.open("/evaluation")
+    query = "" if evaluation_id is None else f"?evaluation={evaluation_id}"
+    await user.open(f"/evaluation{query}")
     await _until(lambda: not _loading(user))
 
 
@@ -1759,8 +1763,10 @@ async def test_the_evaluation_discard_sits_in_the_runs_card_and_not_in_the_toolb
     assert _element_text(action) == evaluation_view.DISCARD_EVALUATION_LABEL
 
     # The toolbar still carries exactly one button, and it is not this one.
+    # `.btn`, because the evaluation chip is a `<button>` too (SD59) and is
+    # not the kind of press `SD32` is about.
     (toolbar,) = _find(seeded.user, "evaluation-toolbar")
-    buttons = [d for d in toolbar.descendants() if d.tag == "button"]
+    buttons = [d for d in toolbar.descendants() if d.tag == "button" and "btn" in d._classes]
     assert len(buttons) == 1
     assert str(buttons[0]._props.get("data-testid")) == "save-draft"
 
@@ -1908,6 +1914,154 @@ async def test_tagged_work_is_named_and_discard_anyway_forces_it(seeded: Seeded)
     seeded.user.find(marker="discard-confirm").click()
     await _until(lambda: not _find(seeded.user, "evaluation-discard"))
     assert await _evaluation_ids(seeded) == set()
+
+
+# --- every evaluation reachable, and named (SD59) ----------------------------
+#
+# The discard above could only ever reach the newest evaluation: the screen had
+# no switcher and no `?evaluation=`, and `app.storage.client` starts empty on
+# every load. These pin the way to every other one, and that the dialog says
+# which one it is about when names repeat.
+
+#: The chip option's and the dialog's time, in the runs table's format.
+_FROZEN_LOCAL = format_local(FROZEN_NOW, evaluation_view.TIMESTAMP_FORMAT)
+
+
+async def _another_evaluation(seeded: Seeded, *, name: str) -> EvaluationDraftView:
+    """A second draft over the same corpus and set, through the service."""
+    return await seeded.services.evaluation.save_draft(
+        name=name, corpus_id=seeded.corpus_id, feature_config_id=seeded.draft.feature_config_id
+    )
+
+
+def _options(user: User) -> dict[str, Element]:
+    """The chip's options by evaluation id, read off the chip's own wrapper:
+    the panel is closed, and `User.find` sees only what is visible."""
+    chips = user.find(marker="chip-evaluation").elements
+    if not chips:
+        return {}
+    (chip,) = chips
+    wrapper = chip.parent_slot.parent  # type: ignore[union-attr]
+    return {
+        str(o._props["data-option"]): o
+        for o in wrapper.descendants()
+        if o._props.get("data-testid") == "option-evaluation"
+    }
+
+
+def _current_option(user: User) -> str:
+    (current,) = [k for k, o in _options(user).items() if o._props["aria-current"] == "true"]
+    return current
+
+
+async def test_the_chip_leads_the_toolbar_and_lists_every_evaluation_with_its_launch(
+    seeded: Seeded,
+) -> None:
+    """Drafts included, and each option says when it was launched: the second
+    evaluation here has the **same name** as the first, which is what
+    "New evaluation" produces (`SD32`)."""
+    await _seed_launch(seeded.app, seeded.draft.evaluation_id)
+    draft = await _another_evaluation(seeded, name=seeded.draft.name)
+    await _open_evaluation(seeded.user, str(draft.evaluation_id))
+
+    (chip,) = seeded.user.find(marker="chip-evaluation").elements
+    assert "evaluation-toolbar" in _ancestor_testids(chip)
+    wrapper = chip.parent_slot.parent  # type: ignore[union-attr]
+    left_group = wrapper.parent_slot.parent  # type: ignore[union-attr]
+    assert left_group.default_slot.children[0] is wrapper
+
+    options = _options(seeded.user)
+    launched_id, draft_id = str(seeded.draft.evaluation_id), str(draft.evaluation_id)
+    assert set(options) == {launched_id, draft_id}
+    assert _element_text(options[launched_id]) == f"{seeded.draft.name} · {_FROZEN_LOCAL}"
+    assert _element_text(options[draft_id]) == f"{seeded.draft.name} · {DRAFT_OPTION}"
+    assert options[launched_id]._props["href"] == f"/evaluation?evaluation={launched_id}"
+    assert _current_option(seeded.user) == draft_id
+
+
+async def test_the_url_opens_the_evaluation_it_names(seeded: Seeded) -> None:
+    """Both ways round, so the answer cannot be "the newest" by luck: the two
+    drafts may share a `created_at`."""
+    other = await _another_evaluation(seeded, name="eval-other")
+
+    for evaluation_id in (seeded.draft.evaluation_id, other.evaluation_id):
+        await _open_evaluation(seeded.user, str(evaluation_id))
+        assert _current_option(seeded.user) == str(evaluation_id)
+
+
+async def test_a_url_naming_no_evaluation_falls_back_and_says_so(seeded: Seeded) -> None:
+    await _open_evaluation(seeded.user, "no-such-evaluation")
+
+    assert (
+        evaluation_view.EVALUATION_NOT_FOUND_MESSAGE.format(evaluation_id="no-such-evaluation")
+        in seeded.user.notify.messages
+    )
+    assert _current_option(seeded.user) == str(seeded.draft.evaluation_id)
+
+
+async def test_the_url_follows_the_evaluation_on_screen(
+    launched: Seeded, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bare `/evaluation` gains the id it landed on, and "New evaluation"
+    moves it to the clone: otherwise a reload would reopen the launched one."""
+    replaced: list[str] = []
+    # On the class: `User.open` installs a fresh `ui.navigate` per page.
+    monkeypatch.setattr(History, "replace", lambda _self, url: replaced.append(url))
+    user = launched.user
+
+    await _open_evaluation(user)
+    assert replaced == [f"/evaluation?evaluation={launched.draft.evaluation_id}"]
+
+    _one(user, _find(user, "new-evaluation")[0]).click()
+    await _until(lambda: bool(_find(user, "save-draft")))
+    clone = next(
+        e
+        for e in await launched.services.evaluation.list_evaluations()
+        if e.evaluation_id != launched.draft.evaluation_id
+    )
+    assert replaced[-1] == f"/evaluation?evaluation={clone.evaluation_id}"
+
+
+async def test_an_older_evaluation_is_discarded_from_its_own_url(seeded: Seeded) -> None:
+    """The case the whole branch is for: the evaluation to clear is not the
+    newest, and the newer one survives it."""
+    newer = await _another_evaluation(seeded, name="eval-newer")
+    await _open_evaluation(seeded.user, str(seeded.draft.evaluation_id))
+    await seeded.user.should_see(marker="evaluation-discard")
+
+    seeded.user.find(marker="evaluation-discard").click()
+    await seeded.user.should_see(marker="discard-confirm")
+    seeded.user.find(marker="discard-confirm").click()
+
+    await _until(lambda: set(_options(seeded.user)) == {str(newer.evaluation_id)})
+    assert await _evaluation_ids(seeded) == {newer.evaluation_id}
+    assert _current_option(seeded.user) == str(newer.evaluation_id)
+
+
+async def test_the_discard_dialog_says_when_what_and_with_which_models(
+    launched: Seeded,
+) -> None:
+    await _seed_run(
+        launched.app,
+        run_id="r-0501",
+        evaluation_id=launched.draft.evaluation_id,
+        template_id=launched.template.prompt_template_id,
+        model_tag=FITS_A,
+        status=RunStatus.DONE,
+        started_at=FROZEN_NOW,
+    )
+    await _open_evaluation(launched.user)
+    await launched.user.should_see(marker="evaluation-discard")
+
+    launched.user.find(marker="evaluation-discard").click()
+    await launched.user.should_see(marker="discard-identity")
+
+    assert _all_text(launched.user, "discard-launched") == f"launched {_FROZEN_LOCAL}"
+    assert _all_text(launched.user, "discard-models") == FITS_A
+    inputs = _all_text(launched.user, "discard-inputs")
+    assert inputs.startswith("launched · v")
+    assert launched.config.name in inputs
+    assert _all_text(launched.user, "discard-id") == str(launched.draft.evaluation_id)
 
 
 def test_every_endpoint_status_has_a_word() -> None:
