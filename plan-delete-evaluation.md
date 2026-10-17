@@ -55,9 +55,9 @@ make it hard to aim at the wrong thing".
 
 | # | Proposition | Cost | Status |
 |---|---|---|---|
-| **P1** | **Make every evaluation reachable on the Evaluation screen.** `?evaluation=<id>`, and the `evaluation · <name> ▼` chip Results and Mismatches already use (`SD54`), drafts included. The URL follows the evaluation on screen (`history.replace`, `features_view`'s precedent), so a reload or a copied link lands on the same one. The existing header discard then works on any evaluation. Discard stays in **one** place: no discard action on the Results picker | UI only | **this branch** |
-| **P2** | **Make the confirm dialog say which evaluation it is.** The preview carries when it was launched (or that it never was), the models its runs used, the corpus · feature set · prompt version it pins, and its id. The service states the facts, the dialog formats the time in the host's zone (`SD37`). The chip's options carry the launch time beside the name, for the same reason | Additive fields on `DiscardPreviewView`; no API change | **this branch** |
-| P3 | **Make the confirmation match what would be lost.** Unlaunched draft or no scores: one click (today). Scores, no tagged work: today's dialog. **Tagged work: type the tagged count** before "Discard anyway" enables, instead of a relabelled button. `analyst_tag` is the only thing a re-run cannot recreate | UI only | proposed |
+| **P1** | **Make every evaluation reachable on the Evaluation screen.** `?evaluation=<id>`, and the `evaluation · <name> ▼` chip Results and Mismatches already use (`SD54`), drafts included. The URL follows the evaluation on screen (`history.replace`, `features_view`'s precedent), so a reload or a copied link lands on the same one. The existing header discard then works on any evaluation. Discard stays in **one** place: no discard action on the Results picker | UI only | done, `SD59` |
+| **P2** | **Make the confirm dialog say which evaluation it is.** The preview carries when it was launched (or that it never was), the models its runs used, the corpus · feature set · prompt version it pins, and its id. The service states the facts, the dialog formats the time in the host's zone (`SD37`). The chip's options carry the launch time beside the name, for the same reason | Additive fields on `DiscardPreviewView`; no API change | done, `SD59` |
+| **P3** | **Make the confirmation match what would be lost.** Unlaunched draft or no scores: one click (today). Scores, no tagged work: today's dialog. **Tagged work: type the tagged count** before "Discard anyway" enables, instead of a relabelled button. `analyst_tag` is the only thing a re-run cannot recreate | UI only | done, `SD60` (§5) |
 | P4 | **A "keep" marker.** An evaluation marked as a baseline is refused by discard until unmarked. Analyst-authored, like `analyst_tag`, so it is not a soft-delete flag | A column and a migration (phase author rule) | proposed, only if P1–P3 are not enough |
 | P5 | **Show what is debris before choosing.** Each switcher option carries runs · scored · failed · tagged counts, so an analyst can tell an inconclusive evaluation from a reviewed one without opening it | Read-only counts on `EvaluationDraftView` or a sibling read model | proposed |
 
@@ -122,3 +122,27 @@ they meet in `_render_toolbar`. Whichever merges second resolves it: chip
 first, then the name field, then the pinned inputs. The chip then repeats the
 name the field shows; if that reads as noise, the chip's text can shrink to
 `evaluation ▼` once the field is there. This branch takes `SD59`.
+
+## 5. P3 — typing the tagged count (`SD60`)
+
+- **Where it applies:** the dialog's tagged-work state, for a run and an
+  evaluation alike, because both open the one dialog. Nothing changes for a
+  draft, for work with no tags, or for a blocked discard (G1 first: typing
+  cannot unblock a run that is still being written).
+- **What is typed: the count**, `DiscardPreviewView.tagged_mismatches`. Not
+  the name, which repeats (`SD32`) and can be copied off the screen. The
+  count is the one figure about what cannot be recreated, and typing it means
+  having read it. Surrounding spaces are ignored; anything else is not.
+- **"Discard anyway" stays disabled** until the field holds the count, and
+  follows the field both ways. The press handler checks the same state,
+  because `disabled` is a UI state and a click can still arrive.
+- **The server is unchanged.** G2 is still `force=true` on the route and the
+  service. The typing guards against attention errors; it is not an access
+  control, and the API stays scriptable.
+
+### 5.1 Tests
+
+| Layer | What |
+|---|---|
+| ui | the prompt and the field appear with tagged work and only then; Discard is disabled until the count is typed, and again when it is taken back; a wrong value (empty, off by one, a word) leaves it dead and a press does nothing; spaces are accepted; a blocked dialog asks for nothing; the Evaluation screen's tagged discard needs the count |
+| e2e | `test_reset_discard.py`: tag a run's mismatches through the API, open its discard; a wrong count keeps the button disabled, the right one enables it, and the run goes |

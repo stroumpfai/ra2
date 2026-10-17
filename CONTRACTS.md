@@ -986,6 +986,26 @@ same commit. No migration and no API change. The design is `sw-design.md`
 
 ---
 
+## Typing the tagged count before a discard, a slice
+
+`feat/discard-guards`, by `plan-delete-evaluation.md` P3 (§5), on top of
+`SD59`. **No Wave 0, no frozen file, no migration and no amendment**: the
+discard dialog and its tests. No service, route or read model changed:
+`DiscardPreviewView.tagged_mismatches` already carried the count (`SD60`).
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/ui/components/discard_dialog.py` | With tagged work and not blocked: + `discard-type-prompt` (`type_prompt`) and the `discard-type-confirm` field (`TYPE_CONFIRM_LABEL`). "Discard anyway" is disabled until the field holds the count, and the press handler checks the same state |
+| `tests/ui/test_discard_dialog.py` | The force test types first. + the field holds Discard until the count is typed and follows it back; wrong values leave it dead; spaces are accepted; no field without tagged work or on a blocked dialog |
+| `tests/ui/test_evaluation_view.py` | The tagged evaluation discard is dead until the count is typed |
+| `tests/e2e/test_reset_discard.py` | + tag a run's mismatches through the API, then type its count in a real browser to discard it |
+| `sw-design.md` | `SD60`; §18.5 |
+| `plan-delete-evaluation.md` | P1–P3 marked done; + §5 |
+
+---
+
 ## Phase 5 — owner: M35 (Wave 0), amendment only
 
 Re-established at tag `p5-frozen`, the same way M27 established the phase-4

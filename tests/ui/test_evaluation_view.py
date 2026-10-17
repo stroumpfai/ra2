@@ -2001,6 +2001,12 @@ async def test_tagged_work_is_named_and_discard_anyway_forces_it(seeded: Seeded)
     await seeded.user.should_see("1 tagged mismatch would be destroyed")
     await seeded.user.should_see("Discard anyway")
 
+    # Dead until the tagged count is typed (`SD60`): a press now changes nothing.
+    seeded.user.find(marker="discard-confirm").click()
+    await asyncio.sleep(0.05)
+    assert await _evaluation_ids(seeded) == {seeded.draft.evaluation_id}
+
+    seeded.user.find(marker="discard-type-confirm").trigger("input", args="1")
     seeded.user.find(marker="discard-confirm").click()
     await _until(lambda: not _find(seeded.user, "evaluation-discard"))
     assert await _evaluation_ids(seeded) == set()
