@@ -638,7 +638,9 @@ class Evaluation(Base):
     `evaluation_feature` snapshot and creates one `queued` `run` per selected
     model, all in one transaction. After that every edit path raises
     `EvaluationLockedError`, except `evaluation_service.rename`: `name` pins
-    nothing, so it stays editable (SD58).
+    nothing, so it stays editable (SD58). `kept_at` is the second exception
+    (`evaluation_service.set_kept`, SD61): it pins nothing either, and a
+    baseline is only worth keeping once its results are in.
 
     Phases 1 and 2 never created one: the table existed because sw-design.md
     §6.3 requires the corpus delete guard — "deleting a corpus is refused
@@ -729,6 +731,16 @@ class Evaluation(Base):
     #: because it is cheap: **suppression is applied at read time** from stored
     #: `n` (SD19), so raising or lowering this never requires a re-score.
     min_cell_count: Mapped[int] = mapped_column(default=20)
+
+    # --- post-phase (SD61) ----------------------------------------------------
+
+    #: When an analyst marked this evaluation to keep; `None` when nobody did.
+    #: A kept evaluation, and every run of it, is refused by discard until it
+    #: is released (§18.2, G3). **Analyst-authored, like `mismatch.analyst_tag`**,
+    #: and not a soft-delete flag: it records a decision to keep, never that
+    #: anything was removed (§18.3). A timestamp rather than a boolean, for
+    #: `tagged_at`'s reason: when it was decided is the one thing worth having.
+    kept_at: Mapped[datetime | None] = mapped_column(default=None)
 
     features: Mapped[list[EvaluationFeature]] = relationship(
         back_populates="evaluation", cascade="all, delete-orphan", passive_deletes=True

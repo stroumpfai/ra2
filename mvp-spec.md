@@ -280,7 +280,7 @@ prompt_template(id, version, source, created_at, activated_at, fingerprint)
 evaluation(id, name, corpus_id, feature_config_id, prompt_template_id,
            prompt_language, temperature, seed, reasoning_effort, size,
            selected_models_json, min_cell_count, created_at, launched_at,
-           is_dev)
+           is_dev, kept_at)
       -- reasoning_effort added post-phase-5 (sw-design.md SD36): how hard
       -- the model is asked to think, pinned here and copied onto every run
       -- the launch creates, because it decides the answer as much as the
@@ -290,7 +290,9 @@ evaluation(id, name, corpus_id, feature_config_id, prompt_template_id,
       -- true. Cheap because suppression is applied at READ time from stored
       -- n, so changing the floor never requires a re-score.
       -- editable while launched_at IS NULL; immutable after (SD13),
-      -- except name, which pins nothing (SD58)
+      -- except name and kept_at, which pin nothing (SD58, SD61)
+      -- kept_at: an analyst's mark that the evaluation is to be kept;
+      -- discard refuses it and its runs until it is released (SD61)
 evaluation_feature(evaluation_id, feature_id, enum_codelist_json, fingerprint)
       -- written once, inside the launch transaction (SD12). A frozen
       -- feature_config is corpus-INDEPENDENT, so the codelist snapshot and

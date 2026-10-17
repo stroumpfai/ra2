@@ -1011,6 +1011,61 @@ the same commit. No migration, no API change, no dependency change.
 
 ---
 
+## Two more discard guards: the tagged count, and the keep mark, a slice
+
+`feat/discard-guards`, on top of `SD59`: propositions P3 and P4 of
+`plan-delete-evaluation.md`, the last two that plan built. **One amendment**
+(`contracts/amendments/feat-discard-guards.md`), applied in the same commit,
+and **one revision**, whose author is this branch's implementer:
+`3ce2190bd859`, `evaluation.kept_at`. The design is `sw-design.md` `SD60`
+(typing the tagged count) and `SD61` (G3, the keep mark).
+
+**`plan-delete-evaluation.md` is deleted** with this slice, as its owner
+asked once P4 shipped. Its decisions are `SD59`–`SD61`; what it proposed and
+did not build, and what it rejected, is §18.6. The references to it in the
+slice above and in `contracts/amendments/feat-evaluation-switcher.md` are
+historical and are left as they were written.
+
+### Amended files (already frozen)
+
+| File | Change | Amendment |
+|---|---|---|
+| `ra2/persistence/models.py` | + `Evaluation.kept_at`, nullable, no backfill; the class docstring names `set_kept` as the second exemption from the launch lock | `feat-discard-guards` |
+| `ra2/services/errors.py` | + `EvaluationKeptError` (G3, 409, no override) | `feat-discard-guards` |
+| `ra2/services/readmodels.py` | + `EvaluationDraftView.kept_at` and `.is_kept`; + `DiscardPreviewView.kept`, and `blocked` includes it. All defaulted | `feat-discard-guards` |
+| `ra2/api/schemas.py` | + `KeepEvaluationRequest`; + `kept_at` on `EvaluationDraftResponse`; + `kept` on `DiscardPreview`. `tests/api/openapi_snapshot.json` regenerated: one new path, three optional fields, and two route descriptions that now name G3 | `feat-discard-guards` |
+| `ra2/services/evaluation_service.py` | + `set_kept(evaluation_id, *, kept)`, draft or launched, under `_draft_lock`; `_draft_view` carries `kept_at`. Additive | `feat-discard-guards` |
+| `ra2/ui/views/evaluation_view.py` | + the keep control in the runs card header (`_keep_action`, `_set_kept`, `KEEP_LABEL`, `RELEASE_LABEL`, `KEPT_PILL`, `KEEP_TITLE`) | `feat-discard-guards` |
+
+### New files
+
+| Path | What |
+|---|---|
+| `ra2/persistence/migrations/versions/20261017_1200_3ce2190bd859_keep_an_evaluation.py` | `evaluation.kept_at`, additive, nullable, no existing row touched. Registered in `tests/test_p5_contract.py`'s `POST_PHASE_5_REVISIONS` |
+| `tests/backend/services/evaluation/test_keep.py` | `set_kept` on a draft and a launched evaluation, idempotence both ways, not found |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/services/lifecycle_service.py` | G3 in `discard_run` and `discard_evaluation`, ordered G1, G3, G2; `kept` on both previews (`_run_is_kept`, `_require_not_kept`) |
+| `ra2/api/v1/evaluations.py` | + `PUT /{evaluation_id}/kept`; `DELETE` maps `EvaluationKeptError` to 409; `kept_at` on the draft response |
+| `ra2/api/v1/runs.py` | `DELETE` maps `EvaluationKeptError` to 409 |
+| `ra2/api/v1/discard.py` | `kept` on the preview; `conflict` names G3 |
+| `ra2/ui/components/discard_dialog.py` | `SD60`: with tagged work and not blocked, + `discard-type-prompt` (`type_prompt`) and the `discard-type-confirm` field (`TYPE_CONFIRM_LABEL`); "Discard anyway" is disabled until the field holds the count, and the press handler checks the same state. `SD61`: + G3's refusal (`kept_refusal`), before the tagged warning |
+| `ra2/ui/views/results/chrome.py` | + `KEPT_OPTION`, appended to a kept evaluation's chip option |
+| `tests/backend/services/lifecycle/test_discard.py` | + G3 on both discards, with `force`; both previews; the order G1, G3, G2; release then discard |
+| `tests/backend/api/lifecycle/test_discard_api.py` | + the keep route, the 409s on both `DELETE`s, release then discard; 404; 422; the list carries the mark |
+| `tests/ui/test_discard_dialog.py` | The force test types first. + the count field and its states (`SD60`); + G3's refusal for both kinds, and no count asked when kept |
+| `tests/ui/test_evaluation_view.py` | The tagged evaluation discard is dead until the count is typed. + the keep control's place and toggle, a launched evaluation released, both discards refused when kept, the chip's `kept` |
+| `tests/e2e/test_reset_discard.py` | + tag a run's mismatches through the API, then type its count in a real browser to discard it |
+| `tests/test_p5_contract.py` | + the revision in `POST_PHASE_5_REVISIONS`; + `EvaluationKeptError` in `POST_PHASE_5_ERRORS` |
+| `sw-design.md` | `SD60`, `SD61`; §18.2 (G3, and "no fifth"), §18.3, §18.4, §18.5, §18.6 (what the deleted plan proposed and rejected); §5 and §15.2's lock exemption; the plan references in `SD59` and `SD60` repointed |
+| `mvp-spec.md` | §5's `evaluation` columns and schema comment: `kept_at` |
+| `plan-delete-evaluation.md` | **deleted** |
+
+---
+
 ## Phase 5 — owner: M35 (Wave 0), amendment only
 
 Re-established at tag `p5-frozen`, the same way M27 established the phase-4

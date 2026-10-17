@@ -37,6 +37,7 @@ __all__ = [
     "DETERMINISM_CAVEAT",
     "DEV_PILL",
     "DRAFT_OPTION",
+    "KEPT_OPTION",
     "MENU_ITEM_ON_STYLE",
     "MENU_ITEM_STYLE",
     "MENU_STYLE",
@@ -361,11 +362,16 @@ def evaluation_chip(drafts: Sequence[EvaluationDraftView], *, current: str, path
 
 #: What a chip option says in place of a launch time (`SD59`).
 DRAFT_OPTION: Final = "draft"
+#: Appended to a kept evaluation's option (`SD61`): the baselines read off
+#: the list before one is opened.
+KEPT_OPTION: Final = "kept"
 
 
 def _option_when(draft: EvaluationDraftView) -> str:
-    """The chip option's second half: when it was launched, or `DRAFT_OPTION`."""
-    return DRAFT_OPTION if draft.launched_at is None else _launched_label(draft.launched_at)
+    """The chip option's second half: when it was launched, or `DRAFT_OPTION`,
+    and `KEPT_OPTION` after it when the evaluation is kept."""
+    when = DRAFT_OPTION if draft.launched_at is None else _launched_label(draft.launched_at)
+    return f"{when} · {KEPT_OPTION}" if draft.is_kept else when
 
 
 def _launched_label(launched_at: datetime | None) -> str:

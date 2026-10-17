@@ -24,6 +24,7 @@ from ra2.api.v1.discard import conflict, discard_response
 from ra2.api.v1.discard import discard_preview as to_preview
 from ra2.domain.ids import EvaluationId, RunId
 from ra2.services.errors import (
+    EvaluationKeptError,
     NotFoundError,
     RunActiveError,
     RunNotActiveError,
@@ -220,9 +221,9 @@ async def discard_run(
     """Discard one run and, by the schema's cascade, everything derived from
     it (§18.1).
 
-    409 when the run is `queued` or `running` (G1), and when it carries tagged
-    mismatches and `force` was not passed (G2). The second is overridable; the
-    first is not.
+    409 when the run is `queued` or `running` (G1), when its evaluation is kept
+    (G3, SD61), and when it carries tagged mismatches and `force` was not
+    passed (G2). Only the last is overridable.
 
     The preview is read **first**, inside the same request, because after the
     delete those counts do not exist anywhere — this response is the receipt.
@@ -233,6 +234,6 @@ async def discard_run(
         await service.discard_run(key, force=force)
     except NotFoundError as exc:
         raise _not_found(exc) from exc
-    except (RunActiveError, TaggedWorkPresentError) as exc:
+    except (RunActiveError, EvaluationKeptError, TaggedWorkPresentError) as exc:
         raise conflict(exc) from exc
     return discard_response(before, forced=force and before.tagged_mismatches > 0)

@@ -816,6 +816,16 @@ class EvaluationDraftResponse(_Schema):
     selected_models: list[str] = Field(default_factory=list)
     launched_at: datetime | None = None
     min_cell_count: int = 20
+    #: When it was marked to keep; `null` when it is not (SD61). A kept
+    #: evaluation and its runs answer `DELETE` with 409 until released.
+    kept_at: datetime | None = None
+
+
+class KeepEvaluationRequest(_Schema):
+    """Mark an evaluation to keep, or release it (SD61). Allowed whether or
+    not it is launched: the mark pins nothing. Idempotent both ways."""
+
+    kept: bool
 
 
 class RunProgressResponse(_Schema):
@@ -1209,6 +1219,9 @@ class DiscardPreview(_Schema):
     #: Corpora frozen from this delivery. Non-zero refuses outright — there is
     #: no `force` for this one (§18.2).
     cited_by: int = 0
+    #: G3 (SD61): the evaluation, or the run's evaluation, is kept. Refuses
+    #: until `PUT /evaluations/{id}/kept` releases it; no `force`.
+    kept: bool = False
     has_exportable: bool = False
     blocked: bool = False
 

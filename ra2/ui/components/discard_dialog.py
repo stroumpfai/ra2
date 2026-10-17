@@ -10,7 +10,9 @@ A third rendering rides on the same shape rather than forking it: when the
 preview carries tagged mismatches, the count goes in the lead sentence and
 Discard carries the `force` call. That is G2's "warn and allow" (`R-D3`) made
 visible — a hard block leaves an analyst no way to clean up, and the workaround
-for a tool that cannot clean up is editing the database by hand.
+for a tool that cannot clean up is editing the database by hand. Pressing
+through it takes **typing the tagged count** first (`SD60`): the relabelled
+button alone was the same click in the same place as every other discard.
 
 **This component holds no state and no business logic** (§8.1.1). It renders a
 `DiscardPreviewView` the service computed and calls back; whether the discard
@@ -24,7 +26,7 @@ from nicegui import ui
 from nicegui.element import Element
 
 from ra2.services.readmodels import DiscardPreviewView
-from ra2.ui.components.primitives import dialog_card, format_local
+from ra2.ui.components.primitives import data_props, dialog_card, format_local
 
 __all__ = [
     "DISCARD_IRREVERSIBLE",
@@ -33,10 +35,13 @@ __all__ = [
     "EXPORT_PER_RUN",
     "EXPORT_PROMPT",
     "NEVER_LAUNCHED",
+    "TYPE_CONFIRM_LABEL",
     "discard_dialog",
+    "kept_refusal",
     "launched_line",
     "loss_line",
     "tagged_sentence",
+    "type_prompt",
 ]
 
 #: Narrow enough to open without clipping at the 1024px viewport this app
@@ -125,6 +130,31 @@ def tagged_sentence(preview: DiscardPreviewView) -> str:
     return f"{count} {noun} would be destroyed — review work a re-run cannot recreate."
 
 
+def kept_refusal(preview: DiscardPreviewView) -> str:
+    """G3's sentence (SD61): what is in the way and where it is released.
+
+    A run names its **evaluation**, because the mark is the evaluation's and so
+    is the control that releases it."""
+    if preview.kind == "run":
+        return "Its evaluation is marked keep. Release it in the runs card header first."
+    return "This evaluation is marked keep. Release it in the runs card header first."
+
+
+#: The field's accessible name. It has no visible label of its own: the
+#: prompt above it is the instruction.
+TYPE_CONFIRM_LABEL = "Number of tagged mismatches"
+
+
+def type_prompt(preview: DiscardPreviewView) -> str:
+    """What to type before "Discard anyway" enables (`SD60`).
+
+    **The count, not the name.** A name repeats (`SD32`) and is on screen to
+    copy; the count is the one fact in the dialog about what cannot be
+    recreated, and typing it means having read it.
+    """
+    return f"Type {preview.tagged_mismatches} to confirm “Discard anyway”."
+
+
 def discard_dialog(
     *,
     preview: DiscardPreviewView,
@@ -148,12 +178,26 @@ def discard_dialog(
         the state in which no Export button is drawn.
     """
     forced = preview.tagged_mismatches > 0
+    #: Whether a press may go through: always without tagged work, and with it
+    #: only once the count has been typed (`SD60`). This dialog's own state,
+    #: gone with the dialog.
+    confirmed = not forced
+
+    def _typed(value: str) -> None:
+        nonlocal confirmed
+        confirmed = value.strip() == str(preview.tagged_mismatches)
+        if confirmed:
+            confirm.props(remove="disabled")
+        else:
+            confirm.props("disabled")
 
     async def _discard() -> None:
         # Closed **before** the await, not after: the caller's handler reloads
         # the view that owns this dialog, and a dialog closing itself after its
         # parent has been redrawn is a close on an element that is gone.
-        if preview.blocked:
+        # `confirmed` is checked here as well as on the button: `disabled` is a
+        # UI state, and a click event can still arrive for it.
+        if preview.blocked or not confirmed:
             return
         dialog.close()
         await on_discard(forced)
@@ -182,6 +226,12 @@ def discard_dialog(
             ).props('data-testid="discard-blocked"').mark("discard-blocked").style(
                 "font-size:12px;"
             )
+        elif preview.kept:
+            # G3 (SD61). Before the tagged warning: that one can be pressed
+            # through and this cannot, so it is the one that matters.
+            ui.label(kept_refusal(preview)).classes("danger").props(
+                'data-testid="discard-blocked"'
+            ).mark("discard-blocked").style("font-size:12px;")
         elif preview.cited_by:
             ui.label(
                 f"A corpus was frozen from this delivery ({preview.cited_by}). "
@@ -193,6 +243,25 @@ def discard_dialog(
             ui.label(tagged_sentence(preview)).classes("danger").props(
                 'data-testid="discard-tagged"'
             ).mark("discard-tagged").style("font-size:12px;")
+            ui.label(type_prompt(preview)).classes("ink2").props(
+                'data-testid="discard-type-prompt"'
+            ).mark("discard-type-prompt").style("font-size:12px;")
+            field = (
+                ui.element("input")
+                .classes("rof")
+                .props(
+                    'type="text" inputmode="numeric" autocomplete="off" '
+                    'data-testid="discard-type-confirm"'
+                )
+                .mark("discard-type-confirm")
+                .style("font-family:var(--mono);font-size:12px;width:12ch;padding:4px 8px;")
+            )
+            data_props(field, {"aria-label": TYPE_CONFIRM_LABEL})
+            field.on(
+                "input",
+                lambda event: _typed(str(event.args)),
+                js_handler="(e) => emit(e.target.value)",
+            )
 
         if preview.has_exportable:
             ui.label(EXPORT_PROMPT).classes("ink2").props(
@@ -251,7 +320,7 @@ def discard_dialog(
                 .mark("discard-confirm")
                 .style("background:var(--danger);")
             )
-            if preview.blocked:
+            if preview.blocked or not confirmed:
                 confirm.props("disabled")
             confirm.on("click", _discard)
             with confirm:
