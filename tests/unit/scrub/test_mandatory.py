@@ -120,3 +120,11 @@ def test_a_canton_named_in_a_sentence_is_not_a_plate() -> None:
 def test_lower_case_words_are_never_plates() -> None:
     text = "il ne 12 pas, so 3 mal"
     assert Scrubber(ScrubRules(MANDATORY_RULES)).scrub(text).text == text
+
+
+def test_a_canton_code_before_a_phone_number_leaves_the_number_whole() -> None:
+    """Found by the property tests: with a plate allowed to start with 0,
+    `ZH 079 123` was a plate, it started first, and it won the overlap,
+    leaving `45 67` of the phone number behind. No plate starts with 0."""
+    scrubbed = Scrubber(ScrubRules(MANDATORY_RULES)).scrub("ZH 079 123 45 67").text
+    assert scrubbed == "ZH <Phone_1>"

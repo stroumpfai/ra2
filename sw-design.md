@@ -600,6 +600,7 @@ must never reach a test, so the hazards are **synthesised byte-exactly** by
 | `h15_mixed_encoding` | UTF-8 rows, then one cp1252 row, in one file | read as cp1252, `UTF8_READ_AS_CP1252` with the count |
 | `h16_utf16_bom` | UTF-16-LE with its byte-order mark | **file fails**, `FILE_UNSUPPORTED_BOM` |
 | `h17_utf16_no_bom` | UTF-16-LE with no byte-order mark | **file fails**, `FILE_CONTAINS_NUL` |
+| `h18_names_in_narrative` | invented names, phones, plates and an email in a narrative, in an `UnfHergangTextAnonym` cell, and in a fallback narrative; a canary `’` inside a scrubbed name | **all scrubbed at freeze**; none of them anywhere in the database (§19, the leak test); canary counted on the original |
 
 Each has a named test asserting the exact `FindingCode` **and** that the offending
 key appears in the report. One **golden report test** imports a full synthetic
@@ -2510,7 +2511,9 @@ scrub_ruleset(id, version UNIQUE, created_at, fingerprint,
               regex_list_id, firstname_list_id, lastname_list_id, whitelist_id)
     -- IMMUTABLE. An import makes version n+1 = n with one component swapped.
     -- The highest version is the active one.
-corpus + scrub_ruleset_id    -- NULL: no imported rule set, mandatory rules only
+corpus + scrub_ruleset_id    -- NULL: no imported rule set, mandatory rules only.
+                             -- NOT a foreign key: SQLite adds or drops one only by
+                             -- rebuilding corpus, which cascades through record
        + scrub_fingerprint   -- NULL: frozen before scrubbing existed
        + scrub_mandatory_json -- the mandatory rules as applied, snapshotted
 ```
@@ -2586,7 +2589,7 @@ import the rules, so a bad pattern is an input error and has to fail like one.
 | Step | What |
 |---|---|
 | Import a file | `ScrubService.import_list(kind, filename, content)`: parse, compose with the active set, `check_rules`, then a new `scrub_list` (or the existing one) and a new `scrub_ruleset` version |
-| Dry run | `ScrubService.preview(delivery_id)`: re-parses the selected files exactly as `freeze` does, scrubs, counts, writes nothing. A `TaskRunner` task, like analyse |
+| Dry run | `CorpusService.scrub_preview(delivery_id, scrub_ruleset_id=None)`: the freeze's own `_selected`, `_unfall_rows` and `_scrub_record`, so it counts exactly the records and texts a freeze would. Writes nothing. Not gated on validation, and a timeout is named (`timed_out_rule`) rather than raised. A direct call, like `freeze` |
 | Freeze | `CorpusService.freeze(…, scrub_ruleset_id=None)`: the set the dry run showed, or the active one. One `Scrubber` per freeze. Writes the §19.4 columns and one REPORTED `TEXT_SCRUBBED` per rule that ran, zero hits included, into `import_report_json`: `{rule_id, tag, source, hits, records}`. Never matched text |
 | Raw preview | `DeliveryService.preview` scrubs each line with the active set: the file report modal shows no name the corpus would not (§8.3) |
 | Try a sentence | `ScrubService.try_text(text)`: the active set over one sentence typed on the Scrubbing screen. Nothing stored |
@@ -2614,7 +2617,8 @@ domain/
 persistence/
   repositories/scrub_repo.py   scrub_list, scrub_ruleset
 services/
-  scrub_service.py         import, list, versions, entries, try_text, preview
+  scrub_service.py         import, remove, active, versions, entries, try_text;
+                           load_scrub_rules, the one loader freeze, dry run and preview share
 api/
   v1/scrub.py              /api/v1/scrub/...
 ui/

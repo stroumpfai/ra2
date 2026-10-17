@@ -497,7 +497,7 @@ def test_h16_h17_block_the_delivery_they_are_part_of(hz, hazard):
     assert all(f.file_id == FileId(f"{hazard}/text.csv") for f in blocking)
 
 
-# --- the rule underneath all seventeen ---------------------------------------
+# --- the rule underneath all eighteen ----------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -549,13 +549,13 @@ def test_the_filename_never_decides_the_kind(hz, hazard, filename, expected):
 
 
 def test_every_hazard_directory_exists(hz):
-    """The seventeen of sw-design.md §11.4, all committed, none quietly missing."""
+    """The eighteen of sw-design.md §11.4, all committed, none quietly missing."""
     found = sorted(p.name for p in hz.dir.iterdir() if p.is_dir())
-    assert [name[:3] for name in found] == [f"h{n:02d}" for n in range(1, 18)]
+    assert [name[:3] for name in found] == [f"h{n:02d}" for n in range(1, 19)]
 
 
 def test_no_hazard_row_outcome_is_unaccounted(hz):
-    """Every outcome the enum defines is exercised somewhere in the seventeen."""
+    """Every outcome the enum defines is exercised somewhere in the eighteen."""
     seen = set()
     for directory in sorted(p for p in hz.dir.iterdir() if p.is_dir()):
         for path in sorted(directory.iterdir()):

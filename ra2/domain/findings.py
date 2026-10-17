@@ -43,7 +43,7 @@ class Severity(StrEnum):
 class FindingCode(StrEnum):
     """Every outcome the import pipeline can report.
 
-    Grouped by where it is raised. Hazard fixture references (h01-h17) point at
+    Grouped by where it is raised. Hazard fixture references (h01-h18) point at
     sw-design.md §11.4.
     """
 

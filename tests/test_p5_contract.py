@@ -327,6 +327,11 @@ POST_PHASE_5_ERRORS = {
     # evaluation, is marked keep. 409, and no `force`: releasing the mark is
     # the way past it.
     "EvaluationKeptError",
+    # `feat/text-scrubbing` — a scrub rule file or name list refused at import
+    # (sw-design.md §19.5): a pattern that fails its examples or turns a
+    # protected string into a placeholder. 422, carrying stable
+    # `ScrubImportErrorCode`s; nothing is written.
+    "ScrubImportRefusedError",
 }
 
 

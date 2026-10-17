@@ -18,6 +18,9 @@ pytestmark = pytest.mark.unit
 
 FIRSTNAMES = ("Hans", "Anna", "Jörg", "Céline", "Luca")
 LASTNAMES = ("Müller", "Meier", "Brunner", "Dupont", "Rossi", "von Allmen")
+#: Ordinary words that must survive wherever they land. No canton code: `ZH`
+#: followed by a planted `80` *is* a plate, so it would not survive, and
+#: rightly. `Kanton` stays, so `Kanton ZH 1234` is generated and tested.
 WORDS = (
     "Der",
     "Lenker",
@@ -40,7 +43,6 @@ WORDS = (
     "a",
     "freiné",
     "Kanton",
-    "ZH",
     "rot",
 )
 NUMBERS = ("079 123 45 67", "+41 44 123 45 67", "BE 123456", "ZH 1234", "h@example.ch")

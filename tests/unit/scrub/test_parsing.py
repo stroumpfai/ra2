@@ -16,6 +16,7 @@ from ra2.domain.scrub import (
     RuleSource,
     ScrubImportErrorCode,
     entry_key,
+    entry_matches,
     parse_name_list,
     parse_regex_rules,
 )
@@ -170,3 +171,18 @@ def test_the_letter_floor_is_three() -> None:
 )
 def test_an_entry_is_known_by_its_transliterated_tokens(entry: str, key: str) -> None:
     assert entry_key(entry) == key
+
+
+@pytest.mark.parametrize("query", ["müll", "MÜLL", "muell", "Mull", "ller", "", "  "])
+def test_a_search_finds_an_entry_the_way_the_scrubber_would(query: str) -> None:
+    assert entry_matches("Müller", query)
+
+
+@pytest.mark.parametrize("query", ["meier", "müllers", "x"])
+def test_a_search_does_not_find_what_is_not_there(query: str) -> None:
+    assert not entry_matches("Müller", query)
+
+
+def test_a_search_spans_the_tokens_of_a_multi_token_entry() -> None:
+    assert entry_matches("D'Alessandro", "d alessandro")
+    assert entry_matches("von Allmen", "VON ALL")

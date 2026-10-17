@@ -30,13 +30,17 @@ _CANTONS: Final = "AG|AI|AR|BE|BL|BS|FR|GE|GL|GR|JU|LU|NE|NW|OW|SG|SH|SO|SZ|TG|T
 #: A Swiss plate: a canton code, an optional space or hyphen, then one to six
 #: digits, optionally grouped `123 456` or `123'456`. Upper case only, so
 #: French `ne` and German `so` are never plates. A canton code right after
-#: `Kanton`, `canton` or `Kt.` names the canton, not a vehicle (Q4).
+#: `Kanton`, `canton` or `Kt.` names the canton, not a vehicle (Q4). **The
+#: first digit is never 0**: no plate starts with one, and without the rule
+#: `ZH 079 123 45 67` was claimed as the plate `ZH 079 123`, which starts
+#: before the phone number and so wins the overlap (found by the property
+#: tests).
 LICENSE_PLATE: Final = RegexRule(
     rule_id="license-plate",
     tag="LicensePlate",
     pattern=(
         r"(?<![\p{L}\p{M}\d])(?<!Kanton\s)(?<!canton\s)(?<!Kt\.\s)"
-        rf"(?:{_CANTONS})[ \-]?\d{{1,3}}(?:[ ']?\d{{3}})?(?![\d\p{{L}}])"
+        rf"(?:{_CANTONS})[ \-]?[1-9]\d{{0,2}}(?:[ ']?\d{{3}})?(?![\d\p{{L}}])"
     ),
     must_match=("BE 123456", "ZH 1234", "VD-123 456", "AG 12 345", "TI123456", "SG 12'345"),
     must_not_match=(
@@ -49,6 +53,7 @@ LICENSE_PLATE: Final = RegexRule(
         "Km 12.5",
         "im Kanton ZH 2 Verletzte",
         "le canton VD 3 blessés",
+        "ZH 079 123 45 67",
     ),
     source=RuleSource.MANDATORY,
     description="Swiss licence plate: canton code and up to six digits. Provisional.",

@@ -560,3 +560,30 @@ scores only, never prompt or output text (`CLAUDE.md` Do-NOT #13).
 Models as pulled on 2026-09-23: `qwen3:8b`, `qwen3.5:2b`, `qwen3.5:9b`,
 `gemma3:4b`, `gemma4:12b`, `granite4.1:8b`, `ministral-3:8b`, `llama3.2:3b`.
 A re-pull can change a tag's digest; RA2 records the digest on every run.
+
+---
+
+## 8. Narrative scrubbing
+
+Scrubbing (`sw-design.md` §19) runs once per record at freeze, and again in
+the Import screen's dry run. It is CPU work in the app process; it never
+touches the model server.
+
+| Measured on the development machine, 2026-10-18 | Time |
+|---|---|
+| Compiling the mandatory rules + a 50 000-entry surname list + 20 000 first names | 0.5 s |
+| Scrubbing 20 000 narratives of 600 characters with that set, uncached normalisation | 8.9 s |
+| The same, with the token normalisers cached (as built) | 6.0 s, about 0.3 ms per narrative |
+
+**The cost follows the text, not the list.** A name is matched by a set
+lookup per n-gram of tokens, never by one alternation over every entry, so a
+list ten times longer compiles longer and scrubs at the same speed. About 60 %
+of the uncached time was Unicode normalisation of tokens; a narrative corpus
+repeats its vocabulary, so both normalisers are cached (bounded at 65 536
+tokens each).
+
+**What to expect at freeze**: roughly 0.3 ms per record, so a 50 000-record
+corpus adds about 15 s to a freeze and to its dry run.
+`tests/unit/scrub/test_performance.py` holds the shape to a budget about ten
+times the measurement, so a slow CI runner passes and a change of shape (a
+scan of the list per token, a cache that stopped working) does not.

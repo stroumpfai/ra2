@@ -1,4 +1,4 @@
-"""Regenerate the seventeen hazard fixtures (sw-design.md §11.4).
+"""Regenerate the eighteen hazard fixtures (sw-design.md §11.4).
 
 mvp-spec.md §15 is explicit that clean fixtures are not acceptable. The real
 delivery is classified and gitignored and must never reach a test (§12.11), so
@@ -39,6 +39,7 @@ The hazards, and what each one exists to prove:
 | h15_mixed_encoding     | UTF-8 rows, then one cp1252 row   | cp1252, mojibake reported   |
 | h16_utf16_bom          | UTF-16-LE with its byte-order mark | file fails, BOM named      |
 | h17_utf16_no_bom       | UTF-16-LE with no byte-order mark | file fails, NUL named       |
+| h18_names_in_narrative | names, phones, plates, an email   | all scrubbed at freeze      |
 """
 
 import sys
@@ -502,6 +503,72 @@ def _h11_unmatched_text_key() -> dict[str, bytes]:
     return {"unfall.txt": unfall.encode("utf-8"), "text.csv": text.encode("utf-8")}
 
 
+#: h18's planted personal data: every value a scrubbed corpus must not hold
+#: anywhere in its database or exports (sw-design.md §19, the leak test).
+#: Invented, as every value in this file is. The names are on the scrub
+#: fixture lists (`tests/fixtures/scrub/hazards/`); the numbers and the email
+#: have the shapes the mandatory rules claim.
+H18_PLANTED: tuple[str, ...] = (
+    "Müller",
+    "Meier",
+    "Dupont",
+    "Rossi",
+    "Alessandro",
+    "079 123 45 67",
+    "044 123 45 67",
+    "+41 79 765 43 21",
+    "BE 123456",
+    "ZH 1234",
+    "VD-123 456",
+    "anna.meier@example.ch",
+)
+
+
+def _h18_names_in_narrative() -> dict[str, bytes]:
+    """Personal data in all three places a narrative is stored (§19.4).
+
+    - `aa..1`: a delivered narrative with names, a phone, a plate and an
+      email; its `UnfHergangTextAnonym` cell is a *different* text with a plate
+      and a phone, so the cell is scrubbed on its own.
+    - `aa..2`: no text row, so the narrative *is* the cell (the fallback):
+      scrubbed once, counted once.
+    - `aa..3`: French, with `D’Alessandro`. The typographic apostrophe
+      is a cp1252 canary character inside a scrubbed span, so the canary,
+      counted on the original, says 1 while the stored text holds none.
+
+    `Fuchs` is a fox here, and on the whitelist: it must survive.
+    """
+    one, two, three = uid("aa", 1), uid("aa", 2), uid("aa", 3)
+    unfall = structured(
+        FileKind.UNFALL,
+        [
+            unfall_row(
+                one,
+                canton=AG,
+                narrative="B1 fuhr auf G1 auf. Halter ZH 1234, Tel. 044 123 45 67.",
+            ),
+            unfall_row(two, canton=AG, narrative="Frau Dupont meldete VD-123 456 um 14.30 Uhr."),
+            unfall_row(three, canton=AG),
+        ],
+    )
+    text = text_file(
+        [
+            (
+                one,
+                "Herr Müller (079 123 45 67) fuhr mit BE 123456 auf G1 auf. "
+                "Zeugin Anna Meier, anna.meier@example.ch, bestätigte. "
+                "Ein Fuchs querte vorher die Fahrbahn.",
+            ),
+            (
+                three,
+                "Madame D’Alessandro, +41 79 765 43 21, roulait à 80 km/h "
+                "quand Monsieur Rossi a freiné.",
+            ),
+        ]
+    )
+    return {"unfall.txt": unfall.encode("utf-8"), "text.csv": text.encode("utf-8")}
+
+
 def _h12_unknown_header() -> dict[str, bytes]:
     """A header matching no table at all.
 
@@ -627,6 +694,7 @@ HAZARDS = (
     ("h15_mixed_encoding", _h15_mixed_encoding),
     ("h16_utf16_bom", _h16_utf16_bom),
     ("h17_utf16_no_bom", _h17_utf16_no_bom),
+    ("h18_names_in_narrative", _h18_names_in_narrative),
 )
 
 

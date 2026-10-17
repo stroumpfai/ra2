@@ -345,7 +345,7 @@ corpus + scrub_ruleset_id NULL     -- FK; NULL = mandatory rules only
 | Step | Change | Owner |
 |---|---|---|
 | Rule import | `ScrubService.import_list(kind, filename, content)` → validate (§3.5) → new `scrub_list` (or reuse one) → new `scrub_ruleset` version | S3 |
-| Dry run | `ScrubService.preview_counts(delivery_id)` as a `TaskRunner` task: re-parses the selected files exactly as `freeze` does, scrubs, returns per-rule counts and the ruleset id it used. Nothing is written | S3 |
+| Dry run | `CorpusService.scrub_preview(delivery_id)`, a direct call like `freeze`: it walks the selected files with the freeze's own code (`_selected`, `_unfall_rows`, `_scrub_record`), so the counts are the freeze's. Returns per-rule counts and the rule-set id it used. Nothing is written. *Changed during the build*: first planned as a `ScrubService` task, which would have meant a second walk to keep equal to the first | S3 |
 | Freeze | `freeze(…, scrub_ruleset_id=None)`. The new keyword is the ruleset the preview showed; `None` means the active one. A preview of v4 followed by a freeze under v5 would otherwise go unnoticed. The service compiles the scrubber once, scrubs in `_build_records`, writes the §5 columns and the `TEXT_SCRUBBED` findings. The counts must equal the dry run's (a test). A `regex` timeout raises `BlockingFindingsError` with `TEXT_SCRUB_TIMEOUT`, and nothing is written (§3.6) | S3 |
 | Raw preview | `DeliveryService.preview` scrubs every returned line with the active effective scrubber. Line-level, all file kinds | S3 |
 | Prompt | Nothing in code. `{{narrative}}` already resolves to `text_raw`. The seed template gains a paragraph (§7.4) | S5 |

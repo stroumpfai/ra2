@@ -41,6 +41,7 @@ import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
+from functools import lru_cache
 from typing import Final
 
 import regex
@@ -80,6 +81,7 @@ __all__ = [
     "check_rules",
     "compute_rules_fingerprint",
     "entry_key",
+    "entry_matches",
     "parse_name_list",
     "parse_regex_rules",
     "placeholder",
@@ -404,12 +406,21 @@ def compute_rules_fingerprint(rules: ScrubRules) -> str:
 # ===========================================================================
 
 
+#: Both normalisers are pure functions of one token, and a corpus repeats its
+#: vocabulary endlessly, so they are cached. Measured: about 60 % of a scrub's
+#: time was spent here, uncached (`docs/performance.md` §8). Bounded, so a
+#: corpus of rare words cannot grow it without limit.
+_NORMALISE_CACHE: Final = 1 << 16
+
+
+@lru_cache(maxsize=_NORMALISE_CACHE)
 def _stripped(token: str) -> str:
     """Casefolded, decomposed, combining marks dropped: `René` -> `rene`."""
     decomposed = unicodedata.normalize("NFKD", token.casefold())
     return "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
 
 
+@lru_cache(maxsize=_NORMALISE_CACHE)
 def _transliterated(token: str) -> str:
     """As `_stripped`, after `ä/ö/ü -> ae/oe/ue`: `Müller` -> `mueller`.
 
@@ -434,6 +445,18 @@ def entry_key(entry: str) -> str:
 def _entry_forms(entry: str) -> tuple[str, str]:
     tokens = _tokens(entry)
     return " ".join(_stripped(t) for t in tokens), " ".join(_transliterated(t) for t in tokens)
+
+
+def entry_matches(entry: str, query: str) -> bool:
+    """Whether a search for `query` finds `entry`, compared the way the
+    scrubber compares (§19.3): either form of the query inside either form of
+    the entry. So `müll`, `MUELL` and `Mull` all find `Müller`. An empty
+    query finds everything."""
+    needles = {form for form in _entry_forms(query) if form}
+    if not needles:
+        return True
+    haystacks = _entry_forms(entry)
+    return any(needle in hay for needle in needles for hay in haystacks)
 
 
 def _letter_count(entry: str) -> int:
