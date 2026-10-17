@@ -12,6 +12,8 @@ Nothing can repair that from inside the process. What it can do is say so, on
 every screen, which is what `DataDirView.database_replaced` carries.
 """
 
+import sys
+
 import pytest
 
 from ra2.infra.config import Settings
@@ -38,6 +40,12 @@ def test_an_untouched_database_is_not_reported_as_replaced(run_upgrade_head: Set
     assert service.data_dir().database_replaced is False
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows refuses to unlink a file with an open handle, so the swap this "
+    "test stages cannot happen there: a reset under a live app fails on the lock "
+    "instead of splitting the database",
+)
 def test_a_replaced_file_is_reported(run_upgrade_head: Settings) -> None:
     """The reported hazard, at its smallest: same path, different file.
 

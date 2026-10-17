@@ -986,6 +986,31 @@ same commit. No migration and no API change. The design is `sw-design.md`
 
 ---
 
+## CI on the runners as they are now, a slice
+
+`ci-fixes`. **One amendment** (`contracts/amendments/ci-fixes.md`), applied in
+the same commit. No migration, no API change, no dependency change.
+
+### Amended files (already frozen)
+
+| File | Change | Amendment |
+|---|---|---|
+| `.github/workflows/ci.yml` | Every action on its first `node24` major: `checkout@v5`, `setup-python@v6`, `setup-uv@v7`, `upload-artifact@v6`. No input changes | `ci-fixes` |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `tests/backend/services/lifecycle/test_database_replaced.py` | `test_a_replaced_file_is_reported` skipped on `win32`: Windows will not unlink an open file, so neither the test's swap nor the hazard can happen there |
+
+### New files
+
+| File | Contents |
+|---|---|
+| `.python-version` | `3.14`. `requires-python = ">=3.14"` let `setup-uv` pick 3.15, which `lingua-language-detector` 2.2.0 has no wheel for |
+
+---
+
 ## Phase 5 — owner: M35 (Wave 0), amendment only
 
 Re-established at tag `p5-frozen`, the same way M27 established the phase-4
