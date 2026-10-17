@@ -44,7 +44,7 @@ that scripts, tests and Playwright can drive the same use cases without a browse
 
 | Package | May import |
 |---|---|
-| `ra2/domain/` | stdlib, `pydantic`, `attrs`-style plain types. **Nothing else in `ra2/`.** |
+| `ra2/domain/` | stdlib, `pydantic`, `attrs`-style plain types, and `regex` in `domain/scrub.py` alone (§19.6, `SD66`). **Nothing else in `ra2/`.** |
 | `ra2/persistence/` | `domain`, SQLAlchemy, Alembic |
 | `ra2/services/` | `domain`, `persistence`, `infra` protocols |
 | `ra2/api/` | `services`, `domain` |
@@ -217,7 +217,11 @@ census_bucket(corpus_id, bucket_label, column_count)            -- the profile c
   `(corpus_id, column_name)` via the parent join; the census tables exist precisely
   so no view queries EAV directly.
 - Values are stored **`value_raw`, verbatim**. Normalisation is a read-time domain
-  function, never an in-place rewrite (§5, N5).
+  function, never an in-place rewrite (§5, N5). **One exception, written at
+  freeze and never after:** `record.text_raw` and the `UnfHergangTextAnonym`
+  cell hold the narrative **scrubbed** (§19.4, `SD62`). Scrubbing is a
+  replacement of named spans with placeholders, never a normalisation: every
+  other byte is the delivered one.
 
 ---
 
@@ -304,11 +308,16 @@ One transaction, all-or-nothing:
 1. Cross-file **blocking** validation over the *selected* files (§4.3): duplicate
    `UnfallUid`/`ObjektUid`/`PersonUid` **across the whole delivery**, orphan FKs,
    header mismatch. Any failure → nothing is written, the errors return to the UI.
-2. Write `corpus`, `record`, and the EAV rows.
+2. Write `corpus`, `record`, and the EAV rows, with each narrative and each
+   `UnfHergangTextAnonym` cell **scrubbed** by the corpus's rules (§19). A
+   rule that times out fails the freeze closed: `TEXT_SCRUB_TIMEOUT`, nothing
+   written (`SD66`).
 3. Per-record language detection (§4.5) — low confidence stored as `mixed`, never
-   forced.
+   forced. **On the original narrative**, in memory, before it is scrubbed.
 4. Corpus-level cp1252 canary count (§4.4). One number, no per-record markers.
-5. Non-blocking findings collected into `import_report_json`.
+   **On the original narratives**, for the same reason.
+5. Non-blocking findings collected into `import_report_json`, with one
+   `TEXT_SCRUBBED` per scrub rule that ran (§19.7).
 6. Compute and store the census (§4.2 above).
 7. Mark `is_dev_sized` from `RA2_DEV_RECORD_MAX` / `RA2_EVAL_RECORD_MIN`.
 8. Mark `is_synthetic` when the caller says so (the seed) or every record key
@@ -441,6 +450,11 @@ so phase 1 specifies the minimum: per-file findings grouped by `FindingCode` wit
 counts and keys, the detected vs. effective encoding/delimiter/quote char with
 override selectors, a re-parse button, a 20-row raw preview, remove, and
 "Export findings CSV".
+
+**The raw preview is scrubbed** with the active rule set, line by line, and
+says so in a caption (§19.7). It exists to diagnose encoding and delimiters,
+which scrubbing leaves intact; it does not exist to show a name the corpus
+would not.
 
 **Amended by P3-D22: remove is no longer in the modal.** Deleting a file is a row
 action in the Import table, so it has exactly one home. Re-parse stays and is
@@ -763,6 +777,11 @@ Each is additive and cheap to reverse; none should change silently.
 | SD59 | **Every evaluation is reachable from the Evaluation screen, and the discard dialog says which evaluation it would take** — `?evaluation=<id>`, `evaluation_chip` leading the toolbar's left group, `_follow_in_url`, `EVALUATION_NOT_FOUND_MESSAGE` in `evaluation_view.py`; `DiscardPreviewView.launched_at` / `.models` / `.inputs`, `discard-identity` in `discard_dialog.py`; `DRAFT_OPTION` and the launch time on every chip option in `results/chrome.py` (§18.5, §18.6, `SD32`, `SD35`, `SD54`) | Reported in use: analysts change a parameter, launch again, and the inconclusive evaluations pile up. The discard existed (`SD35`) but reached one evaluation only. The screen had no switcher and no query parameter, and `app.storage.client` starts empty on every load (`SD54`), so `_current_evaluation` showed the newest, and after “New evaluation” every older one was unreachable there. Clearing the third of ten meant discarding the seven above it. **(1) The switcher is the one Results and Mismatches already use**, not a new control: the `evaluation · <name>` chip, first in the left group as on the other two screens (`SD57`), its options links to `/evaluation?evaluation=<id>`, drafts included because an unlaunched draft is reachable nowhere else. `SD32`'s “no switcher” is withdrawn; its rule that the right group holds exactly one secondary button is not, and the chip is not a `.btn`. The requested id is used once, then the remembered one, then the newest. One that names nothing falls back to the newest **and says so**, because the screen is about to show a different evaluation from the one the link asked for. The URL follows the evaluation on screen by `history.replace` (`features_view`'s precedent), so a reload after “New evaluation” or a discard does not reopen the old one. **(2) Discard stays in one place.** Not on the Results or Mismatches picker: a second place for the one destructive verb, on screens whose job is reading. **(3) Which evaluation, not just which name.** `evaluation.name` is not unique and a new evaluation takes its feature set's (`SD32`), so the dialog's `"{name} · N run(s)"` could name ten rows. The preview now carries when it was launched, the models its runs used and the corpus · feature set · prompt version it pins; the dialog shows those and the id. Facts from the service, formatted in `ui/` in the host's zone (`SD37`). The fields are defaulted and `api/v1/discard.py` maps fields one by one, so the API and its snapshot are unchanged. The chip's options gain the launch time (or `draft`) for the same reason, on all three screens. **Rejected:** an undo window or soft delete (§18.3), bulk discard (§18.6), and a type-to-confirm on every discard, which guards the press people learn to click through rather than naming the target; it was built for tagged work only (`SD60`) |
 | SD60 | **Pressing through tagged work takes typing the tagged count** — `discard-type-prompt`, `discard-type-confirm`, `type_prompt`, `TYPE_CONFIRM_LABEL` in `discard_dialog.py` (§18.2, §18.5, `R-D3`, `SD59`) | G2 warned and allowed, and the allowing was a relabelled button: "Discard anyway" in the place "Discard" always is, pressed by the same hand that had just discarded three inconclusive runs without a second thought. `mismatch.analyst_tag` is the only thing in the pipeline a re-run cannot recreate (`SD21`), so this is the one state in which the confirmation should cost something. **The count, not the name:** the name repeats (`SD32`) and is on screen to copy, while the count is the dialog's one figure about what cannot be recreated, and typing it means having read it. Surrounding spaces are ignored; nothing else is. "Discard anyway" is disabled until the field holds the count and follows it both ways; the press handler checks the same state, because `disabled` is a UI state. **Only there:** no field without tagged work, for a draft, or on a blocked discard, because G1 comes first and typing cannot unblock a run being written. **Still warn and allow** (`R-D3`): the analyst can always get through. **The server is unchanged**: G2 is `force=true` on the route and in the service, and the API stays scriptable. The typing guards against attention errors; it is not an access control, and a second server-side token would be a field recording a UI event, which §18.3 refuses. **Rejected:** typing on every discard, which teaches people to type through it (`SD59`); typing the evaluation's name, for the reason above; a countdown before the button enables, which costs time and asks for no attention |
 | SD61 | **An analyst can mark an evaluation to keep, and discard refuses it and every run of it until it is released (G3)** — `evaluation.kept_at` (revision `3ce2190bd859`); `EvaluationService.set_kept`; `EvaluationKeptError`; `DiscardPreviewView.kept`, `EvaluationDraftView.kept_at` / `.is_kept`; `PUT /api/v1/evaluations/{id}/kept`, `KeepEvaluationRequest`, `kept` on `DiscardPreview`, `kept_at` on `EvaluationDraftResponse`; `evaluation-keep`, `evaluation-kept`, `KEEP_LABEL`, `RELEASE_LABEL`, `KEPT_PILL` in `evaluation_view.py`; `kept_refusal` in `discard_dialog.py`; `KEPT_OPTION` in `results/chrome.py` (§18.2, §18.3, §18.5, `SD23`, `SD35`, `SD58`, `SD59`) | With every evaluation reachable (`SD59`), clearing debris got fast, and so did clearing the wrong thing. G2 protects review work; nothing protected a **baseline**, the evaluation the next ten are compared against, which typically carries no tags at all. **A mark, not a soft delete.** `kept_at` records a decision to keep, by an analyst, on a row that exists. It is `analyst_tag`'s kind of column, never `deleted_at`'s, so §18.3 stands. A timestamp, for `tagged_at`'s reason. **Exempt from the launch lock**, for `SD58`'s reason: it is in no fingerprint and no run reads it, and a baseline is chosen once its results are in. **Runs too**: a baseline whose runs can go one at a time is not kept, so `discard_run` reads the run's evaluation. **No `force`**: the way past G3 is releasing the mark, a separate visible act; a `force` would make the mark G2's warning again. **Order G1, G3, G2**, so a caller is never told to `force` and then refused. **Idempotent**: keeping a kept evaluation keeps the first `kept_at`; releasing one that is not kept changes nothing. **On the wire**, unlike a rename (`SD58`): `DELETE` answers a kept evaluation with 409, and a guard an API caller cannot get past is a defect. **The control sits beside the discard it guards**, in the runs card header: "Keep evaluation", and once kept a `KEPT` pill and "Release". No confirmation either way, both being reversible (the `Stop` note in CONTRACTS.md). The discards stay on screen (`SD35`) and the dialog names where the mark is released; a run's refusal names its evaluation. The chip's options append `kept` on all three screens. `just reset` ignores the mark: it is the developer's wipe (§18 intro). **Rejected:** a per-run mark (the baseline is the evaluation; one run of it is not a comparison); keeping by name (names repeat, `SD32`); a confirmation on release (it guards a reversible act and teaches the click-through) |
+| SD62 | **A corpus stores its narratives scrubbed, and only scrubbed: personal data is replaced at freeze by numbered placeholders, with no LLM** — `domain/scrub.py` (`Scrubber`, `ScrubRules`); `CorpusService.freeze(…, scrub_ruleset_id=)`; `corpus.scrub_ruleset_id` / `.scrub_fingerprint` / `.scrub_mandatory_json`; `FindingCode.TEXT_SCRUBBED`; `DeliveryService.preview` scrubbed (§19, `plan-text-scrubbing.md`) | The narratives are not anonymised (B5) and reach three readers: the screen, every feature later built on `text_raw`, and possibly a model off this host one day. Scrubbing in a prompt adapter would be too late for the first two; storing both texts would leave every name in the database for the first new reader to find. So `text_raw` changes meaning, not name: the narrative as delivered, after the corpus's rules. The original stays in the delivery files and nowhere else. **Language and the canary are computed on the original**, in memory, because the canary counts exactly the characters a scrubbed name takes with it. Do-NOT #2 is intact: a new rule set is a new freeze, which already makes a new version; an existing corpus is never re-scrubbed, and one frozen before this decision carries `scrub_fingerprint IS NULL` and a `NOT SCRUBBED` chip. **Rejected:** a second `text_scrubbed` column beside the original (the names stay in the database); scrubbing at analyse time (the delivery files are re-read at freeze anyway, so it would be done twice and stored nowhere) |
+| SD63 | **The mandatory rules are code, the analyst's rules and lists are data** — `domain/scrub_mandatory.py` (`MANDATORY_RULES`: licence plates, phones, emails; `MANDATORY_RULES_VERSION`); `scrub_list`, `scrub_ruleset`; `ScrubService.import_list`; `.gitignore`'s `**/scrub-lists/` and `*.names.txt` (§19.1, §19.4) | Plates, phones and emails must be scrubbed whatever was imported, so they are committed, reviewed and tested, and an import cannot disable them, reuse their ids or take their place. Their patterns are **provisional** until the project owner supplies the real ones, and `tests/unit/scrub/test_mandatory.py` is the contract a supplied pattern must pass. Everything else is the analyst's: regex rules in TOML, first names, last names and a whitelist, uploaded through the Scrubbing screen. The lists are public data but are **not committed**, the codelists' arrangement (§14.1): the analyst's working copy, versioned by upload. Each import makes a new `scrub_ruleset` version with one component swapped; the highest is active; nothing is edited in place. A corpus snapshots the mandatory rules it got, so it still says so after this file changes. **Rejected:** mandatory rules as a TOML file under `ra2/` (the domain reads no files, and an editable file invites the edit); an explicit *Activate* step like the prompts' (rolling back is re-importing the older file, and one fewer state to explain) |
+| SD64 | **Placeholders are numbered per record, so a narrative keeps its references** — `placeholder()`, `ScrubHit.number`, `entry_key` (§19.4) | `vision.md` notes that the existing anonymisation's role codes (`B1`, `G1`, `P`) keep a consistent internal reference to each party, and that this is more than a privacy detail: extraction reads the narrative's references. A bare `<Lastname>` would make two people one. So the same value gets the same number within a text, counted per tag by first occurrence, keyed by the transliterated list entry for a name (`Müller`, `MUELLER` and `Mueller` are one `<Lastname_1>`) and by the casefolded match without separators for a regex (`079 123 45 67` and `0791234567` are one `<Phone_1>`). A shared surname with two first names is `<Firstname_1> <Lastname_1> … <Firstname_2> <Lastname_1>`, which is correct. Numbers restart with every text and mean nothing across records. The prompt paragraph that explains them is recommended template content (§15.1), not a slot |
+| SD65 | **The label says *scrubbed*, never *anonymised*** — the `SCRUBBED vN` / `NOT SCRUBBED` corpus chip; `data-handling.md` §2; risk B7 (§19.8, `SD50`) | `SD50`'s rule, that a label claims only what is known, applied to the new fact. A name list misses whatever is not on it, inflected forms (`Meiers`), nicknames, typos, letters deleted upstream (h09) and mojibake; addresses are not attempted at all. *Anonymised* would be a statement about personal data that the mechanism cannot back. The per-record marking keeps its meaning (where the text came from), because that is a different fact, and the corpus chip carries the new one. The most-hit table and the *try a sentence* box exist so an analyst can see the misses rather than trust the chip |
+| SD66 | **The scrubber's engine is `regex`, with a timeout, and a timeout fails the freeze closed** — `MATCH_TIMEOUT_S`, `IMPORT_TIMEOUT_S`, `ADVERSARIAL_LENGTH`, `ScrubTimeoutError`; `FindingCode.TEXT_SCRUB_TIMEOUT` (BLOCKING); `.importlinter`'s `regex-only-in-the-scrubber`; §1.1 (§19.6) | Analysts import the rules, so a pattern that backtracks catastrophically is an input error, and stdlib `re` cannot stop one: it has no timeout, so the freeze would hang. `regex` raises `TimeoutError` during matching; it has no runtime dependencies and no network code, and `uv.lock` pins its hashes. **Confined** to `domain/scrub.py`, because a second engine with subtly different semantics should not spread by accident, and **used for every rule**, mandatory ones included, so examples are tested against the engine that runs them. At import each pattern is timed over four adversarial strings and refused as `pattern_too_slow`; at freeze a rule that exceeds its budget on one record raises `BlockingFindingsError` and **nothing is written**, because skipping the record or storing it verbatim would put an unscrubbed narrative in the corpus. Measured: `regex` optimises the textbook `(a+)+$` away, so the fixture is `(a|aa)+$`. **Rejected:** stdlib `re` with review only (one bad import hangs the app); running patterns in a subprocess with a kill (a process per text, for a guarantee `regex` gives in-process) |
 
 **Note on the design's fixture column names.** `UnfallTypAusw`, `WitterungAusw`,
 `LichtverhaeltnisAusw` and `UnfallDatumFeld` do not exist in the delivery; the real
@@ -2412,3 +2431,203 @@ other piece of load-bearing copy. What happens to that file afterwards is
 earlier copy of the database. Destruction at that level is the disk, not the
 application — which is why full-disk encryption is a deployment condition and
 not a nice-to-have.
+
+---
+
+## 19. Narrative scrubbing
+
+The narratives are not anonymised (`data-handling.md` §2, risk B5), and they
+reach three readers: the screen, every feature built on `record.text_raw`
+later, and possibly, one day, a model that is not on this host. So a corpus
+stores its narratives **scrubbed**: personal data replaced at freeze by
+numbered placeholders, `<Lastname_1>`, `<Phone_2>`, by regular expressions
+and name lists. **No LLM is involved at any step.** `plan-text-scrubbing.md`
+is the plan this section was written from; where the two disagree, this
+section wins.
+
+### 19.1 Two kinds of rule
+
+| Kind | Source | Matches on | Tag |
+|---|---|---|---|
+| Regex rule, **mandatory** | `domain/scrub_mandatory.py`: plates, phones, emails | the original text | the rule's |
+| Regex rule, **imported** | the analyst's TOML (`id`, `tag`, `pattern`, `must_match`, optional `must_not_match` and `description`; an optional top-level `protected` list) | the original text | the rule's |
+| Name list | three UTF-8 files, one entry per line: first names, last names, whitelist | normalised tokens (§19.3) | `Firstname`, `Lastname`, `Name` |
+
+**The mandatory rules are code, the rest is data** (`SD63`). The mandatory
+rules are committed and tested, run on every freeze, and cannot be disabled,
+overridden or have their ids reused. Their patterns are provisional until the
+project owner supplies the real ones; a supplied pattern must pass the
+contract in `tests/unit/scrub/test_mandatory.py`. The imported files are
+public data but are **never committed** (`docs/rules.md`): they are uploaded
+through the Scrubbing screen and stored in the database.
+
+### 19.2 One pass, deterministic
+
+1. Every candidate span is collected against the **original** text: every
+   regex rule (mandatory first, then imported, each in declared order) and
+   every name list.
+2. Overlaps: **regex beats name**. Among regex candidates the earliest start
+   wins, then the longest span, then the rule declared first.
+3. The survivors are numbered (§19.4) and replaced in one pass.
+
+So the output is deterministic, a placeholder is never matched again,
+scrubbing scrubbed text changes nothing, and text outside the replaced spans
+is byte-identical. Nothing else is normalised in place.
+
+### 19.3 Names: whole tokens, any case, any accents
+
+- A token is a letter followed by letters and combining marks
+  (`\p{L}[\p{L}\p{M}]*`), so an NFD `Müller` is one token. A multi-token entry
+  (`von Allmen`, `D'Alessandro`) matches as an n-gram whose tokens are
+  separated by whitespace, an apostrophe or a hyphen, a line break included.
+  Longest first, by set lookup: the cost does not grow with the list.
+- Every token and entry is compared in two forms, *stripped* (casefold, NFKD,
+  combining marks dropped) and *transliterated* (casefold, `ä/ö/ü` to
+  `ae/oe/ue`, then stripped). An entry is indexed under both, a text n-gram
+  matches if either form is indexed: `Müller`, `MUELLER`, `Muller` and an NFD
+  `Müller` are one name.
+- **Whitelist** entries are never replaced by a name list, unless one of
+  `HONORIFICS` (`Herr`, `Frau`, `M.`, `Mme`, …) stands right before them:
+  `Herr Fuchs` loses his name, `ein Fuchs querte` keeps its fox. An honorific
+  only lifts the whitelist; it never makes an unlisted word a name.
+- An entry with fewer than `MIN_ENTRY_LETTERS` (3) letters is skipped and
+  reported: `Le`, `Da` and `Li` are French articles too.
+- A token on **both** lists is a first name when a last name follows it, a
+  last name when a first name precedes it, otherwise whatever the same entry
+  was tagged earlier in the text, and only failing all three `<Name_n>`.
+- Matching is on whole tokens, so `Müllerstrasse` is untouched. Addresses are
+  out of scope by decision, and so are inflected forms (`Meiers`): known
+  misses, recorded as residual risk in §19.8.
+
+### 19.4 Storage, numbering and the fingerprint
+
+```
+scrub_list(id, kind, filename, sha256, imported_at, entry_count,
+           content_text, import_report_json)
+    -- IMMUTABLE. kind: regex | firstname | lastname | whitelist.
+    -- UNIQUE(kind, sha256): the same file imported twice is one row.
+scrub_ruleset(id, version UNIQUE, created_at, fingerprint,
+              regex_list_id, firstname_list_id, lastname_list_id, whitelist_id)
+    -- IMMUTABLE. An import makes version n+1 = n with one component swapped.
+    -- The highest version is the active one.
+corpus + scrub_ruleset_id    -- NULL: no imported rule set, mandatory rules only
+       + scrub_fingerprint   -- NULL: frozen before scrubbing existed
+       + scrub_mandatory_json -- the mandatory rules as applied, snapshotted
+```
+
+- **Only scrubbed text is stored** (`SD62`). `record.text_raw` keeps its name
+  and now means "the narrative as delivered, after the corpus's scrub rules";
+  the `UnfHergangTextAnonym` row's `value_raw` the same. The original stays in
+  the delivery files on disk and nowhere else. A different rule set means a
+  new freeze, which already makes a new corpus version: Do-NOT #2 is intact.
+- **Language and the cp1252 canary are computed on the original**, in memory,
+  before scrubbing. The canary counts exactly the characters a scrubbed name
+  takes with it.
+- **Numbering** (`SD64`) is per text, per tag, by first occurrence, keyed by
+  the transliterated entry for a name and by the casefolded match without
+  spaces and `- . / ( )` for a regex. `079 123 45 67` and `0791234567` are one
+  `<Phone_1>`; `Hans Müller … Anna Müller` is
+  `<Firstname_1> <Lastname_1> … <Firstname_2> <Lastname_1>`.
+- **The fingerprint** (`compute_rules_fingerprint`) is sha256 over every rule
+  (id, tag, pattern, source), the lists as sets of entry keys, the protected
+  strings and every constant that changes an outcome
+  (`SCRUB_ALGORITHM_VERSION`, `MIN_ENTRY_LETTERS`, `HONORIFICS`). Not the
+  descriptions.
+
+### 19.5 What an import is refused for
+
+Refused with a stable `ScrubImportErrorCode`, nothing written: not UTF-8; not
+TOML; an unknown, missing or mistyped field (a misspelt `must_not_macth` is
+refused, never ignored); a malformed, duplicate or reserved id (a mandatory
+rule's, a name list's); a malformed or reserved tag (`Firstname`, `Lastname`,
+`Name`); a pattern that does not compile, can match the empty string, or times
+out over an adversarial string (§19.6); a rule with no `must_match`; a
+`must_match` example not matched in full by **its own** rule; a
+`must_not_match` example matched by **its own** rule; a **protected string**
+altered by **the whole** scrubber; a name list left with no usable entry.
+
+The examples are local and the protected strings are global, on purpose. The
+phone rule's counter-example `756.1234.5678.97` is what the AHV rule exists to
+replace, so asking the whole scrubber to leave it alone would refuse a correct
+set; asking it to leave `um 07.45 Uhr` alone is what catches a date rule that
+eats times. `PROTECTED_STRINGS` (role codes, speeds, times, roads, km markers,
+house numbers, emergency numbers) is a constant; the TOML can add to it, never
+remove from it. A name list that turns one into a person (`Rega` on a surname
+list) is refused, and the whitelist is how that is resolved.
+
+Reported, never refusing: a BOM, CRLF, blank and comment lines, duplicates,
+entries too short, entries with no letters. Each is a count (Do-NOT #6).
+
+### 19.6 The engine: `regex`, with a timeout, failing closed
+
+`SD66`. The engine is the `regex` package, not stdlib `re`, for one feature:
+`timeout=` on `finditer`, raising `TimeoutError` during matching. Analysts
+import the rules, so a bad pattern is an input error and has to fail like one.
+
+- **Confined** to `domain/scrub.py`: §1.1 names it, `.importlinter`'s
+  `regex-only-in-the-scrubber` contract and an AST test enforce it. No runtime
+  dependencies, no network; `uv.lock` pins its hashes.
+- **One engine for every rule**, mandatory ones included, compiled in
+  `VERSION0` (the `re`-compatible mode), so each rule's examples are tested
+  against the engine that runs them.
+- **Budgets.** `MATCH_TIMEOUT_S` (2 s) per rule per text at freeze;
+  `IMPORT_TIMEOUT_S` (0.25 s) per rule over each of four adversarial strings
+  of `ADVERSARIAL_LENGTH` (4096) characters at import. Measured: `regex`
+  optimises the textbook `(a+)+$` away; `(a|aa)+$` still backtracks, and is
+  the fixture.
+- **Fail closed.** A timeout at freeze raises `BlockingFindingsError` with
+  `TEXT_SCRUB_TIMEOUT` (BLOCKING, `key` = the record's `UnfallUid`, detail the
+  rule id), and nothing is written. A narrative that could not be scrubbed is
+  never skipped and never stored verbatim.
+- Fuzzy matching and named lists are deliberately unused.
+
+### 19.7 Where scrubbing happens, and where it is counted
+
+| Step | What |
+|---|---|
+| Import a file | `ScrubService.import_list(kind, filename, content)`: parse, compose with the active set, `check_rules`, then a new `scrub_list` (or the existing one) and a new `scrub_ruleset` version |
+| Dry run | `ScrubService.preview(delivery_id)`: re-parses the selected files exactly as `freeze` does, scrubs, counts, writes nothing. A `TaskRunner` task, like analyse |
+| Freeze | `CorpusService.freeze(…, scrub_ruleset_id=None)`: the set the dry run showed, or the active one. One `Scrubber` per freeze. Writes the §19.4 columns and one REPORTED `TEXT_SCRUBBED` per rule that ran, zero hits included, into `import_report_json`: `{rule_id, tag, source, hits, records}`. Never matched text |
+| Raw preview | `DeliveryService.preview` scrubs each line with the active set: the file report modal shows no name the corpus would not (§8.3) |
+| Try a sentence | `ScrubService.try_text(text)`: the active set over one sentence typed on the Scrubbing screen. Nothing stored |
+
+The dry run's counts and the freeze's are equal for the same files and set; a
+test holds them to it. The **most-hit table** lists list entries (public
+data, never record text) with at least `MOST_HIT_FLOOR` (10) hits: the
+fastest way to find whitelist candidates, and floored so that a rare name's
+presence in a corpus is not disclosed.
+
+### 19.8 What the labels may claim
+
+`SD65`, `SD50` extended. The app says **scrubbed**, never **anonymised**: a
+name list misses what is not on it, and §19.3 lists what else it misses.
+The corpus chip reads `SCRUBBED vN`, or `NOT SCRUBBED` for a corpus frozen
+before this section existed. The per-record anonymisation marking is
+unchanged: it says where the text came from, a different fact.
+
+### 19.9 Package layout additions
+
+```
+domain/
+  scrub.py                 Scrubber, ScrubRules, check_rules, parsing, counting (pure; regex)
+  scrub_mandatory.py       MANDATORY_RULES, MANDATORY_RULES_VERSION
+persistence/
+  repositories/scrub_repo.py   scrub_list, scrub_ruleset
+services/
+  scrub_service.py         import, list, versions, entries, try_text, preview
+api/
+  v1/scrub.py              /api/v1/scrub/...
+ui/
+  views/scrubbing_view.py  the Scrubbing screen (nav: Data, after Codelists)
+```
+
+### 19.10 What this section deliberately does not decide
+
+- **Addresses, streets and towns.** Not attempted, by decision.
+- **Structured columns** other than `UnfHergangTextAnonym`. The structured
+  record stays identifying (`vision.md`, *Real data*).
+- **Styling placeholders** in the UI. They render as plain text; a styled
+  inline chip would mean splitting the text into labels, never `ui.html`
+  (`SD31`).
+- **A `{{placeholders}}` prompt slot.** The slot catalogue is closed (§15.1);
+  a generic paragraph in the template explains the placeholders instead.

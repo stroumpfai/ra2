@@ -59,7 +59,7 @@ is not a review comment.
 
 | Package | May import |
 |---|---|
-| `ra2/domain/` | stdlib, `pydantic`. **Nothing else in `ra2/`.** |
+| `ra2/domain/` | stdlib, `pydantic`, and `regex` in `domain/scrub.py` alone (SD66). **Nothing else in `ra2/`.** |
 | `ra2/persistence/` | `domain`, SQLAlchemy, Alembic |
 | `ra2/services/` | `domain`, `persistence`, `infra` protocols |
 | `ra2/api/` | `services`, `domain` |

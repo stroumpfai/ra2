@@ -28,6 +28,12 @@ dependencies = [
     # NVML's library bindings — a ctypes load of libnvidia-ml, never a
     # subprocess (N3, sw-design.md §15.6). Imported as `pynvml`.
     "nvidia-ml-py>=13.0",
+    # The narrative scrubber's engine (sw-design.md §19, SD66), for one
+    # feature stdlib `re` lacks: a matching `timeout=`, so an analyst's bad
+    # pattern fails like any bad input instead of hanging a freeze. No
+    # runtime dependencies, no network. Imported by `ra2/domain/scrub.py`
+    # alone, which `.importlinter`'s `regex-only-in-the-scrubber` enforces.
+    "regex>=2026.9.29",
 ]
 
 [dependency-groups]
@@ -57,6 +63,9 @@ dev = [
     # runtime one: nothing in `ra2/` resolves a named zone (`datetime.UTC`
     # everywhere), and only revision *authoring* needs it.
     "tzdata>=2024.1",
+    # Typeshed's stubs for `regex`, so `mypy --strict` checks the scrubber
+    # instead of ignoring the import. `.pyi` files only; nothing is executed.
+    "types-regex>=2026.0",
 ]
 
 [build-system]

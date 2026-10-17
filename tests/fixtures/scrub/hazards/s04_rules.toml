@@ -1,0 +1,27 @@
+# Erfundene Testregeln (plan-text-scrubbing.md §4).
+
+protected = ["Tempo 80", "am Vortag"]
+
+[[rule]]
+id = "iban-ch"
+tag = "IBAN"
+description = "Swiss IBAN, grouped or not."
+pattern = '(?<![0-9A-Z])CH\d{2}(?: ?[0-9A-Z]{4}){4} ?[0-9A-Z](?![0-9A-Z])'
+must_match = ["CH93 0076 2011 6238 5295 7", "CH9300762011623852957"]
+must_not_match = ["CH93", "Km 123.4"]
+
+[[rule]]
+id = "ahv"
+tag = "AHV"
+description = "AHV number: 756, then ten digits, dotted or not."
+pattern = '(?<!\d)756[. ]?\d{4}[. ]?\d{4}[. ]?\d{2}(?!\d)'
+must_match = ["756.1234.5678.97", "7561234567897"]
+must_not_match = ["756", "Tempo 75"]
+
+[[rule]]
+id = "date"
+tag = "Date"
+description = "A date with a year, or with a German or French month name."
+pattern = '(?<!\d)(?:0?[1-9]|[12]\d|3[01])\.(?:0?[1-9]|1[0-2])\.(?:\d{4}|\d{2})(?!\d)|(?<!\d)(?:0?[1-9]|[12]\d|3[01])\. ?(?:Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)(?: \d{4})?|(?<!\d)(?:1er|0?[1-9]|[12]\d|3[01]) (?:janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre) \d{4}'
+must_match = ["12.03.2024", "12.3.24", "12. März 2024", "1er mars 2024", "3. Mai"]
+must_not_match = ["um 07.45 Uhr", "12.03", "Km 12.5", "um 14.30 Uhr"]

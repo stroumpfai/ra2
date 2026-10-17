@@ -86,6 +86,11 @@ FINDING_LABELS: Final[dict[FindingCode, str]] = {
     FindingCode.TEXT_KEY_UNMATCHED: "Narrative with no unfall row",
     FindingCode.UNFALL_WITHOUT_TEXT: "Unfall row with no narrative",
     FindingCode.CP1252_CANARY_ZERO: "No Windows-1252-only character in a corpus containing French",
+    FindingCode.TEXT_SCRUBBED: "Personal data replaced by placeholders in the narratives",
+    FindingCode.TEXT_SCRUB_TIMEOUT: (
+        "A scrub rule took too long on one narrative — nothing was frozen;"
+        " fix or remove the rule and freeze again"
+    ),
 }
 
 #: How many of a group's keys are listed inline before the count takes over.

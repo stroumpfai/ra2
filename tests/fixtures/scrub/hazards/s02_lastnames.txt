@@ -1,0 +1,18 @@
+﻿# Nachnamen, erfunden für die Tests
+Müller
+Meier
+Fuchs
+Weiss
+Martin
+Simon
+von Allmen
+D'Alessandro
+Brunner
+Dupont
+Rossi
+
+MÜLLER
+Mueller
+Li
+Le
+123

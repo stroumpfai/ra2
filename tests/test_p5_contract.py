@@ -18,6 +18,7 @@ Two of these carry more weight than the rest, and they are the two
 
 import ast
 import importlib
+import re
 import tomllib
 from pathlib import Path
 
@@ -229,16 +230,42 @@ def test_the_migrations_are_a_single_chain_with_one_head():
 # ---------------------------------------------------------------------------
 
 
+#: Runtime dependencies added **after** `p5w4-green`, each named, for the
+#: reason `POST_PHASE_5_ERRORS` gives: the assertion below stays a claim about
+#: *phase 5*, and every later addition is a visible line somebody had to write.
+POST_PHASE_5_DEPENDENCIES = {
+    # `feat/text-scrubbing` — the narrative scrubber's engine, for the matching
+    # `timeout=` stdlib `re` lacks (SD66). No runtime dependencies, no
+    # network; imported by `ra2/domain/scrub.py` alone.
+    "regex>=2026.9.29",
+}
+
+#: Import-linter contracts added after `p5w4-green`, named likewise.
+POST_PHASE_5_CONTRACTS = {
+    # `feat/text-scrubbing` — `regex` is imported by the scrubber and nowhere
+    # else (SD66), so a second regex engine cannot spread by accident.
+    "regex-only-in-the-scrubber",
+}
+
+
+def _contract_names() -> set[str]:
+    text = (REPO_ROOT / ".importlinter").read_text(encoding="utf-8")
+    return set(re.findall(r"^\[importlinter:contract:([^\]]+)\]", text, re.MULTILINE))
+
+
 def test_pyproject_gained_no_dependency_this_phase():
     """The runtime dependency list is pinned here, in full.
 
     Phase 5 adds one domain module, one service, one router and one view over
     tables that already exist — there is nothing for a library to do. Asserting
     the whole list rather than the absence of three names makes an addition
-    fail loudly instead of needing to be guessed at.
+    fail loudly instead of needing to be guessed at. A later addition is
+    subtracted by name — see `POST_PHASE_5_DEPENDENCIES`.
     """
     data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert data["project"]["dependencies"] == [
+    dependencies = data["project"]["dependencies"]
+    assert set(dependencies) >= POST_PHASE_5_DEPENDENCIES
+    assert [d for d in dependencies if d not in POST_PHASE_5_DEPENDENCIES] == [
         "fastapi>=0.115",
         "nicegui>=2.0",
         "uvicorn[standard]>=0.30",
@@ -261,10 +288,12 @@ def test_importlinter_gained_no_contract_this_phase():
     because `domain` may import stdlib and `pydantic` and nothing else in
     `ra2/`. What `import-linter` *cannot* express is "this service may not
     import that service" — both are one layer — so §17.3's absent edge is
-    asserted on the AST below instead (plan-phase-5.md §2.4).
+    asserted on the AST below instead (plan-phase-5.md §2.4). A later
+    contract is subtracted by name — see `POST_PHASE_5_CONTRACTS`.
     """
-    text = (REPO_ROOT / ".importlinter").read_text(encoding="utf-8")
-    assert text.count("[importlinter:contract:") == 7
+    names = _contract_names()
+    assert names >= POST_PHASE_5_CONTRACTS
+    assert len(names - POST_PHASE_5_CONTRACTS) == 7
 
 
 #: Service errors added **after** `p5w4-green`, by the risk and fix slices,

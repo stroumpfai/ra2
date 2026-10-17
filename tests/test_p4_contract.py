@@ -151,9 +151,14 @@ def test_importlinter_gained_no_contract_this_phase():
     of numbers, because `domain` may import stdlib and `pydantic` and nothing
     else in `ra2/` — which is what makes §16.5's "ranking is a derivation"
     structural rather than aspirational (plan-phase-4.md §2.4).
+
+    Contracts added after phase 5 are subtracted by name, the same names
+    `tests/test_p5_contract.py`'s `POST_PHASE_5_CONTRACTS` lists: today one,
+    `regex-only-in-the-scrubber` (`feat/text-scrubbing`, SD66).
     """
     text = (REPO_ROOT / ".importlinter").read_text(encoding="utf-8")
-    assert text.count("[importlinter:contract:") == 7
+    later = text.count("[importlinter:contract:regex-only-in-the-scrubber]")
+    assert text.count("[importlinter:contract:") - later == 7
 
 
 def test_score_metric_is_closed_and_carries_counts_as_well_as_rates():

@@ -251,7 +251,10 @@ corpus(id, name, imported_at, version, source_file_manifest_json,
 
 record(id, corpus_id, unfall_uid, language, language_confidence,
        text_raw, text_anonymised_flag)
-      -- text_raw stored verbatim, never normalised in place
+      -- text_raw stored as delivered, never normalised in place, and
+      -- SCRUBBED at freeze: personal data replaced by numbered placeholders,
+      -- <Lastname_1>, <Phone_2>, by regex and name lists, never an LLM.
+      -- The unscrubbed text is never stored (sw-design.md §19, SD62)
 
 unfall_row(record_id, column_name, value_raw)      -- long/EAV form, 67 cols
 objekt_row(id, record_id, objekt_uid, obj_nr, ...) + objekt_cell(objekt_row_id, column_name, value_raw)
@@ -784,6 +787,10 @@ every record, in one of four states: *anonymised column* (the narrative came
 from `UnfHergangTextAnonym`), and for a delivered narrative *anonymised*, *not
 anonymised* or, until the supplier has said (§18), ***anonymisation unknown***.
 Never an absent marking that reads as "not anonymised".
+**Required on every corpus and every result:** the scrubbing marker,
+***scrubbed vN*** with the rule-set version, or ***not scrubbed*** for a corpus
+frozen before scrubbing existed. Never *anonymised*: name lists miss what is not
+on them (sw-design.md §19.8).
 **Required on every dev-sized result:** the "smoke test, not a result" marker.
 **Required on every result over a synthetic corpus:** the synthetic marker, and
 no ranking verdict (§9).

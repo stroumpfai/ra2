@@ -42,6 +42,7 @@ learning two different worlds.
 | Structured output | **Pydantic model → JSON Schema → Ollama `format:`** (constrained decoding), wrapped by **PydanticAI** | The schema *is* the contract. Constrained decoding means the model can't emit invalid JSON — no repair code. PydanticAI adds retries, and `TestModel`/`FunctionModel` for tests |
 | Storage | **SQLite (WAL) + SQLAlchemy 2.0 async + Alembic** | Same as pi-planner. Alembic matters more here than usual — see handover below |
 | Jobs | **SQLite `runs` table + in-process asyncio worker** | Local LLM calls take seconds to minutes; you need async. But no Redis/Celery — one container, restart-safe, and a queue Claude can reason about in one file |
+| Narrative scrubbing | **`regex`** (mrab-regex), in `domain/scrub.py` only | Analysts import scrub patterns, so a catastrophically backtracking one must fail cleanly; `regex` has the matching `timeout=` stdlib `re` lacks. No runtime dependencies, no network (sw-design.md §19.6, `SD66`) |
 | Quality gates | ruff, mypy, pytest, pytest-cov, pre-commit, GitHub Actions | Same as today |
 | Packaging | Multi-stage Dockerfile + compose (`app` + `ollama`) | Mirrors the existing setup |
 

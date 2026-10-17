@@ -115,6 +115,13 @@ preferred route is always to synthesise the hazard into a fixture instead
   `UAP_Referenzen.csv`, keeping only codes valid today).
 - **Feature sets and prompt versions are frozen.** To change one, clone it or
   save a new version; old runs keep citing exactly what they used.
+- **Scrub rules and name lists are imported, never committed.** The name lists
+  are public, but they are the analyst's working copy, uploaded on the
+  Scrubbing screen and versioned there; keep them outside the checkout, or in
+  a `scrub-lists/` folder, which git ignores. A new rule set applies to the
+  next freeze. An existing corpus is never re-scrubbed: freeze it again.
+- **Scrubbed is not anonymised.** A narrative can still name someone the lists
+  do not know, or describe an address. Read it as sensitive.
 - **A run below the evaluation threshold is a smoke test, not a result**, and
   every view says so. Do not quote its numbers.
 - **A mismatch rate is not a model error rate** until someone has read the
@@ -211,6 +218,8 @@ behind it. In short:
   delivery-shaped files anywhere in the tree by name *and* by content. Do not
   bypass it; if it blocks a synthetic fixture, the fixture belongs under
   `tests/fixtures/deliveries/` with invented keys.
+- **Scrub fixtures are invented and small**, generated into
+  `tests/fixtures/scrub/hazards/`. A test never loads a real name list.
 
 ### 4.5 Logging
 

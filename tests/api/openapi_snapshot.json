@@ -2351,7 +2351,9 @@
           "COUNT_MISMATCH_PERS",
           "TEXT_KEY_UNMATCHED",
           "UNFALL_WITHOUT_TEXT",
-          "CP1252_CANARY_ZERO"
+          "CP1252_CANARY_ZERO",
+          "TEXT_SCRUBBED",
+          "TEXT_SCRUB_TIMEOUT"
         ],
         "title": "FindingCode",
         "type": "string"
