@@ -127,6 +127,8 @@ __all__ = [
     "EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE",
     "EVAL_ERROR_MODEL_EXCEEDS_VRAM",
     "EVAL_ERROR_MODEL_NOT_AVAILABLE",
+    "EVAL_ERROR_NAME_BLANK",
+    "EVAL_ERROR_NAME_TOO_LONG",
     "EVAL_ERROR_NO_MODELS_SELECTED",
     "EVAL_ERROR_NO_TEMPLATE",
     "EVAL_ERROR_UNKNOWN_REASONING_EFFORT",
@@ -148,6 +150,9 @@ _TEMPLATE_KIND: Final = "prompt template"
 _DEFAULT_TEMPERATURE: Final = 0.0
 _DEFAULT_SEED: Final = 42
 _DEFAULT_LANGUAGE: Final = "de"
+
+#: `evaluation.name`'s `String(200)`.
+_NAME_MAX_CHARS: Final = 200
 
 # --- launch validation messages --------------------------------------------
 #
@@ -178,6 +183,14 @@ EVAL_ERROR_UNKNOWN_REASONING_EFFORT: Final = (
 #: value there says nothing the analyst could have meant.
 EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE: Final = (
     "{floor}: not a minimum cell count; a cell needs at least one record to be shown."
+)
+#: SD58 — the name is the one thing a person reads an evaluation by. Blank,
+#: it leaves a picker row with nothing to click and nothing to read.
+EVAL_ERROR_NAME_BLANK: Final = "an evaluation needs a name; this one is blank."
+#: `evaluation.name` is `String(200)`, and the API's request schemas say so
+#: too. SQLite would store a longer one; the next database might not.
+EVAL_ERROR_NAME_TOO_LONG: Final = (
+    "the name is {length} characters; an evaluation name holds at most {limit}."
 )
 #: The design's "Launch N runs" with N = 0 has nothing to launch.
 EVAL_ERROR_NO_MODELS_SELECTED: Final = "no models are selected; a launch needs at least one."
@@ -416,7 +429,10 @@ class EvaluationService:
 
         Read **once**, here. A draft keeps the floor it was created with; a
         later change to the environment moves new drafts, never this one.
+
+        :raises FeatureValidationError: the name is blank or too long (SD58).
         """
+        name = _checked_name(name)
         async with session_scope(self._session_factory) as session:
             await self._require_corpus(session, corpus_id)
             await self._require_config(session, feature_config_id)
@@ -469,8 +485,8 @@ class EvaluationService:
 
         :raises EvaluationLockedError: `launched_at` is set; nothing changed.
         :raises FeatureValidationError: a selected model exceeds the host's
-            VRAM, the reasoning effort is one Ollama does not map, or the
-            floor is below 1; nothing changed.
+            VRAM, the reasoning effort is one Ollama does not map, the floor
+            is below 1, or the name is blank or too long; nothing changed.
         :raises NotFoundError: no such evaluation, or a cited row is missing.
         """
         # Judged before the transaction opens, not inside it: it can be a
@@ -480,7 +496,7 @@ class EvaluationService:
         async with self._draft_lock, session_scope(self._session_factory) as session:
             evaluation = await self._editable(session, evaluation_id)
             if name is not None:
-                evaluation.name = name
+                evaluation.name = _checked_name(name)
             if corpus_id is not None:
                 await self._require_corpus(session, corpus_id)
                 evaluation.corpus_id = corpus_id
@@ -560,6 +576,31 @@ class EvaluationService:
             elif tag not in models:
                 models.append(tag)
             evaluation.selected_models_json = json.dumps(models, **_JSON_KWARGS)  # type: ignore[arg-type]
+            await session.flush()
+            return _draft_view(evaluation)
+
+    async def rename(self, evaluation_id: EvaluationId, *, name: str) -> EvaluationDraftView:
+        """Rename an evaluation, **launched or not** (SD58).
+
+        The one column exempt from "immutable after launch" (§15.2), because
+        it is the one column nothing pins. It is not a fingerprint input, it
+        is not copied onto a run, and every reference to an evaluation
+        (exports, links, the pickers' targets) is by id. Its only reader is a
+        person telling two evaluations apart. That is usually only possible
+        once the results are in, and by then the evaluation is launched.
+
+        The name is stripped, and refused when blank or longer than the
+        column. A blank name would leave a picker row with nothing to click.
+
+        :raises FeatureValidationError: blank, or too long; nothing changed.
+        :raises NotFoundError: no such evaluation.
+        """
+        name = _checked_name(name)
+        # The draft lock as well: on a draft this is one more edit path, and
+        # it must not interleave with a tick or a step.
+        async with self._draft_lock, session_scope(self._session_factory) as session:
+            evaluation = await self._require(session, evaluation_id)
+            evaluation.name = name
             await session.flush()
             return _draft_view(evaluation)
 
@@ -1557,6 +1598,20 @@ def _server_parameters(payload: str | None) -> dict[str, tuple[str, ...]] | None
     if payload is None:
         return None
     return {key: tuple(values) for key, values in json.loads(payload).items()}
+
+
+def _checked_name(name: str) -> str:
+    """The name as stored: stripped, never blank, never longer than the
+    column (SD58). Every path that writes `evaluation.name` goes through here,
+    so a draft and a launched evaluation follow one rule."""
+    stripped = name.strip()
+    if not stripped:
+        raise FeatureValidationError([EVAL_ERROR_NAME_BLANK])
+    if len(stripped) > _NAME_MAX_CHARS:
+        raise FeatureValidationError(
+            [EVAL_ERROR_NAME_TOO_LONG.format(length=len(stripped), limit=_NAME_MAX_CHARS)]
+        )
+    return stripped
 
 
 def _selected_models(evaluation: Evaluation) -> tuple[str, ...]:

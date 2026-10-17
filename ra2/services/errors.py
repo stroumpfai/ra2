@@ -184,7 +184,8 @@ class EvaluationLockedError(ServiceError):
 
     An evaluation is editable while `launched_at IS NULL` and immutable after
     (sw-design.md §15.2): a draft is a saved setup, an evaluation is a pinned
-    one, and the runs citing it would stop being reproducible.
+    one, and the runs citing it would stop being reproducible. `rename` never
+    raises it: the name pins nothing (SD58).
     """
 
     def __init__(self, evaluation_id: str) -> None:

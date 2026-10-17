@@ -637,7 +637,8 @@ class Evaluation(Base):
     immutable after — `evaluation_service.launch` stamps it, writes the
     `evaluation_feature` snapshot and creates one `queued` `run` per selected
     model, all in one transaction. After that every edit path raises
-    `EvaluationLockedError`.
+    `EvaluationLockedError`, except `evaluation_service.rename`: `name` pins
+    nothing, so it stays editable (SD58).
 
     Phases 1 and 2 never created one: the table existed because sw-design.md
     §6.3 requires the corpus delete guard — "deleting a corpus is refused

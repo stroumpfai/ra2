@@ -615,7 +615,8 @@ class EvaluationDraftView:
     """An evaluation's **setup** — the six numbered steps, as data.
 
     Editable while `launched_at` is `None`; every edit path raises
-    `EvaluationLockedError` after (sw-design.md §15.2).
+    `EvaluationLockedError` after (sw-design.md §15.2), except a rename: the
+    name pins nothing (SD58).
     """
 
     evaluation_id: EvaluationId
@@ -783,8 +784,8 @@ class EvaluationView:
     runs: Page[RunView] | None = None
     #: `None` until a run exists — provenance is written at run start.
     provenance: ProvenanceView | None = None
-    #: The toolbar's pinned-inputs line, "Weather & conditions · v2 — only the
-    #: model varies".
+    #: "Weather & conditions · v2". Was the toolbar's pinned-inputs line; the
+    #: view no longer renders it (SD58), and the API still returns it.
     feature_config_label: str = ""
     corpus_label: str = ""
     #: What step 6 offers: the corpus's record count, and the dev cap from

@@ -289,7 +289,8 @@ evaluation(id, name, corpus_id, feature_config_id, prompt_template_id,
       -- is "configurable per evaluation", and a column is what makes that
       -- true. Cheap because suppression is applied at READ time from stored
       -- n, so changing the floor never requires a re-score.
-      -- editable while launched_at IS NULL; immutable after (SD13)
+      -- editable while launched_at IS NULL; immutable after (SD13),
+      -- except name, which pins nothing (SD58)
 evaluation_feature(evaluation_id, feature_id, enum_codelist_json, fingerprint)
       -- written once, inside the launch transaction (SD12). A frozen
       -- feature_config is corpus-INDEPENDENT, so the codelist snapshot and
