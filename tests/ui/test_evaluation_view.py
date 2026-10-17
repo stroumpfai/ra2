@@ -71,7 +71,10 @@ from ra2.domain.settings import SettingRefusal
 from ra2.infra.config import Settings
 from ra2.persistence.models import Corpus, Evaluation, Feature, Mismatch, Record, Run
 from ra2.services.container import Services
-from ra2.services.evaluation_service import EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE
+from ra2.services.evaluation_service import (
+    EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE,
+    EVAL_ERROR_NAME_BLANK,
+)
 from ra2.services.readmodels import EvaluationDraftView, FeatureSetSummary, PromptTemplateView
 from ra2.ui import theme
 from ra2.ui.components import format_local
@@ -742,21 +745,99 @@ async def test_a_launched_evaluation_cannot_change_the_reasoning_effort(
     assert _is_disabled(select)
 
 
-async def test_the_toolbar_pins_the_inputs_and_right_aligns_without_a_spacer(
-    seeded: Seeded,
-) -> None:
-    """README §2, "Toolbar": the pinned-inputs line, and a right group on
-    `margin-left:auto` — **not** a `flex:1` spacer, which breaks right
-    alignment when the row wraps."""
+async def test_the_toolbar_right_aligns_without_a_spacer(seeded: Seeded) -> None:
+    """README §2, "Toolbar": a right group on `margin-left:auto` — **not** a
+    `flex:1` spacer, which breaks right alignment when the row wraps."""
     user = seeded.user
     await _open_evaluation(user)
 
-    pinned = _all_text(user, "pinned-inputs")
-    assert pinned.endswith(evaluation_view.PINNED_SUFFIX)
-    assert seeded.config.name in pinned
     assert "margin-left:auto" in evaluation_view.RIGHT_GROUP_STYLE
     assert "flex:1" not in evaluation_view.RIGHT_GROUP_STYLE
     assert _all_text(user, "save-draft") == "Save draft"
+
+
+# --- the name (SD58) ----------------------------------------------------------
+
+
+def _name_field(user: User) -> Element:
+    (field,) = _find(user, "evaluation-name")
+    return field
+
+
+async def test_the_toolbar_opens_with_the_evaluations_name_in_a_field(seeded: Seeded) -> None:
+    """The screen never showed the name at all, so nothing on it could change
+    it. The left group is the "name:" label and the field, and nothing else:
+    the pinned-inputs line it replaces is gone, so the feature set is named
+    once, in step 2. The toolbar still holds exactly one button (`SD32`)."""
+    user = seeded.user
+    await _open_evaluation(user)
+
+    field = _name_field(user)
+    assert field.tag == "input"
+    assert field._props["value"] == seeded.draft.name
+    assert field._props["aria-label"] == evaluation_view.NAME_LABEL
+    assert field._props["maxlength"] == str(evaluation_view.NAME_MAX_CHARS)
+    assert not _is_disabled(field)
+
+    (prefix,) = _find(user, "evaluation-name-label")
+    assert field.parent_slot is not None and prefix.parent_slot is not None
+    left_group = field.parent_slot.parent
+    assert prefix.parent_slot.parent is left_group
+    assert list(left_group) == [prefix, field]
+    assert _own_text(prefix) == evaluation_view.NAME_PREFIX
+    assert not _find(user, "pinned-inputs")
+
+    (toolbar,) = _find(user, "evaluation-toolbar")
+    assert [d.tag for d in toolbar.descendants()].count("button") == 1
+    texts = [t for t in (_own_text(d) for d in toolbar.descendants()) if t]
+    assert texts == [evaluation_view.NAME_PREFIX, evaluation_view.SAVE_DRAFT_LABEL]
+
+
+async def test_a_draft_is_renamed_from_the_field(seeded: Seeded) -> None:
+    user = seeded.user
+    await _open_evaluation(user)
+
+    _one(user, _name_field(user)).trigger("change", args="  Baseline, prompt v4 ")
+    # The redraw puts the **stored** name back in the field: stripped.
+    await _until(lambda: _name_field(user)._props["value"] == "Baseline, prompt v4")
+
+    view = await seeded.services.evaluation.get(seeded.draft.evaluation_id, probe=False)
+    assert view.draft.name == "Baseline, prompt v4"
+
+
+async def test_a_launched_evaluation_is_renamed_while_its_setup_stays_locked(
+    launched: Seeded,
+) -> None:
+    """The point of `SD58`: the name is the one thing the launch does not
+    pin, so its field is the one control in the toolbar or the setup column
+    that stays live."""
+    user = launched.user
+    await _open_evaluation(user)
+
+    assert not _is_disabled(_name_field(user))
+    (seed_input,) = _find(user, "seed-input")
+    assert _is_disabled(seed_input)
+
+    _one(user, _name_field(user)).trigger("change", args="After the codelist fix")
+    await _until(lambda: _name_field(user)._props["value"] == "After the codelist fix")
+
+    view = await launched.services.evaluation.get(launched.draft.evaluation_id, probe=False)
+    assert view.draft.name == "After the codelist fix"
+    assert view.draft.is_launched
+
+
+async def test_a_blank_name_is_refused_and_the_stored_name_stays(seeded: Seeded) -> None:
+    """The floor's shape: the service's sentence, and the stored value back
+    in the field rather than one that was never saved."""
+    user = seeded.user
+    await _open_evaluation(user)
+
+    _one(user, _name_field(user)).trigger("change", args="   ")
+    await user.should_see(EVAL_ERROR_NAME_BLANK)
+
+    view = await seeded.services.evaluation.get(seeded.draft.evaluation_id, probe=False)
+    assert view.draft.name == seeded.draft.name
+    assert _name_field(user)._props["value"] == seeded.draft.name
 
 
 async def test_the_split_never_wraps_and_the_setup_column_hugs_its_content(
@@ -1269,6 +1350,8 @@ async def _assert_empty_state(seeded: Seeded) -> None:
     await user.should_see("Evaluation")
 
     assert _all_text(user, "pinned-inputs") == evaluation_view.NO_SETUP_MESSAGE
+    # No row, nothing to name (SD58).
+    assert not _find(user, "evaluation-name")
     assert _find(user, "corpus-select")
     assert _find(user, "feature-set-select")
     assert not _find(user, "prompt-select")
@@ -1553,7 +1636,8 @@ async def test_the_page_paints_before_the_endpoint_answers(
     (launch,) = _find(user, "launch")
     assert _is_disabled(launch)
     # The database half really is there, not only the frame.
-    assert seeded.config.name in _all_text(user, "pinned-inputs")
+    (name_field,) = _find(user, "evaluation-name")
+    assert name_field._props["value"] == seeded.draft.name
 
     catalog.answer()
     await _until(lambda: not _loading(user))

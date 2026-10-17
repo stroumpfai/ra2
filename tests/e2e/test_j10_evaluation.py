@@ -115,6 +115,10 @@ TIMEOUT_MS = 60_000
 #: `dd.mm.yy - hh:mm:ss` (README §2, "Runs table").
 TIMESTAMP_RE = re.compile(r"^\d{2}\.\d{2}\.\d{2} - \d{2}:\d{2}:\d{2}$")
 RESULTS_HREF_RE = re.compile(r"^/results\?run=.+$")
+#: What the journey renames its launched evaluation to (SD58). Distinct from
+#: anything another journey names an evaluation, so the picker check below
+#: holds on a shared server.
+RENAMED = "J10 · after launch"
 
 
 @pytest.fixture
@@ -394,6 +398,22 @@ def test_j10_launch_an_evaluation_and_watch_it_finish(
         evaluation_view.NEW_EVALUATION_LABEL
     )
 
+    # --- but its name is not locked (SD58) ------------------------------------
+    # The one field that stays live after the launch: the name pins nothing.
+    # Enter is the `change` a person makes, so this is the browser's event and
+    # not a simulated one.
+    name = page.locator('[data-testid="evaluation-name"]')
+    expect(name).to_be_enabled()
+
+    def _rename() -> None:
+        name.fill(RENAMED)
+        name.press("Enter")
+
+    _redrawn(page, "evaluation-name", _rename)
+    _until_named(page, server_url, evaluation_id=evaluation_id, name=RENAMED)
+    expect(page.locator('[data-testid="evaluation-name"]')).to_have_value(RENAMED)
+    expect(page.locator('[data-testid="corpus-select"]')).to_be_disabled()
+
     # --- and it is not a dead end ---------------------------------------------
     page.click('[data-testid="new-evaluation"]')
     # The toolbar swapping is the redraw landing on the new draft.
@@ -448,6 +468,25 @@ def test_j10_launch_an_evaluation_and_watch_it_finish(
     assert surviving_draft["launched_at"] is not None, survivor
     surviving_runs = _get(page, server_url, f"/api/v1/runs?evaluation_id={evaluation_id}")
     assert len(cast("list[object]", surviving_runs["items"])) == 2, surviving_runs
+
+    # --- the name is what the Review pickers show (SD58, SD54) ----------------
+    page.goto(f"{server_url}/results")
+    expect(
+        page.locator('[data-testid="picker-evaluation"]').filter(has_text=RENAMED)
+    ).to_have_count(1, timeout=TIMEOUT_MS)
+
+
+def _until_named(page: Page, server_url: str, *, evaluation_id: str, name: str) -> None:
+    """`_until_floor`'s poll, for the name."""
+    deadline = time.monotonic() + TIMEOUT_MS / 1000
+    stored: object = None
+    while time.monotonic() < deadline:
+        body = _get(page, server_url, f"/api/v1/evaluations/{evaluation_id}")
+        stored = cast("dict[str, object]", body["draft"])["name"]
+        if stored == name:
+            return
+        page.wait_for_timeout(100)
+    raise AssertionError(f"the evaluation is named {stored!r}, never {name!r}")
 
 
 def _redrawn(page: Page, testid: str, action: Callable[[], object]) -> None:

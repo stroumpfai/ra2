@@ -36,7 +36,14 @@ rather than from a task counter a restart can disagree with (§15 F6). So the
 timer re-reads `EvaluationService.get()` and stops when no run is `queued` or
 `running` — one polling loop, no websocket, no SSE.
 
-**Four places this file departs from the drawn board, all deliberate:**
+**Five places this file departs from the drawn board, all deliberate:**
+
+- *The toolbar's pinned-inputs line is not rendered* once an evaluation is on
+  screen ("Weather & conditions · v2 — only the model varies"). A labelled
+  name field takes its place (`SD58`). The set is already step 2's select, a
+  hand's width below, and "only the model varies" restated what the setup
+  column shows. Beside an editable name, the line read as a second name. The
+  empty state keeps the slot for `NO_SETUP_MESSAGE`.
 
 - *Step 2's note is not rendered at all.* The design reads "Freezes when the
   first run executes", which stopped being true at phase 2 — `mvp-spec.md` §9
@@ -92,7 +99,9 @@ view keeps only the handle it needs to close it on "refresh".
   at the call site.
 - *A new evaluation's name* is the cited feature set's. The design has no name
   control and `save_draft` requires one; naming the draft after what it pins
-  is the only choice that carries information.
+  is the only choice that carries information. It stops carrying any once a
+  set has a few evaluations, so the toolbar's name field renames it, before
+  or after the launch (`SD58`).
 - *The Run column links to `/results`*, which is a placeholder route this
   phase. A link that lands on "Not built in phase 1" is honest; hiding the
   link would be the design's affordance quietly missing.
@@ -193,11 +202,13 @@ __all__ = [
     "LAUNCHED_MESSAGE",
     "MODELS_UNSAVED_MESSAGE",
     "MODELS_WELL_PX",
+    "NAME_LABEL",
+    "NAME_MAX_CHARS",
+    "NAME_PREFIX",
     "NEW_EVALUATION_LABEL",
     "NO_RUNS_MESSAGE",
     "NO_SETUP_MESSAGE",
     "PAGE_SIZE",
-    "PINNED_SUFFIX",
     "POLL_FAST_S",
     "POLL_FAST_TICKS",
     "POLL_SETTLED_S",
@@ -348,9 +359,24 @@ GEAR: Final = (
 
 # --- copy, from design/prompt-evaluation/README.md §2 -----------------------
 
-#: The toolbar's pinned-inputs line: `EvaluationView.feature_config_label`
-#: followed by this. "Weather & conditions · v2 — only the model varies".
-PINNED_SUFFIX: Final = " — only the model varies"
+#: The toolbar's name field (SD58). **Undesigned**: the design's toolbar
+#: shows the pinned inputs and no name, because its fixture has one
+#: evaluation. The field replaces that line (module docstring). `NAME_PREFIX`
+#: is what the eye reads beside the field, `NAME_LABEL` what a screen reader
+#: announces for it: the visible word is not tied to the input.
+NAME_PREFIX: Final = "name:"
+NAME_LABEL: Final = "Evaluation name"
+#: `evaluation.name`'s `String(200)`, as the browser's `maxlength`. The
+#: service refuses a longer one anyway; this keeps the typing from getting
+#: there.
+NAME_MAX_CHARS: Final = 200
+#: `.rof`'s box at `.sel`'s mono, sized to the name between two bounds, so a
+#: short name does not stretch across the toolbar and a long one does not
+#: push the right group onto its own row.
+NAME_STYLE: Final = (
+    "font-family:var(--mono);font-size:12px;font-weight:600;cursor:text;"
+    "padding:4px 8px;width:auto;field-sizing:content;min-width:16ch;max-width:48ch;"
+)
 SAVE_DRAFT_LABEL: Final = "Save draft"
 #: The creation affordance the design never drew, in `features_view`'s "New
 #: set" and `prompts_view`'s "New version" register (SD32). It is the **only**
@@ -924,10 +950,12 @@ class _EvaluationPage:
     def _render_toolbar(self) -> None:
         view = self._view
         with ui.element("div").style(LEFT_GROUP_STYLE):
-            label = "" if view is None else view.feature_config_label
-            ui.label(f"{label}{PINNED_SUFFIX}" if label else NO_SETUP_MESSAGE).classes(
-                "mono ink2"
-            ).props('data-testid="pinned-inputs"').mark("pinned-inputs").style("font-size:11px;")
+            if view is not None:
+                self._name_input(view.draft.name)
+            else:
+                ui.label(NO_SETUP_MESSAGE).classes("mono ink2").props(
+                    'data-testid="pinned-inputs"'
+                ).mark("pinned-inputs").style("font-size:11px;")
         with ui.element("div").style(RIGHT_GROUP_STYLE):
             if self._can_save_draft():
                 self._toolbar_button(
@@ -943,6 +971,36 @@ class _EvaluationPage:
                     enabled=self._can_create(),
                     on_click=self._new_evaluation,
                 )
+
+    def _name_input(self, name: str) -> None:
+        """The evaluation's name, editable in every state (SD58).
+
+        A field rather than a pencil beside a label: `SD32` keeps the toolbar
+        at exactly one button, and a field is also the one control that says
+        "this can be typed into" without a second click. It is **not** greyed
+        out once launched, unlike every setup control: the name pins nothing,
+        so the lock does not reach it. It saves on `change` (Enter, or leaving
+        the field), like Seed.
+        """
+        # A `<label for=…>` would need the input's DOM id, which NiceGUI
+        # assigns; the field's accessible name is its `aria-label` instead.
+        ui.label(NAME_PREFIX).classes("mono ink2").props(
+            'data-testid="evaluation-name-label"'
+        ).style("font-size:11px;")
+        element = (
+            ui.element("input")
+            .classes("rof")
+            .props(f'type="text" maxlength="{NAME_MAX_CHARS}" data-testid="evaluation-name"')
+            .mark("evaluation-name")
+            .style(NAME_STYLE)
+        )
+        # The value is analyst-typed, so the props mapping, never the string (SD31).
+        data_props(element, {"value": name, "aria-label": NAME_LABEL})
+        element.on(
+            "change",
+            lambda event: self._rename(str(event.args)),
+            js_handler="(e) => emit(e.target.value)",
+        )
 
     def _toolbar_button(
         self,
@@ -1826,6 +1884,17 @@ class _EvaluationPage:
             ui.notify(DRAFT_SAVED_MESSAGE, type="positive")
         except ServiceError as exc:
             ui.notify(str(exc), type="negative")
+        await self.redraw()
+
+    async def _rename(self, name: str) -> None:
+        """`rename`, not `update_draft`: one path for a draft and a launched
+        evaluation alike (SD58). A refusal is a toast, and the redraw puts the
+        stored name back in the field. A rename moves no prompt, so nothing
+        here asks the endpoint (SD56)."""
+        view = self._view
+        if view is None or name == view.draft.name:
+            return
+        await self._persist(self._services.evaluation.rename(view.draft.evaluation_id, name=name))
         await self.redraw()
 
     async def _new_evaluation(self) -> None:
