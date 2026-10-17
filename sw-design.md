@@ -760,8 +760,9 @@ Each is additive and cheap to reverse; none should change silently.
 | SD56 | **A tick is one model and one write, and a step asks the endpoint only when its answer can change** — `EvaluationService.select_model`, `_draft_lock`, `_reject_infeasible` asking the GPU first; `evaluation_view.redraw`, `_PROMPT_FIELDS`, `_local_seq` / `_endpoint_seq` (`fix-evaluation-model-tick`) | Reported from `just dev` on a CPU-only host after `SD55`: the model list was slow to react to a tick, and the connection looked unstable. The endpoint was healthy. Measured on that host, `/api/tags` takes 1.3–1.9 s with three models and `/api/show` 0.7–1.4 s, during a CPU generation too, so nothing hit `PROBE_TIMEOUT_S`. The view asked it **three times per tick**: `update_draft` judged the selection against the VRAM through `/api/tags`, inside its transaction; the reload's endpoint half asked `/api/tags` and every `/api/show` again; and that half rebuilt the setup column a second time, 2–3 s after the first paint, while the analyst was still clicking. **(1) Ask only when the answer can change.** `reload` (both halves) is kept for a load, refresh, Save, and a step in `_PROMPT_FIELDS` (corpus, feature set, template, language, size), which move the longest prompt the context fit is measured against (`SD53`), plus new, launch, resume, cancel and discard. Every other step, sort and page calls `redraw`, which is the database half alone. `launch()` judges VRAM and context again before anything is queued, so the held answer is never what a run trusts. `_reject_infeasible` asks NVML first and returns with no VRAM known, because an unknown VRAM refuses nothing (§15.6); on a host without an NVIDIA GPU a tick asks the endpoint nothing. With the VRAM known, adding a model still asks the catalogue once for its size; removing one never does. **(2) A tick names one model and its state.** The view sent the whole list, worked out from `_view`. A read older than the selection on disk (the progress timer's, or another tab's) then put back a model the analyst had just changed. `select_model(tag, selected=)` sends the opposite of the tick on screen and reads the rest of the selection from disk. The read and the write are serialised by `_draft_lock`, because pysqlite opens no transaction until the write. The view also stops keeping overtaken reads: `_read_local` reads into locals and assigns and paints only if no later read began (`_local_seq`), and the progress timer checks the same number. An endpoint ask overtaken by a later one is dropped (`_endpoint_seq`). An ask is **not** dropped because a database read began meanwhile: its answer is stored first, then painted by a setup-only read that overtakes any read begun before the answer arrived (`_full_pending` turns it into a full paint when it overtook a full read that never painted). **(3) An answer equal to the screen repaints nothing** (`_painted`). Rebuilding the setup column replaces every button in it, and a click that lands on one as it goes is dropped. That made J10's tick after *New evaluation* fail one run in two, before this change as well as after it; the journey now also waits for `data-loading="false"` before it ticks. **Rejected:** cancelling a superseded endpoint ask, which is now rare and whose `/api/tags` another caller may be sharing (`SD55`); and passing the size the view already holds into the VRAM judgement, which would make the service trust the screen. |
 | SD57 | **Results says which evaluation it reads where Mismatches does: first, on the left** — `results-identity` and `IDENTITY_ROW_STYLE` in `ui/views/results/__init__.py`; the run descriptor leaves the three tabs' card headers (`fix-results-identity-row`) | Reported in manual testing. `SD54` put the evaluation chip at the far right of the Results tab strip, and at the head of the Mismatches identity row, so moving between the two Review screens moved the control the analyst reaches for first. Results now has an identity row above the tabs, built like Mismatches' (`TOOLBAR_ROW_STYLE` on the strip's surface and 28px gutter): the chip first, the run descriptor on the right. The tab strip goes back to what `design/results/README.md` draws, less its right side, which is this row now. **The descriptor is stated once, not per tab.** The README's "every tab must carry the corpus + config identity" still holds, because the row is drawn above every tab, and stating it once is R11's "the three tabs must not drift into three headers" taken one step further. The descriptor comes with the active tab's view, so the page reads that view before it draws the chrome; a scoring card reads none, so it shows the chip and no descriptor, which is what it showed before. Mismatches is unchanged |
 | SD58 | **An evaluation's name is editable before and after the launch, from a field in the Evaluation toolbar** — `EvaluationService.rename`, `_checked_name`, `EVAL_ERROR_NAME_BLANK`, `EVAL_ERROR_NAME_TOO_LONG`; `evaluation-name`, `NAME_LABEL`, `NAME_STYLE` in `ui/views/evaluation_view.py` (`feat/evaluation-rename`) | Reported in use. A new evaluation is named after its feature set (`evaluation_view._new_name`), which tells evaluations apart only until a set has several. After that, every row in the Results and Mismatches pickers (`SD54`) reads the same and only the launch time separates them. The service could already rename a draft (`update_draft(name=…)`), but no screen offered it and the Evaluation screen did not show the name at all. **The lock does not reach the name.** §15.2 makes every column immutable after launch because the runs citing them would stop being reproducible. `name` is in no fingerprint, is not copied onto a run, and nothing refers to an evaluation by it: exports, links and the pickers' targets all use the id. Its only reader is a person telling two evaluations apart, which is usually possible only once the results are in, after the launch. Feature sets are the counter-case: they lock rename because "its runs cite it by name". **One path for both states.** `rename` takes `_draft_lock` and skips `_editable`. `update_draft(name=…)` stays draft-only, so §15.2's "every edit path raises" keeps meaning every *other* path. `rename`, `update_draft` and `save_draft` all go through `_checked_name`: stripped, never blank (a blank name leaves a picker row with nothing to click), at most the column's 200. **A field, not a pencil**: `SD32` keeps the toolbar at one button. The field is never greyed out and saves on `change` like Seed. **It replaces the design's pinned-inputs line** ("Weather & conditions · v2 — only the model varies"), decided with the project owner: beside an editable name it read as a second name, and the set is already step 2's select. The left group is the evaluation chip (`SD59`), then `name:` and the field; the empty state keeps `NO_SETUP_MESSAGE` there. `EvaluationView.feature_config_label` stays on the read model and in the API. A rename only redraws (`SD56`); it moves no prompt. Not exposed over HTTP: the API keeps `PATCH` draft-only and the OpenAPI snapshot is unchanged. Rejected: a per-run label (models are the only thing that varies within an evaluation, and it needs a migration); a richer generated default (it gets long and still does not say why the evaluation was run) |
-| SD59 | **Every evaluation is reachable from the Evaluation screen, and the discard dialog says which evaluation it would take** — `?evaluation=<id>`, `evaluation_chip` leading the toolbar's left group, `_follow_in_url`, `EVALUATION_NOT_FOUND_MESSAGE` in `evaluation_view.py`; `DiscardPreviewView.launched_at` / `.models` / `.inputs`, `discard-identity` in `discard_dialog.py`; `DRAFT_OPTION` and the launch time on every chip option in `results/chrome.py` (§18.5, `SD32`, `SD35`, `SD54`, `plan-delete-evaluation.md`) | Reported in use: analysts change a parameter, launch again, and the inconclusive evaluations pile up. The discard existed (`SD35`) but reached one evaluation only. The screen had no switcher and no query parameter, and `app.storage.client` starts empty on every load (`SD54`), so `_current_evaluation` showed the newest, and after “New evaluation” every older one was unreachable there. Clearing the third of ten meant discarding the seven above it. **(1) The switcher is the one Results and Mismatches already use**, not a new control: the `evaluation · <name>` chip, first in the left group as on the other two screens (`SD57`), its options links to `/evaluation?evaluation=<id>`, drafts included because an unlaunched draft is reachable nowhere else. `SD32`'s “no switcher” is withdrawn; its rule that the right group holds exactly one secondary button is not, and the chip is not a `.btn`. The requested id is used once, then the remembered one, then the newest. One that names nothing falls back to the newest **and says so**, because the screen is about to show a different evaluation from the one the link asked for. The URL follows the evaluation on screen by `history.replace` (`features_view`'s precedent), so a reload after “New evaluation” or a discard does not reopen the old one. **(2) Discard stays in one place.** Not on the Results or Mismatches picker: a second place for the one destructive verb, on screens whose job is reading. **(3) Which evaluation, not just which name.** `evaluation.name` is not unique and a new evaluation takes its feature set's (`SD32`), so the dialog's `"{name} · N run(s)"` could name ten rows. The preview now carries when it was launched, the models its runs used and the corpus · feature set · prompt version it pins; the dialog shows those and the id. Facts from the service, formatted in `ui/` in the host's zone (`SD37`). The fields are defaulted and `api/v1/discard.py` maps fields one by one, so the API and its snapshot are unchanged. The chip's options gain the launch time (or `draft`) for the same reason, on all three screens. **Rejected:** an undo window or soft delete (§18.3), bulk discard (§18.6), and a type-to-confirm on every discard, which guards the press people learn to click through rather than naming the target; it is proposed for tagged work only (`plan-delete-evaluation.md` P3) |
-| SD60 | **Pressing through tagged work takes typing the tagged count** — `discard-type-prompt`, `discard-type-confirm`, `type_prompt`, `TYPE_CONFIRM_LABEL` in `discard_dialog.py` (§18.2, §18.5, `R-D3`, `SD59`, `plan-delete-evaluation.md` P3) | G2 warned and allowed, and the allowing was a relabelled button: "Discard anyway" in the place "Discard" always is, pressed by the same hand that had just discarded three inconclusive runs without a second thought. `mismatch.analyst_tag` is the only thing in the pipeline a re-run cannot recreate (`SD21`), so this is the one state in which the confirmation should cost something. **The count, not the name:** the name repeats (`SD32`) and is on screen to copy, while the count is the dialog's one figure about what cannot be recreated, and typing it means having read it. Surrounding spaces are ignored; nothing else is. "Discard anyway" is disabled until the field holds the count and follows it both ways; the press handler checks the same state, because `disabled` is a UI state. **Only there:** no field without tagged work, for a draft, or on a blocked discard, because G1 comes first and typing cannot unblock a run being written. **Still warn and allow** (`R-D3`): the analyst can always get through. **The server is unchanged**: G2 is `force=true` on the route and in the service, and the API stays scriptable. The typing guards against attention errors; it is not an access control, and a second server-side token would be a field recording a UI event, which §18.3 refuses. **Rejected:** typing on every discard, which teaches people to type through it (`SD59`); typing the evaluation's name, for the reason above; a countdown before the button enables, which costs time and asks for no attention |
+| SD59 | **Every evaluation is reachable from the Evaluation screen, and the discard dialog says which evaluation it would take** — `?evaluation=<id>`, `evaluation_chip` leading the toolbar's left group, `_follow_in_url`, `EVALUATION_NOT_FOUND_MESSAGE` in `evaluation_view.py`; `DiscardPreviewView.launched_at` / `.models` / `.inputs`, `discard-identity` in `discard_dialog.py`; `DRAFT_OPTION` and the launch time on every chip option in `results/chrome.py` (§18.5, §18.6, `SD32`, `SD35`, `SD54`) | Reported in use: analysts change a parameter, launch again, and the inconclusive evaluations pile up. The discard existed (`SD35`) but reached one evaluation only. The screen had no switcher and no query parameter, and `app.storage.client` starts empty on every load (`SD54`), so `_current_evaluation` showed the newest, and after “New evaluation” every older one was unreachable there. Clearing the third of ten meant discarding the seven above it. **(1) The switcher is the one Results and Mismatches already use**, not a new control: the `evaluation · <name>` chip, first in the left group as on the other two screens (`SD57`), its options links to `/evaluation?evaluation=<id>`, drafts included because an unlaunched draft is reachable nowhere else. `SD32`'s “no switcher” is withdrawn; its rule that the right group holds exactly one secondary button is not, and the chip is not a `.btn`. The requested id is used once, then the remembered one, then the newest. One that names nothing falls back to the newest **and says so**, because the screen is about to show a different evaluation from the one the link asked for. The URL follows the evaluation on screen by `history.replace` (`features_view`'s precedent), so a reload after “New evaluation” or a discard does not reopen the old one. **(2) Discard stays in one place.** Not on the Results or Mismatches picker: a second place for the one destructive verb, on screens whose job is reading. **(3) Which evaluation, not just which name.** `evaluation.name` is not unique and a new evaluation takes its feature set's (`SD32`), so the dialog's `"{name} · N run(s)"` could name ten rows. The preview now carries when it was launched, the models its runs used and the corpus · feature set · prompt version it pins; the dialog shows those and the id. Facts from the service, formatted in `ui/` in the host's zone (`SD37`). The fields are defaulted and `api/v1/discard.py` maps fields one by one, so the API and its snapshot are unchanged. The chip's options gain the launch time (or `draft`) for the same reason, on all three screens. **Rejected:** an undo window or soft delete (§18.3), bulk discard (§18.6), and a type-to-confirm on every discard, which guards the press people learn to click through rather than naming the target; it was built for tagged work only (`SD60`) |
+| SD60 | **Pressing through tagged work takes typing the tagged count** — `discard-type-prompt`, `discard-type-confirm`, `type_prompt`, `TYPE_CONFIRM_LABEL` in `discard_dialog.py` (§18.2, §18.5, `R-D3`, `SD59`) | G2 warned and allowed, and the allowing was a relabelled button: "Discard anyway" in the place "Discard" always is, pressed by the same hand that had just discarded three inconclusive runs without a second thought. `mismatch.analyst_tag` is the only thing in the pipeline a re-run cannot recreate (`SD21`), so this is the one state in which the confirmation should cost something. **The count, not the name:** the name repeats (`SD32`) and is on screen to copy, while the count is the dialog's one figure about what cannot be recreated, and typing it means having read it. Surrounding spaces are ignored; nothing else is. "Discard anyway" is disabled until the field holds the count and follows it both ways; the press handler checks the same state, because `disabled` is a UI state. **Only there:** no field without tagged work, for a draft, or on a blocked discard, because G1 comes first and typing cannot unblock a run being written. **Still warn and allow** (`R-D3`): the analyst can always get through. **The server is unchanged**: G2 is `force=true` on the route and in the service, and the API stays scriptable. The typing guards against attention errors; it is not an access control, and a second server-side token would be a field recording a UI event, which §18.3 refuses. **Rejected:** typing on every discard, which teaches people to type through it (`SD59`); typing the evaluation's name, for the reason above; a countdown before the button enables, which costs time and asks for no attention |
+| SD61 | **An analyst can mark an evaluation to keep, and discard refuses it and every run of it until it is released (G3)** — `evaluation.kept_at` (revision `3ce2190bd859`); `EvaluationService.set_kept`; `EvaluationKeptError`; `DiscardPreviewView.kept`, `EvaluationDraftView.kept_at` / `.is_kept`; `PUT /api/v1/evaluations/{id}/kept`, `KeepEvaluationRequest`, `kept` on `DiscardPreview`, `kept_at` on `EvaluationDraftResponse`; `evaluation-keep`, `evaluation-kept`, `KEEP_LABEL`, `RELEASE_LABEL`, `KEPT_PILL` in `evaluation_view.py`; `kept_refusal` in `discard_dialog.py`; `KEPT_OPTION` in `results/chrome.py` (§18.2, §18.3, §18.5, `SD23`, `SD35`, `SD58`, `SD59`) | With every evaluation reachable (`SD59`), clearing debris got fast, and so did clearing the wrong thing. G2 protects review work; nothing protected a **baseline**, the evaluation the next ten are compared against, which typically carries no tags at all. **A mark, not a soft delete.** `kept_at` records a decision to keep, by an analyst, on a row that exists. It is `analyst_tag`'s kind of column, never `deleted_at`'s, so §18.3 stands. A timestamp, for `tagged_at`'s reason. **Exempt from the launch lock**, for `SD58`'s reason: it is in no fingerprint and no run reads it, and a baseline is chosen once its results are in. **Runs too**: a baseline whose runs can go one at a time is not kept, so `discard_run` reads the run's evaluation. **No `force`**: the way past G3 is releasing the mark, a separate visible act; a `force` would make the mark G2's warning again. **Order G1, G3, G2**, so a caller is never told to `force` and then refused. **Idempotent**: keeping a kept evaluation keeps the first `kept_at`; releasing one that is not kept changes nothing. **On the wire**, unlike a rename (`SD58`): `DELETE` answers a kept evaluation with 409, and a guard an API caller cannot get past is a defect. **The control sits beside the discard it guards**, in the runs card header: "Keep evaluation", and once kept a `KEPT` pill and "Release". No confirmation either way, both being reversible (the `Stop` note in CONTRACTS.md). The discards stay on screen (`SD35`) and the dialog names where the mark is released; a run's refusal names its evaluation. The chip's options append `kept` on all three screens. `just reset` ignores the mark: it is the developer's wipe (§18 intro). **Rejected:** a per-run mark (the baseline is the evaluation; one run of it is not a comparison); keeping by name (names repeat, `SD32`); a confirmation on release (it guards a reversible act and teaches the click-through) |
 
 **Note on the design's fixture column names.** `UnfallTypAusw`, `WitterungAusw`,
 `LichtverhaeltnisAusw` and `UnfallDatumFeld` do not exist in the delivery; the real
@@ -969,11 +970,13 @@ grows the setup it was always implying (**SD13**):
 ```
 evaluation(id, name, corpus_id, feature_config_id, prompt_template_id,
            prompt_language, temperature, seed, reasoning_effort, size,
-           selected_models_json, created_at, launched_at, is_dev)
+           selected_models_json, created_at, launched_at, is_dev, kept_at)
           -- reasoning_effort added post-phase-5 (SD36): step 5's third
           -- pinned input, copied onto every run the launch creates
           -- editable while launched_at IS NULL; immutable after, except
-          -- name, which pins nothing (SD58)
+          -- name and kept_at, which pin nothing (SD58, SD61)
+          -- kept_at: an analyst's mark to keep; NULL when not kept. Discard
+          -- refuses a kept evaluation and its runs until released (G3, §18.2)
           -- prompt_template_id is NULLABLE: "Save draft" means the row can
           -- exist before any template does; the launch transaction requires one
 run(... , prompt_template_id, prompt_template_fingerprint, status, error,
@@ -1040,8 +1043,8 @@ In one transaction, launch: verifies the cited `feature_config` is frozen
 every feature, sets `is_dev` from the size choice against
 `RA2_EVAL_RECORD_MIN` / `RA2_DEV_RECORD_MAX`, stamps `launched_at`, and
 creates one `queued` `run` per selected model. After it, every edit path
-raises, except `rename` (`SD58`): the name pins nothing, so the lock does not
-reach it.
+raises, except `rename` (`SD58`) and `set_kept` (`SD61`): the name and the
+keep mark pin nothing, so the lock does not reach them.
 
 **After the launch, the way on is a new evaluation, not an edit.** "Every edit
 path raises" is a rule about the row; the view owes the other half of it, and
@@ -2205,7 +2208,7 @@ stays that way. `foreign_keys=ON` is a connect-time PRAGMA (§4.4); the backend
 test that discards a run and counts the rows that went with it is what keeps
 that honest.
 
-### 18.2 Two guards, and no third one added quietly
+### 18.2 Three guards, and no fourth one added quietly
 
 **G1 — nothing active is discarded.** A `queued` or `running` run is refused
 (`RunActiveError`, 409), and so is an evaluation holding one. `done`, `failed`
@@ -2220,7 +2223,18 @@ argument, and gets a weaker remedy on purpose: the count of tagged mismatches
 is refused with (`TaggedWorkPresentError`, 409, carrying the count) **unless
 the caller passes `force`**. Warn and allow, not block — an analyst who cannot
 clean up works around the app, and the workaround is editing the database by
-hand.
+hand. Pressing through it in the dialog takes typing the tagged count first
+(`SD60`); the wire keeps `force` as the whole of it.
+
+**G3 — nothing kept is discarded** (`SD61`). An analyst can mark an
+evaluation to keep (`evaluation.kept_at`, `EvaluationService.set_kept`,
+`PUT /api/v1/evaluations/{id}/kept`). A kept evaluation is refused
+(`EvaluationKeptError`, 409), and so is **every run of it**: a baseline whose
+runs can go one at a time is not kept. **No `force`.** The way past it is
+releasing the mark, a separate and visible act, and a `force` would turn the
+mark into the warning G2 already gives. The order is G1, G3, G2: the two that
+cannot be pressed through are reported before the one that can, so a caller is
+never told to `force` and then refused anyway.
 
 A **cited delivery** is refused (`DeliveryCitedError`, 409). This one is not a
 policy so much as a hole in the schema: `corpus.delivery_id` is
@@ -2228,7 +2242,7 @@ policy so much as a hole in the schema: `corpus.delivery_id` is
 would quietly null the reference rather than refuse. The guard is in the
 service because that is the only place it can be.
 
-Those are the three. **A fourth guard is not added without this section
+Those are the four. **A fifth guard is not added without this section
 changing first**, because each one is a rule a user has to learn from a
 message.
 
@@ -2241,6 +2255,12 @@ absence of a result reproduces nothing.
 
 This is also why the slice needs **no migration**: no new table, no new
 column, no new Alembic head.
+
+**`evaluation.kept_at` is not discard state** (`SD61`). It records a decision
+to *keep*, made by an analyst, on a row that still exists; it never says that
+anything was removed, and nothing reads it but G3. It is
+`mismatch.analyst_tag`'s kind of column, not `deleted_at`'s. It is the one
+column G3 cost, in revision `3ce2190bd859`.
 
 **The trace lives outside the database, in a file the analyst chose to keep**
 (**SD23**). The confirm dialog offers Export beside Discard, writing the run's
@@ -2281,8 +2301,9 @@ scripts/
 
 `LifecycleService` is a service and not a repository method reached from three
 routers because the guards are policy, not persistence: G1 reads a status, G2
-counts rows in a different table, and the delivery guard asks a question about
-corpora. One place answers all three, and both adapters get the same answer.
+counts rows in a different table, G3 reads the evaluation's keep mark, and the
+delivery guard asks a question about corpora. One place answers all four, and
+both adapters get the same answer.
 
 ### 18.5 One dialog, two states
 
@@ -2321,6 +2342,13 @@ discard is not blocked, the dialog asks for the tagged count, and "Discard
 anyway" stays disabled until the field holds it. The route and the service are
 unchanged: `force=true` is still the whole of G2 on the wire.
 
+The keep mark sits beside the discard it guards (`SD61`): "Keep evaluation"
+in the runs card header, and once kept a `KEPT` pill and "Release". Neither
+direction asks for confirmation; both are reversible. The discards stay on
+screen when kept, as they do with a run active, and the dialog renders G3's
+refusal naming where the mark is released. The chip's options on all three
+screens append `kept`, so the baselines read off the list before one is opened.
+
 ### 18.6 What this section deliberately does not decide
 
 - **Snapshot and restore.** Deferred until discarding runs is shown to be
@@ -2339,6 +2367,19 @@ unchanged: `force=true` is still the whole of G2 on the wire.
   half this feature exists to *keep*.
 - **Corpus discard.** It already exists, with its 409-when-cited guard and its
   `LOCKED · N eval` pill (§6.3, J3). Unchanged.
+- **An undo window.** A discard that waits N seconds before it happens is a
+  soft delete held in memory: §18.3's persisted state by another name, lost or
+  half-done on a restart. The export is the trace (SD23), and G3 is the
+  protection for what must not go (`SD61`).
+- **Debris counts on the evaluation chip.** Each option could carry runs ·
+  scored · failed · tagged, so an inconclusive evaluation reads differently
+  from a reviewed one before it is opened. Read-only counts the services
+  already compute; not built, because the launch time (`SD59`) and the `kept`
+  suffix (`SD61`) may be enough. It is the next thing to try if analysts still
+  open evaluations only to find out what they hold.
+- **A discard on the Results or Mismatches picker.** One place for the one
+  destructive verb, the Evaluation screen's runs card (`SD35`, `SD59`); the two
+  Review screens are for reading.
 
 ### 18.7 What a discard erases
 

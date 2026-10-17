@@ -37,6 +37,7 @@ __all__ = [
     "NEVER_LAUNCHED",
     "TYPE_CONFIRM_LABEL",
     "discard_dialog",
+    "kept_refusal",
     "launched_line",
     "loss_line",
     "tagged_sentence",
@@ -129,6 +130,16 @@ def tagged_sentence(preview: DiscardPreviewView) -> str:
     return f"{count} {noun} would be destroyed — review work a re-run cannot recreate."
 
 
+def kept_refusal(preview: DiscardPreviewView) -> str:
+    """G3's sentence (SD61): what is in the way and where it is released.
+
+    A run names its **evaluation**, because the mark is the evaluation's and so
+    is the control that releases it."""
+    if preview.kind == "run":
+        return "Its evaluation is marked keep. Release it in the runs card header first."
+    return "This evaluation is marked keep. Release it in the runs card header first."
+
+
 #: The field's accessible name. It has no visible label of its own: the
 #: prompt above it is the instruction.
 TYPE_CONFIRM_LABEL = "Number of tagged mismatches"
@@ -215,6 +226,12 @@ def discard_dialog(
             ).props('data-testid="discard-blocked"').mark("discard-blocked").style(
                 "font-size:12px;"
             )
+        elif preview.kept:
+            # G3 (SD61). Before the tagged warning: that one can be pressed
+            # through and this cannot, so it is the one that matters.
+            ui.label(kept_refusal(preview)).classes("danger").props(
+                'data-testid="discard-blocked"'
+            ).mark("discard-blocked").style("font-size:12px;")
         elif preview.cited_by:
             ui.label(
                 f"A corpus was frozen from this delivery ({preview.cited_by}). "

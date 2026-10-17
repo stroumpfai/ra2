@@ -163,6 +163,11 @@ POST_PHASE_5_REVISIONS = {
     # the context window the model was loaded with, which is what flags a
     # prompt at the limit (risk D1). Additive, nullable, no backfill.
     "20260930_0900_b4f2c81e6d37_pin_what_the_digest_does_not.py",
+    # `feat/discard-guards` — `evaluation.kept_at` (SD61). An analyst marked
+    # the evaluation to keep, and discard refuses it and its runs until it is
+    # released (G3). Additive, nullable, no backfill: `NULL` is "nobody marked
+    # it", which is true of every row that exists before it.
+    "20261017_1200_3ce2190bd859_keep_an_evaluation.py",
 }
 
 
@@ -284,6 +289,10 @@ POST_PHASE_5_ERRORS = {
     # anything is written (SD49): outside `RA2_IMPORT_ROOT`, past a bound, or
     # a link out of the root. Carries a stable `reason` code.
     "HostPathRefusedError",
+    # `feat/discard-guards` — G3 (SD61): the evaluation, or a run's
+    # evaluation, is marked keep. 409, and no `force`: releasing the mark is
+    # the way past it.
+    "EvaluationKeptError",
 }
 
 

@@ -615,8 +615,8 @@ class EvaluationDraftView:
     """An evaluation's **setup** — the six numbered steps, as data.
 
     Editable while `launched_at` is `None`; every edit path raises
-    `EvaluationLockedError` after (sw-design.md §15.2), except a rename: the
-    name pins nothing (SD58).
+    `EvaluationLockedError` after (sw-design.md §15.2), except a rename and
+    the keep mark: neither pins anything (SD58, SD61).
     """
 
     evaluation_id: EvaluationId
@@ -641,10 +641,17 @@ class EvaluationDraftView:
     #: construction that predates it holds (amendment:
     #: fix/settings-with-no-reader).
     min_cell_count: int = 20
+    #: When it was marked to keep; `None` when it is not (SD61). Discard
+    #: refuses a kept evaluation and its runs until it is released (G3).
+    kept_at: datetime | None = None
 
     @property
     def is_launched(self) -> bool:
         return self.launched_at is not None
+
+    @property
+    def is_kept(self) -> bool:
+        return self.kept_at is not None
 
     @property
     def launch_label_count(self) -> int:
@@ -1352,6 +1359,9 @@ class DiscardPreviewView:
     """The models its runs used, distinct and sorted. `()` with no runs."""
     inputs: str = ""
     """What it pins: "<corpus> · v1 · <feature set> · v2 · prompt v3"."""
+    kept: bool = False
+    """G3 (SD61): the evaluation, or for a run its evaluation, is marked keep.
+    Refused until it is released; there is no `force` for this one."""
 
     @property
     def has_exportable(self) -> bool:
@@ -1361,9 +1371,10 @@ class DiscardPreviewView:
 
     @property
     def blocked(self) -> bool:
-        """Refused whatever the analyst does. `tagged_mismatches` is **not**
-        here: that one warns and allows (R-D3)."""
-        return self.active or self.cited_by > 0
+        """Refused whatever the analyst does here. `tagged_mismatches` is
+        **not** here: that one warns and allows (R-D3). `kept` is, because
+        its way out is releasing the mark, not pressing through."""
+        return self.active or self.cited_by > 0 or self.kept
 
 
 @dataclass(frozen=True, slots=True)

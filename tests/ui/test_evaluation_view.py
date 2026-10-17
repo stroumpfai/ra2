@@ -81,7 +81,7 @@ from ra2.ui import theme
 from ra2.ui.components import format_local
 from ra2.ui.components.discard_dialog import EXPORT_PER_RUN
 from ra2.ui.components.ollama_settings import SAVE_REFUSAL_WORDS, SAVE_REFUSED_RUN_ACTIVE
-from ra2.ui.views.results.chrome import DETERMINISM_CAVEAT, DRAFT_OPTION
+from ra2.ui.views.results.chrome import DETERMINISM_CAVEAT, DRAFT_OPTION, KEPT_OPTION
 
 pytestmark = pytest.mark.ui
 
@@ -2158,6 +2158,97 @@ async def test_the_discard_dialog_says_when_what_and_with_which_models(
     assert inputs.startswith("launched · v")
     assert launched.config.name in inputs
     assert _all_text(launched.user, "discard-id") == str(launched.draft.evaluation_id)
+
+
+# --- the keep mark (SD61) ------------------------------------------------------
+
+
+async def _is_kept(seeded: Seeded) -> bool:
+    view = await seeded.services.evaluation.get(seeded.draft.evaluation_id, probe=False)
+    return view.draft.is_kept
+
+
+async def test_the_keep_mark_sits_beside_the_discard_and_toggles(seeded: Seeded) -> None:
+    """In the runs card header with the discard it guards, not in the toolbar
+    (`SD32`, `SD35`). No confirmation either way: both are reversible."""
+    await _open_evaluation(seeded.user)
+    await seeded.user.should_see(marker="evaluation-keep")
+
+    (keep,) = _find(seeded.user, "evaluation-keep")
+    assert "card-header" in _ancestor_testids(keep)
+    assert "evaluation-toolbar" not in _ancestor_testids(keep)
+    assert _element_text(keep) == evaluation_view.KEEP_LABEL
+    assert keep._props["aria-pressed"] == "false"
+    assert keep._props["title"] == evaluation_view.KEEP_TITLE
+    assert not _find(seeded.user, "evaluation-kept")
+
+    seeded.user.find(marker="evaluation-keep").click()
+    await _until(lambda: bool(_find(seeded.user, "evaluation-kept")))
+    assert await _is_kept(seeded)
+    (keep,) = _find(seeded.user, "evaluation-keep")
+    assert _element_text(keep) == evaluation_view.RELEASE_LABEL
+    assert keep._props["aria-pressed"] == "true"
+    assert _all_text(seeded.user, "evaluation-kept") == evaluation_view.KEPT_PILL
+
+    seeded.user.find(marker="evaluation-keep").click()
+    await _until(lambda: not _find(seeded.user, "evaluation-kept"))
+    assert not await _is_kept(seeded)
+
+
+async def test_a_kept_launched_evaluation_can_be_released(launched: Seeded) -> None:
+    """The setup column's lock does not reach the mark (`SD61`)."""
+    await launched.services.evaluation.set_kept(launched.draft.evaluation_id, kept=True)
+    await _open_evaluation(launched.user)
+    await launched.user.should_see(marker="evaluation-kept")
+    await launched.user.should_see(marker="launched-note")
+
+    launched.user.find(marker="evaluation-keep").click()
+    await _until(lambda: not _find(launched.user, "evaluation-kept"))
+
+
+async def test_a_kept_evaluation_cannot_be_discarded_and_the_dialog_says_why(
+    seeded: Seeded,
+) -> None:
+    """The discard stays on screen (`SD35`) and the dialog renders G3 instead
+    of a button that 409s."""
+    await _seed_two_done_runs(seeded)
+    await seeded.services.evaluation.set_kept(seeded.draft.evaluation_id, kept=True)
+    await _open_evaluation(seeded.user)
+    await seeded.user.should_see(marker="evaluation-discard")
+
+    seeded.user.find(marker="evaluation-discard").click()
+    await seeded.user.should_see(marker="discard-blocked")
+    assert "marked keep" in _all_text(seeded.user, "discard-blocked")
+    (confirm,) = _find(seeded.user, "discard-confirm")
+    assert _is_disabled(confirm)
+    seeded.user.find(marker="discard-confirm").click()
+    await asyncio.sleep(0.05)
+    assert await _evaluation_ids(seeded) == {seeded.draft.evaluation_id}
+
+
+async def test_a_run_of_a_kept_evaluation_cannot_be_discarded(seeded: Seeded) -> None:
+    await _seed_two_done_runs(seeded)
+    await seeded.services.evaluation.set_kept(seeded.draft.evaluation_id, kept=True)
+    await _open_evaluation(seeded.user)
+    await seeded.user.should_see(marker="run-discard")
+
+    _one(seeded.user, _find(seeded.user, "run-discard")[0]).click()
+    await seeded.user.should_see(marker="discard-blocked")
+    assert _all_text(seeded.user, "discard-blocked").startswith("Its evaluation")
+    (confirm,) = _find(seeded.user, "discard-confirm")
+    assert _is_disabled(confirm)
+
+
+async def test_the_chip_says_which_evaluations_are_kept(seeded: Seeded) -> None:
+    other = await _another_evaluation(seeded, name="eval-other")
+    await seeded.services.evaluation.set_kept(seeded.draft.evaluation_id, kept=True)
+    await _open_evaluation(seeded.user, str(other.evaluation_id))
+
+    options = _options(seeded.user)
+    assert _element_text(options[str(seeded.draft.evaluation_id)]).endswith(
+        f"{DRAFT_OPTION} · {KEPT_OPTION}"
+    )
+    assert _element_text(options[str(other.evaluation_id)]).endswith(f"· {DRAFT_OPTION}")
 
 
 def test_every_endpoint_status_has_a_word() -> None:

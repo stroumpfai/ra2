@@ -133,6 +133,70 @@ async def test_discarding_an_evaluation_keeps_its_corpus(
     assert corpus.status_code == 200
 
 
+# --- G3: the keep mark (SD61) ---------------------------------------------
+
+
+async def test_a_kept_evaluation_and_its_runs_are_409_until_released(
+    api_client: httpx.AsyncClient,
+    scored_api: ScoredApi,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The route exists because the guard does: a 409 a caller cannot get
+    past is a defect. `force` does not get past it; releasing does."""
+    evaluation_id = scored_api.corpus.evaluation_id
+    run_id = scored_api.untagged_run_id
+
+    kept = await api_client.put(f"/api/v1/evaluations/{evaluation_id}/kept", json={"kept": True})
+    assert kept.status_code == 200
+    assert kept.json()["kept_at"] is not None
+
+    preview = (await api_client.get(f"/api/v1/evaluations/{evaluation_id}/discard-preview")).json()
+    assert preview["kept"] is True
+    assert preview["blocked"] is True
+    run_preview = (await api_client.get(f"/api/v1/runs/{run_id}/discard-preview")).json()
+    assert run_preview["kept"] is True
+
+    for path in (f"/api/v1/evaluations/{evaluation_id}", f"/api/v1/runs/{run_id}"):
+        refused = await api_client.delete(path, params={"force": "true"})
+        assert refused.status_code == 409
+        assert "kept" in refused.json()["detail"]
+    async with db_session_factory() as session:
+        assert await session.get(Run, run_id) is not None
+
+    released = await api_client.put(
+        f"/api/v1/evaluations/{evaluation_id}/kept", json={"kept": False}
+    )
+    assert released.status_code == 200
+    assert released.json()["kept_at"] is None
+    gone = await api_client.delete(f"/api/v1/evaluations/{evaluation_id}", params={"force": "true"})
+    assert gone.status_code == 200
+
+
+async def test_keeping_a_missing_evaluation_is_404(api_client: httpx.AsyncClient) -> None:
+    response = await api_client.put("/api/v1/evaluations/nope/kept", json={"kept": True})
+    assert response.status_code == 404
+
+
+async def test_the_keep_body_needs_its_one_field(
+    api_client: httpx.AsyncClient, scored_api: ScoredApi
+) -> None:
+    evaluation_id = scored_api.corpus.evaluation_id
+    response = await api_client.put(f"/api/v1/evaluations/{evaluation_id}/kept", json={})
+    assert response.status_code == 422
+
+
+async def test_the_evaluation_list_carries_the_mark(
+    api_client: httpx.AsyncClient, scored_api: ScoredApi
+) -> None:
+    evaluation_id = str(scored_api.corpus.evaluation_id)
+    await api_client.put(f"/api/v1/evaluations/{evaluation_id}/kept", json={"kept": True})
+
+    listed = (await api_client.get("/api/v1/evaluations")).json()
+
+    (row,) = [e for e in listed if e["evaluation_id"] == evaluation_id]
+    assert row["kept_at"] is not None
+
+
 async def test_discarding_a_missing_evaluation_is_404(api_client: httpx.AsyncClient) -> None:
     response = await api_client.delete("/api/v1/evaluations/nope")
     assert response.status_code == 404

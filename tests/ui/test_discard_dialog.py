@@ -32,6 +32,7 @@ from ra2.ui.components.discard_dialog import (
     NEVER_LAUNCHED,
     TYPE_CONFIRM_LABEL,
     discard_dialog,
+    kept_refusal,
     loss_line,
     type_prompt,
 )
@@ -325,3 +326,39 @@ async def test_a_run_carries_no_evaluation_identity(user: User) -> None:
 
     await user.should_see(marker="discard-target")
     await user.should_not_see(marker="discard-identity")
+
+
+# --- G3: kept (SD61) --------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", ["evaluation", "run"])
+async def test_a_kept_target_says_where_it_is_released_and_stays_dead(
+    user: User, kind: str
+) -> None:
+    """Refused whatever is pressed, and the sentence names the evaluation for
+    a run too: the mark, and the control that releases it, are the
+    evaluation's. A press that lands anyway does nothing."""
+    preview = _preview(kind=kind, kept=True)
+    forced = _page(f"/d/kept-{kind}", preview)
+    await user.open(f"/d/kept-{kind}")
+
+    await user.should_see(kept_refusal(preview))
+    assert _disabled(user)
+    user.find(marker="discard-confirm").click()
+    await asyncio.sleep(0.05)
+    assert forced == []
+
+
+async def test_a_kept_target_with_tagged_work_asks_for_no_count(user: User) -> None:
+    """G3 before G2: typing the count would enable nothing."""
+    _page("/d/kept-tagged", _preview(kind="evaluation", kept=True, tagged_mismatches=2))
+    await user.open("/d/kept-tagged")
+
+    await user.should_see(marker="discard-blocked")
+    await user.should_not_see(marker="discard-tagged")
+    await user.should_not_see(marker="discard-type-confirm")
+
+
+def test_the_refusal_names_the_evaluation_for_a_run() -> None:
+    assert kept_refusal(_preview(kind="run", kept=True)).startswith("Its evaluation")
+    assert kept_refusal(_preview(kind="evaluation", kept=True)).startswith("This evaluation")

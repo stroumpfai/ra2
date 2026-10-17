@@ -1482,6 +1482,11 @@
             "title": "Has Exportable",
             "type": "boolean"
           },
+          "kept": {
+            "default": false,
+            "title": "Kept",
+            "type": "boolean"
+          },
           "kind": {
             "title": "Kind",
             "type": "string"
@@ -1632,6 +1637,18 @@
           "feature_config_id": {
             "title": "Feature Config Id",
             "type": "string"
+          },
+          "kept_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kept At"
           },
           "launched_at": {
             "anyOf": [
@@ -2451,6 +2468,21 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "KeepEvaluationRequest": {
+        "additionalProperties": false,
+        "description": "Mark an evaluation to keep, or release it (SD61). Allowed whether or\nnot it is launched: the mark pins nothing. Idempotent both ways.",
+        "properties": {
+          "kept": {
+            "title": "Kept",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kept"
+        ],
+        "title": "KeepEvaluationRequest",
         "type": "object"
       },
       "MapColumnRequest": {
@@ -5844,7 +5876,7 @@
     },
     "/api/v1/evaluations/{evaluation_id}": {
       "delete": {
-        "description": "Discard an evaluation and its runs (\u00a718.1).\n\n**The corpus, the feature config and the prompt versions it cites are\nuntouched** \u2014 they are `RESTRICT`, and discarding an evaluation is not a\nway to delete a corpus.\n\n409 when any run is `queued` or `running` (G1), and when tagged mismatches\nwould be destroyed without `force` (G2).",
+        "description": "Discard an evaluation and its runs (\u00a718.1).\n\n**The corpus, the feature config and the prompt versions it cites are\nuntouched** \u2014 they are `RESTRICT`, and discarding an evaluation is not a\nway to delete a corpus.\n\n409 when any run is `queued` or `running` (G1), when the evaluation is kept\n(G3, SD61), and when tagged mismatches would be destroyed without `force`\n(G2).",
         "operationId": "discard_evaluation_api_v1_evaluations__evaluation_id__delete",
         "parameters": [
           {
@@ -6045,6 +6077,69 @@
           }
         },
         "summary": "Discard Preview",
+        "tags": [
+          "evaluations"
+        ]
+      }
+    },
+    "/api/v1/evaluations/{evaluation_id}/kept": {
+      "put": {
+        "description": "Mark an evaluation to keep, or release it (SD61).\n\n**On the wire because G3 is**: `DELETE` answers a kept evaluation, or a run\nof one, with 409, and a guard a caller cannot get past is a defect rather\nthan a guard. Allowed launched or not, and idempotent both ways; marking a\nkept evaluation keeps the first `kept_at`.",
+        "operationId": "set_kept_api_v1_evaluations__evaluation_id__kept_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeepEvaluationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationDraftResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Kept",
         "tags": [
           "evaluations"
         ]
@@ -8051,7 +8146,7 @@
     },
     "/api/v1/runs/{run_id}": {
       "delete": {
-        "description": "Discard one run and, by the schema's cascade, everything derived from\nit (\u00a718.1).\n\n409 when the run is `queued` or `running` (G1), and when it carries tagged\nmismatches and `force` was not passed (G2). The second is overridable; the\nfirst is not.\n\nThe preview is read **first**, inside the same request, because after the\ndelete those counts do not exist anywhere \u2014 this response is the receipt.",
+        "description": "Discard one run and, by the schema's cascade, everything derived from\nit (\u00a718.1).\n\n409 when the run is `queued` or `running` (G1), when its evaluation is kept\n(G3, SD61), and when it carries tagged mismatches and `force` was not\npassed (G2). Only the last is overridable.\n\nThe preview is read **first**, inside the same request, because after the\ndelete those counts do not exist anywhere \u2014 this response is the receipt.",
         "operationId": "discard_run_api_v1_runs__run_id__delete",
         "parameters": [
           {

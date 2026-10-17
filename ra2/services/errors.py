@@ -19,6 +19,7 @@ __all__ = [
     "CorpusLockedError",
     "DeliveryCitedError",
     "DeliveryNotAnalysedError",
+    "EvaluationKeptError",
     "EvaluationLockedError",
     "FeatureConfigFrozenError",
     "FeatureValidationError",
@@ -306,6 +307,25 @@ class TaggedWorkPresentError(ServiceError):
         self.kind = kind
         self.key = key
         self.tagged_count = tagged_count
+
+
+class EvaluationKeptError(ServiceError):
+    """G3 — the evaluation is marked keep. -> HTTP 409, and **not**
+    overridable (sw-design.md §18.2, SD61).
+
+    Raised for discarding a kept evaluation and for discarding any run of one:
+    a baseline whose runs can be removed one at a time is not kept. There is
+    no `force`, because the override is already a separate, visible act:
+    releasing the mark (`EvaluationService.set_kept`). A `force` here would
+    make the mark a warning G2 already gives.
+
+    `evaluation_id` is the **kept evaluation**, which for a run discard is the
+    run's evaluation rather than the object the caller named.
+    """
+
+    def __init__(self, evaluation_id: str) -> None:
+        super().__init__(f"evaluation {evaluation_id} is kept; release it before discarding")
+        self.evaluation_id = evaluation_id
 
 
 class DeliveryCitedError(ServiceError):

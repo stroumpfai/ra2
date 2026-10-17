@@ -26,6 +26,7 @@ from ra2.api.schemas import (
     EvaluationLaunchResponse,
     EvaluationResponse,
     FeatureValidationErrorResponse,
+    KeepEvaluationRequest,
     ModelChoiceResponse,
     PageMeta,
     ProvenanceResponse,
@@ -39,6 +40,7 @@ from ra2.api.v1.discard import conflict, discard_response
 from ra2.api.v1.discard import discard_preview as to_preview
 from ra2.domain.ids import CorpusId, EvaluationId, FeatureConfigId, PromptTemplateId
 from ra2.services.errors import (
+    EvaluationKeptError,
     EvaluationLockedError,
     FeatureValidationError,
     NotFoundError,
@@ -81,6 +83,7 @@ def _draft_response(view: EvaluationDraftView) -> EvaluationDraftResponse:
         selected_models=list(view.selected_models),
         launched_at=view.launched_at,
         min_cell_count=view.min_cell_count,
+        kept_at=view.kept_at,
     )
 
 
@@ -351,6 +354,28 @@ async def launch(
     return EvaluationLaunchResponse(evaluation=_evaluation_response(view), task_id=str(task_id))
 
 
+@router.put(
+    "/{evaluation_id}/kept",
+    response_model=EvaluationDraftResponse,
+    responses={404: {"model": ErrorResponse}},
+)
+async def set_kept(
+    evaluation_id: str, body: KeepEvaluationRequest, service: EvaluationServiceDep
+) -> EvaluationDraftResponse:
+    """Mark an evaluation to keep, or release it (SD61).
+
+    **On the wire because G3 is**: `DELETE` answers a kept evaluation, or a run
+    of one, with 409, and a guard a caller cannot get past is a defect rather
+    than a guard. Allowed launched or not, and idempotent both ways; marking a
+    kept evaluation keeps the first `kept_at`.
+    """
+    try:
+        view = await service.set_kept(EvaluationId(evaluation_id), kept=body.kept)
+    except NotFoundError as exc:
+        raise _not_found(exc) from exc
+    return _draft_response(view)
+
+
 # ---------------------------------------------------------------------------
 # discard — sw-design.md §18
 # ---------------------------------------------------------------------------
@@ -380,8 +405,9 @@ async def discard_evaluation(
     untouched** — they are `RESTRICT`, and discarding an evaluation is not a
     way to delete a corpus.
 
-    409 when any run is `queued` or `running` (G1), and when tagged mismatches
-    would be destroyed without `force` (G2).
+    409 when any run is `queued` or `running` (G1), when the evaluation is kept
+    (G3, SD61), and when tagged mismatches would be destroyed without `force`
+    (G2).
     """
     key = EvaluationId(evaluation_id)
     try:
@@ -389,6 +415,6 @@ async def discard_evaluation(
         await service.discard_evaluation(key, force=force)
     except NotFoundError as exc:
         raise _not_found(exc) from exc
-    except (RunActiveError, TaggedWorkPresentError) as exc:
+    except (RunActiveError, EvaluationKeptError, TaggedWorkPresentError) as exc:
         raise conflict(exc) from exc
     return discard_response(before, forced=force and before.tagged_mismatches > 0)

@@ -604,6 +604,30 @@ class EvaluationService:
             await session.flush()
             return _draft_view(evaluation)
 
+    async def set_kept(self, evaluation_id: EvaluationId, *, kept: bool) -> EvaluationDraftView:
+        """Mark an evaluation to keep, or release it, **launched or not** (SD61).
+
+        The second column exempt from "immutable after launch" (§15.2), for
+        `rename`'s reason: it pins nothing. It is not a fingerprint input and
+        no run reads it. Its one reader is `LifecycleService`, which refuses to
+        discard a kept evaluation or any run of it (G3, §18.2).
+
+        Idempotent both ways: marking a kept evaluation keeps its first
+        `kept_at`, because that is when the decision was made, and releasing
+        one that is not kept changes nothing. No confirmation is asked for
+        either direction; both are reversible.
+
+        :raises NotFoundError: no such evaluation.
+        """
+        async with self._draft_lock, session_scope(self._session_factory) as session:
+            evaluation = await self._require(session, evaluation_id)
+            if not kept:
+                evaluation.kept_at = None
+            elif evaluation.kept_at is None:
+                evaluation.kept_at = self._clock.now()
+            await session.flush()
+            return _draft_view(evaluation)
+
     async def list_models(self, evaluation_id: EvaluationId | None = None) -> list[ModelChoiceView]:
         """The endpoint's catalogue, each row judged against the host's VRAM.
 
@@ -1643,6 +1667,7 @@ def _draft_view(evaluation: Evaluation) -> EvaluationDraftView:
         selected_models=_selected_models(evaluation),
         launched_at=evaluation.launched_at,
         min_cell_count=evaluation.min_cell_count,
+        kept_at=evaluation.kept_at,
     )
 
 

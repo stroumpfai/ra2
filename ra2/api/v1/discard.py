@@ -39,6 +39,7 @@ def discard_preview(view: DiscardPreviewView) -> DiscardPreview:
         active=view.active,
         active_detail=view.active_detail,
         cited_by=view.cited_by,
+        kept=view.kept,
         has_exportable=view.has_exportable,
         blocked=view.blocked,
     )
@@ -68,8 +69,9 @@ def conflict(exc: Exception) -> HTTPException:
     """Every guard in §18.2 is a 409.
 
     `RunActiveError` (G1) is final; `TaggedWorkPresentError` (G2) carries the
-    count in its message and is overridable with `force`; `DeliveryCitedError`
-    is final. One status, because from the caller's side they are one kind of
+    count in its message and is overridable with `force`; `EvaluationKeptError`
+    (G3, SD61) is final until the mark is released; `DeliveryCitedError` is
+    final. One status, because from the caller's side they are one kind of
     answer — "not in this state" — and the message says which.
     """
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
