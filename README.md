@@ -367,6 +367,8 @@ which version scrubbed it; one frozen before scrubbing existed says
 *not scrubbed*. **A date rule hides every date in a narrative from the model**,
 so an evaluation that extracts a date or time from the text needs a corpus
 frozen without one.
+[`docs/scrubbing.md`](docs/scrubbing.md) explains the options, the file
+formats and what scrubbing will always miss, with examples.
 
 ### Real data never enters the repository
 
