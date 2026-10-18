@@ -2599,6 +2599,22 @@ data, never record text) with at least `MOST_HIT_FLOOR` (10) hits: the
 fastest way to find whitelist candidates, and floored so that a rare name's
 presence in a corpus is not disclosed.
 
+**Never on the event loop.** A surname list runs to hundreds of thousands of
+entries, and parsing it, checking a composition, fingerprinting it or
+building a `Scrubber` over it each take up to seconds. NiceGUI deletes a page
+whose socket misses its heartbeat for about six seconds (a 4 s ping, a 2 s
+timeout, then `reconnect_timeout`), and a refused import once lost the dialog
+that said why. So the domain stays synchronous and pure, and the services
+call each of those steps through `asyncio.to_thread`, the dry run's walk over
+the delivery included. Two results are kept because they cannot go stale: a
+stored file's parse, by kind and `sha256` (a `scrub_list` row is never
+rewritten), and the compiled scrubber, by the composed `ScrubRules` itself
+(`compile_scrubber`), which the freeze, the dry run, the raw preview and the
+sentence on the Scrubbing screen share.
+`tests/backend/services/scrub/test_event_loop.py` holds the loop to it. The
+freeze's own record building, which also detects languages, is unchanged and
+still runs on the loop.
+
 ### 19.8 What the labels may claim
 
 `SD65`, `SD50` extended. The app says **scrubbed**, never **anonymised**: a
@@ -2617,7 +2633,8 @@ persistence/
   repositories/scrub_repo.py   scrub_list, scrub_ruleset
 services/
   scrub_service.py         import, remove, active, versions, entries, try_text;
-                           load_scrub_rules, the one loader freeze, dry run and preview share
+                           load_scrub_rules, the one loader freeze, dry run and preview share;
+                           compile_scrubber, the one scrubber they share
 api/
   v1/scrub.py              /api/v1/scrub/...
 ui/

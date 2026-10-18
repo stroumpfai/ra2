@@ -11,13 +11,24 @@ so they cannot disagree about what is active.
 rules and the active set's other files, and `check_rules` runs over the
 composition: a whitelist removed, a list added or a rule file swapped can each
 turn a protected string into a placeholder, and only the composition can say.
+
+**Never on the event loop.** A surname list runs to hundreds of thousands of
+entries, and parsing one, checking a composition or building a `Scrubber`
+over it takes seconds. NiceGUI drops a page whose socket misses its
+heartbeat for about six seconds, which is how a refused import once lost the
+dialog that said why. Every such step here runs in `asyncio.to_thread`
+(§19.7), and the two results worth keeping are kept: a stored file's parse,
+by its hash, and the scrubber of the set in use.
 """
 
+import asyncio
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+import threading
+from collections import OrderedDict
+from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -64,6 +75,7 @@ from ra2.services.readmodels import (
 __all__ = [
     "LoadedRules",
     "ScrubService",
+    "compile_scrubber",
     "load_scrub_rules",
     "mandatory_snapshot",
 ]
@@ -100,17 +112,76 @@ class LoadedRules:
 # ===========================================================================
 
 
-def _parse_stored(row: ScrubList) -> RegexRuleFile | NameListFile:
+class _Recent[K: Hashable, V]:
+    """The few most recently used values, by key. Locked, because a task
+    runner may drive a service on a second event loop in its own thread."""
+
+    def __init__(self, size: int) -> None:
+        self._size = size
+        self._items: OrderedDict[K, V] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key: K) -> V | None:
+        with self._lock:
+            value = self._items.get(key)
+            if value is not None:
+                self._items.move_to_end(key)
+            return value
+
+    def put(self, key: K, value: V) -> None:
+        with self._lock:
+            self._items[key] = value
+            self._items.move_to_end(key)
+            while len(self._items) > self._size:
+                self._items.popitem(last=False)
+
+
+#: Stored files, parsed, by kind and `sha256`. A `scrub_list` row is never
+#: rewritten, so a parse cannot go stale: without this, every screen that
+#: shows the active set parsed every list in it again.
+_PARSED: Final[_Recent[tuple[ListKind, str], RegexRuleFile | NameListFile]] = _Recent(8)
+
+#: Compiled scrubbers, by the rules they apply. Keyed on the composed
+#: `ScrubRules` itself, never on an id or a stored fingerprint, so a hit is a
+#: scrubber for exactly these rules. Cheap to look up: the lists in it come
+#: from `_PARSED`, so comparing two keys compares the same strings.
+_SCRUBBERS: Final[_Recent[ScrubRules, Scrubber]] = _Recent(2)
+
+
+def _parse(kind: ListKind, content: bytes) -> RegexRuleFile | NameListFile | list[ScrubImportError]:
+    return parse_regex_rules(content) if kind is ListKind.REGEX else parse_name_list(kind, content)
+
+
+async def _parse_stored(row: ScrubList) -> RegexRuleFile | NameListFile:
     """A stored file, parsed again. It was valid when it was imported and is
     never rewritten, so a failure here is a corrupted database, not input."""
-    content = row.content_text.encode("utf-8")
     kind = ListKind(row.kind)
-    parsed = (
-        parse_regex_rules(content) if kind is ListKind.REGEX else parse_name_list(kind, content)
-    )
+    cached = _PARSED.get((kind, row.sha256))
+    if cached is not None:
+        return cached
+    parsed = await asyncio.to_thread(_parse, kind, row.content_text.encode("utf-8"))
     if isinstance(parsed, list):
         raise RuntimeError(f"stored scrub list {row.id} no longer parses: {parsed[0].code}")
+    _PARSED.put((kind, row.sha256), parsed)
     return parsed
+
+
+def _compiled(rules: ScrubRules) -> Scrubber:
+    scrubber = Scrubber(rules)
+    # Every freeze and dry run reads it, so it is computed here, in the thread.
+    _ = scrubber.fingerprint
+    return scrubber
+
+
+async def compile_scrubber(rules: ScrubRules) -> Scrubber:
+    """`Scrubber(rules)`, built off the event loop and kept for the next call
+    with the same rules: the freeze, the dry run, the raw preview and the
+    sentence on the Scrubbing screen all apply the active set."""
+    scrubber = _SCRUBBERS.get(rules)
+    if scrubber is None:
+        scrubber = await asyncio.to_thread(_compiled, rules)
+        _SCRUBBERS.put(rules, scrubber)
+    return scrubber
 
 
 def _compose(
@@ -148,7 +219,7 @@ async def _components(
         row = await repo.get_list(list_id)
         if row is None:  # pragma: no cover - a RESTRICT foreign key forbids it
             raise RuntimeError(f"scrub rule set {ruleset.id} cites a missing list {list_id}")
-        found[kind] = _Component(row, _parse_stored(row))
+        found[kind] = _Component(row, await _parse_stored(row))
     return found
 
 
@@ -238,7 +309,7 @@ def _list_view(kind: ListKind, row: ScrubList) -> ScrubListView:
     )
 
 
-def _ruleset_view(
+async def _ruleset_view(
     ruleset: ScrubRuleset | None, components: Mapping[ListKind, _Component]
 ) -> ScrubRulesetView:
     rules = _compose({kind: c.parsed for kind, c in components.items()})
@@ -246,7 +317,7 @@ def _ruleset_view(
         ruleset_id=ScrubRulesetId(ruleset.id) if ruleset else None,
         version=ruleset.version if ruleset else None,
         created_at=ruleset.created_at if ruleset else None,
-        fingerprint=compute_rules_fingerprint(rules),
+        fingerprint=await asyncio.to_thread(compute_rules_fingerprint, rules),
         mandatory_version=MANDATORY_RULES_VERSION,
         rules=tuple(_rule_view(r) for r in rules.regex_rules),
         lists=tuple(
@@ -291,9 +362,7 @@ class ScrubService:
 
         :raises ScrubImportRefusedError: any refusal; nothing is written.
         """
-        parsed = (
-            parse_regex_rules(content) if kind is ListKind.REGEX else parse_name_list(kind, content)
-        )
+        parsed = await asyncio.to_thread(_parse, kind, content)
         if isinstance(parsed, list):
             raise ScrubImportRefusedError(parsed)
         sha256 = hashlib.sha256(content).hexdigest()
@@ -305,7 +374,7 @@ class ScrubService:
             current = components.get(kind)
             if active is not None and current is not None and current.row.sha256 == sha256:
                 return ScrubImportView(
-                    _ruleset_view(active, components),
+                    await _ruleset_view(active, components),
                     no_change=True,
                     notices=_notices(parsed.notices),
                 )
@@ -314,7 +383,7 @@ class ScrubService:
                 k: c.parsed for k, c in components.items()
             }
             candidate[kind] = parsed
-            self._refuse_unless_valid(candidate)
+            await self._refuse_unless_valid(candidate)
 
             row = await repo.find_list(kind, sha256)
             if row is None:
@@ -333,12 +402,14 @@ class ScrubService:
                     import_report_json=_dump_notices(parsed.notices),
                 )
                 await repo.add_list(row)
+            # The screen reloads the active set next; it need not parse this again.
+            _PARSED.put((kind, sha256), parsed)
             ids = {k: ScrubListId(c.row.id) for k, c in components.items()}
             ids[kind] = ScrubListId(row.id)
             ruleset = await self._add_version(repo, ids, candidate)
             components[kind] = _Component(row, parsed)
             return ScrubImportView(
-                _ruleset_view(ruleset, components),
+                await _ruleset_view(ruleset, components),
                 no_change=False,
                 notices=_notices(parsed.notices),
             )
@@ -356,21 +427,21 @@ class ScrubService:
             active = await repo.get_active()
             components = await _components(repo, active)
             if kind not in components:
-                return ScrubImportView(_ruleset_view(active, components), no_change=True)
+                return ScrubImportView(await _ruleset_view(active, components), no_change=True)
             del components[kind]
             candidate: dict[ListKind, RegexRuleFile | NameListFile | None] = {
                 k: c.parsed for k, c in components.items()
             }
-            self._refuse_unless_valid(candidate)
+            await self._refuse_unless_valid(candidate)
             ids = {k: ScrubListId(c.row.id) for k, c in components.items()}
             ruleset = await self._add_version(repo, ids, candidate)
-            return ScrubImportView(_ruleset_view(ruleset, components), no_change=False)
+            return ScrubImportView(await _ruleset_view(ruleset, components), no_change=False)
 
     @staticmethod
-    def _refuse_unless_valid(
+    async def _refuse_unless_valid(
         candidate: Mapping[ListKind, RegexRuleFile | NameListFile | None],
     ) -> None:
-        errors: list[ScrubImportError] = check_rules(_compose(candidate))
+        errors: list[ScrubImportError] = await asyncio.to_thread(check_rules, _compose(candidate))
         if errors:
             raise ScrubImportRefusedError(errors)
 
@@ -384,7 +455,9 @@ class ScrubService:
             id=ScrubRulesetId(self._ids.new_id()),
             version=await repo.next_version(),
             created_at=self._clock.now(),
-            fingerprint=compute_rules_fingerprint(_compose(candidate, mandatory=False)),
+            fingerprint=await asyncio.to_thread(
+                compute_rules_fingerprint, _compose(candidate, mandatory=False)
+            ),
             **{column: ids.get(kind) for kind, column in _COMPONENT_COLUMNS.items()},
         )
         await repo.add_ruleset(ruleset)
@@ -398,7 +471,7 @@ class ScrubService:
         async with self._session_factory() as session:
             repo = ScrubRepository(session)
             ruleset = await repo.get_active()
-            return _ruleset_view(ruleset, await _components(repo, ruleset))
+            return await _ruleset_view(ruleset, await _components(repo, ruleset))
 
     async def versions(self) -> list[ScrubVersionView]:
         """Every version, newest first, with the corpora frozen under it."""
@@ -438,14 +511,12 @@ class ScrubService:
             if component and isinstance(component.parsed, NameListFile)
             else ()
         )
-        matching = [
-            ScrubEntryView(entry, entry_key(entry))
-            for entry in entries
-            if entry_matches(entry, query)
-        ]
+        matching = await asyncio.to_thread(_matching, entries, query)
         start = max(page - 1, 0) * page_size
         return Page(
-            items=tuple(matching[start : start + page_size]),
+            items=tuple(
+                ScrubEntryView(e, entry_key(e)) for e in matching[start : start + page_size]
+            ),
             total=len(matching),
             page=page,
             page_size=page_size,
@@ -458,8 +529,9 @@ class ScrubService:
         is logged: the sentence may be real narrative typed in to test."""
         async with self._session_factory() as session:
             loaded = await load_scrub_rules(session)
+        scrubber = await compile_scrubber(loaded.rules)
         try:
-            result = Scrubber(loaded.rules).scrub(text)
+            result = await asyncio.to_thread(scrubber.scrub, text)
         except ScrubTimeoutError as exc:
             return ScrubTryView(text="", hits=(), timed_out_rule=exc.rule_id)
         return ScrubTryView(
@@ -468,3 +540,7 @@ class ScrubService:
                 ScrubHitView(h.rule_id, h.tag, h.placeholder, h.start, h.end) for h in result.hits
             ),
         )
+
+
+def _matching(entries: Sequence[str], query: str) -> list[str]:
+    return [entry for entry in entries if entry_matches(entry, query)]

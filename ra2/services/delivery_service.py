@@ -16,7 +16,7 @@ from ra2.domain.delivery import DeliveryStatus, Dialect, Encoding, FileKind, Sou
 from ra2.domain.findings import Finding, FindingCode, Severity
 from ra2.domain.ids import DeliveryId, FileId, TaskId
 from ra2.domain.parsing.analysis import ParsedFile, analyse_file
-from ra2.domain.scrub import Scrubber, ScrubTimeoutError
+from ra2.domain.scrub import ScrubTimeoutError
 from ra2.domain.validation import validate_delivery
 from ra2.infra.clock import Clock
 from ra2.infra.filestore import FileStore
@@ -28,7 +28,7 @@ from ra2.persistence.repositories.delivery_repo import DeliveryRepository
 from ra2.persistence.session import session_scope
 from ra2.services.errors import HostPathRefusedError, NotFoundError
 from ra2.services.readmodels import DeliveryFileView, DeliveryView, Page, SortDir
-from ra2.services.scrub_service import load_scrub_rules
+from ra2.services.scrub_service import compile_scrubber, load_scrub_rules
 
 __all__ = ["DeliveryService", "store_for"]
 
@@ -611,6 +611,7 @@ class DeliveryService:
             row = await self._require_file(repo, delivery_id, file_id)
             data = await self._store_for(delivery).read_bytes(delivery_id, row.relative_path)
             loaded = await load_scrub_rules(session)
+        scrubber = await compile_scrubber(loaded.rules)
         encoding = Encoding(row.encoding) if row.encoding else None
         candidates = (encoding,) if encoding else (Encoding.UTF_8, Encoding.CP1252)
         for candidate in candidates:
@@ -618,7 +619,6 @@ class DeliveryService:
                 text = data.decode(candidate.value)
             except UnicodeDecodeError:
                 continue
-            scrubber = Scrubber(loaded.rules)
             try:
                 return tuple(scrubber.scrub(line).text for line in text.splitlines()[:lines])
             except ScrubTimeoutError:

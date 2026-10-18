@@ -1,6 +1,7 @@
 # FROZEN (constructor + signatures) — see CONTRACTS.md; bodies owned by B1
 """Freeze a selection into an immutable corpus; list; delete-guard (§6.3)."""
 
+import asyncio
 import json
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -76,7 +77,12 @@ from ra2.services.readmodels import (
     ScrubPreviewView,
     SortDir,
 )
-from ra2.services.scrub_service import LoadedRules, load_scrub_rules, mandatory_snapshot
+from ra2.services.scrub_service import (
+    LoadedRules,
+    compile_scrubber,
+    load_scrub_rules,
+    mandatory_snapshot,
+)
 
 __all__ = ["CorpusService"]
 
@@ -184,7 +190,7 @@ class CorpusService:
 
             # --- 2-4. the corpus, its records and their cells --------------
             loaded = await _load_rules(session, scrub_ruleset_id)
-            scrubber = Scrubber(loaded.rules)
+            scrubber = await compile_scrubber(loaded.rules)
             corpus_repo = CorpusRepository(session)
             corpus_id = CorpusId(self._ids.new_id())
             built = self._build_records(corpus_id, parsed, scrubber)
@@ -253,17 +259,9 @@ class CorpusService:
         async with self._session_factory() as session:
             _, _, parsed = await self._selected(session, delivery_id)
             loaded = await _load_rules(session, scrub_ruleset_id)
-        scrubber = Scrubber(loaded.rules)
-        counter = ScrubCounter(scrubber)
-        narratives = _narratives(parsed)
-        timed_out: str | None = None
-        try:
-            for unfall_uid, unfall_cells in _unfall_rows(parsed, _unfall_key_column(parsed)):
-                text, anonymised = _text_for(unfall_uid, unfall_cells, narratives)
-                _scrub_record(scrubber, counter, unfall_uid, text, anonymised, unfall_cells)
-        except BlockingFindingsError as exc:
-            timed_out = exc.findings[0].detail.get("rule_id")
-        tally = counter.tally()
+        scrubber = await compile_scrubber(loaded.rules)
+        # Every narrative of the delivery: seconds of CPU, so not on the loop.
+        tally, timed_out = await asyncio.to_thread(_dry_run, parsed, scrubber)
         return ScrubPreviewView(
             ruleset_id=ScrubRulesetId(loaded.ruleset.id) if loaded.ruleset else None,
             version=loaded.ruleset.version if loaded.ruleset else None,
@@ -871,3 +869,18 @@ def _corpus_view(
 def _loads(payload: str) -> dict[str, int]:
     parsed: dict[str, int] = json.loads(payload)
     return parsed
+
+
+def _dry_run(parsed: Sequence[ParsedFile], scrubber: Scrubber) -> tuple[ScrubTally, str | None]:
+    """`scrub_preview`'s walk: the freeze's own rows and `_scrub_record`, with
+    the rule that timed out, if one did, instead of a raise."""
+    counter = ScrubCounter(scrubber)
+    narratives = _narratives(parsed)
+    timed_out: str | None = None
+    try:
+        for unfall_uid, unfall_cells in _unfall_rows(parsed, _unfall_key_column(parsed)):
+            text, anonymised = _text_for(unfall_uid, unfall_cells, narratives)
+            _scrub_record(scrubber, counter, unfall_uid, text, anonymised, unfall_cells)
+    except BlockingFindingsError as exc:
+        timed_out = exc.findings[0].detail.get("rule_id")
+    return counter.tally(), timed_out

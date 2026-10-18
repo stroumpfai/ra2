@@ -41,7 +41,7 @@ import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from typing import Final
 
 import regex
@@ -411,27 +411,41 @@ def compute_rules_fingerprint(rules: ScrubRules) -> str:
 #: vocabulary endlessly, so they are cached. Measured: about 60 % of a scrub's
 #: time was spent here, uncached (`docs/performance.md` §8). Bounded, so a
 #: corpus of rare words cannot grow it without limit.
+#:
+#: **An ASCII token never reaches the cache.** Normalising one is `lower()`:
+#: casefolding ASCII is lower-casing, decomposing it changes nothing, it has
+#: no combining marks and nothing to transliterate. A name list is mostly
+#: ASCII and nearly every entry is new to the cache, which is where a
+#: 500 000-entry import spent its time (`docs/performance.md` §8).
 _NORMALISE_CACHE: Final = 1 << 16
 
 
-@lru_cache(maxsize=_NORMALISE_CACHE)
 def _stripped(token: str) -> str:
     """Casefolded, decomposed, combining marks dropped: `René` -> `rene`."""
+    return token.lower() if token.isascii() else _stripped_unicode(token)
+
+
+@lru_cache(maxsize=_NORMALISE_CACHE)
+def _stripped_unicode(token: str) -> str:
     decomposed = unicodedata.normalize("NFKD", token.casefold())
     return "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
 
 
-@lru_cache(maxsize=_NORMALISE_CACHE)
 def _transliterated(token: str) -> str:
     """As `_stripped`, after `ä/ö/ü -> ae/oe/ue`: `Müller` -> `mueller`.
 
     Composed first, so an NFD `u` + U+0308 transliterates like `ü` does."""
+    return token.lower() if token.isascii() else _transliterated_unicode(token)
+
+
+@lru_cache(maxsize=_NORMALISE_CACHE)
+def _transliterated_unicode(token: str) -> str:
     composed = unicodedata.normalize("NFC", token).casefold()
     return _stripped(composed.translate(_TRANSLITERATION))
 
 
 def _tokens(text: str) -> list[str]:
-    return [m.group() for m in _TOKEN.finditer(text)]
+    return _TOKEN.findall(text)
 
 
 def entry_key(entry: str) -> str:
@@ -462,6 +476,14 @@ def entry_matches(entry: str, query: str) -> bool:
 
 def _letter_count(entry: str) -> int:
     return sum(len(_stripped(t)) for t in _tokens(entry))
+
+
+def _key_and_letters(entry: str) -> tuple[str, int]:
+    """`entry_key` and `_letter_count` from one tokenisation, for a list
+    parsed entry by entry."""
+    tokens = _tokens(entry)
+    key = " ".join(_transliterated(t) for t in tokens)
+    return key, sum(len(_stripped(t)) for t in tokens)
 
 
 # ===========================================================================
@@ -557,13 +579,15 @@ class _NameIndex:
         self._keys: dict[str, str] = {}
         self.max_tokens = 0
         for entry in entries:
-            stripped, transliterated = _entry_forms(entry)
-            if not transliterated or _letter_count(entry) < MIN_ENTRY_LETTERS:
+            tokens = _tokens(entry)
+            stripped_tokens = [_stripped(t) for t in tokens]
+            # Three letters make at least one token, so the key is never empty.
+            if sum(map(len, stripped_tokens)) < MIN_ENTRY_LETTERS:
                 continue
-            key = transliterated
-            self._keys.setdefault(stripped, key)
-            self._keys.setdefault(transliterated, key)
-            self.max_tokens = max(self.max_tokens, len(_tokens(entry)))
+            key = " ".join(_transliterated(t) for t in tokens)
+            self._keys.setdefault(" ".join(stripped_tokens), key)
+            self._keys.setdefault(key, key)
+            self.max_tokens = max(self.max_tokens, len(tokens))
 
     def __len__(self) -> int:
         return len(set(self._keys.values()))
@@ -585,7 +609,6 @@ class Scrubber:
 
     def __init__(self, rules: ScrubRules, *, timeout_s: float = MATCH_TIMEOUT_S) -> None:
         self.rules = rules
-        self.fingerprint = compute_rules_fingerprint(rules)
         self._timeout_s = timeout_s
         self._compiled = tuple(
             _CompiledRule(rule, regex.compile(rule.pattern, regex.VERSION0))
@@ -595,6 +618,12 @@ class Scrubber:
         self._lastnames = _NameIndex(rules.lastnames)
         self._whitelist = _NameIndex(rules.whitelist)
         self._max_tokens = max(self._firstnames.max_tokens, self._lastnames.max_tokens)
+
+    @cached_property
+    def fingerprint(self) -> str:
+        """`compute_rules_fingerprint(self.rules)`, on first use: an import's
+        check builds a scrubber and never asks."""
+        return compute_rules_fingerprint(self.rules)
 
     @property
     def has_firstnames(self) -> bool:
@@ -1137,10 +1166,10 @@ def parse_name_list(kind: ListKind, content: bytes) -> NameListFile | list[Scrub
         if entry.startswith("#"):
             comments += 1
             continue
-        key = entry_key(entry)
+        key, letters = _key_and_letters(entry)
         if not key:
             no_letters.append(entry)
-        elif _letter_count(entry) < MIN_ENTRY_LETTERS:
+        elif letters < MIN_ENTRY_LETTERS:
             too_short.append(entry)
         elif key in seen:
             duplicates.append(entry)
