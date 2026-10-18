@@ -1106,6 +1106,30 @@ contract), one new router (`/api/v1/scrub`), one new nav item (Scrubbing).
 
 ---
 
+## E2E on Linux again, a slice
+
+`fix/e2e-ci`. **No amendment**: nothing frozen changes. No migration, no API
+change, and `pyproject.toml` is byte-unchanged.
+
+The Playwright job had been skipped since September behind failing jobs, and
+four journeys failed the first time it ran (J9's cited-version story, three
+J10s). uvicorn runs on **uvloop** wherever it installs, which is everywhere
+but Windows, and uvloop 0.22.1's `run_in_executor` calls
+`asyncio.iscoroutinefunction`, deprecated in 3.14. Under
+`filterwarnings = ["error"]` every `asyncio.to_thread` in a request raised: the
+draft `PUT` answered 500 from `_reject_infeasible`, and the Evaluation page's
+endpoint ask never painted, so `data-loading` stayed `true`. Production only
+loses a warning; the suite loses the request. Invisible on Windows, which has
+no uvloop.
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `uv.lock` | `uvloop` 0.22.1 → 0.23.0, which calls `inspect.iscoroutinefunction`. Nothing else moves |
+
+---
+
 ## Phase 5 — owner: M35 (Wave 0), amendment only
 
 Re-established at tag `p5-frozen`, the same way M27 established the phase-4
