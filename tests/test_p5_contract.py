@@ -600,8 +600,8 @@ def test_the_nav_has_eight_items_and_every_one_of_them_is_built():
 
 #: Nav entries added **after** `p5w4-green`, named, so the eight-item claims
 #: below stay claims about their phase (the `POST_PHASE_5_*` pattern of
-#: `tests/test_p5_contract.py`). `feat/text-scrubbing`: Scrubbing, in Data
-#: after Codelists (sw-design.md §19).
+#: `tests/test_p5_contract.py`). `feat/text-scrubbing`: Scrubbing, alone in
+#: Preparation above Data (sw-design.md §19).
 POST_PHASE_5_NAV_KEYS = frozenset({"scrubbing"})
 
 

@@ -2,7 +2,7 @@
 
 Three claims, one per test group:
 
-1. every route renders all **9 nav items in 4 groups**;
+1. every route renders all **9 nav items in 5 groups**;
 2. the active item is **derived from the route**, never stored;
 3. the header title and description are the design's copy, **verbatim**.
 
@@ -41,20 +41,30 @@ DESIGNED_COPY = {
 }
 
 
-def test_the_nav_is_four_groups_of_nine_items():
+def test_the_nav_is_five_groups_of_nine_items():
     """Eight since phase 3 (M17): Prompts joins the Configure group,
     immediately after Features (design/prompt-evaluation/README.md §0).
-    Nine since `feat/text-scrubbing`: Scrubbing joins Data, after Codelists
-    (sw-design.md §19)."""
-    assert [group for group, _ in NAV_GROUPS] == ["Data", "Configure", "Run", "Review"]
+    Nine since `feat/text-scrubbing`: Scrubbing, in a Preparation group of its
+    own above Data (sw-design.md §19)."""
+    assert [group for group, _ in NAV_GROUPS] == [
+        "Preparation",
+        "Data",
+        "Configure",
+        "Run",
+        "Review",
+    ]
     assert len(NAV_ITEMS) == 9
     assert sum(len(items) for _, items in NAV_GROUPS) == 9
 
 
-def test_scrubbing_sits_in_data_immediately_after_codelists():
-    """The rules act on the data at freeze, before anything is configured."""
+def test_scrubbing_is_alone_in_preparation_at_the_top():
+    """The lists are imported and tried before a corpus is created, because a
+    freeze applies them; the nav's order is the workflow's order."""
+    preparation = next(items for group, items in NAV_GROUPS if group == "Preparation")
+    assert [item.key for item in preparation] == ["scrubbing"]
+    assert NAV_ITEMS[0].key == "scrubbing"
     data = next(items for group, items in NAV_GROUPS if group == "Data")
-    assert [item.key for item in data] == ["import", "census", "codelists", "scrubbing"]
+    assert [item.key for item in data] == ["import", "census", "codelists"]
     scrubbing = next(i for i in NAV_ITEMS if i.key == "scrubbing")
     assert (scrubbing.label, scrubbing.path, scrubbing.built) == ("Scrubbing", "/scrubbing", True)
 

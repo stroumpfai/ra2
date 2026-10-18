@@ -2642,7 +2642,7 @@ services/
 api/
   v1/scrub.py              /api/v1/scrub/...
 ui/
-  views/scrubbing_view.py  the Scrubbing screen (nav: Data, after Codelists)
+  views/scrubbing_view.py  the Scrubbing screen (nav: Preparation, alone, above Data)
 ```
 
 ### 19.10 What this section deliberately does not decide

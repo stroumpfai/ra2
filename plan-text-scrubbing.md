@@ -361,7 +361,7 @@ All four follow the existing tokens and primitives (`theme.py`,
 `components/primitives.py`, `data_table.py`). Each still needs a design pass
 before E2E asserts pixel sizes (`sw-design.md` §8.2).
 
-### 7.1 A new **Scrubbing** screen (nav: Data → after Codelists)
+### 7.1 A new **Scrubbing** screen (nav: Preparation, alone, above Data)
 
 Recommended. It is a concept of its own, and the analyst has to find it
 without being told where to look.
@@ -652,5 +652,5 @@ except Q8, which was revised after the `regex` package was checked (§3.6).
 | Q6 | The *k* floor for the most-hit list entries | 10, a constant (`MOST_HIT_FLOOR`) |
 | Q7 | Highest version active, or an explicit *Activate*? | The highest is active; rolling back means re-importing the older file |
 | Q8 | Stdlib `re` or the `regex` package? | **`regex`**, with a timeout, failing closed (§3.6) |
-| Q9 | Nav item or Codelists tab? | Nav item, *Scrubbing*, in Data after Codelists |
+| Q9 | Nav item or Codelists tab? | Nav item, *Scrubbing*. First in Data after Codelists; then moved to a *Preparation* group of its own above Data, because the lists are imported and tried before a corpus is created and the nav keeps the workflow's order |
 | Q10 | Minimum entry length | 3 letters (`MIN_ENTRY_LETTERS`) |
