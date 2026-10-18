@@ -2610,7 +2610,11 @@ the delivery included. Two results are kept because they cannot go stale: a
 stored file's parse, by kind and `sha256` (a `scrub_list` row is never
 rewritten), and the compiled scrubber, by the composed `ScrubRules` itself
 (`compile_scrubber`), which the freeze, the dry run, the raw preview and the
-sentence on the Scrubbing screen share.
+sentence on the Scrubbing screen share. The screen itself reads nothing whose
+cost grows with a list on a plain visit: the active set's fingerprint is kept
+by the same key, an empty search hands the list back without a pass over it
+(`search_entries`), and the frame is served before any read, `SD55`'s way,
+with `data-loading` on `scrubbing-page` until the first read is drawn.
 `tests/backend/services/scrub/test_event_loop.py` holds the loop to it. The
 freeze's own record building, which also detects languages, is unchanged and
 still runs on the loop.

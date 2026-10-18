@@ -218,7 +218,11 @@ def register(services: Services) -> None:
     @ui.page(_ITEM.path)
     async def _page() -> None:
         page = _ScrubbingPage(services)
-        await page.build()
+        page.frame()
+        # SD55: the frame goes to the browser now and the reads fill it over
+        # the websocket, so the nav answers at once whatever the lists cost.
+        await ui.context.client.connected()
+        await page.reload()
 
 
 class _ScrubbingPage:
@@ -241,7 +245,9 @@ class _ScrubbingPage:
         self._editor: Element | None = None
         self._versions_slot: Element | None = None
 
-    async def build(self) -> None:
+    def frame(self) -> None:
+        """Every card, empty: nothing here waits on a read. `data-loading`
+        stays `true` until the first `reload` has drawn what it read."""
         data_dir_view = self._services.lifecycle.data_dir()
         with shell(
             title=_ITEM.title,
@@ -252,7 +258,7 @@ class _ScrubbingPage:
         ):
             self._root = (
                 ui.element("div")
-                .props('data-testid="scrubbing-page"')
+                .props('data-testid="scrubbing-page" data-loading="true"')
                 .style("display:flex;flex-direction:column;gap:16px;min-width:0;")
             )
             with self._root:
@@ -263,7 +269,6 @@ class _ScrubbingPage:
                 self._protected_slot = ui.element("div")
                 self._try_card()
                 self._versions_slot = ui.element("div")
-        await self.reload()
 
     async def reload(self) -> None:
         """Re-read everything, then redraw what it changes. The search box and
@@ -274,6 +279,8 @@ class _ScrubbingPage:
         self._render_upper()
         self._render_protected()
         self._render_versions()
+        if self._root is not None:
+            self._root.props('data-loading="false"')
 
     async def _reload_entries(self) -> None:
         state = scrubbing_state()

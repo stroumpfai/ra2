@@ -19,6 +19,7 @@ from ra2.domain.scrub import (
     entry_matches,
     parse_name_list,
     parse_regex_rules,
+    search_entries,
 )
 
 pytestmark = pytest.mark.unit
@@ -186,3 +187,19 @@ def test_a_search_does_not_find_what_is_not_there(query: str) -> None:
 def test_a_search_spans_the_tokens_of_a_multi_token_entry() -> None:
     assert entry_matches("D'Alessandro", "d alessandro")
     assert entry_matches("von Allmen", "VON ALL")
+
+
+_ENTRIES = ("Müller", "Mueller", "Meier", "von Allmen", "D'Alessandro", "Brunner")
+
+
+@pytest.mark.parametrize("query", ["müll", "MUELL", "all", "ner", "x", "von all"])
+def test_searching_a_list_finds_what_each_entry_would(query: str) -> None:
+    expected = [e for e in _ENTRIES if entry_matches(e, query)]
+    assert list(search_entries(_ENTRIES, query)) == expected
+
+
+@pytest.mark.parametrize("query", ["", "   ", "123", "-"])
+def test_a_search_with_no_letters_hands_the_list_back_untouched(query: str) -> None:
+    """Not a copy: the Scrubbing screen shows a list unsearched on every
+    visit, and that must not cost a pass over every entry."""
+    assert search_entries(_ENTRIES, query) is _ENTRIES

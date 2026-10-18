@@ -26,6 +26,7 @@ from nicegui.testing.user_interaction import UserInteraction
 from ra2.domain.scrub import ListKind, ListNoticeCode, ScrubImportErrorCode
 from ra2.infra.config import Settings
 from ra2.services.container import Services
+from ra2.services.readmodels import ScrubRulesetView
 from ra2.ui.views.scrubbing_view import (
     ERROR_LABELS,
     KIND_LABELS,
@@ -107,6 +108,18 @@ async def _until(predicate: Callable[[], bool]) -> None:
     raise AssertionError("condition never became true")
 
 
+async def _open(user: User) -> None:
+    """Open the screen and wait for its first read to be drawn: the frame is
+    served first and filled over the websocket (SD55)."""
+    await user.open("/scrubbing")
+    await _until(lambda: _loaded(user))
+
+
+def _loaded(user: User) -> bool:
+    roots = _find(user, "scrubbing-page")
+    return bool(roots) and all(root._props.get("data-loading") == "false" for root in roots)
+
+
 def _file_row(user: User, kind: ListKind) -> Element:
     (row,) = [e for e in _find(user, "scrub-file-row") if e._props.get("data-kind") == kind.value]
     return row
@@ -138,7 +151,7 @@ def test_every_refusal_every_notice_and_every_kind_has_words() -> None:
 
 async def test_with_nothing_imported_the_mandatory_rules_are_shown(mounted: Mounted) -> None:
     user = mounted.user
-    await user.open("/scrubbing")
+    await _open(user)
     await user.should_see(MANDATORY_ONLY)
     await user.should_see(SCRUBBED_NOT_ANONYMISED)
     await user.should_see(NO_VERSIONS_MESSAGE)
@@ -153,7 +166,7 @@ async def test_with_nothing_imported_the_mandatory_rules_are_shown(mounted: Moun
 
 async def test_an_imported_list_shows_its_file_and_what_was_counted(mounted: Mounted) -> None:
     user = mounted.user
-    await user.open("/scrubbing")
+    await _open(user)
     await _upload(user, ListKind.LASTNAME, "s02_lastnames.txt")
     await _until(lambda: bool(_find(user, "scrub-file-name")))
     await user.should_see("Rule set v1 is active.")
@@ -168,7 +181,7 @@ async def test_an_imported_list_shows_its_file_and_what_was_counted(mounted: Mou
 
 async def test_a_refused_import_says_why_and_changes_nothing(mounted: Mounted) -> None:
     user = mounted.user
-    await user.open("/scrubbing")
+    await _open(user)
     await _upload(user, ListKind.LASTNAME, "s05_lastnames_cp1252.txt")
     await _until(lambda: bool(_find(user, "scrub-refusal-error")))
     await user.should_see(REFUSED_TITLE)
@@ -180,7 +193,7 @@ async def test_a_refused_import_says_why_and_changes_nothing(mounted: Mounted) -
 
 async def test_a_slow_rule_is_refused_by_its_own_code(mounted: Mounted) -> None:
     user = mounted.user
-    await user.open("/scrubbing")
+    await _open(user)
     await _upload(user, ListKind.REGEX, "s06_slow_rule.toml")
     await _until(lambda: bool(_find(user, "scrub-refusal-error")))
     (error,) = _find(user, "scrub-refusal-error")
@@ -192,7 +205,7 @@ async def test_removing_a_list_makes_a_version_without_it(mounted: Mounted) -> N
         ListKind.WHITELIST, "s03_whitelist.txt", _fixture("s03_whitelist.txt")
     )
     user = mounted.user
-    await user.open("/scrubbing")
+    await _open(user)
     _one(user, _find(user, "scrub-remove-whitelist")[0]).click()
     await _until(lambda: len(_find(user, "scrub-file-none")) == len(ListKind))
     assert _texts_in(user, "scrub-version") == ["v2", "v1"]
@@ -203,7 +216,7 @@ async def test_imported_rules_are_listed_after_the_mandatory_ones(mounted: Mount
         ListKind.REGEX, "s04_rules.toml", _fixture("s04_rules.toml")
     )
     user = mounted.user
-    await user.open("/scrubbing")
+    await _open(user)
     assert _texts_in(user, "scrub-rule-id") == [
         "license-plate",
         "phone",
@@ -223,7 +236,7 @@ async def test_a_search_finds_a_name_however_it_is_spelt(mounted: Mounted) -> No
         ListKind.LASTNAME, "s02_lastnames.txt", _fixture("s02_lastnames.txt")
     )
     user = mounted.user
-    await user.open("/scrubbing")
+    await _open(user)
     await _until(lambda: len(_find(user, "scrub-entry")) == 11)
     (search,) = _find(user, "scrub-entry-search")
     _one(user, search).trigger("input", args="MUELL")
@@ -235,7 +248,7 @@ async def test_switching_the_list_shows_its_entries(mounted: Mounted) -> None:
         ListKind.FIRSTNAME, "s01_firstnames.txt", _fixture("s01_firstnames.txt")
     )
     user = mounted.user
-    await user.open("/scrubbing")
+    await _open(user)
     await user.should_see(f"No {KIND_LABELS[ListKind.LASTNAME].lower()} imported.")
     assert _pressed(user) == [KIND_LABELS[ListKind.LASTNAME]]
     (option,) = user.find(marker="seg-first-names").elements
@@ -268,7 +281,7 @@ async def test_a_typed_sentence_comes_back_scrubbed_as_plain_text(mounted: Mount
     ):
         await mounted.services.scrub.import_list(kind, name, _fixture(name))
     user = mounted.user
-    await user.open("/scrubbing")
+    await _open(user)
     (editor,) = _find(user, "scrub-try-input")
     _one(user, editor).trigger("change", args="Herr Meier, 079 123 45 67, am 12.03.2024.")
     _one(user, _find(user, "scrub-try-run")[0]).click()
@@ -284,6 +297,29 @@ async def test_the_nav_reaches_the_screen(mounted: Mounted) -> None:
     user = mounted.user
     await user.open("/import")
     await user.should_see("Scrubbing")
-    await user.open("/scrubbing")
+    await _open(user)
     await user.should_see(KIND_LABELS[ListKind.REGEX])
     assert NO_FILE in _texts_in(user, "scrub-file-none")
+
+
+async def test_the_frame_is_on_screen_before_the_rules_are_read(
+    mounted: Mounted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SD55: the nav answers at once, whatever the lists cost to read."""
+    release = asyncio.Event()
+    scrub = mounted.services.scrub
+    read_active = scrub.active
+
+    async def held() -> ScrubRulesetView:
+        await release.wait()
+        return await read_active()
+
+    monkeypatch.setattr(scrub, "active", held)
+    user = mounted.user
+    await user.open("/scrubbing")
+    (root,) = _find(user, "scrubbing-page")
+    assert root._props.get("data-loading") == "true"
+    assert _find(user, "scrub-entry-search")
+    release.set()
+    await _until(lambda: _loaded(user))
+    await user.should_see(KIND_LABELS[ListKind.REGEX])

@@ -8,7 +8,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.backend.services.scrub.conftest import FIXTURE_LISTS, scrub_bytes
 
-from ra2.domain.scrub import ListKind, ScrubImportErrorCode
+import ra2.services.scrub_service as scrub_service_module
+from ra2.domain.scrub import ListKind, ScrubImportErrorCode, ScrubRules, compute_rules_fingerprint
 from ra2.domain.scrub_mandatory import MANDATORY_RULES
 from ra2.persistence.models import ScrubList, ScrubRuleset
 from ra2.services.errors import ScrubImportRefusedError
@@ -170,3 +171,28 @@ async def test_a_sentence_is_scrubbed_with_the_active_rules(
     result = await scrub_service.try_text("Herr Meier, 079 123 45 67, am 12.03.2024.")
     assert result.text == "Herr <Lastname_1>, <Phone_1>, am <Date_1>."
     assert [h.rule_id for h in result.hits] == ["lastnames", "phone", "date"]
+
+
+async def test_the_active_fingerprint_is_computed_once_per_set(
+    scrub_service: ScrubService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Scrubbing screen shows it on every visit, and computing it reads
+    every entry of every list: a surname list made each visit cost seconds."""
+    computed: list[ScrubRules] = []
+
+    def counting(rules: ScrubRules) -> str:
+        computed.append(rules)
+        return compute_rules_fingerprint(rules)
+
+    monkeypatch.setattr(scrub_service_module, "compute_rules_fingerprint", counting)
+    await scrub_service.import_list(
+        ListKind.LASTNAME, "s02_lastnames.txt", scrub_bytes("s02_lastnames.txt")
+    )
+    first = await scrub_service.active()
+    shown = len(computed)
+    assert (await scrub_service.active()).fingerprint == first.fingerprint
+    assert len(computed) == shown
+    await scrub_service.import_list(
+        ListKind.FIRSTNAME, "s01_firstnames.txt", scrub_bytes("s01_firstnames.txt")
+    )
+    assert (await scrub_service.active()).fingerprint != first.fingerprint

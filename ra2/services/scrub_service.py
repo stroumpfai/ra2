@@ -47,9 +47,9 @@ from ra2.domain.scrub import (
     check_rules,
     compute_rules_fingerprint,
     entry_key,
-    entry_matches,
     parse_name_list,
     parse_regex_rules,
+    search_entries,
 )
 from ra2.domain.scrub_mandatory import MANDATORY_RULES, MANDATORY_RULES_VERSION
 from ra2.infra.clock import Clock
@@ -147,6 +147,10 @@ _PARSED: Final[_Recent[tuple[ListKind, str], RegexRuleFile | NameListFile]] = _R
 #: from `_PARSED`, so comparing two keys compares the same strings.
 _SCRUBBERS: Final[_Recent[ScrubRules, Scrubber]] = _Recent(2)
 
+#: Fingerprints of composed sets, by the same key. The Scrubbing screen shows
+#: the active set's on every visit, and computing it reads every entry.
+_FINGERPRINTS: Final[_Recent[ScrubRules, str]] = _Recent(4)
+
 
 def _parse(kind: ListKind, content: bytes) -> RegexRuleFile | NameListFile | list[ScrubImportError]:
     return parse_regex_rules(content) if kind is ListKind.REGEX else parse_name_list(kind, content)
@@ -171,6 +175,14 @@ def _compiled(rules: ScrubRules) -> Scrubber:
     # Every freeze and dry run reads it, so it is computed here, in the thread.
     _ = scrubber.fingerprint
     return scrubber
+
+
+async def _fingerprint(rules: ScrubRules) -> str:
+    fingerprint = _FINGERPRINTS.get(rules)
+    if fingerprint is None:
+        fingerprint = await asyncio.to_thread(compute_rules_fingerprint, rules)
+        _FINGERPRINTS.put(rules, fingerprint)
+    return fingerprint
 
 
 async def compile_scrubber(rules: ScrubRules) -> Scrubber:
@@ -317,7 +329,7 @@ async def _ruleset_view(
         ruleset_id=ScrubRulesetId(ruleset.id) if ruleset else None,
         version=ruleset.version if ruleset else None,
         created_at=ruleset.created_at if ruleset else None,
-        fingerprint=await asyncio.to_thread(compute_rules_fingerprint, rules),
+        fingerprint=await _fingerprint(rules),
         mandatory_version=MANDATORY_RULES_VERSION,
         rules=tuple(_rule_view(r) for r in rules.regex_rules),
         lists=tuple(
@@ -511,7 +523,7 @@ class ScrubService:
             if component and isinstance(component.parsed, NameListFile)
             else ()
         )
-        matching = await asyncio.to_thread(_matching, entries, query)
+        matching = await asyncio.to_thread(search_entries, entries, query)
         start = max(page - 1, 0) * page_size
         return Page(
             items=tuple(
@@ -540,7 +552,3 @@ class ScrubService:
                 ScrubHitView(h.rule_id, h.tag, h.placeholder, h.start, h.end) for h in result.hits
             ),
         )
-
-
-def _matching(entries: Sequence[str], query: str) -> list[str]:
-    return [entry for entry in entries if entry_matches(entry, query)]

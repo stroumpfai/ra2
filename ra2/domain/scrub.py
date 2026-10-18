@@ -474,6 +474,20 @@ def entry_matches(entry: str, query: str) -> bool:
     return any(needle in hay for needle in needles for hay in haystacks)
 
 
+def search_entries(entries: Sequence[str], query: str) -> Sequence[str]:
+    """The entries a search for `query` finds, in order, as `entry_matches`
+    decides. A query with no letters finds everything and returns `entries`
+    itself, so showing a list unsearched costs nothing however long it is."""
+    needles = {form for form in _entry_forms(query) if form}
+    if not needles:
+        return entries
+    return [
+        entry
+        for entry in entries
+        if any(needle in hay for needle in needles for hay in _entry_forms(entry))
+    ]
+
+
 def _letter_count(entry: str) -> int:
     return sum(len(_stripped(t)) for t in _tokens(entry))
 
