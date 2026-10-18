@@ -174,11 +174,18 @@ def test_prompt_templates_router_has_no_patch_route(app_factory):
             assert "put" not in operations, f"{path} has a PUT; §15.1 forbids one"
 
 
+#: Nav entries added **after** `p5w4-green`, named, so the eight-item claims
+#: below stay claims about their phase (the `POST_PHASE_5_*` pattern of
+#: `tests/test_p5_contract.py`). `feat/text-scrubbing`: Scrubbing, in Data
+#: after Codelists (sw-design.md §19).
+POST_PHASE_5_NAV_KEYS = frozenset({"scrubbing"})
+
+
 def test_the_nav_has_eight_items_with_prompts_after_features():
     """The nav change lands at Wave 0, not Wave 4 — J4, J5 and J6 all
     parametrise over `NAV_ITEMS`, so this is where it is proven
     (plan-phase-3.md §5.2)."""
-    keys = [item.key for item in NAV_ITEMS]
+    keys = [item.key for item in NAV_ITEMS if item.key not in POST_PHASE_5_NAV_KEYS]
     assert len(keys) == 8
     assert keys.index("prompts") == keys.index("features") + 1
     prompts = next(i for i in NAV_ITEMS if i.key == "prompts")

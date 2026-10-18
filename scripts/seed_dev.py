@@ -117,6 +117,7 @@ from ra2.domain.parsing.headers import (
     TEXT_NARRATIVE_COLUMN,
     UNFALL_KEY_COLUMN,
 )
+from ra2.domain.scrub import ListKind as ScrubListKind
 from ra2.infra.config import Settings
 from ra2.infra.idgen import Uuid7Factory
 from ra2.infra.tasks import InlineTaskRunner
@@ -821,6 +822,7 @@ async def seed(services: Services, *, delivery_root: Path, scenarios: tuple[Scen
     for file in view.files:
         print(f"    {file.filename}: {file.file_kind} · {file.encoding} · {file.row_count} rows")
 
+    await _seed_scrub_lists(services)
     corpus_id = await _freeze(services, delivery_id)
     if corpus_id is None:
         return
@@ -834,6 +836,27 @@ async def seed(services: Services, *, delivery_root: Path, scenarios: tuple[Scen
     await _seed_features(services, corpus_id)
     await _seed_prompt(services)
     _print_plan(scenarios)
+
+
+#: Invented name lists for the Scrubbing screen (sw-design.md §19), so a seeded
+#: app shows a rule set at work rather than an empty screen. The real lists
+#: are public and never committed; these are not them.
+#:
+#: **No rule file, and so no date rule**: every seeded narrative states its
+#: date, and `UnfDatumFeld` is scored from it. A date rule would replace the
+#: very value the seed asks the model for. The seeded narratives name nobody,
+#: so the lists replace nothing; the corpus still reads `scrubbed · rules v3`.
+_SEED_SCRUB_LISTS: Final = (
+    (ScrubListKind.FIRSTNAME, "seed-firstnames.txt", "Hans\nAnna\nLuca\nCéline\n"),
+    (ScrubListKind.LASTNAME, "seed-lastnames.txt", "Müller\nMeier\nDupont\nRossi\n"),
+    (ScrubListKind.WHITELIST, "seed-whitelist.txt", "Fuchs\nWeiss\nWolf\n"),
+)
+
+
+async def _seed_scrub_lists(services: Services) -> None:
+    for kind, name, content in _SEED_SCRUB_LISTS:
+        result = await services.scrub.import_list(kind, name, content.encode("utf-8"))
+    print(f"  scrub rules v{result.ruleset.version}: first names, last names, whitelist")
 
 
 async def _freeze(services: Services, delivery_id: DeliveryId) -> CorpusId | None:
@@ -1026,6 +1049,13 @@ async def _seed_prompt(services: Services) -> None:
         "            never its position in the list.\n"
         "  boolean   true or false.\n\n"
         "A value the narrative does not state is null, never a guess.\n\n"
+        # SD64, sw-design.md §15.1's recommended paragraph: the scrubber's
+        # placeholders are numbered, and the model has to know what they are.
+        "Text in angle brackets, such as <Lastname_1> or <Phone_2>, is a\n"
+        "placeholder for personal data that was removed. The same placeholder\n"
+        "means the same value within this narrative; different numbers mean\n"
+        "different values. Never return a placeholder as a feature value.\n"
+        "Quoting one inside an evidence span is correct.\n\n"
         "Answer as JSON only, one key per feature, no prose.\n\n"
         "--- narrative ---\n"
         "{{narrative}}\n"

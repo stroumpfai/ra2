@@ -223,6 +223,21 @@ from the same narrative.
 
 ---
 
+### Scrubbing
+
+Before the freeze the seed imports three small invented name lists (first
+names, last names, a whitelist), so the corpus reads *scrubbed · rules v3* and
+the Scrubbing screen has something to show. The seeded narratives name nobody,
+so nothing in them is replaced, and every number in §8 is unchanged.
+
+It imports **no rule file**, on purpose. Every seeded narrative states its date,
+and `UnfDatumFeld` is scored from it: a date rule would replace exactly the value
+the model is asked for. The same holds for a real evaluation of a date or time
+feature (`sw-design.md` §19).
+
+The prompt template explains the placeholders the scrubber writes, in one
+paragraph, because a real corpus will carry them.
+
 ## 6. The code table
 
 `data/Codes/codes-2018.json` wins when it is present. On a clone without it —

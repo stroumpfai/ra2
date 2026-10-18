@@ -293,13 +293,20 @@ def test_services_bundle_has_the_three_new_fields(app_factory):
     assert services.ranking is not None
 
 
+#: Nav entries added **after** `p5w4-green`, named, so the eight-item claims
+#: below stay claims about their phase (the `POST_PHASE_5_*` pattern of
+#: `tests/test_p5_contract.py`). `feat/text-scrubbing`: Scrubbing, in Data
+#: after Codelists (sw-design.md §19).
+POST_PHASE_5_NAV_KEYS = frozenset({"scrubbing"})
+
+
 def test_the_nav_still_has_eight_items():
     """The first phase since M0 that adds no nav entry: `results` and
     `mismatches` have existed since phase 1 with `built=False`, and V1 flips
     exactly one flag in Wave 4 (plan-phase-4.md §6.1)."""
     from ra2.ui.shell import NAV_ITEMS
 
-    keys = [item.key for item in NAV_ITEMS]
+    keys = [item.key for item in NAV_ITEMS if item.key not in POST_PHASE_5_NAV_KEYS]
     assert len(keys) == 8
     results = next(i for i in NAV_ITEMS if i.key == "results")
     assert results.group == "Review"

@@ -1066,6 +1066,46 @@ historical and are left as they were written.
 
 ---
 
+## Narrative scrubbing, a slice
+
+`feat/text-scrubbing`, `plan-text-scrubbing.md`. **One amendment**
+(`contracts/amendments/feat-text-scrubbing.md`), applied in the same commits,
+and **one revision**, whose author is this branch's implementer:
+`5b93f1f9617a`, `scrub_list`, `scrub_ruleset` and three nullable `corpus`
+columns. The design is `sw-design.md` §19 and `SD62`–`SD66`. One new runtime
+dependency (`regex`, confined to `ra2/domain/scrub.py` by a new import-linter
+contract), one new router (`/api/v1/scrub`), one new nav item (Scrubbing).
+
+### Amended files (already frozen)
+
+| File | Change | Amendment |
+|---|---|---|
+| `ra2/domain/ids.py` | + `ScrubListId`, `ScrubRulesetId` | `feat-text-scrubbing` |
+| `ra2/domain/findings.py` | + `TEXT_SCRUBBED` (REPORTED), `TEXT_SCRUB_TIMEOUT` (BLOCKING) | `feat-text-scrubbing` |
+| `ra2/persistence/models.py` | + `ScrubList`, `ScrubRuleset`; + three nullable `corpus` columns, `scrub_ruleset_id` deliberately not a foreign key | `feat-text-scrubbing` |
+| `ra2/services/corpus_service.py` | `freeze(…, scrub_ruleset_id=None)`, keyword-only, defaulted; + `scrub_preview`. Constructor unchanged | `feat-text-scrubbing` |
+| `ra2/services/delivery_service.py` | Body of `preview`: lines scrubbed with the active rules | `feat-text-scrubbing` |
+| `ra2/services/readmodels.py` | + eleven `Scrub*View`s; + defaulted scrub fields on `CorpusView` and `RunDescriptorView` | `feat-text-scrubbing` |
+| `ra2/services/errors.py` | + `ScrubImportRefusedError` (422) | `feat-text-scrubbing` |
+| `ra2/services/container.py`, `ra2/main.py` | + `Services.scrub` | `feat-text-scrubbing` |
+| `ra2/api/schemas.py`, `ra2/api/deps.py`, `ra2/api/v1/router.py` | + the scrub schemas, `ScrubServiceDep`, the router; additive corpus fields. OpenAPI snapshot regenerated, additions only | `feat-text-scrubbing` |
+| `pyproject.toml`, `uv.lock`, `.importlinter`, `.gitignore` | + `regex`, `types-regex` (dev); + `regex-only-in-the-scrubber`; + `**/scrub-lists/`, `*.names.txt` | `feat-text-scrubbing` |
+| `tests/test_p3_contract.py`, `test_p4_contract.py`, `test_p5_contract.py` | Named post-phase sets for the nav, the dependencies and the contracts; the revision and the error registered | `feat-text-scrubbing` |
+
+### New files
+
+| Path | What |
+|---|---|
+| `ra2/domain/scrub.py`, `ra2/domain/scrub_mandatory.py` | The scrubber, its checks, parsing and counting; the provisional mandatory rules |
+| `ra2/persistence/migrations/versions/20261018_0900_5b93f1f9617a_scrub_the_narratives.py` | The revision; `corpus` altered in place both ways |
+| `ra2/persistence/repositories/scrub_repo.py`, `ra2/services/scrub_service.py`, `ra2/api/v1/scrub.py`, `ra2/ui/views/scrubbing_view.py` | Repository, service, router, screen |
+| `tests/fixtures/scrub/` | Invented, byte-exact scrub fixtures and their generator |
+| `tests/fixtures/deliveries/hazards/h18_names_in_narrative/` | Invented personal data in all three places a narrative is stored |
+| `tests/unit/scrub/`, `tests/backend/services/scrub/`, `tests/backend/api/scrub/`, `tests/backend/persistence/test_scrub_*.py`, `tests/backend/services/results/test_descriptor_scrub.py`, `tests/ui/test_scrub*.py`, `tests/ui/test_import_scrub.py`, `tests/e2e/test_scrubbing.py` | The tests, the leak test among them |
+| `plan-text-scrubbing.md` | The plan, its decisions taken (§11) |
+
+---
+
 ## Phase 5 — owner: M35 (Wave 0), amendment only
 
 Re-established at tag `p5-frozen`, the same way M27 established the phase-4

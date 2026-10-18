@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ra2.domain.fingerprint import compute_set_fingerprint
 from ra2.domain.ids import EvaluationId, RunId
 from ra2.domain.llm import at_context_limit
-from ra2.persistence.models import Corpus, Evaluation, EvaluationFeature, Run
+from ra2.persistence.models import Corpus, Evaluation, EvaluationFeature, Run, ScrubRuleset
 from ra2.persistence.repositories.run_repo import RunRepository
 from ra2.services.readmodels import ModelColumnView, ReadingQuality, RunDescriptorView
 
@@ -65,6 +65,11 @@ async def build_descriptor(
             EvaluationFeature.evaluation_id == evaluation.id
         )
     )
+    ruleset = (
+        await session.get(ScrubRuleset, corpus.scrub_ruleset_id)
+        if corpus is not None and corpus.scrub_ruleset_id
+        else None
+    )
     return RunDescriptorView(
         evaluation_id=EvaluationId(evaluation.id),
         corpus_label=_MISSING_CORPUS if corpus is None else corpus.name,
@@ -77,6 +82,9 @@ async def build_descriptor(
         is_dev=evaluation.is_dev,
         min_cell_count=evaluation.min_cell_count,
         is_synthetic=corpus is not None and corpus.is_synthetic,
+        # SD65: what the board's narratives were, beside what its corpus is.
+        scrubbed=corpus is not None and corpus.scrub_fingerprint is not None,
+        scrub_version=ruleset.version if ruleset is not None else None,
     )
 
 

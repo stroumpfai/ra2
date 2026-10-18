@@ -2627,6 +2627,13 @@ ui/
 
 ### 19.10 What this section deliberately does not decide
 
+- **A date rule against a date feature.** An imported date rule replaces every
+  date in a narrative, and a feature extracted from the text (`UnfDatumFeld`,
+  `UnfZeitFeld` read from a `Datum`) then has nothing to read: the model sees
+  `<Date_1>`. Nothing here refuses the combination, because a birth date in a
+  narrative is the case the rule exists for. Which dates to scrub, and whether
+  an evaluation of a date feature runs on a corpus frozen without the rule, is
+  the project owner's decision; the seed imports no rule file for this reason.
 - **Addresses, streets and towns.** Not attempted, by decision.
 - **Structured columns** other than `UnfHergangTextAnonym`. The structured
   record stays identifying (`vision.md`, *Real data*).

@@ -38,9 +38,9 @@ mounted on it, SQLite (WAL) underneath, and an in-process asyncio worker for
 long runs. The pipeline the navigation follows:
 
 ```
-Data                       Configure              Run           Review
-Import → Census → Codelists → Features → Prompts → Evaluation → Results ·
-                                                                Mismatches
+Data                                   Configure              Run           Review
+Import → Census → Codelists → Scrubbing → Features → Prompts → Evaluation → Results ·
+                                                                            Mismatches
 ```
 
 - **Import** — one delivery becomes one immutable corpus.
@@ -48,6 +48,10 @@ Import → Census → Codelists → Features → Prompts → Evaluation → Resu
   is the input to choosing features.
 - **Codelists** — the code→label tables the prompt reads, imported as JSON and
   read-only in the app.
+- **Scrubbing** — the rules and name lists that replace personal data in the
+  narratives with numbered placeholders (`<Lastname_1>`, `<Phone_2>`) when a
+  corpus is frozen. Plates, phone numbers and emails are always replaced; no
+  LLM is involved. *Scrubbed* is not *anonymised*.
 - **Features** — what to extract: labelled features and exploratory attributes.
 - **Prompts** — the wording around the feature descriptions, versioned, because
   changing one word changes every answer.
@@ -148,6 +152,9 @@ its own HTTP API — so the API is there for scripts, not for the UI.
    project exists; pick features from what is actually populated.
 3. **Codelists** — import `codes-2018.json`, then map corpus columns to code
    attributes so enum features can carry real labels.
+   Before freezing, **Scrubbing** is where the rule file and the name lists are
+   imported, and Import's *Preview scrubbing* shows what a freeze would
+   replace before it does.
 4. **Features** — define what to extract, then create a feature set. **A set is
    frozen the moment it is created**; to change it, clone it.
 5. **Prompts** — write the template around the feature descriptions. Saving
@@ -346,6 +353,21 @@ app** — there is no UI path that edits a label. A correction or a successor fi
 is a new import that adds rows; existing mappings keep pointing at the old
 generation until an analyst re-points them.
 
+### Scrubbing
+
+A corpus stores its narratives **scrubbed**: personal data replaced at freeze by
+numbered placeholders, by regular expressions and name lists, never an LLM
+(`sw-design.md` §19). Plates, phone numbers and emails are mandatory rules in the
+code; a rule file (TOML, each rule with the examples it must and must not
+match), first names, last names and a whitelist are imported on the Scrubbing
+screen. Every import is a new rule-set version, checked whole: a file that would
+change a protected string (`B1`, `80 km/h`, `um 14.30 Uhr`, …) is refused. The
+name lists are public but are **not committed** (`docs/rules.md`). A corpus says
+which version scrubbed it; one frozen before scrubbing existed says
+*not scrubbed*. **A date rule hides every date in a narrative from the model**,
+so an evaluation that extracts a date or time from the text needs a corpus
+frozen without one.
+
 ### Real data never enters the repository
 
 The deliveries are classified sensitive: the structured records are not
@@ -445,9 +467,10 @@ it:
 |---|---|
 | **Delivery** | Four files — `unfall.txt`, `objekt.txt` and `person.txt` in RADIS format (`\|`-delimited, CRLF, the full 67/77/18-column vocabulary) and `text.csv` (`;`-delimited). |
 | **Corpus** | 48 records by default, frozen. Two cantons; narratives generated German / French / Italian in a 6:3:1 mix, plus one record too short to call (`mixed`) and one with no narrative at all (`und`). |
+| **Scrubbing** | Three small invented name lists (first names, last names, whitelist), imported before the freeze, so the corpus reads *scrubbed · rules v3*. **No rule file**: a date rule would replace the dates `UnfDatumFeld` is scored from. |
 | **Codelists** | `data/Codes/codes-2018.json` when this host has it; otherwise a small code table the script synthesises, so an `enum` feature works on a fresh clone. Both `UnfTypAusw` and `PersSchaAusw` are mapped. |
 | **Features** | A set named *seed features*, frozen: six labelled (`time` within tolerance, `date`, `integer`, `enum`, and two derived — `count_objects` and `any_person_matches`) and one exploratory (`phone_use`). |
-| **Prompt** | One template, saved as the next version and activated. It carries a **format contract** — what a `date`, a `time` and an `enum` code must look like — because a labelled feature's description is never rendered into the prompt and `domain/matching.py` parses `YYYYMMDD` and `HH:MM` and nothing else. |
+| **Prompt** | One template, saved as the next version and activated. It explains the scrubber's numbered placeholders, and it carries a **format contract** — what a `date`, a `time` and an `enum` code must look like — because a labelled feature's description is never rendered into the prompt and `domain/matching.py` parses `YYYYMMDD` and `HH:MM` and nothing else. |
 
 `--records N` changes the size; the default 48 stays under `RA2_DEV_RECORD_MAX`
 so the corpus is still marked dev-sized, and `just reset-seed yes --records 200`

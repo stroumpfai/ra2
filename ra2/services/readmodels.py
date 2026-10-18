@@ -909,6 +909,12 @@ class RunDescriptorView:
     #: `SD45` — the corpus is invented data. A `SYNTHETIC` pill beside the run
     #: pill on every tab, and the ranking names no winner (risk D8).
     is_synthetic: bool = False
+    #: `SD65`: the corpus's narratives were scrubbed at freeze. `False` for a
+    #: corpus frozen before scrubbing existed, and the default, so a descriptor
+    #: built without the fact errs to the warning, never to the reassurance.
+    scrubbed: bool = False
+    #: The rule-set version; `None` when only the mandatory rules ran.
+    scrub_version: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

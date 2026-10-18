@@ -48,7 +48,7 @@ from ra2.services.errors import ServiceError
 from ra2.services.readmodels import DeliveryFileView, DeliveryView
 from ra2.ui.components import data_props, dialog_card, format_count
 
-__all__ = ["FINDING_LABELS", "PREVIEW_LINES", "open_file_report"]
+__all__ = ["FINDING_LABELS", "PREVIEW_LINES", "open_file_report", "preview_caption"]
 
 #: sw-design.md §8.3 — "a 20-row raw preview".
 PREVIEW_LINES: Final = 20
@@ -150,6 +150,8 @@ class _FileReport:
         self._delimiter = ""
         self._quote_char = ""
         self._preview_lines: tuple[str, ...] = ()
+        #: The rule-set version the preview was scrubbed with (§8.3, §19.7).
+        self._scrub_version: int | None = None
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -215,6 +217,7 @@ class _FileReport:
             )
         except ServiceError:
             self._preview_lines = ()
+        self._scrub_version = (await self._services.scrub.active()).version
 
     # --- rendering ---------------------------------------------------------
 
@@ -402,6 +405,9 @@ class _FileReport:
         `_refresh()` before this synchronous render runs."""
         with ui.element("div").style(_SECTION):
             ui.label(f"First {PREVIEW_LINES} lines").classes("lbl")
+            ui.label(preview_caption(self._scrub_version)).classes("ink3").props(
+                'data-testid="report-preview-caption"'
+            ).mark("report-preview-caption").style("font-size:11px;margin-top:2px;")
             if not self._preview_lines:
                 ui.label("No preview available for this file.").props(
                     'data-testid="report-preview"'
@@ -527,3 +533,11 @@ def _button(
     button.on("click", cast("Callable[[], None]", action))
     with button:
         ui.label(label)
+
+
+def preview_caption(scrub_version: int | None) -> str:
+    """What the raw preview was scrubbed with (§8.3): it shows no name the
+    corpus would not, and says so, so nobody reads it as the delivered text."""
+    if scrub_version is None:
+        return "Scrubbed with the mandatory rules: plates, phone numbers and emails."
+    return f"Scrubbed with rule set v{scrub_version}, as a freeze would be."

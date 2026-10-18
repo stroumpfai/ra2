@@ -95,6 +95,7 @@ pipeline (Data → Configure → Run → Review).
 | Data | Import | Import.dc.html | download / arrow-down-to-tray |
 | Data | Census | Census.dc.html | bar-chart (4 ascending bars on a baseline) |
 | Data | Codelists | Codelists.dc.html | list |
+| Data | Scrubbing | *no design yet* (`sw-design.md` §19, `plan-text-scrubbing.md` §7.1) | shield |
 | Configure | Features | FeatureConfig.dc.html | sliders / settings-2 |
 | Run | Evaluation | Evaluation.dc.html | play inside a circle |
 | Review | Results | Main.dc.html | table / layout |

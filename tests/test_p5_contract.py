@@ -587,7 +587,8 @@ def test_the_nav_has_eight_items_and_every_one_of_them_is_built():
     """
     from ra2.ui.shell import NAV_ITEMS
 
-    assert len(NAV_ITEMS) == 8
+    assert {i.key for i in NAV_ITEMS} >= POST_PHASE_5_NAV_KEYS
+    assert len([i for i in NAV_ITEMS if i.key not in POST_PHASE_5_NAV_KEYS]) == 8
     item = next(i for i in NAV_ITEMS if i.key == "mismatches")
     assert item.group == "Review"
     assert item.path == "/mismatches"
@@ -595,6 +596,13 @@ def test_the_nav_has_eight_items_and_every_one_of_them_is_built():
     assert [i.key for i in NAV_ITEMS if not i.built] == [], (
         "phase 5 is the phase after which there is no placeholder route left"
     )
+
+
+#: Nav entries added **after** `p5w4-green`, named, so the eight-item claims
+#: below stay claims about their phase (the `POST_PHASE_5_*` pattern of
+#: `tests/test_p5_contract.py`). `feat/text-scrubbing`: Scrubbing, in Data
+#: after Codelists (sw-design.md §19).
+POST_PHASE_5_NAV_KEYS = frozenset({"scrubbing"})
 
 
 def test_the_tag_words_live_in_exactly_one_rendering_table():

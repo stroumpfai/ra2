@@ -9,7 +9,7 @@
 # immediately after Features — label, route and icon verbatim from
 # design/prompt-evaluation/README.md §0. It lands at Wave 0, not Wave 4, so
 # J4/J5/J6 prove the nav change before any view exists to fill it.
-"""Header, 4 nav groups, 8 items, active state derived from the route."""
+"""Header, 4 nav groups, 9 items, active state derived from the route."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -69,7 +69,7 @@ class NavItem:
     built: bool
 
 
-#: The 4 groups x 8 items. Order is the nav's order.
+#: The 4 groups x 9 items. Order is the nav's order.
 #:
 #: Import and Census copy is **verbatim** from the design README. The other five
 #: views are not designed yet, so their copy is provisional and lands with the
@@ -100,6 +100,21 @@ NAV_ITEMS: Final[tuple[NavItem, ...]] = (
         path="/codelists",
         title="Codelists",
         description="Code-to-label tables the prompt reads, imported as JSON and read-only.",
+        built=True,
+    ),
+    # Narrative scrubbing (sw-design.md §19). After Codelists, in Data: the
+    # rules act on the data at freeze, before anything is configured or run.
+    # No design yet; the copy is provisional, the route and label are not.
+    NavItem(
+        key="scrubbing",
+        group="Data",
+        label="Scrubbing",
+        path="/scrubbing",
+        title="Scrubbing",
+        description=(
+            "Rules and name lists that replace personal data in the narratives when a "
+            "corpus is frozen."
+        ),
         built=True,
     ),
     NavItem(

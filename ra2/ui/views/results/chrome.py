@@ -42,8 +42,10 @@ __all__ = [
     "MENU_ITEM_STYLE",
     "MENU_STYLE",
     "MISMATCH_RATE_NOTE",
+    "NOT_SCRUBBED_PILL",
     "QUALITY_TITLE",
     "RUN_PILL",
+    "SCRUBBED_LABEL",
     "SYNTHETIC_PILL",
     "anonymisation_chip",
     "empty_card",
@@ -52,6 +54,7 @@ __all__ = [
     "launched",
     "quality_text",
     "run_descriptor",
+    "scrub_marker",
 ]
 
 #: mvp-spec.md §13: "**Required on every dev-sized result**: the 'smoke test,
@@ -64,6 +67,9 @@ RUN_PILL: Final = "Evaluation run"
 #: can be dev-sized or not, and both facts are worth stating. Provenance is
 #: the one a screenshot must not lose.
 SYNTHETIC_PILL: Final = "SYNTHETIC · invented data, not a result"
+#: `SD65`. The corpus's narratives were scrubbed at freeze, or were not.
+SCRUBBED_LABEL: Final = "scrubbed"
+NOT_SCRUBBED_PILL: Final = "NOT SCRUBBED · narratives verbatim"
 
 
 #: `SD48`, risks D1 and D2. Both failures score `missing` on every feature of
@@ -158,6 +164,32 @@ def anonymisation_chip(marking: AnonymisationMarking) -> Element:
     return chip
 
 
+def scrub_marker(scrubbed: bool, version: int | None) -> Element:
+    """`SD65` on every board: *scrubbed*, never *anonymised*, and a corpus
+    frozen before scrubbing existed in the danger tone, beside the synthetic
+    pill and in its shape. mvp-spec.md §13 requires it on every result."""
+    if not scrubbed:
+        marker = (
+            ui.element("span")
+            .classes("pill pill-danger")
+            .props('data-testid="scrub-pill" data-scrubbed="false"')
+            .mark("scrub-pill")
+        )
+        with marker:
+            ui.label(NOT_SCRUBBED_PILL)
+        return marker
+    marker = (
+        ui.element("span")
+        .classes("mono")
+        .props('data-testid="scrub-pill" data-scrubbed="true"')
+        .mark("scrub-pill")
+        .style("font-size:11px;color:var(--ink3);")
+    )
+    with marker:
+        ui.label(SCRUBBED_LABEL if version is None else f"{SCRUBBED_LABEL} v{version}")
+    return marker
+
+
 def run_descriptor(view: RunDescriptorView) -> Element:
     """The identity line every tab carries.
 
@@ -200,6 +232,7 @@ def run_descriptor(view: RunDescriptorView) -> Element:
             )
             with synthetic:
                 ui.label(SYNTHETIC_PILL)
+        scrub_marker(view.scrubbed, view.scrub_version)
         chip = ui.element("span").classes("chip").props('data-testid="cfg-chip"').mark("cfg-chip")
         with chip:
             ui.label(f"cfg {view.config_fingerprint[:8]}")

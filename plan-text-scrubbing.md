@@ -11,7 +11,7 @@ report.
 and `sw-design.md` disagree, `sw-design.md` wins and this file is corrected in
 the same commit.
 
-**Status: decided 2026-10-18, being built on `feat/text-scrubbing`.** §11
+**Status: decided and built, 2026-10-18, on `feat/text-scrubbing`.** §11
 records the decisions taken. The mandatory patterns in §4 are **provisional**:
 the implementer wrote them to the §4 contract, and they are replaced by the
 supplied ones when those arrive. Each supplied pattern must still pass the
