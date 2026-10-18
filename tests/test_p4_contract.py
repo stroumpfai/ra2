@@ -151,9 +151,14 @@ def test_importlinter_gained_no_contract_this_phase():
     of numbers, because `domain` may import stdlib and `pydantic` and nothing
     else in `ra2/` — which is what makes §16.5's "ranking is a derivation"
     structural rather than aspirational (plan-phase-4.md §2.4).
+
+    Contracts added after phase 5 are subtracted by name, the same names
+    `tests/test_p5_contract.py`'s `POST_PHASE_5_CONTRACTS` lists: today one,
+    `regex-only-in-the-scrubber` (`feat/text-scrubbing`, SD66).
     """
     text = (REPO_ROOT / ".importlinter").read_text(encoding="utf-8")
-    assert text.count("[importlinter:contract:") == 7
+    later = text.count("[importlinter:contract:regex-only-in-the-scrubber]")
+    assert text.count("[importlinter:contract:") - later == 7
 
 
 def test_score_metric_is_closed_and_carries_counts_as_well_as_rates():
@@ -288,13 +293,20 @@ def test_services_bundle_has_the_three_new_fields(app_factory):
     assert services.ranking is not None
 
 
+#: Nav entries added **after** `p5w4-green`, named, so the eight-item claims
+#: below stay claims about their phase (the `POST_PHASE_5_*` pattern of
+#: `tests/test_p5_contract.py`). `feat/text-scrubbing`: Scrubbing, alone in
+#: Preparation above Data (sw-design.md §19).
+POST_PHASE_5_NAV_KEYS = frozenset({"scrubbing"})
+
+
 def test_the_nav_still_has_eight_items():
     """The first phase since M0 that adds no nav entry: `results` and
     `mismatches` have existed since phase 1 with `built=False`, and V1 flips
     exactly one flag in Wave 4 (plan-phase-4.md §6.1)."""
     from ra2.ui.shell import NAV_ITEMS
 
-    keys = [item.key for item in NAV_ITEMS]
+    keys = [item.key for item in NAV_ITEMS if item.key not in POST_PHASE_5_NAV_KEYS]
     assert len(keys) == 8
     results = next(i for i in NAV_ITEMS if i.key == "results")
     assert results.group == "Review"

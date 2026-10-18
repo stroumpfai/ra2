@@ -1,6 +1,7 @@
 # FROZEN (constructor + signatures) — see CONTRACTS.md; bodies owned by B1
 """Freeze a selection into an immutable corpus; list; delete-guard (§6.3)."""
 
+import asyncio
 import json
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -10,8 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ra2.domain.canary import canary_finding, count_canary_chars
 from ra2.domain.delivery import DeliveryStatus, FileKind
-from ra2.domain.findings import Finding
-from ra2.domain.ids import CorpusId, DeliveryId, ObjektRowId, PersonRowId, RecordId
+from ra2.domain.findings import Finding, FindingCode, Severity
+from ra2.domain.ids import (
+    CorpusId,
+    DeliveryId,
+    ObjektRowId,
+    PersonRowId,
+    RecordId,
+    ScrubRulesetId,
+)
 from ra2.domain.language import LanguageDetector
 from ra2.domain.parsing.analysis import ParsedFile
 from ra2.domain.parsing.headers import (
@@ -24,6 +32,7 @@ from ra2.domain.parsing.headers import (
     ColumnSet,
     column_index,
 )
+from ra2.domain.scrub import Scrubber, ScrubCounter, ScrubTally, ScrubTimeoutError
 from ra2.domain.synthetic import all_invented
 from ra2.domain.validation import validate_delivery
 from ra2.infra.clock import Clock
@@ -44,10 +53,12 @@ from ra2.persistence.models import (
 )
 from ra2.persistence.repositories.corpus_repo import CorpusRepository
 from ra2.persistence.repositories.delivery_repo import DeliveryRepository
+from ra2.persistence.repositories.scrub_repo import ScrubRepository
 from ra2.persistence.session import session_scope
 from ra2.services.delivery_service import (
     dump_findings,
     dump_json,
+    load_findings,
     parsed_file_for,
     store_for,
 )
@@ -58,7 +69,20 @@ from ra2.services.errors import (
     NotFoundError,
 )
 from ra2.services.protocols import CensusInput, CensusMaterialiser, CensusTableInput
-from ra2.services.readmodels import CorpusSummary, CorpusView, Page, SortDir
+from ra2.services.readmodels import (
+    CorpusSummary,
+    CorpusView,
+    Page,
+    ScrubCountView,
+    ScrubPreviewView,
+    SortDir,
+)
+from ra2.services.scrub_service import (
+    LoadedRules,
+    compile_scrubber,
+    load_scrub_rules,
+    mandatory_snapshot,
+)
 
 __all__ = ["CorpusService"]
 
@@ -127,6 +151,7 @@ class CorpusService:
         name: str,
         description: str | None = None,
         synthetic: bool = False,
+        scrub_ruleset_id: ScrubRulesetId | None = None,
     ) -> CorpusId:
         """One transaction, all-or-nothing (sw-design.md §6.3).
 
@@ -136,49 +161,43 @@ class CorpusService:
 
         1. Cross-file **blocking** validation over the *selected* files. Any
            failure -> `BlockingFindingsError`, **nothing written**.
-        2. Write `corpus`, `record` and the EAV rows.
+        2. Write `corpus`, `record` and the EAV rows, every narrative and
+           `UnfHergangTextAnonym` cell **scrubbed** (sw-design.md §19,
+           `SD62`) with `scrub_ruleset_id`, or the active set when `None`.
+           A rule that times out fails the freeze closed (`SD66`).
         3. Per-record language detection; low confidence stored as `mixed`.
+           On the original narrative, before it is scrubbed.
         4. Corpus-level cp1252 canary count. One number, no per-record markers.
-        5. Non-blocking findings into `import_report_json`.
+           On the original narratives, for the same reason.
+        5. Non-blocking findings into `import_report_json`, with one
+           `TEXT_SCRUBBED` per scrub rule that ran, zero hits included.
         6. The census, via `CensusMaterialiser` on this same session.
         7. `is_dev_sized` from `RA2_DEV_RECORD_MAX` / `RA2_EVAL_RECORD_MIN`.
         8. `is_synthetic` from `synthetic`, or from the keys (risk D8).
 
-        :raises BlockingFindingsError: validation refused; zero corpus rows.
+        :raises BlockingFindingsError: validation refused, or a scrub rule
+            timed out (`TEXT_SCRUB_TIMEOUT`); zero corpus rows either way.
         :raises DeliveryNotAnalysedError: analysis has not finished.
+        :raises NotFoundError: `scrub_ruleset_id` names no rule-set version.
         """
         async with session_scope(self._session_factory) as session:
-            delivery_repo = DeliveryRepository(session)
-            delivery = await delivery_repo.get(delivery_id)
-            if delivery is None:
-                raise NotFoundError("delivery", delivery_id)
-            if DeliveryStatus(delivery.status) is not DeliveryStatus.ANALYSED:
-                raise DeliveryNotAnalysedError(delivery_id)
-
-            rows = [f for f in await delivery_repo.list_files(delivery_id) if f.selected]
-            if not rows or any(f.analysed_at is None for f in rows):
-                raise DeliveryNotAnalysedError(delivery_id)
+            delivery, rows, parsed = await self._selected(session, delivery_id)
 
             # --- 1. blocking validation, before anything is written --------
-            #
-            # The rows are produced by re-running the *pure* `analyse_file`
-            # over each selected file's bytes, honouring that file's effective
-            # (possibly overridden) encoding and dialect. `delivery_file`
-            # deliberately stores only the summary, so this is the single
-            # source of truth for what a file's rows are and there is no cache
-            # a re-parse could leave stale.
-            parsed = [parsed_file_for(row, await self._read_bytes(delivery, row)) for row in rows]
             analysis = validate_delivery(parsed)
             if analysis.blocking:
                 raise BlockingFindingsError(analysis.blocking)
 
             # --- 2-4. the corpus, its records and their cells --------------
+            loaded = await _load_rules(session, scrub_ruleset_id)
+            scrubber = await compile_scrubber(loaded.rules)
             corpus_repo = CorpusRepository(session)
             corpus_id = CorpusId(self._ids.new_id())
-            built = self._build_records(corpus_id, parsed)
+            built = self._build_records(corpus_id, parsed, scrubber)
 
-            texts = [r.text_raw for r in built.records if r.text_raw]
-            canary_count = count_canary_chars(texts)
+            # The canary counts the delivered characters, so it reads the
+            # narratives as they were before a scrubbed name took some away.
+            canary_count = count_canary_chars(built.original_texts)
             languages = {r.language for r in built.records}
 
             # --- 5. non-blocking findings into the import report -----------
@@ -186,6 +205,7 @@ class CorpusService:
             canary = canary_finding(canary_count, languages)
             if canary is not None:
                 report.append(canary)
+            report.extend(_scrubbed_findings(built.tally))
 
             record_count = len(built.records)
             corpus = Corpus(
@@ -205,6 +225,10 @@ class CorpusService:
                 delivery_id=DeliveryId(delivery.id),
                 source_file_ids_json=dump_json([row.id for row in rows]),
                 language_counts_json=dump_json(_language_counts(built.records)),
+                # --- SD62, SD63: what the narratives were scrubbed with ----
+                scrub_ruleset_id=(ScrubRulesetId(loaded.ruleset.id) if loaded.ruleset else None),
+                scrub_fingerprint=scrubber.fingerprint,
+                scrub_mandatory_json=dump_json(mandatory_snapshot()),
             )
             corpus.records = built.records
             await corpus_repo.add(corpus)
@@ -215,6 +239,43 @@ class CorpusService:
             await self._census_materialiser.materialise(session, corpus_id, built.census)
             return corpus_id
 
+    async def scrub_preview(
+        self, delivery_id: DeliveryId, *, scrub_ruleset_id: ScrubRulesetId | None = None
+    ) -> ScrubPreviewView:
+        """What `freeze` would count, without writing anything (§19.7).
+
+        The same selected files, parsed by the same `_selected`, walked by
+        the same `_unfall_rows` and scrubbed by the same `_scrub_record`, so
+        for the same files and rule set the counts are the freeze's own. Not
+        gated on validation: an analyst fixing a blocking finding may still
+        want to see what the rules would do.
+
+        A rule that times out does not raise here: the view names it
+        (`timed_out_rule`), because it is what a freeze would refuse.
+
+        :raises DeliveryNotAnalysedError: analysis has not finished.
+        :raises NotFoundError: no such delivery or rule-set version.
+        """
+        async with self._session_factory() as session:
+            _, _, parsed = await self._selected(session, delivery_id)
+            loaded = await _load_rules(session, scrub_ruleset_id)
+        scrubber = await compile_scrubber(loaded.rules)
+        # Every narrative of the delivery: seconds of CPU, so not on the loop.
+        tally, timed_out = await asyncio.to_thread(_dry_run, parsed, scrubber)
+        return ScrubPreviewView(
+            ruleset_id=ScrubRulesetId(loaded.ruleset.id) if loaded.ruleset else None,
+            version=loaded.ruleset.version if loaded.ruleset else None,
+            fingerprint=scrubber.fingerprint,
+            counts=tuple(
+                ScrubCountView(r.rule_id, r.tag, r.source.value, r.hits, r.records)
+                for r in tally.rules
+            ),
+            most_hit=tally.entry_hits,
+            records=tally.records,
+            records_changed=tally.records_changed,
+            timed_out_rule=timed_out,
+        )
+
     async def get(self, corpus_id: CorpusId) -> CorpusView:
         """Raises `NotFoundError`."""
         async with self._session_factory() as session:
@@ -222,7 +283,8 @@ class CorpusService:
             corpus = await repo.get(corpus_id)
             if corpus is None:
                 raise NotFoundError("corpus", corpus_id)
-            return _corpus_view(corpus, await repo.count_citing_evaluations(corpus_id))
+            versions = await _scrub_versions(session)
+            return _corpus_view(corpus, await repo.count_citing_evaluations(corpus_id), versions)
 
     async def list_corpora(
         self,
@@ -237,8 +299,9 @@ class CorpusService:
         async with self._session_factory() as session:
             repo = CorpusRepository(session)
             corpora = await repo.list_all()
+            versions = await _scrub_versions(session)
             views = [
-                _corpus_view(c, await repo.count_citing_evaluations(CorpusId(c.id)))
+                _corpus_view(c, await repo.count_citing_evaluations(CorpusId(c.id)), versions)
                 for c in corpora
             ]
 
@@ -324,12 +387,38 @@ class CorpusService:
             delivery, upload_store=self._upload_store, host_path_store=self._host_path_store
         )
 
+    async def _selected(
+        self, session: AsyncSession, delivery_id: DeliveryId
+    ) -> tuple[Delivery, list[DeliveryFile], list[ParsedFile]]:
+        """The delivery, its selected files and their parse.
+
+        The rows are produced by re-running the *pure* `analyse_file` over
+        each selected file's bytes, honouring that file's effective (possibly
+        overridden) encoding and dialect. `delivery_file` deliberately stores
+        only the summary, so this is the single source of truth for what a
+        file's rows are and there is no cache a re-parse could leave stale.
+        Shared by `freeze` and `scrub_preview`, so the two read one thing.
+        """
+        delivery_repo = DeliveryRepository(session)
+        delivery = await delivery_repo.get(delivery_id)
+        if delivery is None:
+            raise NotFoundError("delivery", delivery_id)
+        if DeliveryStatus(delivery.status) is not DeliveryStatus.ANALYSED:
+            raise DeliveryNotAnalysedError(delivery_id)
+        rows = [f for f in await delivery_repo.list_files(delivery_id) if f.selected]
+        if not rows or any(f.analysed_at is None for f in rows):
+            raise DeliveryNotAnalysedError(delivery_id)
+        parsed = [parsed_file_for(row, await self._read_bytes(delivery, row)) for row in rows]
+        return delivery, rows, parsed
+
     async def _read_bytes(self, delivery: Delivery, row: DeliveryFile) -> bytes:
         return await self._store_for(delivery).read_bytes(
             DeliveryId(delivery.id), row.relative_path
         )
 
-    def _build_records(self, corpus_id: CorpusId, parsed: Sequence[ParsedFile]) -> _Built:
+    def _build_records(
+        self, corpus_id: CorpusId, parsed: Sequence[ParsedFile], scrubber: Scrubber
+    ) -> _Built:
         """Every `record` and EAV row of the corpus, plus the census input.
 
         One pass over the selected files. `person` hangs off `objekt`, never
@@ -343,7 +432,7 @@ class CorpusService:
         unfall_set = _resolved_column_set(parsed, FileKind.UNFALL)
         objekt_set = _resolved_column_set(parsed, FileKind.OBJEKT)
         person_set = _resolved_column_set(parsed, FileKind.PERSON)
-        unfall_key_column = unfall_set.key_column if unfall_set else UNFALL_KEY_COLUMN
+        unfall_key_column = _unfall_key_column(parsed)
         objekt_key_column = objekt_set.key_column if objekt_set else OBJEKT_KEY_COLUMN
         person_key_column = person_set.key_column if person_set else PERSON_KEY_COLUMN
         objekt_ordinal_column = objekt_set.ordinal_column if objekt_set else None
@@ -354,59 +443,60 @@ class CorpusService:
         person_by_objekt = _group(parsed, FileKind.PERSON, objekt_key_column)
 
         records: list[Record] = []
+        original_texts: list[str] = []
+        counter = ScrubCounter(scrubber)
         cells: dict[str, list[tuple[str, str]]] = {
             FileKind.UNFALL.value: [],
             FileKind.OBJEKT.value: [],
             FileKind.PERSON.value: [],
         }
 
-        for unfall_file in _of_kind(parsed, FileKind.UNFALL):
-            header = unfall_file.header
-            key_index = column_index(header, unfall_key_column)
-            if key_index is None:  # pragma: no cover - a header mismatch blocks first
-                continue
-            for row in unfall_file.rows:
-                unfall_uid = row[key_index] if key_index < len(row) else ""
-                if not unfall_uid:
-                    continue
-                record_id = RecordId(self._ids.new_id())
-                unfall_cells = list(_cells_of(header, row))
+        for unfall_uid, unfall_cells in _unfall_rows(parsed, unfall_key_column):
+            record_id = RecordId(self._ids.new_id())
 
-                # --- 3. language, per record, from the narrative (§4.5) ----
-                text_raw, anonymised = _text_for(unfall_uid, unfall_cells, narratives)
-                guess = self._language_detector.detect(text_raw or "")
+            # --- 3. language, per record, from the narrative (§4.5) ----
+            # On the original: a scrubbed name is fewer letters to read.
+            original, anonymised = _text_for(unfall_uid, unfall_cells, narratives)
+            guess = self._language_detector.detect(original or "")
+            if original:
+                original_texts.append(original)
 
-                record = Record(
-                    id=record_id,
-                    corpus_id=corpus_id,
-                    unfall_uid=unfall_uid,
-                    language=guess.language.value,
-                    language_confidence=guess.confidence,
-                    text_raw=text_raw,
-                    text_anonymised_flag=anonymised,
-                )
-                record.unfall_cells = [
-                    UnfallRow(record_id=record_id, column_name=c.column_name, value_raw=c.value_raw)
-                    for c in unfall_cells
-                ]
-                cells[FileKind.UNFALL.value].extend(
-                    (c.column_name, c.value_raw) for c in unfall_cells
-                )
+            # --- 2. scrubbed before anything is stored (§19, SD62) -----
+            text_raw, unfall_cells = _scrub_record(
+                scrubber, counter, unfall_uid, original, anonymised, unfall_cells
+            )
 
-                record.objekt_rows = self._build_objekt_rows(
-                    record_id,
-                    objekt_by_unfall.get(unfall_uid, ()),
-                    person_by_objekt,
-                    cells,
-                    objekt_key_column=objekt_key_column,
-                    objekt_ordinal_column=objekt_ordinal_column,
-                    person_key_column=person_key_column,
-                    person_ordinal_column=person_ordinal_column,
-                )
-                records.append(record)
+            record = Record(
+                id=record_id,
+                corpus_id=corpus_id,
+                unfall_uid=unfall_uid,
+                language=guess.language.value,
+                language_confidence=guess.confidence,
+                text_raw=text_raw,
+                text_anonymised_flag=anonymised,
+            )
+            record.unfall_cells = [
+                UnfallRow(record_id=record_id, column_name=c.column_name, value_raw=c.value_raw)
+                for c in unfall_cells
+            ]
+            cells[FileKind.UNFALL.value].extend((c.column_name, c.value_raw) for c in unfall_cells)
+
+            record.objekt_rows = self._build_objekt_rows(
+                record_id,
+                objekt_by_unfall.get(unfall_uid, ()),
+                person_by_objekt,
+                cells,
+                objekt_key_column=objekt_key_column,
+                objekt_ordinal_column=objekt_ordinal_column,
+                person_key_column=person_key_column,
+                person_ordinal_column=person_ordinal_column,
+            )
+            records.append(record)
 
         return _Built(
             records=records,
+            original_texts=original_texts,
+            tally=counter.tally(),
             census=CensusInput(
                 record_count=len(records),
                 tables=tuple(
@@ -514,6 +604,10 @@ class _Built:
 
     records: list[Record]
     census: CensusInput
+    #: The narratives as delivered, for the canary only. Never stored.
+    original_texts: list[str]
+    #: What the scrubber replaced, for the import report.
+    tally: ScrubTally
 
 
 def _of_kind(parsed: Sequence[ParsedFile], kind: FileKind) -> list[ParsedFile]:
@@ -589,6 +683,127 @@ def _text_for(
     return None, False
 
 
+def _unfall_key_column(parsed: Sequence[ParsedFile]) -> str:
+    unfall_set = _resolved_column_set(parsed, FileKind.UNFALL)
+    return unfall_set.key_column if unfall_set else UNFALL_KEY_COLUMN
+
+
+def _unfall_rows(
+    parsed: Sequence[ParsedFile], unfall_key_column: str
+) -> Iterator[tuple[str, list[_Cell]]]:
+    """Every `unfall` row a freeze makes a record of, with its cells.
+
+    The one walk `freeze` and `scrub_preview` both take, so a dry run counts
+    the records a freeze would write and no others.
+    """
+    for unfall_file in _of_kind(parsed, FileKind.UNFALL):
+        header = unfall_file.header
+        key_index = column_index(header, unfall_key_column)
+        if key_index is None:  # pragma: no cover - a header mismatch blocks first
+            continue
+        for row in unfall_file.rows:
+            unfall_uid = row[key_index] if key_index < len(row) else ""
+            if unfall_uid:
+                yield unfall_uid, list(_cells_of(header, row))
+
+
+def _is_anonymised_column(column_name: str) -> bool:
+    return column_name.strip().casefold() == UNFALL_ANONYMISED_TEXT_COLUMN.casefold()
+
+
+def _scrub_record(
+    scrubber: Scrubber,
+    counter: ScrubCounter,
+    unfall_uid: str,
+    text: str | None,
+    from_anonymised_column: bool,
+    unfall_cells: Sequence[_Cell],
+) -> tuple[str | None, list[_Cell]]:
+    """One record's narrative and its `UnfHergangTextAnonym` cell, scrubbed
+    and counted (sw-design.md §19.4, §19.7).
+
+    The cell holds narrative text too, and every later reader of the EAV
+    rows would find it. When it *is* the record's narrative (the fallback
+    in `_text_for`), it is the same text, so it takes the same result and
+    is counted once.
+
+    :raises BlockingFindingsError: a rule timed out. `TEXT_SCRUB_TIMEOUT`,
+        keyed by the record, so the freeze fails closed (`SD66`): a
+        narrative that could not be scrubbed is never stored verbatim.
+    """
+    try:
+        narrative = scrubber.scrub(text) if text else None
+        if narrative is not None:
+            counter.add(unfall_uid, narrative)
+        scrubbed: list[_Cell] = []
+        for cell in unfall_cells:
+            if _is_anonymised_column(cell.column_name) and cell.value_raw:
+                if from_anonymised_column and narrative is not None:
+                    value = narrative.text
+                else:
+                    result = scrubber.scrub(cell.value_raw)
+                    counter.add(unfall_uid, result)
+                    value = result.text
+                cell = _Cell(cell.column_name, value)
+            scrubbed.append(cell)
+    except ScrubTimeoutError as exc:
+        raise BlockingFindingsError(
+            [
+                Finding(
+                    code=FindingCode.TEXT_SCRUB_TIMEOUT,
+                    severity=Severity.BLOCKING,
+                    key=unfall_uid,
+                    detail={"rule_id": exc.rule_id},
+                )
+            ]
+        ) from None
+    return (narrative.text if narrative is not None else text), scrubbed
+
+
+def _scrubbed_findings(tally: ScrubTally) -> list[Finding]:
+    """One REPORTED `TEXT_SCRUBBED` per rule that ran, zero hits included,
+    so the report always lists every rule. Counts only, never matched text."""
+    return [
+        Finding(
+            code=FindingCode.TEXT_SCRUBBED,
+            severity=Severity.REPORTED,
+            detail={
+                "rule_id": row.rule_id,
+                "tag": row.tag,
+                "source": row.source.value,
+                "hits": str(row.hits),
+                "records": str(row.records),
+            },
+        )
+        for row in tally.rules
+    ]
+
+
+async def _load_rules(session: AsyncSession, ruleset_id: ScrubRulesetId | None) -> LoadedRules:
+    try:
+        return await load_scrub_rules(session, ruleset_id)
+    except LookupError:
+        raise NotFoundError("scrub_ruleset", str(ruleset_id)) from None
+
+
+async def _scrub_versions(session: AsyncSession) -> dict[str, int]:
+    return {r.id: r.version for r in await ScrubRepository(session).list_rulesets()}
+
+
+def _scrub_counts(corpus: Corpus) -> tuple[ScrubCountView, ...]:
+    return tuple(
+        ScrubCountView(
+            rule_id=f.detail.get("rule_id", ""),
+            tag=f.detail.get("tag", ""),
+            source=f.detail.get("source", ""),
+            hits=int(f.detail.get("hits", "0")),
+            records=int(f.detail.get("records", "0")),
+        )
+        for f in load_findings(corpus.import_report_json)
+        if f.code is FindingCode.TEXT_SCRUBBED
+    )
+
+
 def _language_counts(records: Sequence[Record]) -> dict[str, int]:
     """The design's "de 2 812 · fr 1 402 · it 396", key-sorted for stability."""
     counts: dict[str, int] = {}
@@ -624,7 +839,9 @@ def _manifest_entry(row: DeliveryFile) -> dict[str, Any]:
     }
 
 
-def _corpus_view(corpus: Corpus, locked_by_evaluations: int) -> CorpusView:
+def _corpus_view(
+    corpus: Corpus, locked_by_evaluations: int, scrub_versions: dict[str, int]
+) -> CorpusView:
     counts: dict[str, int] = (
         {} if not corpus.language_counts_json else _loads(corpus.language_counts_json)
     )
@@ -641,9 +858,29 @@ def _corpus_view(corpus: Corpus, locked_by_evaluations: int) -> CorpusView:
         language_counts=counts,
         delivery_id=DeliveryId(corpus.delivery_id) if corpus.delivery_id else None,
         locked_by_evaluations=locked_by_evaluations,
+        scrubbed=corpus.scrub_fingerprint is not None,
+        scrub_version=(
+            scrub_versions.get(corpus.scrub_ruleset_id) if corpus.scrub_ruleset_id else None
+        ),
+        scrub_counts=_scrub_counts(corpus),
     )
 
 
 def _loads(payload: str) -> dict[str, int]:
     parsed: dict[str, int] = json.loads(payload)
     return parsed
+
+
+def _dry_run(parsed: Sequence[ParsedFile], scrubber: Scrubber) -> tuple[ScrubTally, str | None]:
+    """`scrub_preview`'s walk: the freeze's own rows and `_scrub_record`, with
+    the rule that timed out, if one did, instead of a raise."""
+    counter = ScrubCounter(scrubber)
+    narratives = _narratives(parsed)
+    timed_out: str | None = None
+    try:
+        for unfall_uid, unfall_cells in _unfall_rows(parsed, _unfall_key_column(parsed)):
+            text, anonymised = _text_for(unfall_uid, unfall_cells, narratives)
+            _scrub_record(scrubber, counter, unfall_uid, text, anonymised, unfall_cells)
+    except BlockingFindingsError as exc:
+        timed_out = exc.findings[0].detail.get("rule_id")
+    return counter.tally(), timed_out

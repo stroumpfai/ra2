@@ -186,3 +186,55 @@ def test_cancelling_the_dialog_discards_nothing(
     page.reload()
     expect(rows).to_have_count(len(before), timeout=TIMEOUT_MS)
     assert rows.all_text_contents() == before
+
+
+def test_tagged_work_is_discarded_only_after_its_count_is_typed(
+    page: Page, server_url: str, discardable_evaluation: ScoredCorpus
+) -> None:
+    """`SD60` in a real browser: the field's `emit(e.target.value)` is the
+    half the UI layer cannot reach, because its tests fire the event directly.
+
+    Runs **last** in this file: it discards a run the two journeys above need.
+    It tags through the API, the way the Mismatches screen does.
+    """
+    evaluation_id = discardable_evaluation.evaluation_id
+    page.goto(f"{server_url}/evaluation?evaluation={evaluation_id}")
+    expect(page.locator('[data-testid="evaluation-page"]')).to_have_attribute(
+        "data-loading", "false", timeout=TIMEOUT_MS
+    )
+    links = page.locator('[data-testid="run-link"]')
+    expect(links.first).to_be_visible(timeout=TIMEOUT_MS)
+    run_id = str(links.first.get_attribute("title"))
+
+    listed = page.request.get(
+        f"{server_url}/api/v1/evaluations/{evaluation_id}/mismatches?run={run_id}&page_size=2"
+    )
+    assert listed.ok, listed.text()
+    items = listed.json()["rows"]["items"]
+    assert items, "the scored fixture must leave mismatches to tag"
+    for item in items:
+        tagged = page.request.post(
+            f"{server_url}/api/v1/mismatches/{item['mismatch_id']}/tag",
+            data={"tag": "hallucination"},
+        )
+        assert tagged.ok, tagged.text()
+
+    row = page.locator("tr", has=page.locator(f'[data-testid="run-link"][title="{run_id}"]'))
+    row.locator('[data-testid="run-discard"]').click()
+    expect(page.locator('[data-testid="discard-tagged"]')).to_contain_text(f"{len(items)} tagged")
+    confirm = page.locator('[data-testid="discard-confirm"]')
+    expect(confirm).to_have_text("Discard anyway")
+    expect(confirm).to_be_disabled()
+
+    field = page.locator('[data-testid="discard-type-confirm"]')
+    field.fill(str(len(items) + 1))
+    expect(confirm).to_be_disabled()
+    field.fill(str(len(items)))
+    expect(confirm).to_be_enabled(timeout=TIMEOUT_MS)
+    confirm.click()
+
+    expect(page.locator(f'[data-testid="run-link"][title="{run_id}"]')).to_have_count(
+        0, timeout=TIMEOUT_MS
+    )
+    gone = page.request.get(f"{server_url}/api/v1/runs/{run_id}")
+    assert gone.status == 404

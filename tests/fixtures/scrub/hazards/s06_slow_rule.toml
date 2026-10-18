@@ -1,0 +1,5 @@
+[[rule]]
+id = "slow"
+tag = "Slow"
+pattern = '(a|aa)+$'
+must_match = ["aaa"]

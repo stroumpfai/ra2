@@ -208,6 +208,9 @@ __all__ = [
     "EVALUATION_NOT_FOUND_MESSAGE",
     "EVALUATION_PARAM",
     "FLOOR_LABEL",
+    "KEEP_LABEL",
+    "KEEP_TITLE",
+    "KEPT_PILL",
     "LAUNCHED_MESSAGE",
     "MODELS_UNSAVED_MESSAGE",
     "MODELS_WELL_PX",
@@ -235,6 +238,7 @@ __all__ = [
     "QUALIFICATION_UNMEASURED_STATE",
     "QUALIFICATION_UNMEASURED_TOOLTIP",
     "REASONING_LABEL",
+    "RELEASE_LABEL",
     "RESULTS_LINK_LABEL",
     "RUNS_TABLE",
     "RUNS_TITLE",
@@ -396,6 +400,15 @@ NEW_EVALUATION_LABEL: Final = "New evaluation"
 #: than in the toolbar (`SD35`). It says "evaluation" out loud because the rows
 #: under it each carry a bare "discard" that takes one run.
 DISCARD_EVALUATION_LABEL: Final = "Discard evaluation"
+#: The keep mark beside it (`SD61`). Not kept: one press marks it. Kept: a
+#: `KEPT` pill, and the press releases it.
+KEEP_LABEL: Final = "Keep evaluation"
+RELEASE_LABEL: Final = "Release"
+KEPT_PILL: Final = "KEPT"
+#: The control's tooltip, in both states: what the mark does, said once.
+KEEP_TITLE: Final = (
+    "A kept evaluation, and every run of it, cannot be discarded until it is released."
+)
 
 STEP_TITLES: Final[tuple[str, ...]] = (
     "Corpus",
@@ -1630,11 +1643,47 @@ class _EvaluationPage:
             # No evaluation, no target. The toolbar's "New evaluation" is the
             # only thing to offer in that state (`SD32`).
             return
-        _text_button(
-            DISCARD_EVALUATION_LABEL,
-            testid="evaluation-discard",
-            on_click=_toggle(self._open_evaluation_discard, view.draft.evaluation_id),
+        with ui.element("div").style("display:flex;align-items:center;gap:12px;"):
+            self._keep_action(view)
+            _text_button(
+                DISCARD_EVALUATION_LABEL,
+                testid="evaluation-discard",
+                on_click=_toggle(self._open_evaluation_discard, view.draft.evaluation_id),
+            )
+
+    def _keep_action(self, view: EvaluationView) -> None:
+        """The keep mark, beside the discard it guards (`SD61`).
+
+        **Here, not in the toolbar**, for the discard's reason: the mark is
+        about what discard may take, so it sits where discard is, and the
+        toolbar keeps its one button (`SD32`). Kept, it shows as a `KEPT` pill
+        and the press reads "Release"; neither direction asks for confirmation,
+        because both are reversible (the `Stop` note in CONTRACTS.md).
+
+        The discard beside it **stays on screen** when kept, as it does with a
+        run active (`SD35`): pressing it opens the dialog, which says what is
+        in the way and where it is released.
+        """
+        kept = view.draft.is_kept
+        if kept:
+            pill(KEPT_PILL, tone="accent").props('data-testid="evaluation-kept"').mark(
+                "evaluation-kept"
+            )
+        button = _text_button(
+            RELEASE_LABEL if kept else KEEP_LABEL,
+            testid="evaluation-keep",
+            on_click=_toggle(self._set_kept, not kept),
         )
+        data_props(button, {"aria-pressed": "true" if kept else "false", "title": KEEP_TITLE})
+
+    async def _set_kept(self, kept: bool) -> None:
+        """`set_kept`, then a redraw: the mark moves no prompt, so nothing here
+        asks the endpoint (SD56)."""
+        view = self._view
+        if view is None:
+            return
+        await self._persist(self._services.evaluation.set_kept(view.draft.evaluation_id, kept=kept))
+        await self.redraw()
 
     def _runs_summary(self) -> str:
         """The header's "14 · 2 dev · 1 failed".

@@ -9,7 +9,7 @@
 # immediately after Features — label, route and icon verbatim from
 # design/prompt-evaluation/README.md §0. It lands at Wave 0, not Wave 4, so
 # J4/J5/J6 prove the nav change before any view exists to fill it.
-"""Header, 4 nav groups, 8 items, active state derived from the route."""
+"""Header, 5 nav groups, 9 items, active state derived from the route."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -69,12 +69,28 @@ class NavItem:
     built: bool
 
 
-#: The 4 groups x 8 items. Order is the nav's order.
+#: The 5 groups x 9 items. Order is the nav's order.
 #:
 #: Import and Census copy is **verbatim** from the design README. The other five
 #: views are not designed yet, so their copy is provisional and lands with the
 #: view (phase 2); the route and the label are not.
 NAV_ITEMS: Final[tuple[NavItem, ...]] = (
+    # Narrative scrubbing (sw-design.md §19), alone in Preparation, above Data:
+    # the lists are imported and tried before any corpus is created, because
+    # a freeze applies them. No design yet; the copy is provisional, the route
+    # and label are not.
+    NavItem(
+        key="scrubbing",
+        group="Preparation",
+        label="Scrubbing",
+        path="/scrubbing",
+        title="Scrubbing",
+        description=(
+            "Rules and name lists that replace personal data in the narratives when a "
+            "corpus is frozen."
+        ),
+        built=True,
+    ),
     NavItem(
         key="import",
         group="Data",
@@ -152,9 +168,9 @@ NAV_ITEMS: Final[tuple[NavItem, ...]] = (
     ),
 )
 
-#: Group label -> its items, in nav order. Four groups — Data, Configure, Run,
-#: Review — because permanent orientation in the pipeline is the nav's whole
-#: job (README §0, "Purpose").
+#: Group label -> its items, in nav order. Five groups — Preparation, Data,
+#: Configure, Run, Review — because permanent orientation in the pipeline is
+#: the nav's whole job (README §0, "Purpose").
 NAV_GROUPS: Final[tuple[tuple[str, tuple[NavItem, ...]], ...]] = tuple(
     (group, tuple(i for i in NAV_ITEMS if i.group == group))
     for group in dict.fromkeys(i.group for i in NAV_ITEMS)
@@ -323,7 +339,7 @@ def _header(*, title: str, description: str, data_dir: str | None = None) -> Non
 
 
 def _nav(active_key: str) -> None:
-    """The 4 groups x 7 items.
+    """The 5 groups x 9 items.
 
     Every item is a real `<a href>`: reachable with Tab alone, focus-ringed by
     the one `--focus` token in `theme.py`, and openable in a new tab. The mock

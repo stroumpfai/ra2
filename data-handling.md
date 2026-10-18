@@ -29,13 +29,15 @@ that live with people, and the procedure for ending the processing.
 | | |
 |---|---|
 | **Structured records** | `Unfall` / `Objekt` / `Mitfahrende` rows: birth date, postcode, LV95 coordinates at metre precision, vehicle and insurer. Not anonymised. |
-| **Narratives** | Free German and French accident descriptions (`UnfHergangText`). Whether the delivered text is anonymised at all is an **open question with the supplier** (`mvp-spec.md` §18; `risk-assesment.md` B5). |
+| **Narratives** | Free German and French accident descriptions (`UnfHergangText`). Whether the delivered text is anonymised at all is an **open question with the supplier** (`mvp-spec.md` §18; `risk-assesment.md` B5). **Scrubbed at freeze** (`sw-design.md` §19): plates, phone numbers and emails always, and whatever the imported rules and name lists catch, replaced by numbered placeholders. The corpus stores only the scrubbed text; the delivery files still hold the original. **Scrubbed is not anonymised**: names not on the lists, inflected names, nicknames and addresses remain (`risk-assesment.md` B7). |
 | **Derived** | Extractions, scores, and **mismatches carrying `evidence_span`** — verbatim fragments of the narrative, mandatory by design so a reviewer can judge the model. |
 | **Aggregates** | The census: column population counts, distinct counts, type hints. Value samples are withheld for every column the delivery does not mark as coded (`SD28`). |
 
-Treat all four as the same class. The census is the only one where the software
-itself removes identifying content, and it does so on a rule about the column
-header, not about what a value happens to contain.
+Treat all four as the same class. The software itself removes identifying
+content in two places only: the census, on a rule about the column header, not
+about what a value happens to contain; and the narratives, scrubbed at freeze
+by rules and lists that miss what is not on them. Neither makes a class safe
+to treat differently.
 
 ---
 

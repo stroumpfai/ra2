@@ -7,9 +7,11 @@ whole of it exists to bound that so the invariant survives contact with an
 analyst who has three inconclusive evaluations cluttering a screen.
 
 **Why a service and not three repository calls.** The guards are policy, not
-persistence: G1 reads a status, G2 counts rows in a different table, and the
-delivery guard asks a question about corpora. One place answers all three, and
-both adapters get the same answer.
+persistence: G1 reads a status, G2 counts rows in a different table, G3 reads
+the evaluation's keep mark (SD61), and the delivery guard asks a question about
+corpora. One place answers all four, and both adapters get the same answer.
+The order is G1, G3, G2: the two that cannot be pressed through are reported
+before the one that can.
 
 **The cascade is the schema's, not this file's.** `extraction`,
 `extraction_value`, `extraction_entity`, `score` and `mismatch` are
@@ -44,6 +46,7 @@ from ra2.persistence.repositories.score_repo import ScoreRepository
 from ra2.persistence.session import session_scope
 from ra2.services.errors import (
     DeliveryCitedError,
+    EvaluationKeptError,
     NotFoundError,
     RunActiveError,
     TaggedWorkPresentError,
@@ -147,6 +150,7 @@ class LifecycleService:
                 launched_at=evaluation.launched_at,
                 models=tuple(sorted({run.model_name for run in runs})),
                 inputs=await self._evaluation_inputs(session, evaluation),
+                kept=evaluation.kept_at is not None,
             )
 
     async def delivery_preview(self, delivery_id: DeliveryId) -> DiscardPreviewView:
@@ -189,12 +193,16 @@ class LifecycleService:
             gets to take.
         :raises NotFoundError: no such run.
         :raises RunActiveError: the run is `queued` or `running` (G1).
+        :raises EvaluationKeptError: its evaluation is kept (G3): a baseline
+            whose runs go one at a time is not kept.
         :raises TaggedWorkPresentError: tagged mismatches, and no `force` (G2).
         """
         async with session_scope(self._session_factory) as session:
             run = await self._require_run(session, run_id)
             repo = RunRepository(session)
             self._require_inactive(run)
+            evaluation = await self._require_evaluation(session, EvaluationId(run.evaluation_id))
+            self._require_not_kept(evaluation)
             _, tagged = await repo.count_mismatches(run_id)
             self._require_no_tagged_work(RUN_KIND, str(run_id), tagged, force=force)
             await repo.delete(run)
@@ -208,6 +216,7 @@ class LifecycleService:
 
         :raises NotFoundError: no such evaluation.
         :raises RunActiveError: **any** of its runs is active (G1).
+        :raises EvaluationKeptError: it is kept (G3).
         :raises TaggedWorkPresentError: tagged mismatches across its runs (G2).
         """
         async with session_scope(self._session_factory) as session:
@@ -216,6 +225,7 @@ class LifecycleService:
             runs = await run_repo.list_by_evaluation(evaluation_id)
             for run in runs:
                 self._require_inactive(run)
+            self._require_not_kept(evaluation)
             tagged = 0
             for run in runs:
                 _, run_tagged = await run_repo.count_mismatches(RunId(run.id))
@@ -361,7 +371,23 @@ class LifecycleService:
             files=0,
             active=active,
             active_detail=f"{run_id} is {status.value}" if active else None,
+            kept=await self._run_is_kept(session, run),
         )
+
+    @staticmethod
+    async def _run_is_kept(session: AsyncSession, run: Run) -> bool:
+        """G3 reaches a run through its evaluation (SD61). `session.get`, not
+        the relationship: an async session does not lazy-load, and the row is
+        usually already in the identity map."""
+        evaluation = await session.get(Evaluation, run.evaluation_id)
+        return evaluation is not None and evaluation.kept_at is not None
+
+    @staticmethod
+    def _require_not_kept(evaluation: Evaluation) -> None:
+        """G3. Final, like G1: the way past it is releasing the mark, which is
+        its own visible act, never a `force` on the discard (SD61)."""
+        if evaluation.kept_at is not None:
+            raise EvaluationKeptError(str(evaluation.id))
 
     @staticmethod
     async def _evaluation_inputs(session: AsyncSession, evaluation: Evaluation) -> str:

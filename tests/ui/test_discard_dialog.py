@@ -30,8 +30,11 @@ from ra2.ui.components.discard_dialog import (
     EXPORT_LEAVES_RA2,
     EXPORT_PROMPT,
     NEVER_LAUNCHED,
+    TYPE_CONFIRM_LABEL,
     discard_dialog,
+    kept_refusal,
     loss_line,
+    type_prompt,
 )
 
 pytestmark = pytest.mark.ui
@@ -158,9 +161,80 @@ async def test_confirming_through_the_warning_passes_force(user: User) -> None:
     forced = _page("/d/force", _preview(tagged_mismatches=3))
     await user.open("/d/force")
 
+    user.find(marker="discard-type-confirm").trigger("input", args="3")
     user.find(marker="discard-confirm").click()
 
     await _until(lambda: forced == [True])
+
+
+# --- SD60: typing the tagged count ----------------------------------------
+
+
+def _disabled(user: User) -> bool:
+    (button,) = user.find(marker="discard-confirm").elements
+    return "disabled" in button._props
+
+
+async def test_tagged_work_asks_for_the_count_and_holds_discard_until_it_is_typed(
+    user: User,
+) -> None:
+    _page("/d/type", _preview(tagged_mismatches=3))
+    await user.open("/d/type")
+
+    await user.should_see(type_prompt(_preview(tagged_mismatches=3)))
+    (field,) = user.find(marker="discard-type-confirm").elements
+    assert field._props["aria-label"] == TYPE_CONFIRM_LABEL
+    assert _disabled(user)
+
+    user.find(marker="discard-type-confirm").trigger("input", args="3")
+    assert not _disabled(user)
+    # Taking it back takes the button back: the state follows the field.
+    user.find(marker="discard-type-confirm").trigger("input", args="")
+    assert _disabled(user)
+
+
+@pytest.mark.parametrize("typed", ["", "2", "30", "three", "Discard"])
+async def test_anything_but_the_count_leaves_discard_dead(user: User, typed: str) -> None:
+    """A press that lands anyway is ignored too: `disabled` is a UI state."""
+    forced = _page(f"/d/wrong-{typed or 'empty'}", _preview(tagged_mismatches=3))
+    await user.open(f"/d/wrong-{typed or 'empty'}")
+
+    user.find(marker="discard-type-confirm").trigger("input", args=typed)
+    assert _disabled(user)
+    user.find(marker="discard-confirm").click()
+    await asyncio.sleep(0.05)
+    assert forced == []
+
+
+async def test_the_count_is_accepted_with_surrounding_spaces(user: User) -> None:
+    forced = _page("/d/spaces", _preview(tagged_mismatches=1))
+    await user.open("/d/spaces")
+
+    user.find(marker="discard-type-confirm").trigger("input", args=" 1 ")
+    user.find(marker="discard-confirm").click()
+
+    await _until(lambda: forced == [True])
+
+
+async def test_without_tagged_work_nothing_is_typed(user: User) -> None:
+    _page("/d/untyped", _preview())
+    await user.open("/d/untyped")
+
+    await user.should_not_see(marker="discard-type-confirm")
+    assert not _disabled(user)
+
+
+async def test_a_blocked_dialog_with_tagged_work_asks_for_nothing(user: User) -> None:
+    """G1 first: typing cannot unblock a run that is still being written."""
+    _page(
+        "/d/blocked-tagged",
+        _preview(tagged_mismatches=2, active=True, active_detail="run-1 is running"),
+    )
+    await user.open("/d/blocked-tagged")
+
+    await user.should_see("run-1 is running")
+    await user.should_not_see(marker="discard-type-confirm")
+    assert _disabled(user)
 
 
 async def test_confirming_without_tagged_work_does_not_force(user: User) -> None:
@@ -252,3 +326,39 @@ async def test_a_run_carries_no_evaluation_identity(user: User) -> None:
 
     await user.should_see(marker="discard-target")
     await user.should_not_see(marker="discard-identity")
+
+
+# --- G3: kept (SD61) --------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", ["evaluation", "run"])
+async def test_a_kept_target_says_where_it_is_released_and_stays_dead(
+    user: User, kind: str
+) -> None:
+    """Refused whatever is pressed, and the sentence names the evaluation for
+    a run too: the mark, and the control that releases it, are the
+    evaluation's. A press that lands anyway does nothing."""
+    preview = _preview(kind=kind, kept=True)
+    forced = _page(f"/d/kept-{kind}", preview)
+    await user.open(f"/d/kept-{kind}")
+
+    await user.should_see(kept_refusal(preview))
+    assert _disabled(user)
+    user.find(marker="discard-confirm").click()
+    await asyncio.sleep(0.05)
+    assert forced == []
+
+
+async def test_a_kept_target_with_tagged_work_asks_for_no_count(user: User) -> None:
+    """G3 before G2: typing the count would enable nothing."""
+    _page("/d/kept-tagged", _preview(kind="evaluation", kept=True, tagged_mismatches=2))
+    await user.open("/d/kept-tagged")
+
+    await user.should_see(marker="discard-blocked")
+    await user.should_not_see(marker="discard-tagged")
+    await user.should_not_see(marker="discard-type-confirm")
+
+
+def test_the_refusal_names_the_evaluation_for_a_run() -> None:
+    assert kept_refusal(_preview(kind="run", kept=True)).startswith("Its evaluation")
+    assert kept_refusal(_preview(kind="evaluation", kept=True)).startswith("This evaluation")

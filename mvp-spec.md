@@ -251,7 +251,10 @@ corpus(id, name, imported_at, version, source_file_manifest_json,
 
 record(id, corpus_id, unfall_uid, language, language_confidence,
        text_raw, text_anonymised_flag)
-      -- text_raw stored verbatim, never normalised in place
+      -- text_raw stored as delivered, never normalised in place, and
+      -- SCRUBBED at freeze: personal data replaced by numbered placeholders,
+      -- <Lastname_1>, <Phone_2>, by regex and name lists, never an LLM.
+      -- The unscrubbed text is never stored (sw-design.md §19, SD62)
 
 unfall_row(record_id, column_name, value_raw)      -- long/EAV form, 67 cols
 objekt_row(id, record_id, objekt_uid, obj_nr, ...) + objekt_cell(objekt_row_id, column_name, value_raw)
@@ -280,7 +283,7 @@ prompt_template(id, version, source, created_at, activated_at, fingerprint)
 evaluation(id, name, corpus_id, feature_config_id, prompt_template_id,
            prompt_language, temperature, seed, reasoning_effort, size,
            selected_models_json, min_cell_count, created_at, launched_at,
-           is_dev)
+           is_dev, kept_at)
       -- reasoning_effort added post-phase-5 (sw-design.md SD36): how hard
       -- the model is asked to think, pinned here and copied onto every run
       -- the launch creates, because it decides the answer as much as the
@@ -290,7 +293,9 @@ evaluation(id, name, corpus_id, feature_config_id, prompt_template_id,
       -- true. Cheap because suppression is applied at READ time from stored
       -- n, so changing the floor never requires a re-score.
       -- editable while launched_at IS NULL; immutable after (SD13),
-      -- except name, which pins nothing (SD58)
+      -- except name and kept_at, which pin nothing (SD58, SD61)
+      -- kept_at: an analyst's mark that the evaluation is to be kept;
+      -- discard refuses it and its runs until it is released (SD61)
 evaluation_feature(evaluation_id, feature_id, enum_codelist_json, fingerprint)
       -- written once, inside the launch transaction (SD12). A frozen
       -- feature_config is corpus-INDEPENDENT, so the codelist snapshot and
@@ -782,6 +787,10 @@ every record, in one of four states: *anonymised column* (the narrative came
 from `UnfHergangTextAnonym`), and for a delivered narrative *anonymised*, *not
 anonymised* or, until the supplier has said (§18), ***anonymisation unknown***.
 Never an absent marking that reads as "not anonymised".
+**Required on every corpus and every result:** the scrubbing marker,
+***scrubbed vN*** with the rule-set version, or ***not scrubbed*** for a corpus
+frozen before scrubbing existed. Never *anonymised*: name lists miss what is not
+on them (sw-design.md §19.8).
 **Required on every dev-sized result:** the "smoke test, not a result" marker.
 **Required on every result over a synthetic corpus:** the synthetic marker, and
 no ranking verdict (§9).

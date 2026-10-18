@@ -11,6 +11,7 @@ from ra2.domain.codes import CodeImportError
 from ra2.domain.findings import Finding
 from ra2.domain.llm import LlmEndpointError
 from ra2.domain.prompt import PromptValidationError
+from ra2.domain.scrub import ScrubImportError
 from ra2.domain.settings import SettingRefusal
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "CorpusLockedError",
     "DeliveryCitedError",
     "DeliveryNotAnalysedError",
+    "EvaluationKeptError",
     "EvaluationLockedError",
     "FeatureConfigFrozenError",
     "FeatureValidationError",
@@ -31,6 +33,7 @@ __all__ = [
     "RunNotActiveError",
     "RunNotScoreableError",
     "RunNotScoredError",
+    "ScrubImportRefusedError",
     "ServiceError",
     "SettingRefusedError",
     "TaggedWorkPresentError",
@@ -105,6 +108,20 @@ class CodelistImportError(ServiceError):
 
     def __init__(self, import_errors: Sequence[CodeImportError]) -> None:
         super().__init__(f"{len(import_errors)} codelist import error(s)")
+        self.import_errors = tuple(import_errors)
+
+
+class ScrubImportRefusedError(ServiceError):
+    """A scrub rule file or name list was refused (sw-design.md §19.5).
+    -> HTTP 422.
+
+    **Nothing was written**: no `scrub_list`, no new `scrub_ruleset` version.
+    Carries the stable `ScrubImportErrorCode`s for `ui/` to word; never a
+    sentence, and never a line of the file.
+    """
+
+    def __init__(self, import_errors: Sequence[ScrubImportError]) -> None:
+        super().__init__(f"{len(import_errors)} scrub import error(s)")
         self.import_errors = tuple(import_errors)
 
 
@@ -306,6 +323,25 @@ class TaggedWorkPresentError(ServiceError):
         self.kind = kind
         self.key = key
         self.tagged_count = tagged_count
+
+
+class EvaluationKeptError(ServiceError):
+    """G3 — the evaluation is marked keep. -> HTTP 409, and **not**
+    overridable (sw-design.md §18.2, SD61).
+
+    Raised for discarding a kept evaluation and for discarding any run of one:
+    a baseline whose runs can be removed one at a time is not kept. There is
+    no `force`, because the override is already a separate, visible act:
+    releasing the mark (`EvaluationService.set_kept`). A `force` here would
+    make the mark a warning G2 already gives.
+
+    `evaluation_id` is the **kept evaluation**, which for a run discard is the
+    run's evaluation rather than the object the caller named.
+    """
+
+    def __init__(self, evaluation_id: str) -> None:
+        super().__init__(f"evaluation {evaluation_id} is kept; release it before discarding")
+        self.evaluation_id = evaluation_id
 
 
 class DeliveryCitedError(ServiceError):

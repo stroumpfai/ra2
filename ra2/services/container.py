@@ -23,6 +23,7 @@ from ra2.services.ranking_service import RankingService
 from ra2.services.results_service import ResultsService
 from ra2.services.run_service import RunService
 from ra2.services.scoring_service import ScoringService
+from ra2.services.scrub_service import ScrubService
 from ra2.services.settings_service import SettingsService
 
 __all__ = ["Services"]
@@ -61,3 +62,8 @@ class Services:
     #: settings dialog — the one write in that dialog, through a service like
     #: every other write in `ui/` (Do-NOT #7).
     settings: SettingsService
+    # --- narrative scrubbing (sw-design.md §19) ---
+    #: The rule set an analyst imports and the next freeze applies. The
+    #: scrubbing itself is `corpus`'s (freeze, dry run) and `delivery`'s
+    #: (the raw preview); this is where the rules come in and are shown.
+    scrub: ScrubService

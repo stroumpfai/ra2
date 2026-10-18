@@ -33,10 +33,17 @@ from nicegui.events import MultiUploadEventArguments
 
 from ra2.domain.delivery import DeliveryStatus, FileKind, SourceKind
 from ra2.domain.findings import Finding
-from ra2.domain.ids import CorpusId, DeliveryId, FileId
+from ra2.domain.ids import CorpusId, DeliveryId, FileId, ScrubRulesetId
 from ra2.services.container import Services
 from ra2.services.errors import BlockingFindingsError, ServiceError
-from ra2.services.readmodels import CorpusView, DeliveryFileView, DeliveryView, Page, SortDir
+from ra2.services.readmodels import (
+    CorpusView,
+    DeliveryFileView,
+    DeliveryView,
+    Page,
+    ScrubPreviewView,
+    SortDir,
+)
 from ra2.ui.components import (
     ColumnSpec,
     add_button,
@@ -64,6 +71,10 @@ __all__ = [
     "CORPORA_CAPTION",
     "CORPORA_TABLE",
     "GRID_STYLE",
+    "NOT_SCRUBBED",
+    "SCRUB_CREATE_LABEL",
+    "SCRUB_PREVIEW_LABEL",
+    "SCRUB_TIMEOUT_TEXT",
     "STRUCTURED_NOTE",
     "STRUCTURED_TABLE",
     "TEXT_NOTE",
@@ -131,6 +142,20 @@ NO_DELIVERY_MESSAGE: Final = "No delivery yet — use + to register one."
 NO_FILES_MESSAGE: Final = "No files."
 NO_CORPORA_MESSAGE: Final = "No corpora yet."
 
+# --- narrative scrubbing (sw-design.md §19.7) -----------------------------
+#: The dry run's button, beside "Create corpus". No design yet
+#: (`plan-text-scrubbing.md` §7.2); the dialog is the smallest surface for
+#: counts an analyst has to read before committing to a freeze.
+SCRUB_PREVIEW_LABEL: Final = "Preview scrubbing"
+SCRUB_CREATE_LABEL: Final = "Create corpus with these rules"
+SCRUB_TIMEOUT_TEXT: Final = (
+    "A rule took too long on a narrative, so a freeze would be refused and nothing "
+    "stored. Fix or remove the rule on the Scrubbing screen."
+)
+NOT_SCRUBBED: Final = "NOT SCRUBBED"
+MOST_HIT_NONE: Final = "No list entry reached the floor, so none is named."
+MOST_HIT_TITLE: Final = "Most-hit list entries — whitelist candidates"
+
 
 def register(services: Services) -> None:
     @ui.page(_ITEM.path)
@@ -172,6 +197,7 @@ class _ImportPage:
         self._grid: Element | None = None
         self._corpora_slot: Element | None = None
         self._poll: ui.timer | None = None
+        self._scrub_dialog: ui.dialog | None = None
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -525,6 +551,7 @@ class _ImportPage:
                 f"locked by an evaluation",
                 count_class="ink2",
             ):
+                self._scrub_preview_button()
                 self._create_corpus_button()
             ui.label(CORPORA_CAPTION).props('data-testid="corpora-caption"').style(
                 "padding:9px 14px;border-bottom:1px solid var(--rule2);"
@@ -546,6 +573,22 @@ class _ImportPage:
                 on_page=_sync(self._corpora_page),
                 on_page_size=_sync(self._corpora_page_size),
             )
+
+    def _scrub_preview_button(self) -> None:
+        """The dry run (§19.7): what the freeze would replace, before it does."""
+        button = (
+            ui.element("button")
+            .classes("btn secondary")
+            .props('type="button" data-testid="scrub-preview"')
+            .mark("scrub-preview")
+        )
+        ready = self._delivery is not None and self._delivery.status is DeliveryStatus.ANALYSED
+        if self._corpus_busy or not ready:
+            button.props("disabled").style("opacity:.5;cursor:default;")
+        else:
+            button.on("click", cast("Callable[[], None]", self._open_scrub_preview))
+        with button:
+            ui.label(SCRUB_PREVIEW_LABEL)
 
     def _create_corpus_button(self) -> None:
         """ "Create corpus · N records" — the record count is the service's.
@@ -821,7 +864,7 @@ class _ImportPage:
             on_changed=self.reload,
         )
 
-    async def _create_corpus(self) -> None:
+    async def _create_corpus(self, *, scrub_ruleset_id: ScrubRulesetId | None = None) -> None:
         """Freeze the selection. On a blocking failure **nothing was written**
         and the findings go back to the analyst naming the offending key.
 
@@ -838,7 +881,11 @@ class _ImportPage:
         self._corpus_busy = True
         self._render()
         try:
-            await self._services.corpus.freeze(self._delivery.delivery_id, name=self._delivery.name)
+            await self._services.corpus.freeze(
+                self._delivery.delivery_id,
+                name=self._delivery.name,
+                scrub_ruleset_id=scrub_ruleset_id,
+            )
         except BlockingFindingsError as exc:
             self._corpus_busy = False
             self._render()
@@ -856,6 +903,54 @@ class _ImportPage:
         # table is the feedback.
         self._corpus_busy = False
         await self.reload()
+
+    async def _open_scrub_preview(self) -> None:
+        """Count what the freeze would replace, and offer that freeze.
+
+        The dialog's own Create freezes with **the version it shows**
+        (`scrub_ruleset_id`), so a rule set imported in another tab between
+        reading the counts and pressing the button cannot change what the
+        analyst agreed to (§19.7).
+        """
+        if self._delivery is None:
+            return
+        try:
+            preview = await self._services.corpus.scrub_preview(self._delivery.delivery_id)
+        except ServiceError as exc:
+            ui.notify(str(exc), type="negative")
+            return
+        assert self._root is not None
+        if self._scrub_dialog is not None:
+            self._scrub_dialog.delete()
+        with (
+            self._root,
+            ui.dialog().props('data-testid="scrub-preview-dialog"') as dialog,
+            dialog_card(extra="width:620px;max-height:88vh;overflow:auto;"),
+        ):
+            self._scrub_dialog = dialog
+            _render_scrub_preview(preview)
+            with ui.element("div").style(
+                "display:flex;justify-content:flex-end;gap:8px;padding:12px 14px;"
+                "border-top:1px solid var(--rule2);"
+            ):
+                create = (
+                    ui.element("button")
+                    .classes("btn primary")
+                    .props('type="button" data-testid="scrub-preview-create"')
+                    .mark("scrub-preview-create")
+                )
+                if preview.timed_out_rule is not None:
+                    create.props("disabled").style("opacity:.5;cursor:default;")
+                else:
+
+                    async def _freeze() -> None:
+                        dialog.close()
+                        await self._create_corpus(scrub_ruleset_id=preview.ruleset_id)
+
+                    create.on("click", cast("Callable[[], None]", _freeze))
+                with create:
+                    ui.label(SCRUB_CREATE_LABEL)
+        dialog.value = True
 
     async def _delete_corpus(self, corpus_id: CorpusId) -> None:
         """Mirrors `_create_corpus`'s busy handling, keyed by corpus id so
@@ -1132,8 +1227,82 @@ def _render_status(corpus: CorpusView) -> None:
         ui.label(f"LOCKED · {corpus.locked_by_evaluations} eval{plural}").classes("pill").props(
             'data-testid="locked-pill"'
         ).mark("locked-pill")
+    else:
+        ui.label("Not used by any evaluation").classes("ink2").style("font-size:12px;")
+    _render_scrub_status(corpus)
+
+
+def _render_scrub_status(corpus: CorpusView) -> None:
+    """`SD65`: *scrubbed*, with the version, never *anonymised*; and a corpus
+    frozen before scrubbing existed says so in the danger tone. The counts
+    are the import report's, in the title."""
+    if not corpus.scrubbed:
+        ui.label(NOT_SCRUBBED).classes("mono danger").props(
+            'data-testid="scrub-status" data-scrubbed="false"'
+        ).mark("scrub-status").style("font-size:11px;")
         return
-    ui.label("Not used by any evaluation").classes("ink2").style("font-size:12px;")
+    rules = "mandatory rules" if corpus.scrub_version is None else f"rules v{corpus.scrub_version}"
+    label = (
+        ui.label(f"scrubbed · {rules}")
+        .classes("mono ink3")
+        .props('data-testid="scrub-status" data-scrubbed="true"')
+        .mark("scrub-status")
+        .style("font-size:11px;")
+    )
+    counts = " · ".join(f"{c.tag} {format_count(c.hits)}" for c in corpus.scrub_counts)
+    if counts:
+        data_props(label, {"title": counts})
+
+
+def _render_scrub_preview(preview: ScrubPreviewView) -> None:
+    """The dry run's counts, every rule that would run, zero hits included;
+    then the most-hit list entries (public data, floored), which is where
+    whitelist candidates show themselves."""
+    rules = "mandatory rules only" if preview.version is None else f"rules v{preview.version}"
+    with ui.element("div").style("padding:14px;display:flex;flex-direction:column;gap:10px;"):
+        ui.label(f"{SCRUB_PREVIEW_LABEL} · {rules}").classes("lbl")
+        ui.label(
+            f"{format_count(preview.records_changed)} of {format_count(preview.records)} "
+            "records would have something replaced. Nothing has been written."
+        ).props('data-testid="scrub-preview-records"').style("font-size:12.5px;color:var(--ink2);")
+        if preview.timed_out_rule is not None:
+            ui.label(f"{SCRUB_TIMEOUT_TEXT} Rule: {preview.timed_out_rule}.").classes(
+                "danger"
+            ).props('data-testid="scrub-preview-timeout"').style(
+                "font-size:12.5px;white-space:normal;"
+            )
+        with (
+            ui.element("table")
+            .props('data-testid="scrub-preview-counts"')
+            .style("width:100%;border-collapse:collapse;font-size:12px;")
+        ):
+            with ui.element("tr"):
+                for heading in ("Placeholder", "Rule", "Replaced", "Records"):
+                    with ui.element("th").classes("th").style("text-align:left;"):
+                        ui.label(heading)
+            for count in preview.counts:
+                with (
+                    ui.element("tr")
+                    .props(f'data-testid="scrub-preview-row" data-rule-id="{count.rule_id}"')
+                    .mark("scrub-preview-row")
+                ):
+                    for text, mono in (
+                        (f"<{count.tag}_n>", True),
+                        (f"{count.rule_id} · {count.source}", False),
+                        (format_count(count.hits), True),
+                        (format_count(count.records), True),
+                    ):
+                        with ui.element("td").classes("td"):
+                            ui.label(text).classes("mono" if mono else "ink2")
+        ui.label(MOST_HIT_TITLE).classes("lbl")
+        if preview.most_hit:
+            ui.label(
+                " · ".join(f"{entry} {format_count(hits)}" for entry, hits in preview.most_hit)
+            ).classes("mono").props('data-testid="scrub-preview-most-hit"').style(
+                "font-size:12px;white-space:normal;"
+            )
+        else:
+            ui.label(MOST_HIT_NONE).classes("ink3").style("font-size:12px;")
 
 
 # --- error surfaces ----------------------------------------------------------

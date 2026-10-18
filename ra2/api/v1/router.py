@@ -17,6 +17,7 @@ from ra2.api.v1 import (
     ranking,
     results,
     runs,
+    scrub,
     tasks,
 )
 
@@ -37,3 +38,4 @@ api_router.include_router(results.router)
 api_router.include_router(presence.router)
 api_router.include_router(ranking.router)
 api_router.include_router(mismatches.router)
+api_router.include_router(scrub.router)

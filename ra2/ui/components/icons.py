@@ -24,6 +24,7 @@ __all__ = [
     "PLAY_CIRCLE",
     "PLUS",
     "REFRESH",
+    "SHIELD",
     "SLIDERS",
     "TABLE",
     "TRASH",
@@ -95,11 +96,16 @@ TRASH: Final = (
     '<path d="M10 10.5v6"></path><path d="M14 10.5v6"></path>'
 )
 
+#: The Scrubbing nav entry (sw-design.md §19). Lucide `shield`: one path, the
+#: same 24x24 viewBox and stroke as the rest of the set.
+SHIELD: Final = '<path d="M12 3 4.5 6v5.5c0 4.6 3.1 8.2 7.5 9.5 4.4-1.3 7.5-4.9 7.5-9.5V6z"></path>'
+
 #: Nav key -> icon body. The mapping the design README's nav table specifies.
 NAV_ICONS: Final[dict[str, str]] = {
     "import": DOWNLOAD,
     "census": BAR_CHART,
     "codelists": LIST,
+    "scrubbing": SHIELD,
     "features": SLIDERS,
     "prompts": ALIGN_LEFT,
     "evaluation": PLAY_CIRCLE,

@@ -53,6 +53,7 @@ from ra2.services.ranking_service import RankingService
 from ra2.services.results_service import ResultsService
 from ra2.services.run_service import RunService
 from ra2.services.scoring_service import ScoringService
+from ra2.services.scrub_service import ScrubService
 from ra2.services.settings_service import SettingsService
 from ra2.ui import views
 from ra2.ui.theme import FONTS_DIR, FONTS_URL_PATH
@@ -294,6 +295,9 @@ def create_app(
         results=results_service,
         ids=ids,
     )
+    # sw-design.md §19: the scrub rules and lists live in the database,
+    # uploaded through the Scrubbing screen, never shipped under ra2/.
+    scrub_service = ScrubService(session_factory=session_factory, clock=clock, ids=ids)
     services = Services(
         delivery=delivery_service,
         corpus=corpus_service,
@@ -311,6 +315,7 @@ def create_app(
         lifecycle=lifecycle_service,
         qualification=qualification_service,
         settings=settings_service,
+        scrub=scrub_service,
     )
 
     @asynccontextmanager

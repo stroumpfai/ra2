@@ -8,6 +8,8 @@ tables of orphans on a misconfigured engine. These run against the real
 temp-file database with the real engine, and count what went and what stayed.
 """
 
+from datetime import UTC, datetime
+
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -30,10 +32,18 @@ from ra2.persistence.models import (
     Run,
     Score,
 )
-from ra2.services.errors import NotFoundError, RunActiveError, TaggedWorkPresentError
+from ra2.services.errors import (
+    EvaluationKeptError,
+    NotFoundError,
+    RunActiveError,
+    TaggedWorkPresentError,
+)
 from ra2.services.lifecycle_service import LifecycleService
 
 pytestmark = pytest.mark.backend
+
+#: When the fixture's evaluation was marked to keep (SD61).
+KEPT_AT = datetime(2026, 10, 17, 12, 0, tzinfo=UTC)
 
 
 async def _count(session: AsyncSession, model: type, *where: object) -> int:
@@ -250,6 +260,127 @@ async def test_an_evaluation_with_an_active_run_is_refused(
 
     async with db_session_factory() as session:
         assert await session.get(Evaluation, scored.corpus.evaluation_id) is not None
+
+
+# --- G3: nothing kept is discarded (SD61) ---------------------------------
+
+
+async def _keep(
+    factory: async_sessionmaker[AsyncSession], evaluation_id: EvaluationId, *, kept: bool = True
+) -> None:
+    """The mark, straight onto the row: it is the precondition here, and
+    `EvaluationService.set_kept` has its own tests."""
+    async with factory() as session:
+        evaluation = await session.get(Evaluation, evaluation_id)
+        assert evaluation is not None
+        evaluation.kept_at = KEPT_AT if kept else None
+        await session.commit()
+
+
+async def test_a_kept_evaluation_is_refused_even_with_force(
+    lifecycle_service: LifecycleService,
+    scored: ScoredWorld,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """No `force` past G3: the way past it is releasing the mark."""
+    await _keep(db_session_factory, scored.corpus.evaluation_id)
+
+    with pytest.raises(EvaluationKeptError) as excinfo:
+        await lifecycle_service.discard_evaluation(scored.corpus.evaluation_id, force=True)
+
+    assert excinfo.value.evaluation_id == str(scored.corpus.evaluation_id)
+    async with db_session_factory() as session:
+        assert await session.get(Evaluation, scored.corpus.evaluation_id) is not None
+        assert await _count(session, Run) == len(scored.corpus.run_ids)
+
+
+async def test_a_run_of_a_kept_evaluation_is_refused_even_with_force(
+    lifecycle_service: LifecycleService,
+    scored: ScoredWorld,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A baseline whose runs can go one at a time is not kept."""
+    await _keep(db_session_factory, scored.corpus.evaluation_id)
+    run_id = scored.corpus.run_ids[1]
+
+    with pytest.raises(EvaluationKeptError) as excinfo:
+        await lifecycle_service.discard_run(run_id, force=True)
+
+    # The run's evaluation is named, not the run: the mark is the evaluation's.
+    assert excinfo.value.evaluation_id == str(scored.corpus.evaluation_id)
+    async with db_session_factory() as session:
+        assert await session.get(Run, run_id) is not None
+
+
+async def test_both_previews_say_kept_and_blocked(
+    lifecycle_service: LifecycleService,
+    scored: ScoredWorld,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await _keep(db_session_factory, scored.corpus.evaluation_id)
+
+    whole = await lifecycle_service.evaluation_preview(scored.corpus.evaluation_id)
+    one = await lifecycle_service.run_preview(scored.corpus.run_ids[1])
+
+    assert whole.kept and whole.blocked
+    assert one.kept and one.blocked
+
+
+async def test_an_active_run_is_reported_before_the_mark(
+    lifecycle_service: LifecycleService,
+    scored: ScoredWorld,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """G1, G3, G2: the guards that cannot be pressed through come first, and
+    of those the run being written is the one to name."""
+    await _keep(db_session_factory, scored.corpus.evaluation_id)
+    async with db_session_factory() as session:
+        run = await session.get(Run, scored.corpus.run_ids[1])
+        assert run is not None
+        run.status = RunStatus.RUNNING
+        await session.commit()
+
+    with pytest.raises(RunActiveError):
+        await lifecycle_service.discard_evaluation(scored.corpus.evaluation_id)
+
+
+async def test_the_mark_is_reported_before_tagged_work(
+    lifecycle_service: LifecycleService,
+    scored: ScoredWorld,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The tagged run is in the kept evaluation. Without the order, the caller
+    would be told to `force` and then refused anyway."""
+    await _keep(db_session_factory, scored.corpus.evaluation_id)
+
+    with pytest.raises(EvaluationKeptError):
+        await lifecycle_service.discard_run(scored.tagged_run_id)
+
+
+async def test_a_released_evaluation_discards_as_before(
+    lifecycle_service: LifecycleService,
+    scored: ScoredWorld,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await _keep(db_session_factory, scored.corpus.evaluation_id)
+    await _keep(db_session_factory, scored.corpus.evaluation_id, kept=False)
+
+    preview = await lifecycle_service.evaluation_preview(scored.corpus.evaluation_id)
+    assert not preview.kept
+    await lifecycle_service.discard_evaluation(scored.corpus.evaluation_id, force=True)
+
+    async with db_session_factory() as session:
+        assert await session.get(Evaluation, scored.corpus.evaluation_id) is None
+
+
+async def test_an_unkept_evaluation_previews_as_not_kept(
+    lifecycle_service: LifecycleService, scored: ScoredWorld
+) -> None:
+    whole = await lifecycle_service.evaluation_preview(scored.corpus.evaluation_id)
+    one = await lifecycle_service.run_preview(scored.corpus.run_ids[0])
+
+    assert not whole.kept
+    assert not one.kept
 
 
 # --- G2: human work is never destroyed silently ---------------------------

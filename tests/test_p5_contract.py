@@ -18,6 +18,7 @@ Two of these carry more weight than the rest, and they are the two
 
 import ast
 import importlib
+import re
 import tomllib
 from pathlib import Path
 
@@ -163,6 +164,16 @@ POST_PHASE_5_REVISIONS = {
     # the context window the model was loaded with, which is what flags a
     # prompt at the limit (risk D1). Additive, nullable, no backfill.
     "20260930_0900_b4f2c81e6d37_pin_what_the_digest_does_not.py",
+    # `feat/discard-guards` — `evaluation.kept_at` (SD61). An analyst marked
+    # the evaluation to keep, and discard refuses it and its runs until it is
+    # released (G3). Additive, nullable, no backfill: `NULL` is "nobody marked
+    # it", which is true of every row that exists before it.
+    "20261017_1200_3ce2190bd859_keep_an_evaluation.py",
+    # `feat/text-scrubbing` — `scrub_list`, `scrub_ruleset` and three nullable
+    # `corpus` columns (SD62, SD63). No backfill: a corpus frozen before it
+    # was frozen verbatim, and `scrub_fingerprint IS NULL` says exactly that.
+    # `corpus` is altered in place both ways, never rebuilt.
+    "20261018_0900_5b93f1f9617a_scrub_the_narratives.py",
 }
 
 
@@ -224,16 +235,42 @@ def test_the_migrations_are_a_single_chain_with_one_head():
 # ---------------------------------------------------------------------------
 
 
+#: Runtime dependencies added **after** `p5w4-green`, each named, for the
+#: reason `POST_PHASE_5_ERRORS` gives: the assertion below stays a claim about
+#: *phase 5*, and every later addition is a visible line somebody had to write.
+POST_PHASE_5_DEPENDENCIES = {
+    # `feat/text-scrubbing` — the narrative scrubber's engine, for the matching
+    # `timeout=` stdlib `re` lacks (SD66). No runtime dependencies, no
+    # network; imported by `ra2/domain/scrub.py` alone.
+    "regex>=2026.9.29",
+}
+
+#: Import-linter contracts added after `p5w4-green`, named likewise.
+POST_PHASE_5_CONTRACTS = {
+    # `feat/text-scrubbing` — `regex` is imported by the scrubber and nowhere
+    # else (SD66), so a second regex engine cannot spread by accident.
+    "regex-only-in-the-scrubber",
+}
+
+
+def _contract_names() -> set[str]:
+    text = (REPO_ROOT / ".importlinter").read_text(encoding="utf-8")
+    return set(re.findall(r"^\[importlinter:contract:([^\]]+)\]", text, re.MULTILINE))
+
+
 def test_pyproject_gained_no_dependency_this_phase():
     """The runtime dependency list is pinned here, in full.
 
     Phase 5 adds one domain module, one service, one router and one view over
     tables that already exist — there is nothing for a library to do. Asserting
     the whole list rather than the absence of three names makes an addition
-    fail loudly instead of needing to be guessed at.
+    fail loudly instead of needing to be guessed at. A later addition is
+    subtracted by name — see `POST_PHASE_5_DEPENDENCIES`.
     """
     data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert data["project"]["dependencies"] == [
+    dependencies = data["project"]["dependencies"]
+    assert set(dependencies) >= POST_PHASE_5_DEPENDENCIES
+    assert [d for d in dependencies if d not in POST_PHASE_5_DEPENDENCIES] == [
         "fastapi>=0.115",
         "nicegui>=2.0",
         "uvicorn[standard]>=0.30",
@@ -256,10 +293,12 @@ def test_importlinter_gained_no_contract_this_phase():
     because `domain` may import stdlib and `pydantic` and nothing else in
     `ra2/`. What `import-linter` *cannot* express is "this service may not
     import that service" — both are one layer — so §17.3's absent edge is
-    asserted on the AST below instead (plan-phase-5.md §2.4).
+    asserted on the AST below instead (plan-phase-5.md §2.4). A later
+    contract is subtracted by name — see `POST_PHASE_5_CONTRACTS`.
     """
-    text = (REPO_ROOT / ".importlinter").read_text(encoding="utf-8")
-    assert text.count("[importlinter:contract:") == 7
+    names = _contract_names()
+    assert names >= POST_PHASE_5_CONTRACTS
+    assert len(names - POST_PHASE_5_CONTRACTS) == 7
 
 
 #: Service errors added **after** `p5w4-green`, by the risk and fix slices,
@@ -284,6 +323,15 @@ POST_PHASE_5_ERRORS = {
     # anything is written (SD49): outside `RA2_IMPORT_ROOT`, past a bound, or
     # a link out of the root. Carries a stable `reason` code.
     "HostPathRefusedError",
+    # `feat/discard-guards` — G3 (SD61): the evaluation, or a run's
+    # evaluation, is marked keep. 409, and no `force`: releasing the mark is
+    # the way past it.
+    "EvaluationKeptError",
+    # `feat/text-scrubbing` — a scrub rule file or name list refused at import
+    # (sw-design.md §19.5): a pattern that fails its examples or turns a
+    # protected string into a placeholder. 422, carrying stable
+    # `ScrubImportErrorCode`s; nothing is written.
+    "ScrubImportRefusedError",
 }
 
 
@@ -539,7 +587,8 @@ def test_the_nav_has_eight_items_and_every_one_of_them_is_built():
     """
     from ra2.ui.shell import NAV_ITEMS
 
-    assert len(NAV_ITEMS) == 8
+    assert {i.key for i in NAV_ITEMS} >= POST_PHASE_5_NAV_KEYS
+    assert len([i for i in NAV_ITEMS if i.key not in POST_PHASE_5_NAV_KEYS]) == 8
     item = next(i for i in NAV_ITEMS if i.key == "mismatches")
     assert item.group == "Review"
     assert item.path == "/mismatches"
@@ -547,6 +596,13 @@ def test_the_nav_has_eight_items_and_every_one_of_them_is_built():
     assert [i.key for i in NAV_ITEMS if not i.built] == [], (
         "phase 5 is the phase after which there is no placeholder route left"
     )
+
+
+#: Nav entries added **after** `p5w4-green`, named, so the eight-item claims
+#: below stay claims about their phase (the `POST_PHASE_5_*` pattern of
+#: `tests/test_p5_contract.py`). `feat/text-scrubbing`: Scrubbing, alone in
+#: Preparation above Data (sw-design.md §19).
+POST_PHASE_5_NAV_KEYS = frozenset({"scrubbing"})
 
 
 def test_the_tag_words_live_in_exactly_one_rendering_table():

@@ -20,6 +20,7 @@ from ra2.ui.views import (
     placeholder_view,
     prompts_view,
     results,
+    scrubbing_view,
 )
 
 __all__ = ["register_all"]
@@ -34,6 +35,7 @@ def register_all(services: Services) -> None:
     import_view.register(services)
     census_view.register(services)
     codelists_view.register(services)
+    scrubbing_view.register(services)
     features_view.register(services)
     prompts_view.register(services)
     evaluation_view.register(services)

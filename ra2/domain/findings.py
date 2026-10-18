@@ -43,7 +43,7 @@ class Severity(StrEnum):
 class FindingCode(StrEnum):
     """Every outcome the import pipeline can report.
 
-    Grouped by where it is raised. Hazard fixture references (h01-h17) point at
+    Grouped by where it is raised. Hazard fixture references (h01-h18) point at
     sw-design.md §11.4.
     """
 
@@ -157,6 +157,20 @@ class FindingCode(StrEnum):
     #: detail: {"canary_count": "0", "languages": "de,fr,it"}          (h09)
     CP1252_CANARY_ZERO = "CP1252_CANARY_ZERO"
 
+    # --- corpus level: narrative scrubbing (sw-design.md §19) ----------------
+    #: One per scrub rule that ran at freeze, zero-hit rules included, so the
+    #: report always lists every rule. Replacing text is a deliberate change,
+    #: and Do-NOT #6 asks for it to be counted. Never carries matched text.
+    #: detail: {"rule_id": "phone", "tag": "Phone", "source": "mandatory",
+    #:          "hits": "41", "records": "39"}                          (h18)
+    TEXT_SCRUBBED = "TEXT_SCRUBBED"
+
+    #: A scrub rule exceeded its time budget over one record's text. The
+    #: freeze **fails closed**: a narrative that could not be scrubbed would
+    #: be stored unscrubbed (`SD66`). `key` is the record's `UnfallUid`.
+    #: detail: {"rule_id": "date-de"}
+    TEXT_SCRUB_TIMEOUT = "TEXT_SCRUB_TIMEOUT"
+
 
 #: The severity each code carries unless the raising site says otherwise.
 #:
@@ -184,6 +198,8 @@ DEFAULT_SEVERITY: Final[dict[FindingCode, Severity]] = {
     FindingCode.TEXT_KEY_UNMATCHED: Severity.REPORTED,
     FindingCode.UNFALL_WITHOUT_TEXT: Severity.REPORTED,
     FindingCode.CP1252_CANARY_ZERO: Severity.REPORTED,
+    FindingCode.TEXT_SCRUBBED: Severity.REPORTED,
+    FindingCode.TEXT_SCRUB_TIMEOUT: Severity.BLOCKING,
 }
 
 

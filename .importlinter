@@ -1,7 +1,8 @@
 # The sw-design.md §1.1 dependency rule, enforced. A violation fails the
 # build; it is not a review comment.
 #
-#   ra2/domain/       stdlib and pydantic only. Nothing else in ra2/.
+#   ra2/domain/       stdlib and pydantic only, plus `regex` in
+#                     `domain/scrub.py` alone (SD66). Nothing else in ra2/.
 #   ra2/persistence/  domain, SQLAlchemy, Alembic
 #   ra2/services/     domain, persistence, infra protocols
 #   ra2/api/          services, domain
@@ -129,4 +130,29 @@ forbidden_modules =
 # that `openai` and `pynvml` are each named by exactly one module across all of
 # `ra2/`, and `tests/backend/infra/test_gpu_probe.py` covers `importlib` and
 # `__import__` besides — all three stricter than what a linter contract sees.
+allow_indirect_imports = True
+
+[importlinter:contract:regex-only-in-the-scrubber]
+name = only the narrative scrubber imports regex (sw-design.md §19.6, SD66)
+type = forbidden
+source_modules =
+    ra2.domain
+    ra2.persistence
+    ra2.services
+    ra2.api
+    ra2.ui
+    ra2.infra
+    ra2.main
+    ra2.cli
+forbidden_modules =
+    regex
+# `regex` is in the stack for one module: its matching `timeout=` is how a bad
+# scrub pattern fails a freeze cleanly instead of hanging it. Every other
+# module uses stdlib `re`, so a second engine with subtly different semantics
+# never spreads by accident. `tests/unit/scrub/test_engine_confinement.py`
+# asserts the same on the AST, `importlib` included.
+ignore_imports =
+    ra2.domain.scrub -> regex
+# Direct imports only, for the same reason as the contracts above: everything
+# that calls the scrubber reaches `regex` through it, and that is the point.
 allow_indirect_imports = True

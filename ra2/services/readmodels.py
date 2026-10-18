@@ -39,6 +39,8 @@ from ra2.domain.ids import (
     PromptTemplateId,
     RecordId,
     RunId,
+    ScrubListId,
+    ScrubRulesetId,
 )
 from ra2.domain.llm import DEFAULT_REASONING_EFFORT, EndpointStatus, ProbeCode
 from ra2.domain.mismatch import MismatchTag, ReviewTally, TagFilter, TagState
@@ -104,6 +106,17 @@ __all__ = [
     "RunView",
     "ScoreExportRow",
     "ScoringStatusView",
+    "ScrubCountView",
+    "ScrubEntryView",
+    "ScrubHitView",
+    "ScrubImportView",
+    "ScrubListView",
+    "ScrubNoticeView",
+    "ScrubPreviewView",
+    "ScrubRuleView",
+    "ScrubRulesetView",
+    "ScrubTryView",
+    "ScrubVersionView",
     "SeparatingRow",
     "SlotView",
     "SortDir",
@@ -207,6 +220,14 @@ class CorpusView:
     locked_by_evaluations: int = 0
     #: `SD45` — invented data. Renders the `SYNTHETIC` chip beside the dev one.
     is_synthetic: bool = False
+    #: `SD62`: the narratives were scrubbed at freeze. `False` only for a
+    #: corpus frozen before scrubbing existed: the `NOT SCRUBBED` chip.
+    scrubbed: bool = False
+    #: The analyst's rule-set version it was scrubbed with; `None` when only
+    #: the mandatory rules ran, or when it was not scrubbed at all.
+    scrub_version: int | None = None
+    #: The import report's scrubbing table, one row per rule that ran.
+    scrub_counts: tuple[ScrubCountView, ...] = ()
 
     @property
     def is_locked(self) -> bool:
@@ -615,8 +636,8 @@ class EvaluationDraftView:
     """An evaluation's **setup** — the six numbered steps, as data.
 
     Editable while `launched_at` is `None`; every edit path raises
-    `EvaluationLockedError` after (sw-design.md §15.2), except a rename: the
-    name pins nothing (SD58).
+    `EvaluationLockedError` after (sw-design.md §15.2), except a rename and
+    the keep mark: neither pins anything (SD58, SD61).
     """
 
     evaluation_id: EvaluationId
@@ -641,10 +662,17 @@ class EvaluationDraftView:
     #: construction that predates it holds (amendment:
     #: fix/settings-with-no-reader).
     min_cell_count: int = 20
+    #: When it was marked to keep; `None` when it is not (SD61). Discard
+    #: refuses a kept evaluation and its runs until it is released (G3).
+    kept_at: datetime | None = None
 
     @property
     def is_launched(self) -> bool:
         return self.launched_at is not None
+
+    @property
+    def is_kept(self) -> bool:
+        return self.kept_at is not None
 
     @property
     def launch_label_count(self) -> int:
@@ -881,6 +909,12 @@ class RunDescriptorView:
     #: `SD45` — the corpus is invented data. A `SYNTHETIC` pill beside the run
     #: pill on every tab, and the ranking names no winner (risk D8).
     is_synthetic: bool = False
+    #: `SD65`: the corpus's narratives were scrubbed at freeze. `False` for a
+    #: corpus frozen before scrubbing existed, and the default, so a descriptor
+    #: built without the fact errs to the warning, never to the reassurance.
+    scrubbed: bool = False
+    #: The rule-set version; `None` when only the mandatory rules ran.
+    scrub_version: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1352,6 +1386,9 @@ class DiscardPreviewView:
     """The models its runs used, distinct and sorted. `()` with no runs."""
     inputs: str = ""
     """What it pins: "<corpus> · v1 · <feature set> · v2 · prompt v3"."""
+    kept: bool = False
+    """G3 (SD61): the evaluation, or for a run its evaluation, is marked keep.
+    Refused until it is released; there is no `force` for this one."""
 
     @property
     def has_exportable(self) -> bool:
@@ -1361,9 +1398,10 @@ class DiscardPreviewView:
 
     @property
     def blocked(self) -> bool:
-        """Refused whatever the analyst does. `tagged_mismatches` is **not**
-        here: that one warns and allows (R-D3)."""
-        return self.active or self.cited_by > 0
+        """Refused whatever the analyst does here. `tagged_mismatches` is
+        **not** here: that one warns and allows (R-D3). `kept` is, because
+        its way out is releasing the mark, not pressing through."""
+        return self.active or self.cited_by > 0 or self.kept
 
 
 @dataclass(frozen=True, slots=True)
@@ -1580,3 +1618,152 @@ class MismatchListView:
     rows: Page[MismatchRowView]
     #: Per feature, scoped to `filters`, so the strip and the table agree.
     tallies: tuple[ReviewTallyView, ...]
+
+
+# ===========================================================================
+# Narrative scrubbing — sw-design.md §19
+# ===========================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class ScrubRuleView:
+    """One regex rule as the Scrubbing screen lists it (§19.1)."""
+
+    rule_id: str
+    tag: str
+    pattern: str
+    #: A `RuleSource` value: `mandatory` or `imported`.
+    source: str
+    description: str
+    must_match: tuple[str, ...]
+    must_not_match: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ScrubNoticeView:
+    """One reported, non-refusing fact about an imported file: a `ListNotice`."""
+
+    code: str
+    count: int
+    #: Up to five affected list entries. Public data, never record text.
+    examples: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ScrubListView:
+    """One imported file of the active rule set."""
+
+    scrub_list_id: ScrubListId
+    #: A `ListKind` value.
+    kind: str
+    filename: str
+    sha256: str
+    imported_at: datetime
+    #: Entries for a name list, rules for a rule file.
+    entry_count: int
+    notices: tuple[ScrubNoticeView, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ScrubRulesetView:
+    """What the next freeze will apply (§19.4).
+
+    `ruleset_id` and `version` are `None` before anything was imported:
+    the mandatory rules still run, and the screen says so."""
+
+    ruleset_id: ScrubRulesetId | None
+    version: int | None
+    created_at: datetime | None
+    #: Of everything that would run now: mandatory rules included.
+    fingerprint: str
+    mandatory_version: int
+    #: Mandatory first, then imported, in the order overlaps are broken.
+    rules: tuple[ScrubRuleView, ...]
+    #: The imported files present, rule file included, in `ListKind` order.
+    lists: tuple[ScrubListView, ...]
+    #: Built-in protected strings, then the rule file's additions.
+    protected: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ScrubVersionView:
+    """One row of the Scrubbing screen's history."""
+
+    ruleset_id: ScrubRulesetId
+    version: int
+    created_at: datetime
+    fingerprint: str
+    #: `ListKind` value -> filename, for the components present.
+    components: Mapping[str, str]
+    #: Corpora frozen with this version.
+    corpus_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class ScrubImportView:
+    """The result of importing one file: the rule set it made active."""
+
+    ruleset: ScrubRulesetView
+    #: The file was already the active one of its kind: no version was made.
+    no_change: bool
+    notices: tuple[ScrubNoticeView, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ScrubEntryView:
+    """One entry of a name list, as the screen's search pages it."""
+
+    entry: str
+    #: `entry_key(entry)`: what the scrubber compares, shown in grey.
+    key: str
+
+
+@dataclass(frozen=True, slots=True)
+class ScrubCountView:
+    """One rule's count over a freeze or a dry run (§19.7)."""
+
+    rule_id: str
+    tag: str
+    #: A `RuleSource` value.
+    source: str
+    hits: int
+    #: Records with at least one hit from this rule.
+    records: int
+
+
+@dataclass(frozen=True, slots=True)
+class ScrubPreviewView:
+    """A dry run over a delivery's selected files: what a freeze would count.
+
+    Nothing is written. Equal, for the same files and rule set, to the
+    `TEXT_SCRUBBED` findings the freeze then stores."""
+
+    ruleset_id: ScrubRulesetId | None
+    version: int | None
+    fingerprint: str
+    counts: tuple[ScrubCountView, ...]
+    #: `(entry_key, hits)`: list entries at or above `MOST_HIT_FLOOR`.
+    most_hit: tuple[tuple[str, int], ...]
+    records: int
+    records_changed: int
+    #: The rule that timed out, when one did. A freeze would refuse (`SD66`).
+    timed_out_rule: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ScrubHitView:
+    rule_id: str
+    tag: str
+    placeholder: str
+    start: int
+    end: int
+
+
+@dataclass(frozen=True, slots=True)
+class ScrubTryView:
+    """The active rule set over one sentence typed on the screen. Stored
+    nowhere."""
+
+    text: str
+    hits: tuple[ScrubHitView, ...]
+    timed_out_rule: str | None = None

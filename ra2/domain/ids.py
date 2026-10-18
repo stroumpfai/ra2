@@ -31,6 +31,8 @@ __all__ = [
     "QualificationId",
     "RecordId",
     "RunId",
+    "ScrubListId",
+    "ScrubRulesetId",
     "TaskId",
 ]
 
@@ -115,3 +117,15 @@ MismatchId = NewType("MismatchId", str)
 #: This host's measurement of one model (tag, digest) over the synthetic seed
 #: (sw-design.md SD40). Append-only: a re-qualification is a new row.
 QualificationId = NewType("QualificationId", str)
+
+# --- feat/text-scrubbing (sw-design.md §19) -------------------------------------
+
+#: One imported scrub file: a rule TOML or a name list (sw-design.md §19.4).
+#: **IMMUTABLE**, and reused by `(kind, sha256)`: importing the same file twice
+#: is one row.
+ScrubListId = NewType("ScrubListId", str)
+
+#: One version of the analyst's scrub rule set: up to four `scrub_list` rows.
+#: **IMMUTABLE**: an import makes version n+1, never edits n. The highest
+#: version is the active one.
+ScrubRulesetId = NewType("ScrubRulesetId", str)

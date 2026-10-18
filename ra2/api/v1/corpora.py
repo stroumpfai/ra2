@@ -19,9 +19,10 @@ from ra2.api.schemas import (
     ErrorResponse,
     FindingResponse,
     PageMeta,
+    ScrubCountResponse,
 )
 from ra2.domain.findings import Finding
-from ra2.domain.ids import CorpusId, DeliveryId
+from ra2.domain.ids import CorpusId, DeliveryId, ScrubRulesetId
 from ra2.services.errors import (
     BlockingFindingsError,
     CorpusLockedError,
@@ -65,6 +66,14 @@ def _corpus_response(view: CorpusView) -> CorpusResponse:
         delivery_id=view.delivery_id,
         locked_by_evaluations=view.locked_by_evaluations,
         is_synthetic=view.is_synthetic,
+        scrubbed=view.scrubbed,
+        scrub_version=view.scrub_version,
+        scrub_counts=[
+            ScrubCountResponse(
+                rule_id=c.rule_id, tag=c.tag, source=c.source, hits=c.hits, records=c.records
+            )
+            for c in view.scrub_counts
+        ],
     )
 
 
@@ -129,7 +138,12 @@ async def create_corpus(
     """Freeze the selected files. All-or-nothing (sw-design.md §6.3)."""
     try:
         corpus_id = await service.freeze(
-            DeliveryId(body.delivery_id), name=body.name, description=body.description
+            DeliveryId(body.delivery_id),
+            name=body.name,
+            description=body.description,
+            scrub_ruleset_id=(
+                ScrubRulesetId(body.scrub_ruleset_id) if body.scrub_ruleset_id else None
+            ),
         )
     except BlockingFindingsError as exc:
         return _blocking_findings_response(exc)

@@ -2285,6 +2285,43 @@ in `data-handling.md`, so F3 re-opens it deliberately rather than by drift.
 
 ---
 
+**B7 · Personal data survives scrubbing, and the chip invites trust** ·
+Severity: **Medium** · Control status: **partial, by design**
+
+*Scenario.* Narratives are scrubbed at freeze (`sw-design.md` §19, `SD62`):
+plates, phone numbers and emails always, plus what the imported rules and
+name lists catch. The corpus chip reads `SCRUBBED v4`. A reader takes it to
+mean the text is safe to show, paste or export, and it is not. What survives,
+by construction:
+
+- names on no list: rare surnames, foreign names, nicknames, typos;
+- inflected forms (`Meiers Auto`): the lists hold the base form only;
+- names whose letters were deleted upstream (h09: `Lœwe` arrives as `Lwe`),
+  and mojibake (`MÃ¼ller`);
+- whitelisted words used as names without an honorific (`Fuchs sagte`);
+- addresses, streets and towns, which are not attempted at all, and
+  descriptions (*"the driver's 82-year-old mother"*);
+- everything in the structured record, which stays identifying (`vision.md`).
+
+*Impact.* An export or a screenshot treated as anonymised. The mismatch list's
+evidence spans are verbatim scrubbed narrative, so whatever survived the
+scrub survives into the one export that leaves RA2 by design (B2).
+
+*Controls built.* The label says *scrubbed*, never *anonymised* (`SD65`); the
+CSV classification line is unchanged; the Import screen's most-hit table and
+the Scrubbing screen's *try a sentence* box exist so an analyst can find the
+misses rather than trust the chip; the dry run shows counts before anything is
+frozen; a rule that times out fails the freeze closed rather than storing a
+narrative unscrubbed (`SD66`).
+
+*Recommendation.* Treat a scrubbed corpus exactly as an unscrubbed one in
+`data-handling.md` §3, which is what it now says. Before the first real
+corpus is cut, read a sample of scrubbed narratives against the lists, add
+the misses to the lists and the false hits to the whitelist, and record the
+sample size in the evaluation report.
+
+---
+
 **C4 · The agent deny rules are relative paths, and agents work in worktrees**
 · Severity: **Medium** · Control status: **partial**
 
