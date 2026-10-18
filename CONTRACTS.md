@@ -1096,7 +1096,7 @@ contract), one new router (`/api/v1/scrub`), one new nav item (Scrubbing).
 
 | Path | What |
 |---|---|
-| `ra2/domain/scrub.py`, `ra2/domain/scrub_mandatory.py` | The scrubber, its checks, parsing and counting; the provisional mandatory rules |
+| `ra2/domain/scrub.py`, `ra2/domain/scrub_mandatory.py` | The scrubber, its checks, parsing and counting; the mandatory rules |
 | `ra2/persistence/migrations/versions/20261018_0900_5b93f1f9617a_scrub_the_narratives.py` | The revision; `corpus` altered in place both ways |
 | `ra2/persistence/repositories/scrub_repo.py`, `ra2/services/scrub_service.py`, `ra2/api/v1/scrub.py`, `ra2/ui/views/scrubbing_view.py` | Repository, service, router, screen |
 | `tests/fixtures/scrub/` | Invented, byte-exact scrub fixtures and their generator |

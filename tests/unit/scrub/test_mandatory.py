@@ -1,7 +1,7 @@
 """The mandatory rules meet their contract (plan-text-scrubbing.md §4, `SD63`).
 
-The patterns in `scrub_mandatory.py` are provisional until the supplied ones
-arrive. **This file is the gate a supplied pattern has to pass**: the table
+The patterns in `scrub_mandatory.py` are the agreed ones. **This file is the
+gate any change to them has to pass**: the table
 below is the plan's §4, transcribed, and it is asserted separately from the
 rules' own example tuples, so editing a rule's examples to make a weaker
 pattern pass does not weaken this test.

@@ -128,6 +128,7 @@ HONORIFICS: Final[tuple[str, ...]] = (
     "herr",
     "frau",
     "hr.",
+    "mr.",
     "fr.",
     "m.",
     "mme",

@@ -1,4 +1,4 @@
-# NEW — feat/text-scrubbing. Not frozen: the supplied patterns replace these.
+# NEW — feat/text-scrubbing. Not frozen; a change bumps MANDATORY_RULES_VERSION.
 """The rules every freeze applies, whatever was imported (sw-design.md §19, `SD63`).
 
 Licence plates, phone numbers and email addresses. They are **code**, not
@@ -6,11 +6,10 @@ data: committed, reviewed and tested in CI, and an import cannot disable,
 override or reuse their ids. Each corpus frozen with them copies them, so a
 corpus still says which mandatory rules it got after this file changes.
 
-**These patterns are provisional.** The project owner will supply the
-patterns; until then these are written to the contract in
-`plan-text-scrubbing.md` §4. A supplied pattern replaces one of these only if
-it passes the same examples, and `tests/unit/scrub/test_mandatory.py` is where
-that is checked. Bump `MANDATORY_RULES_VERSION` with any change here.
+**These are the agreed patterns**, confirmed by the project owner. They meet
+the contract in `plan-text-scrubbing.md` §4, and any change to one must still
+pass the same examples: `tests/unit/scrub/test_mandatory.py` is where that is
+checked. Bump `MANDATORY_RULES_VERSION` with any change here.
 
 Patterns compile in `regex`'s `VERSION0` mode (the `re`-compatible one) and
 are case-sensitive unless they say otherwise inline.
@@ -56,7 +55,7 @@ LICENSE_PLATE: Final = RegexRule(
         "ZH 079 123 45 67",
     ),
     source=RuleSource.MANDATORY,
-    description="Swiss licence plate: canton code and up to six digits. Provisional.",
+    description="Swiss licence plate: canton code and up to six digits.",
 )
 
 #: A Swiss phone number: `0` and a two-digit area or mobile code, or `+41` /
@@ -90,7 +89,7 @@ PHONE: Final = RegexRule(
         "Km 12.5",
     ),
     source=RuleSource.MANDATORY,
-    description="Swiss phone number, national or international form. Provisional.",
+    description="Swiss phone number, national or international form.",
 )
 
 #: An email address: a local part, `@`, a domain with at least one dot and a
@@ -105,7 +104,7 @@ EMAIL: Final = RegexRule(
     must_match=("a.b@example.ch", "x+y@sub.example.org", "Hans.Muster@bluewin.ch"),
     must_not_match=("B1@", "@", "a@b", "B1 @ G1"),
     source=RuleSource.MANDATORY,
-    description="Email address. Provisional.",
+    description="Email address.",
 )
 
 #: In this order: plates, phones, emails. The order breaks ties between

@@ -14,7 +14,7 @@ disagrees with this page, this page is wrong. Every example below is checked
 by a test (§6 says which), so an example that stops being true fails the
 build rather than misleading you.
 
-**Last reviewed:** 2026-10-18 · mandatory rules v1 (**provisional**, see §2.1).
+**Last reviewed:** 2026-10-18 · mandatory rules v1.
 
 ---
 
@@ -91,10 +91,9 @@ reuse their ids.
 | `phone` | `<Phone_n>` | `0` and a two-digit code, then seven digits with optional single separators (space, `.`, `-`, `/`), or `+41` / `0041` with an optional `(0)`: `079 123 45 67`, `+41 (0)44 123 45 67`, `0791234567`, `044/123 45 67` | short numbers, which are information rather than personal data (`117`, `144`, `1414`); times; dates; AHV numbers |
 | `email` | `<Email_n>` | `local@domain.tld`, with a top-level part of at least two letters | `B1@`, a lone `@`, `a@b` |
 
-**These patterns are provisional.** They were written to the contract in
-`plan-text-scrubbing.md` §4 and are to be replaced by the patterns the project
-owner supplies. A supplied pattern goes in only if it passes the same examples
-(`tests/unit/scrub/test_mandatory.py`).
+Changing one is a change to the code, not an import: the new pattern must pass
+the same examples (`tests/unit/scrub/test_mandatory.py`), and the mandatory
+rules' version goes up, which every corpus frozen afterwards records.
 
 ### 2.2 What you cannot configure
 
@@ -104,7 +103,7 @@ They are part of the fingerprint every corpus records:
 | Setting | Value | Why |
 |---|---|---|
 | Minimum letters in a list entry | 3 | `Le`, `Da` and `Li` are surnames and French articles |
-| Honorifics that lift the whitelist | `Herr`, `Frau`, `Hr.`, `Fr.`, `M.`, `Mme`, `Mlle`, `Monsieur`, `Madame`, `Signor`, `Signora`, `Sig.`, `Sig.ra` | §3.4 |
+| Honorifics that lift the whitelist | `Herr`, `Frau`, `Hr.`, `Fr.`, `Mr.`, `M.`, `Mme`, `Mlle`, `Monsieur`, `Madame`, `Signor`, `Signora`, `Sig.`, `Sig.ra` | §3.4 |
 | Built-in protected strings | `B1`, `G1`, `P`, `B1 kollidierte mit G1`, `80 km/h`, `um 14.30 Uhr`, `um 07.45 Uhr`, `A1`, `N1`, `Hauptstrasse 12`, `Km 12.5`, `Rega 1414`, `Notruf 117`, `Notruf 144`, `im Kanton ZH 2 Verletzte` | The role codes, speeds, times, roads and numbers extraction depends on |
 | Time budget per rule per narrative, at freeze | 2 s | §3.6 |
 | Time budget per rule at import | 0.25 s over each of four 4 096-character test strings | §3.6 |
@@ -343,6 +342,105 @@ names (§3.4).
 
 A `protected_altered` caused by a name list is resolved with the whitelist:
 add the word there, then import the list again.
+
+### 4.5 Drafting a rule with an AI assistant
+
+Scrubbing itself never uses an LLM. *Writing* a pattern is a different
+matter: a general-purpose assistant (Claude, for example) is good at drafting
+a regular expression and its examples, and the import checks (§4.4) catch
+most of what it gets wrong. The prompt below asks for exactly the TOML of
+§4.1, ready to import.
+
+**Never paste real data into the assistant.** Not a narrative, not a real
+AHV number, not a line from a delivery: a conversation leaves this machine
+([`rules.md`](rules.md) §5). Describe the format in words and let the
+assistant invent its examples.
+
+**The prompt** (replace the part in brackets):
+
+```text
+Write one or more scrub rules for RA2, as TOML, for this kind of personal
+data in Swiss accident narratives (German, French, Italian):
+
+  [Swiss AHV/AVS number: 756, then 10 digits, written 756.1234.5678.97,
+   756 1234 5678 97 or 7561234567897. Also: Swiss passport and identity
+   card numbers, one capital letter followed by seven digits, C1234567.]
+
+Each rule is a [[rule]] table with exactly these keys:
+- id: lower-case letters, digits and hyphens, at most 64 characters;
+  not license-plate, phone, email, firstnames, lastnames or both-lists.
+- tag: one capital letter then 1 to 31 letters, no digits or
+  underscores; not Firstname, Lastname or Name.
+- description: one sentence.
+- pattern: a regular expression for the Python `regex` package in its
+  re-compatible mode, written as a TOML literal string in single quotes
+  so backslashes stay single. Case-sensitive unless it starts with (?i).
+- must_match: at least three invented examples, each matched in full.
+- must_not_match: at least four invented strings the rule must not
+  match anywhere, including near misses (too few digits, one digit too
+  many, a longer number containing it) and these, which must survive
+  scrubbing: B1, G1, P, A1, N1, 80 km/h, um 14.30 Uhr, Km 12.5,
+  Rega 1414, Notruf 117, BE 123456.
+
+The pattern must:
+- be fenced so it never matches inside a longer number or word, using
+  lookarounds such as (?<![\d.]) and (?![\d.]?\d) or (?<![\p{L}\d]);
+- never match the empty string;
+- avoid nested repetition of overlapping alternatives such as (a|aa)+,
+  because a pattern that backtracks for more than 0.25 s on a
+  4096-character string is refused;
+- use only invented examples, never a real person's number.
+
+Answer with the TOML only, no explanation.
+```
+
+**A good answer** looks like this. Both rules below pass every import
+check, together with the mandatory rules and a set of name lists:
+
+```toml
+[[rule]]
+id = "ahv"
+tag = "AHV"
+description = "Swiss AHV/AVS number: 756, then ten digits, grouped with dots, spaces or not at all."
+pattern = '(?<![\d.])756([. ]?)\d{4}\1\d{4}\1\d{2}(?![\d.]?\d)'
+must_match = ["756.1234.5678.97", "756 1234 5678 97", "7561234567897"]
+must_not_match = ["756", "Tempo 75", "756.1234.5678", "756.1234 5678.97", "1756.1234.5678.97"]
+
+[[rule]]
+id = "id-document"
+tag = "IdDocument"
+description = "Swiss passport or identity card number: one capital letter and seven digits."
+pattern = '(?<![\p{L}\d])[A-Z]\d{7}(?![\p{L}\d])'
+must_match = ["C1234567", "X0012345"]
+must_not_match = ["B1", "G1", "A1", "BE 123456", "TI123456", "C123456", "C12345678", "AB1234567"]
+```
+
+Two details worth noticing. `([. ]?)` with `\1` makes an AHV number use one
+separator throughout, so `756.1234 5678.97` is not taken for one. And the
+identity-card rule leaves `BE 123456` and `TI123456` to the plate rule: one
+letter and seven digits is not a canton code and up to six.
+
+With those two rules, `Lenker Meier (AHV 756.1234.5678.97, ID C1234567)`
+becomes `Lenker <Lastname_1> (AHV <AHV_1>, ID <IdDocument_1>)`.
+
+**Then check it yourself before importing:**
+
+1. **Read the pattern.** An assistant can be confidently wrong about a
+   format. Check it against the issuing authority's description; the
+   identity-card format above is an example to confirm, not a reference.
+2. **Add the near misses you know about** to `must_not_match`. They become
+   permanent: every later import re-checks them.
+3. **Import it.** A refusal names the code (§4.4): give it back to the
+   assistant with the rule, or fix it by hand.
+4. **Try a sentence** on the Scrubbing screen, written the way your
+   narratives are written.
+5. **Preview scrubbing** on a delivery before freezing: a rule that
+   suddenly replaces hundreds of spans has probably caught something it
+   should not.
+
+A regular expression checks shape, not validity: the AHV rule above does not
+check the number's check digit, and it does not need to. A number-shaped
+string in a narrative is replaced either way.
 
 ---
 

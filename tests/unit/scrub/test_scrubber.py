@@ -238,7 +238,9 @@ def test_a_colour_that_is_a_surname_stays_a_colour(scrubber: Scrubber) -> None:
     assert scrubber.scrub("Das Fahrzeug war weiss.").text == "Das Fahrzeug war weiss."
 
 
-@pytest.mark.parametrize("honorific", ["Herr", "Frau", "Hr.", "Fr.", "M.", "Mme", "Monsieur"])
+@pytest.mark.parametrize(
+    "honorific", ["Herr", "Frau", "Hr.", "Fr.", "Mr.", "M.", "Mme", "Monsieur"]
+)
 def test_an_honorific_lifts_the_whitelist(scrubber: Scrubber, honorific: str) -> None:
     assert scrubber.scrub(f"{honorific} Fuchs bremste.").text == (
         f"{honorific} <Lastname_1> bremste."
