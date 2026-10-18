@@ -235,6 +235,7 @@ class _ScrubbingPage:
         self._root: Element | None = None
         self._upper: Element | None = None
         self._protected_slot: Element | None = None
+        self._kind_slot: Element | None = None
         self._entries_slot: Element | None = None
         self._try_slot: Element | None = None
         self._editor: Element | None = None
@@ -401,12 +402,8 @@ class _ScrubbingPage:
                 "display:flex;align-items:center;gap:12px;padding:10px 14px;"
                 "border-bottom:1px solid var(--rule2);flex-wrap:wrap;"
             ):
-                segmented_control(
-                    options=[KIND_LABELS[k] for k in ENTRY_KINDS],
-                    value=KIND_LABELS[ListKind(state.entry_kind)],
-                    label="Which list",
-                    on_change=_sync(self._pick_kind),
-                )
+                self._kind_slot = ui.element("div")
+                self._render_kind()
                 search = data_props(
                     ui.element("input")
                     .props('type="search" data-testid="scrub-entry-search"')
@@ -421,6 +418,21 @@ class _ScrubbingPage:
                     js_handler="(e) => emit(e.target.value)",
                 )
             self._entries_slot = ui.element("div")
+
+    def _render_kind(self) -> None:
+        """The list switch, in a slot of its own. `segmented_control` draws
+        the value it is handed and only reports a click, so a pick must redraw
+        it; the rest of the card is drawn once, so the search box keeps focus."""
+        if self._kind_slot is None:
+            return
+        self._kind_slot.clear()
+        with self._kind_slot:
+            segmented_control(
+                options=[KIND_LABELS[k] for k in ENTRY_KINDS],
+                value=KIND_LABELS[ListKind(scrubbing_state().entry_kind)],
+                label="Which list",
+                on_change=_sync(self._pick_kind),
+            )
 
     def _render_entries(self) -> None:
         if self._entries_slot is None or self._entries is None:
@@ -554,6 +566,10 @@ class _ScrubbingPage:
         kind = next(k for k in ENTRY_KINDS if KIND_LABELS[k] == label)
         _store(replace(scrubbing_state(), entry_kind=kind.value, page=1))
         await self._reload_entries()
+        # Last: NiceGUI runs this handler inside the clicked button's slot,
+        # and redrawing deletes that button, so any element created after it
+        # raises "the parent element this slot belongs to has been deleted".
+        self._render_kind()
 
     async def _search(self, query: str) -> None:
         _store(replace(scrubbing_state(), query=query, page=1))

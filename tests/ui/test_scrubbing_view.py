@@ -237,9 +237,25 @@ async def test_switching_the_list_shows_its_entries(mounted: Mounted) -> None:
     user = mounted.user
     await user.open("/scrubbing")
     await user.should_see(f"No {KIND_LABELS[ListKind.LASTNAME].lower()} imported.")
+    assert _pressed(user) == [KIND_LABELS[ListKind.LASTNAME]]
     (option,) = user.find(marker="seg-first-names").elements
     _one(user, option).click()
     await _until(lambda: "Hans" in _texts_in(user, "scrub-entry"))
+    # The switch marks the list it now shows, not the one the page opened on.
+    assert _pressed(user) == [KIND_LABELS[ListKind.FIRSTNAME]]
+    (option,) = user.find(marker="seg-whitelist").elements
+    _one(user, option).click()
+    await _until(lambda: _pressed(user) == [KIND_LABELS[ListKind.WHITELIST]])
+
+
+def _pressed(user: User) -> list[str]:
+    """The segments of the list switch that say they are the chosen one."""
+    return [
+        _text(label)
+        for option in user.find(marker="seg-option").elements
+        if option._props.get("aria-pressed") == "true" and "on" in option.classes
+        for label in option.default_slot.children
+    ]
 
 
 # --- trying a sentence -----------------------------------------------------------------
