@@ -227,8 +227,18 @@ def test_an_unlabelled_code_surfaces_the_danger_footer(
     page.set_input_files('[data-testid="codelist-upload"] input[type="file"]', str(CODELIST))
     expect(page.locator('[data-testid="import-dialog"]')).not_to_be_visible(timeout=15_000)
 
-    page.locator(f'{ROW}[data-column="{UNTOUCHED_COLUMN}"]').click()
-    expect(page.locator('[data-testid="detail-name"]')).to_have_text(UNTOUCHED_COLUMN)
+    # The import's re-render can land after the first click and swallow it, so
+    # click until the detail pane names the row.
+    for attempt in range(5):
+        page.locator(f'{ROW}[data-column="{UNTOUCHED_COLUMN}"]').click()
+        try:
+            expect(page.locator('[data-testid="detail-name"]')).to_have_text(
+                UNTOUCHED_COLUMN, timeout=2_000
+            )
+            break
+        except AssertionError:
+            if attempt == 4:
+                raise
     page.click('[data-testid="json-key"]')
     page.click(f'[data-testid="option-json-key"][aria-label="{ATTRIBUTE_OPTION}"]')
 

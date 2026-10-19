@@ -186,7 +186,12 @@ def test_j11_every_tab_carries_the_run_descriptor_and_the_cfg_chip(
         assert chip is not None and first_tab is not None and descriptor is not None
         assert chip["y"] + chip["height"] <= first_tab["y"]
         assert abs(chip["x"] - first_tab["x"]) <= 1
-        assert descriptor["x"] > chip["x"] + chip["width"]
+        # On the right of the chip, or wrapped onto the line below it when the
+        # row is too narrow for both (`flex-wrap`, right-aligned by its auto margin).
+        assert (
+            descriptor["x"] > chip["x"] + chip["width"]
+            or descriptor["y"] >= chip["y"] + chip["height"]
+        )
 
 
 def test_j11_clicking_a_feature_row_opens_exactly_one_breakdown(
