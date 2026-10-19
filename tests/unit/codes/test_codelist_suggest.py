@@ -10,7 +10,6 @@ from ra2.domain.codelist_suggest import (
     MIN_OVERLAP_DISTINCT,
     MappingSuggestion,
     SuggestionSource,
-    rank_attributes,
     suggest_mappings,
 )
 
@@ -45,7 +44,6 @@ def test_a_copied_key_wins_over_a_better_overlap() -> None:
 def test_a_copy_that_does_not_cover_the_column_still_says_so() -> None:
     suggestion = _only(suggest_mappings({"A": [("1", 3), ("7", 1)]}, {"k": BARE}, {"A": "k"}))
     assert (suggestion.overlap.contained, suggestion.overlap.distinct) == (1, 2)
-    assert suggestion.overlap.records_contained == 0.75
 
 
 def test_a_copied_key_missing_from_the_import_gives_no_suggestion() -> None:
@@ -89,8 +87,9 @@ def test_codes_match_exactly_so_a_lost_leading_zero_is_no_overlap() -> None:
         ("Bare", "bare"),
         ("Padded", "padded"),
     ]
-    (padded,) = [o for o in rank_attributes([("1", 3)], attributes) if o.attribute_key == "padded"]
-    assert padded.contained == 0
+    # …and a bare column copied onto the padded attribute shows it covers nothing.
+    copied = _only(suggest_mappings({"Bare": [("1", 3)]}, attributes, {"Bare": "padded"}))
+    assert copied.overlap.contained == 0
 
 
 def test_one_distinct_value_is_no_evidence_for_overlap() -> None:
@@ -121,16 +120,20 @@ def test_suggestions_keep_the_callers_column_order() -> None:
     assert [s.column_name for s in suggestions] == ["Z", "A", "M"]
 
 
-def test_the_ranking_is_total_and_deterministic() -> None:
-    """Same score, different keys: ordered by key, whatever order the
-    attributes arrived in."""
-    ranked = rank_attributes([("1", 1)], {"b": BARE, "a": frozenset(BARE), "w": WIDE})
-    assert [o.attribute_key for o in ranked] == ["a", "b", "w"]
+def test_the_winner_does_not_depend_on_the_order_attributes_arrive_in() -> None:
+    cells = [("1", 1), ("2", 1)]
+    forwards = suggest_mappings({"A": cells}, {"bare": BARE, "wide": WIDE}, {})
+    backwards = suggest_mappings({"A": cells}, {"wide": WIDE, "bare": BARE}, {})
+    assert forwards == backwards
+    assert _only(forwards).attribute_key == "bare"
 
 
-def test_records_weigh_more_than_distinct_values() -> None:
-    """A stray value on one record barely dents the share of records covered,
-    which is what ranks first."""
-    (best, *_) = rank_attributes([("1", 99), ("7", 1)], {"bare": BARE, "other": frozenset({"7"})})
-    assert best.attribute_key == "bare"
-    assert best.records_contained == 0.99
+def test_a_tighter_attribute_that_does_not_cover_is_no_candidate() -> None:
+    """{1, 7}: `{"7"}` alone has the higher Jaccard (1/2) but misses `1`;
+    `WIDE` covers both, so it is the proposal."""
+    suggestion = _only(
+        suggest_mappings(
+            {"A": [("1", 99), ("7", 1)]}, {"seven": frozenset({"7"}), "wide": WIDE}, {}
+        )
+    )
+    assert suggestion.attribute_key == "wide"

@@ -57,7 +57,6 @@ point of decision:
   a list the analyst has to read and act on is not a toast.
 """
 
-import unicodedata
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Final, cast
@@ -67,10 +66,11 @@ from nicegui.element import Element
 from nicegui.events import MultiUploadEventArguments
 
 from ra2.domain.codelist_coverage import CodeUsage, ColumnCoverage, CoverageStatus
-from ra2.domain.codelist_suggest import SuggestionSource
+from ra2.domain.codelist_suggest import SuggestionSource, UnresolvedReason
 from ra2.domain.codes import CodeImportError
 from ra2.domain.ids import CodeAttributeId, CorpusId
 from ra2.domain.language import Language
+from ra2.domain.text_search import fold, matches
 from ra2.services.container import Services
 from ra2.services.errors import CodelistImportError, ServiceError
 from ra2.services.readmodels import (
@@ -229,9 +229,14 @@ AUTOMAP_INTRO: Final = (
     "ticking it. A mapping changes the fingerprint of every feature using it."
 )
 AUTOMAP_NOTHING: Final = "No suggestions — every column is mapped, or nothing fits."
-AUTOMAP_UNRESOLVED_TITLE: Final = "Not in the current codelist"
+AUTOMAP_UNRESOLVED_TITLE: Final = "Not copied"
 AUTOMAP_APPLY: Final = "Apply selected"
 AUTOMAP_NO_SOURCE: Final = "no corpus to copy from"
+#: `UnresolvedReason` values are stable identifiers; the words are this table.
+UNRESOLVED_LABELS: Final[dict[UnresolvedReason, str]] = {
+    UnresolvedReason.KEY_NOT_IN_IMPORT: "key not in the current codelist",
+    UnresolvedReason.COLUMN_NOT_OFFERED: "not mappable here (not an enum, shared, or empty)",
+}
 #: `SuggestionSource` values are stable identifiers; the words are this table.
 SOURCE_LABELS: Final[dict[SuggestionSource, str]] = {
     SuggestionSource.COPIED: "copied",
@@ -726,8 +731,7 @@ class _CodelistsPage:
             .mark("column-search")
             .style(SEARCH_INPUT_STYLE)
         )
-        element.props["placeholder"] = SEARCH_PLACEHOLDER
-        element.props["aria-label"] = SEARCH_PLACEHOLDER
+        data_props(element, {"placeholder": SEARCH_PLACEHOLDER, "aria-label": SEARCH_PLACEHOLDER})
         element.on(
             "input",
             lambda event: self._set_query(str(event.args)),
@@ -954,8 +958,10 @@ class _CodelistsPage:
                 .mark("json-key-search")
                 .style(JSON_KEY_SEARCH_STYLE)
             )
-            search.props["placeholder"] = KEY_SEARCH_PLACEHOLDER
-            search.props["aria-label"] = KEY_SEARCH_PLACEHOLDER
+            data_props(
+                search,
+                {"placeholder": KEY_SEARCH_PLACEHOLDER, "aria-label": KEY_SEARCH_PLACEHOLDER},
+            )
             search.on("input", js_handler=_KEY_FILTER_JS)
             search.on("keydown", self._close_json_key, js_handler=_KEY_NAV_JS)
             with (
@@ -1028,11 +1034,20 @@ class _CodelistsPage:
                 ui.label(candidate.key).style("min-width:0;overflow-wrap:anywhere;")
                 ui.label(format_count(candidate.code_count)).style("flex:none;color:var(--ink3);")
             name = candidate.name.get(language)
-            details = " · ".join(part for part in (name, candidate.chapter) if part)
-            if details:
-                ui.label(details).props('data-testid="json-key-details"').mark(
-                    "json-key-details"
-                ).style("font-size:11px;color:var(--ink2);margin-top:1px;white-space:normal;")
+            if name is None and candidate.chapter is None:
+                return
+            with (
+                ui.element("div")
+                .props('data-testid="json-key-details"')
+                .mark("json-key-details")
+                .style("font-size:11px;margin-top:1px;white-space:normal;")
+            ):
+                if name is not None:
+                    ui.label(name).style("display:inline;color:var(--ink2);")
+                if candidate.chapter is not None:
+                    ui.label(
+                        f" · {candidate.chapter}" if name is not None else candidate.chapter
+                    ).style("display:inline;color:var(--ink3);")
 
     def _toggle_json_key(self) -> None:
         self._toggle_menu("json-key")
@@ -1353,11 +1368,7 @@ class _CodelistsPage:
         except ServiceError as exc:
             ui.notify(str(exc), type="negative")
             return
-        self._automap_checked = {
-            s.column_name
-            for s in self._automap.suggestions
-            if s.source is SuggestionSource.COPIED and s.currently is None
-        }
+        self._automap_checked = {s.column_name for s in self._automap.suggestions if s.preselected}
         self._open_menu = None
         if self._automap_dialog is None:
             with (
@@ -1400,9 +1411,14 @@ class _CodelistsPage:
                         "margin-top:12px;color:var(--warn);"
                     )
                     for missing in proposals.unresolved:
+                        where = (
+                            _qualified(missing.table_name, missing.column_name)
+                            if missing.table_name is not None
+                            else missing.column_name
+                        )
                         ui.label(
-                            f"{_qualified(missing.table_name, missing.column_name)} → "
-                            f"{missing.attribute_key}"
+                            f"{where} → {missing.attribute_key} · "
+                            f"{UNRESOLVED_LABELS[missing.reason]}"
                         ).classes("mono").props('data-testid="automap-unresolved"').mark(
                             "automap-unresolved"
                         ).style("font-size:11px;color:var(--warn);padding:3px 0;")
@@ -1499,7 +1515,7 @@ class _CodelistsPage:
                 # Re-sent on every render of this dialog, so the box always
                 # shows the server's set — see `_search_input` on why a stale
                 # prop would otherwise win.
-                box.props["checked"] = checked
+                data_props(box, {"checked": checked})
                 box.on(
                     "change",
                     lambda _, column=suggestion.column_name: self._toggle_automap(column),
@@ -1516,6 +1532,12 @@ class _CodelistsPage:
                 ui.label(suggestion.attribute_key).style(
                     "overflow-wrap:anywhere;white-space:normal;"
                 )
+                name = suggestion.attribute_name.get(codelists_state().language)
+                if name is not None:
+                    ui.label(name).props('data-testid="automap-name"').mark("automap-name").style(
+                        "font-family:var(--sans);font-size:11px;color:var(--ink2);"
+                        "white-space:normal;"
+                    )
             with ui.element("td").classes("td"):
                 if suggestion.source is SuggestionSource.COPIED:
                     pill(SOURCE_LABELS[suggestion.source], tone="accent")
@@ -1649,28 +1671,14 @@ def _status_of(column: ColumnMappingView) -> CoverageStatus:
 def matches_query(column: ColumnMappingView, query: str) -> bool:
     """Does the search text appear in the row's name or its mapped key?
 
-    Case- and accent-insensitive, so `strasse` finds `StrassenartAusw` and
-    `chaussee` finds a key spelt `chaussée`. The name is matched both bare and
-    table-qualified, so `person.` narrows to one table the way the screen
-    writes it (`_row_name`). Blank text matches every row.
+    `domain.text_search.matches` decides; this only says which of the row's
+    fields it reads. The name is offered both bare and table-qualified, so
+    `person.` narrows to one table the way the screen writes it (`_row_name`).
     """
-    needle = _fold(query.strip())
-    if not needle:
-        return True
     haystacks = [column.column_name, _row_name(column)]
     if column.mapped_attribute is not None:
         haystacks.append(column.mapped_attribute.key)
-    return any(needle in _fold(text) for text in haystacks)
-
-
-def _fold(text: str) -> str:
-    """Casefold and drop combining marks — the comparison form for search.
-
-    `_KEY_FILTER_JS` folds the typed text the same way in the browser; the two
-    must agree, which J7's `test_the_key_search_filters_in_the_browser` pins.
-    """
-    decomposed = unicodedata.normalize("NFKD", text.casefold())
-    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return matches(query, *haystacks)
 
 
 def _focus(element: Element) -> None:
@@ -1689,11 +1697,12 @@ def key_search_text(attribute: CodeAttributeView) -> str:
     the key, the attribute's name in **every** language (an analyst prompting
     in `fr` may still know the German word), and the chapter."""
     parts = [attribute.key, *attribute.name.values(), attribute.chapter or ""]
-    return _fold(" ".join(part for part in parts if part))
+    return fold(" ".join(part for part in parts if part))
 
 
 #: The browser half of the JSON-key search (see `_json_key_popover`): fold the
-#: typed text as `_fold` does, show the options whose `data-search` contains
+#: typed text as `domain.text_search.fold` does — the same three steps, in the
+#: same order — show the options whose `data-search` contains
 #: it, and say so when none does. Hiding is `style.display`, not `hidden`: an
 #: inline `display` would beat the attribute.
 _KEY_FILTER_JS: Final = r"""(e) => {

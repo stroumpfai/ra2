@@ -84,7 +84,9 @@ After:
   option for the selected column can carry `5 / 5 codes`. The list can also
   sort by that number, with ties in file order. It reuses the domain function
   and adds no new logic. It is listed here because it is the cheapest form of
-  "automap" there is. **It is cut first if the slice runs long.**
+  "automap" there is. **It is cut first if the slice runs long.** *Cut:* not
+  built in this slice. It needs a per-column service call on every popover
+  open, and the Automap dialog already shows the same `5 / 5`.
 
 `field_select` stays as it is: the change is local to the Codelists view,
 whose JSON-key control is the only place the README clamps.
@@ -113,7 +115,12 @@ query: str = ""
   *does* round-trip, because it changes the groups, the counts and the "N of M
   shown" footer, all of which are drawn on the server. Debounced at 250 ms,
   re-rendering only `_list_slot` rather than the whole page, so the input
-  keeps its focus and caret.
+  keeps its focus and caret. *As built:* the input event is **throttled**
+  at 250 ms with the trailing event kept, which NiceGUI's `on(…, throttle=)`
+  offers directly, and the redraw is everything *except* the search strip.
+  The chips' counts change with the query, so they have to be redrawn anyway.
+  Focus survives because the field is never rebuilt and carries no `value`
+  prop (§7a), not because the redraw is small.
 - `_shown()` becomes status ∧ table ∧ query. The chip counts stay `len()` over
   the **complete** list, which the module docstring already insists on. The
   status chip's counts are taken *after* the table filter, so "status · missing
@@ -160,7 +167,9 @@ The rules, each one with a unit test:
    unresolved row (§4.2) and never falls back silently to overlap
    (Do-NOT #6).
 2. **Overlap otherwise.** Rank by `records_contained`, then `jaccard`, then key,
-   so the order is deterministic. Suggest the top candidate only if
+   so the order is deterministic. *As built (review):* `records_contained`
+   was dropped. Only attributes that cover **every** value are candidates, and
+   for all of those it is 1, so it never decided anything. Suggest the top candidate only if
    `distinct_contained == 1.0` and its `jaccard` beats the runner-up's. A tie
    gives no suggestion, because a coin-flip is not a proposal.
 3. **Exact codes only.** `"04"` does not match `"4"`. The coverage check
@@ -269,9 +278,9 @@ from `codes.py` (sw-design.md §14.3).
 
 | Layer | File | Asserts |
 |---|---|---|
-| unit | `tests/unit/test_codelist_suggest.py` (new) | copied wins; a copied key missing from the import gives no suggestion; overlap needs full containment and a clear margin; a tie gives none; `"04"` ≠ `"4"`; an all-empty column gives none; deterministic order |
-| backend | `tests/backend/test_codelist_suggest_service.py` (new) | default source = previous version of the same name; keys resolved across import generations; `unresolved` populated; already-mapped columns flagged and never altered by `suggest`; `apply_mappings` is one transaction and writes nothing on an unknown id; `code_value` row count unchanged |
-| ui | `tests/ui/test_codelists_view.py` (extend) | table chip options come from the rows; table ∧ status ∧ query; counts over the complete list; the search box keeps focus across a debounced redraw; the picker shows name and chapter; the dialog pre-checks only copied-and-unmapped; Apply calls the service once |
+| unit | `tests/unit/codes/test_codelist_suggest.py`, `tests/unit/codes/test_text_search.py` (new) | copied wins; a copied key missing from the import gives no suggestion; overlap needs full containment and a clear margin; a tie gives none; `"04"` ≠ `"4"`; an all-empty column gives none; deterministic order |
+| backend | `tests/backend/services/codelist/test_suggest_mappings.py` (new) | default source = previous version of the same name; keys resolved across import generations; `unresolved` populated; already-mapped columns flagged and never altered by `suggest`; `apply_mappings` is one transaction and writes nothing on an unknown id; `code_value` row count unchanged |
+| ui | `tests/ui/test_codelists_view.py` (extend) | table chip options come from the rows; table ∧ status ∧ query; counts over the complete list; the search box keeps focus across a debounced redraw; the picker shows name and chapter; the dialog pre-checks only copied-and-unmapped; Apply maps exactly the ticked rows (the UI layer mocks nothing, so "one call" is shown at the backend layer: one transaction, all or nothing) |
 | e2e | `tests/e2e/test_j7_codelists.py` (extend) | the popover stays inside the edit pane; typing filters options with no server round trip; ↑/↓/Enter/Esc; the column search keeps its focus while the list re-filters; a hand-made mapping is copied into a second corpus, pre-ticked, and the checkbox survives a real browser |
 
 Fixtures: one corpus at version 1 and version 2 under the same name, v1
@@ -333,7 +342,7 @@ branch, with a test.
    tests. Standalone and low-risk.
 3. (a) picker: popover and client-side search, with UI and E2E tests.
 4. (c) domain → service → dialog, each with its own layer's tests, then the
-   optional overlap hint in the picker.
+   optional overlap hint in the picker (cut, §2).
 5. **Code review**, before anything is merged. The diff since `78ccc9c` is
    reviewed along the two axes `/code-review` (the mattpocock skill) uses, in
    parallel sub-agents:
@@ -353,3 +362,40 @@ branch, with a test.
 Each implementation step ends with `just lint` and `just test` green, and is
 checked by eye with `just dev-agent`. Steps 2–4 are committed separately, so
 the review in step 5 can read them one at a time.
+
+*As run:* the by-eye check used the E2E harness rather than `just dev-agent`.
+It has the same isolation (its own temp data dir and port). It also needs
+no seed, and `scripts/seed_dev.py` reads `data/Codes/codes-2018.json` when
+that file exists, which an agent must never cause (Do-NOT #13).
+
+---
+
+## 9. Code review (step 5), and what happened to each finding
+
+Run over `78ccc9c...f44ad60`, the two axes in parallel.
+
+| # | Axis | Finding | Outcome |
+|---|---|---|---|
+| S1 | Standards | Matching logic in `ui/` (`matches_query`, `_fold`) against §8.1.1 | **Fixed.** `domain/text_search.py` (`fold`, `matches`); the view only names the fields to match |
+| S2 | Standards | The pre-tick rule decided in `ui/` | **Fixed.** `MappingSuggestionView.preselected`, set by the service |
+| S3 | Standards | Python `casefold` vs JS `toLowerCase` fold; `combining()` vs `\p{M}` | **Fixed.** `fold` uses only steps both languages spell identically; unit-tested where they used to differ |
+| S4 | Standards | Literal `placeholder` / `aria-label` / `checked` written into `props` directly | **Fixed** for consistency through `data_props`. SD34 allows literals, so this was not a breach |
+| S5 | Standards | Per-table chip counts computed in `ui/` | **Kept, deliberately.** It is a `len()` over a display filter of rows the service already classified, the same shape as the pre-existing status counts (module docstring) |
+| S6 | Standards | Automap's ticked set lives on the page object, not `app.storage.client` | **Kept, deliberately.** It is transient dialog state, like `_open_menu`, and it dies with the dialog. §12.8 forbids module globals, and it is not one |
+| S7 | Standards | `rank_attributes` / `records_contained` speculative | **Fixed.** Both removed (§4.1 rule 2) |
+| S8 | Standards | Copied mappings dropped without a word (all-empty, non-enum, shared-name column) | **Fixed.** Reported in `unresolved` with `UnresolvedReason.COLUMN_NOT_OFFERED` |
+| S9 | Standards | `picks` as bare tuples; five dicts keyed by column in the service | **Kept.** Local to one method, with one caller each |
+| S10 | Standards | `_corpus_total` duplicated in J8 and J9 | **Kept.** tests/e2e has no shared helper module by design (their docstrings) |
+| P1 | Spec | The dialog showed the key, not "key and name" (§4.3) | **Fixed.** `MappingSuggestionView.attribute_name`, rendered under the key |
+| P2 | Spec | Overlap hint not built, cut not recorded | **Recorded** (§2) |
+| P3 | Spec | "Apply calls the service once" not asserted | **Restated** (§6): proven at the backend layer |
+| P4 | Spec | Test file names differ from §6 | **Corrected** in §6 |
+| P5 | Spec | A suggestion equal to the current mapping is dropped | **Kept**, and stated in `suggest_mappings`' docstring: there is nothing to apply |
+| P6 | Spec | `MappingSuggestionsView.sources` not in §4.2 | **Kept.** It is how the dialog offers "any other corpus" |
+| P7 | Spec | Search also matches the table-qualified name; Enter takes the first result | **Kept.** Both are small and documented where they are built |
+| P8 | Spec | Throttle, not debounce; the whole page except the strip redraws | **Recorded** (§3) |
+| P9 | Spec | The default source could be a *later* version of the same name | **Fixed.** `Corpus.version < this version`; tested |
+| P10 | Spec | = S8 | **Fixed** |
+| P11 | Spec | `apply_mappings` accepted an older import's attribute and counted a duplicate twice | **Fixed.** Refused unless in the current import; returns distinct columns, last pick wins; both tested |
+| P12 | Spec | Option's name and chapter in one `--ink2` label (README: `--ink2` / `--ink3`) | **Fixed**, and asserted on colour |
+| — | Spec | §4.4's open question (API routes now?) | **Open**, for the reviewer |

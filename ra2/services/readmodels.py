@@ -18,7 +18,7 @@ from enum import StrEnum
 from ra2.domain.anonymisation import AnonymisationMarking
 from ra2.domain.census import CensusBucket, TypeHint, ValueCount
 from ra2.domain.codelist_coverage import ColumnCoverage
-from ra2.domain.codelist_suggest import SuggestionSource
+from ra2.domain.codelist_suggest import SuggestionSource, UnresolvedReason
 from ra2.domain.codes import CodeValue
 from ra2.domain.context_fit import ContextFit
 from ra2.domain.delivery import DeliveryStatus, FileKind, SourceKind
@@ -336,22 +336,28 @@ class MappingSuggestionView:
     table_name: str
     code_attribute_id: CodeAttributeId
     attribute_key: str
+    #: The attribute's name per language, as imported (`de`/`fr`/`it`).
+    attribute_name: Mapping[str, str]
     source: SuggestionSource
     #: Distinct corpus values that are codes of the attribute, of `distinct`.
     contained: int
     distinct: int
     #: The key this column is mapped to now, or `None` when unmapped.
     currently: str | None
+    #: Ticked when the dialog opens: a copy, onto a column with no mapping —
+    #: a decision already made, landing where nothing is decided (plan §1).
+    preselected: bool
 
 
 @dataclass(frozen=True, slots=True)
 class UnresolvedCopyView:
-    """A mapping the source corpus has and the current import cannot
-    honour: its key is not in the file any more."""
+    """A mapping the source corpus has that cannot be copied here, and why."""
 
     column_name: str
-    table_name: str
+    #: `None` when two of this corpus's tables share the column name.
+    table_name: str | None
     attribute_key: str
+    reason: UnresolvedReason
 
 
 @dataclass(frozen=True, slots=True)

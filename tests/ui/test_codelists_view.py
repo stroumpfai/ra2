@@ -911,6 +911,15 @@ async def test_the_json_key_popover_opens_with_a_search_field(unmapped: Seeded) 
     ]
 
 
+def _details(popover: Element) -> list[list[tuple[str, str]]]:
+    """Each option's second line as `(text, colour)` pieces — the README
+    draws the name in `--ink2` and the chapter in `--ink3`."""
+    return [
+        [(_own_text(piece), str(piece._style.get("color"))) for piece in _kids(line)]
+        for line in _within(popover, "json-key-details")
+    ]
+
+
 async def test_each_key_option_names_its_attribute_and_chapter(unmapped: Seeded) -> None:
     """The second line is the attribute's name **in the prompt language**,
     then its chapter — the words an analyst recognises when the key is an
@@ -918,16 +927,16 @@ async def test_each_key_option_names_its_attribute_and_chapter(unmapped: Seeded)
     user = unmapped.user
     await user.open("/codelists")
     popover = await _open_json_key(user, OK_COLUMN)
-    assert [_own_text(e) for e in _within(popover, "json-key-details")] == [
-        "Unfallart · 4.1.1",
-        "Strassenart · 4.1.2",
+    assert _details(popover) == [
+        [("Unfallart", "var(--ink2)"), (" · 4.1.1", "var(--ink3)")],
+        [("Strassenart", "var(--ink2)"), (" · 4.1.2", "var(--ink3)")],
     ]
 
     await _pick(user, "language", "prompt language · fr")
     popover = await _open_json_key(user, OK_COLUMN)
-    assert [_own_text(e) for e in _within(popover, "json-key-details")] == [
-        "Type d'accident · 4.1.1",
-        "Type de route · 4.1.2",
+    assert [[text for text, _ in line] for line in _details(popover)] == [
+        ["Type d'accident", " · 4.1.1"],
+        ["Type de route", " · 4.1.2"],
     ]
 
 
@@ -994,6 +1003,8 @@ async def test_automap_pre_ticks_the_copied_mappings_of_unmapped_columns(
         PARTIAL_COLUMN: "true",
     }
     assert _chip_text(user, "automap-source") == f"from corpus {CORPUS_NAME} · v1 ▼"
+    # The key alone is an English identifier; its name is what the analyst checks.
+    assert [_own_text(e) for e in _within(rows[OK_COLUMN], "automap-name")] == ["Unfallart"]
     (apply,) = _find(user, "automap-apply")
     assert _own_text(_kids(apply)[0]) == f"{AUTOMAP_APPLY} (2)"
 

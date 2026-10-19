@@ -1150,9 +1150,10 @@ amended first, in the plan's first commit.
 
 | Path | What |
 |---|---|
-| `ra2/domain/codelist_suggest.py` | Automap's pure half: copied, then overlap; exact codes; a tie proposes nothing |
+| `ra2/domain/codelist_suggest.py` | Automap's pure half: copied, then overlap; exact codes; a tie proposes nothing; why a copy cannot land (`UnresolvedReason`) |
+| `ra2/domain/text_search.py` | `fold` / `matches`: the search rule, out of `ui/`, folded the way the browser folds |
 | `tests/fixtures/codelists/hazards/c06_automap/` | Padded vs bare codes, nested code sets, and a next generation that drops a key — from the generator |
-| `tests/unit/codes/test_codelist_suggest.py`, `tests/backend/services/codelist/test_suggest_mappings.py` | The rules; the service over three corpora and two generations |
+| `tests/unit/codes/test_codelist_suggest.py`, `tests/unit/codes/test_text_search.py`, `tests/backend/services/codelist/test_suggest_mappings.py` | The rules; the service over three corpora and two generations |
 | `plan-codelists-usability.md` | The plan, its deviations, and what it found on the way (§7a) |
 
 ### Not frozen, and changed

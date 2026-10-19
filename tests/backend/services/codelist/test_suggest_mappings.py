@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.conftest import FrozenClock
 from tests.fixtures.factories import make_census_input, make_census_table_input, seed_corpus
 
-from ra2.domain.codelist_suggest import SuggestionSource
+from ra2.domain.codelist_suggest import SuggestionSource, UnresolvedReason
 from ra2.domain.ids import CodeAttributeId, CorpusId, RecordId
 from ra2.infra.idgen import SeededFactory
 from ra2.persistence.models import CodeValue, ColumnMapping, Record, UnfallRow
@@ -179,6 +179,76 @@ async def test_the_default_source_is_the_previous_version_of_the_same_name(
     assert view.sources == (OTHER, OLD)
 
 
+async def test_a_later_version_is_never_the_default_source(
+    three_corpora: CodelistService, seed_columns: Seeder
+) -> None:
+    """`old` is v1 and mapped; asked about **v1**, the default must not be a
+    v3 of the same name — that is a later corpus, not the previous one. With
+    no earlier version, it falls back to the newest mapped corpus of any name.
+    """
+    later = CorpusId("later")
+    await seed_columns(
+        later,
+        name="deliv",
+        version=3,
+        imported_at=datetime(2026, 9, 4, tzinfo=UTC),
+        columns={"VerlAusw": ("1", "2")},
+    )
+    keys = await _keys(three_corpora)
+    await three_corpora.map_column(later, "VerlAusw", keys["injury_severity"])
+
+    assert (await three_corpora.suggest_mappings(NEW)).source_corpus_id == OLD
+    assert (await three_corpora.suggest_mappings(OLD)).source_corpus_id == later
+
+
+async def test_only_a_copy_onto_an_unmapped_column_is_preselected(
+    three_corpora: CodelistService,
+) -> None:
+    keys = await _keys(three_corpora)
+    await three_corpora.map_column(NEW, "LichtAusw", keys["injury_severity"])
+    preselected = {
+        s.column_name: s.preselected
+        for s in (await three_corpora.suggest_mappings(NEW)).suggestions
+    }
+    assert preselected == {
+        "UnfTypAusw": True,
+        "LichtAusw": False,  # a copy, but over an existing mapping
+        "WitterAusw": True,
+        "VerlAusw": False,  # an overlap
+    }
+
+
+async def test_a_copy_onto_a_column_automap_cannot_map_is_reported(
+    codelist_service: CodelistService,
+    codelist_bytes: Callable[[str], bytes],
+    seed_columns: Seeder,
+) -> None:
+    """The source maps `UnfZeit`; here it holds times and has no `Ausw` suffix, so the
+    census calls it something other than `enum`. It is reported, not dropped."""
+    await codelist_service.import_file("codelist.json", codelist_bytes("c06_automap"))
+    await seed_columns(
+        OLD,
+        name="deliv",
+        version=1,
+        imported_at=datetime(2026, 9, 1, tzinfo=UTC),
+        columns={"UnfZeit": ("1", "2")},
+    )
+    keys = await _keys(codelist_service)
+    await codelist_service.map_column(OLD, "UnfZeit", keys["injury_severity"])
+    await seed_columns(
+        NEW,
+        name="deliv",
+        version=2,
+        imported_at=datetime(2026, 9, 2, tzinfo=UTC),
+        columns={"UnfZeit": tuple(f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 30))},
+    )
+    view = await codelist_service.suggest_mappings(NEW)
+    assert view.suggestions == ()
+    assert [(u.column_name, u.attribute_key, u.reason) for u in view.unresolved] == [
+        ("UnfZeit", "injury_severity", UnresolvedReason.COLUMN_NOT_OFFERED)
+    ]
+
+
 async def test_copied_suggestions_carry_their_overlap_and_the_rest_is_overlap(
     three_corpora: CodelistService,
 ) -> None:
@@ -221,8 +291,8 @@ async def test_a_copied_key_the_current_import_lacks_is_unresolved_not_guessed(
     view = await three_corpora.suggest_mappings(NEW)
 
     assert "LichtAusw" not in _by_column(view)
-    assert [(u.column_name, u.table_name, u.attribute_key) for u in view.unresolved] == [
-        ("LichtAusw", "unfall", "light_condition")
+    assert [(u.column_name, u.table_name, u.attribute_key, u.reason) for u in view.unresolved] == [
+        ("LichtAusw", "unfall", "light_condition", UnresolvedReason.KEY_NOT_IN_IMPORT)
     ]
     current = await _keys(three_corpora)
     assert _by_column(view)["UnfTypAusw"].code_attribute_id == current["accident_type"]
@@ -325,6 +395,38 @@ async def test_an_unknown_attribute_applies_nothing_at_all(
             [("VerlAusw", keys["injury_severity"]), ("LichtAusw", CodeAttributeId("no-such"))],
         )
     assert await _mapping_count(db_session_factory) == before
+
+
+async def test_an_attribute_of_an_older_import_is_refused(
+    three_corpora: CodelistService,
+    codelists_dir: Path,
+    clock: FrozenClock,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Automap only offers the current import, so an id from the generation
+    before is no pick it could have made — refused, nothing written."""
+    stale = (await _keys(three_corpora))["weather"]
+    clock.advance(seconds=60)
+    await three_corpora.import_file(
+        "codelist_next.json", (codelists_dir / "c06_automap" / "codelist_next.json").read_bytes()
+    )
+    before = await _mapping_count(db_session_factory)
+    with pytest.raises(NotFoundError):
+        await three_corpora.apply_mappings(NEW, [("WitterAusw", stale)])
+    assert await _mapping_count(db_session_factory) == before
+
+
+async def test_a_column_picked_twice_is_mapped_once_to_its_last_pick(
+    three_corpora: CodelistService,
+) -> None:
+    keys = await _keys(three_corpora)
+    written = await three_corpora.apply_mappings(
+        NEW, [("VerlAusw", keys["weather"]), ("VerlAusw", keys["injury_severity"])]
+    )
+    assert written == 1
+    columns = {c.column_name: c for c in await three_corpora.list_columns(NEW, language="de")}
+    mapped = columns["VerlAusw"].mapped_attribute
+    assert mapped is not None and mapped.key == "injury_severity"
 
 
 async def test_an_unknown_column_applies_nothing_at_all(

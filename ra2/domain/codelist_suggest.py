@@ -35,7 +35,7 @@ __all__ = [
     "MappingSuggestion",
     "Overlap",
     "SuggestionSource",
-    "rank_attributes",
+    "UnresolvedReason",
     "suggest_mappings",
 ]
 
@@ -54,6 +54,17 @@ class SuggestionSource(StrEnum):
     OVERLAP = "overlap"
 
 
+class UnresolvedReason(StrEnum):
+    """Why a mapping the source corpus has cannot be copied. Stable
+    identifiers, like `SuggestionSource`; the words are `ui/`'s."""
+
+    #: The key is not in the current import (a later generation dropped it).
+    KEY_NOT_IN_IMPORT = "key_not_in_import"
+    #: This corpus has the column, but not as a column automap can map: not an
+    #: `enum` here, a name two of its tables share, or empty in every row.
+    COLUMN_NOT_OFFERED = "column_not_offered"
+
+
 @dataclass(frozen=True, slots=True)
 class Overlap:
     """How well one attribute's codes cover one column's values."""
@@ -63,9 +74,6 @@ class Overlap:
     contained: int
     #: Distinct column values.
     distinct: int
-    #: The share of the column's *records* whose value is a code, in [0, 1] —
-    #: a stray value on one record weighs little.
-    records_contained: float
     #: |values ∩ codes| / |values ∪ codes|, in [0, 1] — prefers the
     #: attribute that is *just* big enough over one that contains everything.
     jaccard: float
@@ -97,7 +105,8 @@ def suggest_mappings(
     :param attributes: attribute key → its codes, from the current import.
     :param copied: column name → the attribute key the source corpus maps it
         to. A key `attributes` does not have yields **no** suggestion for that
-        column — never a silent fall-back to overlap; the caller reports it.
+        column — never a silent fall-back to overlap; the caller reports it
+        (`UnresolvedReason`), as it does a copy for an all-empty column.
     """
     suggestions: list[MappingSuggestion] = []
     for column_name, cells in columns.items():
@@ -118,7 +127,7 @@ def suggest_mappings(
             continue
         if len(cells) < MIN_OVERLAP_DISTINCT:
             continue
-        best = _clear_winner(rank_attributes(cells, attributes))
+        best = _clear_winner([_overlap(cells, key, codes) for key, codes in attributes.items()])
         if best is not None:
             suggestions.append(
                 MappingSuggestion(
@@ -131,20 +140,14 @@ def suggest_mappings(
     return tuple(suggestions)
 
 
-def rank_attributes(
-    cells: Sequence[tuple[str, int]], attributes: Mapping[str, frozenset[str]]
-) -> tuple[Overlap, ...]:
-    """Every attribute's overlap with one column, best first: by the share of
-    records covered, then Jaccard, then key — a total, deterministic order."""
-    scores = [_overlap(cells, key, codes) for key, codes in attributes.items()]
-    return tuple(sorted(scores, key=lambda o: (-o.records_contained, -o.jaccard, o.attribute_key)))
-
-
-def _clear_winner(ranked: Sequence[Overlap]) -> Overlap | None:
+def _clear_winner(overlaps: Sequence[Overlap]) -> Overlap | None:
     """The one attribute that covers the column and beats every other one
     that also does on Jaccard. A tie is no suggestion: a coin flip is not a
-    proposal."""
-    covering = sorted((o for o in ranked if o.covers), key=lambda o: (-o.jaccard, o.attribute_key))
+    proposal. Ordered by key after Jaccard, so the answer never depends on
+    the order the attributes arrived in."""
+    covering = sorted(
+        (o for o in overlaps if o.covers), key=lambda o: (-o.jaccard, o.attribute_key)
+    )
     if not covering:
         return None
     if len(covering) > 1 and covering[1].jaccard >= covering[0].jaccard:
@@ -154,15 +157,11 @@ def _clear_winner(ranked: Sequence[Overlap]) -> Overlap | None:
 
 def _overlap(cells: Sequence[tuple[str, int]], key: str, codes: frozenset[str]) -> Overlap:
     values = {value for value, _ in cells}
-    records = sum(count for _, count in cells)
     inside = values & codes
     union = values | codes
     return Overlap(
         attribute_key=key,
         contained=len(inside),
         distinct=len(values),
-        records_contained=(
-            sum(count for value, count in cells if value in codes) / records if records else 0.0
-        ),
         jaccard=len(inside) / len(union) if union else 0.0,
     )

@@ -20,7 +20,7 @@ the current import can no longer honour. `ui/` may not see an ORM row
 (§12.7), so this needs read models.
 
 ```diff
-+from ra2.domain.codelist_suggest import SuggestionSource
++from ra2.domain.codelist_suggest import SuggestionSource, UnresolvedReason
  ...
 +@dataclass(frozen=True, slots=True)
 +class MappingSuggestionView:
@@ -28,16 +28,19 @@ the current import can no longer honour. `ui/` may not see an ORM row
 +    table_name: str
 +    code_attribute_id: CodeAttributeId
 +    attribute_key: str
++    attribute_name: Mapping[str, str]
 +    source: SuggestionSource
 +    contained: int
 +    distinct: int
 +    currently: str | None
++    preselected: bool
 +
 +@dataclass(frozen=True, slots=True)
 +class UnresolvedCopyView:
 +    column_name: str
-+    table_name: str
++    table_name: str | None
 +    attribute_key: str
++    reason: UnresolvedReason
 +
 +@dataclass(frozen=True, slots=True)
 +class MappingSuggestionsView:
