@@ -23,6 +23,7 @@ from ra2.api.schemas import (
 )
 from ra2.domain.findings import Finding
 from ra2.domain.ids import CorpusId, DeliveryId, ScrubRulesetId
+from ra2.services.corpus_service import CorpusNameError
 from ra2.services.errors import (
     BlockingFindingsError,
     CorpusLockedError,
@@ -151,6 +152,10 @@ async def create_corpus(
         raise _not_found(exc) from exc
     except DeliveryNotAnalysedError as exc:
         raise _conflict(exc) from exc
+    except CorpusNameError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
     view = await service.get(corpus_id)
     return _corpus_response(view)
 

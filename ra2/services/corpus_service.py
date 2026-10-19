@@ -67,6 +67,7 @@ from ra2.services.errors import (
     CorpusLockedError,
     DeliveryNotAnalysedError,
     NotFoundError,
+    ServiceError,
 )
 from ra2.services.protocols import CensusInput, CensusMaterialiser, CensusTableInput
 from ra2.services.readmodels import (
@@ -118,6 +119,39 @@ def _cells_of(header: Sequence[str], row: Sequence[str]) -> Iterator[_Cell]:
     """
     for index, column in enumerate(header):
         yield _Cell(column, row[index] if index < len(row) else "")
+
+
+#: `corpus.name` is `String(200)`; the description has no column limit, so this
+#: one is ours (`SD68`).
+NAME_MAX_CHARS = 200
+DESCRIPTION_MAX_CHARS = 500
+
+
+class CorpusNameError(ServiceError):
+    """The name or description given to `freeze` cannot be stored. -> HTTP 422."""
+
+
+def _checked_name(name: str) -> str:
+    """Stripped, never blank, never longer than the column (`SD68`)."""
+    stripped = name.strip()
+    if not stripped:
+        raise CorpusNameError("A corpus needs a name.")
+    if len(stripped) > NAME_MAX_CHARS:
+        raise CorpusNameError(
+            f"A corpus name is at most {NAME_MAX_CHARS} characters; this one has {len(stripped)}."
+        )
+    return stripped
+
+
+def _checked_description(description: str | None) -> str | None:
+    """Stripped; empty is no description (`SD68`)."""
+    stripped = (description or "").strip()
+    if len(stripped) > DESCRIPTION_MAX_CHARS:
+        raise CorpusNameError(
+            f"A corpus description is at most {DESCRIPTION_MAX_CHARS} characters; "
+            f"this one has {len(stripped)}."
+        )
+    return stripped or None
 
 
 class CorpusService:
@@ -180,6 +214,8 @@ class CorpusService:
         :raises DeliveryNotAnalysedError: analysis has not finished.
         :raises NotFoundError: `scrub_ruleset_id` names no rule-set version.
         """
+        name = _checked_name(name)
+        description = _checked_description(description)
         async with session_scope(self._session_factory) as session:
             delivery, rows, parsed = await self._selected(session, delivery_id)
 

@@ -590,3 +590,50 @@ async def test_a_restored_binding_is_not_rechecked_against_the_import_root(tmp_p
     store.restore(DeliveryId("old"), elsewhere)
 
     assert await store.read_bytes(DeliveryId("old"), "f.txt") == b"x"
+
+
+async def test_a_name_is_stored_stripped_and_a_blank_description_is_none(
+    corpus_service, analysed_golden_delivery
+):
+    delivery_id = await analysed_golden_delivery()
+
+    corpus_id = await corpus_service.freeze(
+        delivery_id, name="  only-canton-x  ", description="   "
+    )
+
+    view = await corpus_service.get(corpus_id)
+    assert (view.name, view.description) == ("only-canton-x", None)
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 201])
+async def test_a_name_the_column_cannot_hold_is_refused_and_nothing_is_written(
+    corpus_service, analysed_golden_delivery, db_session_factory, name
+):
+    from ra2.services.corpus_service import CorpusNameError
+
+    delivery_id = await analysed_golden_delivery()
+
+    with pytest.raises(CorpusNameError):
+        await corpus_service.freeze(delivery_id, name=name)
+
+    assert await _count(db_session_factory, Corpus) == 0
+
+
+async def test_an_over_long_description_is_refused(corpus_service, analysed_golden_delivery):
+    from ra2.services.corpus_service import DESCRIPTION_MAX_CHARS, CorpusNameError
+
+    delivery_id = await analysed_golden_delivery()
+
+    with pytest.raises(CorpusNameError):
+        await corpus_service.freeze(
+            delivery_id, name="ok", description="d" * (DESCRIPTION_MAX_CHARS + 1)
+        )
+
+
+async def test_the_same_name_twice_is_v1_then_v2(corpus_service, analysed_golden_delivery):
+    delivery_id = await analysed_golden_delivery()
+
+    first = await corpus_service.freeze(delivery_id, name="data-2023")
+    second = await corpus_service.freeze(delivery_id, name="data-2023")
+
+    assert [(await corpus_service.get(c)).version for c in (first, second)] == [1, 2]

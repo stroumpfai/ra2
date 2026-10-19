@@ -186,6 +186,12 @@ class _ImportPage:
         self._corpus_total = 0
         self._corpus_locked = 0
         self._corpus_busy = False
+        #: What the analyst has typed for the next corpus (`SD68`). `None` is
+        #: "not touched": the delivery's own name is then shown and used. Kept
+        #: here, not read back from the inputs, because the corpora card is
+        #: redrawn by every reload and the inputs with it.
+        self._corpus_name: str | None = None
+        self._corpus_description = ""
         self._deleting_corpus_id: CorpusId | None = None
         #: The file whose delete is one click from happening (P3-D22's inline
         #: two-step) and the file a row action is currently running for. Both
@@ -560,6 +566,7 @@ class _ImportPage:
             ):
                 self._scrub_preview_button()
                 self._create_corpus_button()
+            self._corpus_naming_row()
             ui.label(CORPORA_CAPTION).props('data-testid="corpora-caption"').style(
                 "padding:9px 14px;border-bottom:1px solid var(--rule2);"
                 "font-size:11.5px;color:var(--ink2);"
@@ -579,6 +586,51 @@ class _ImportPage:
                 shown=len(items),
                 on_page=_sync(self._corpora_page),
                 on_page_size=_sync(self._corpora_page_size),
+            )
+
+    def _corpus_naming_row(self) -> None:
+        """The name and description the next corpus is frozen with (`SD68`).
+
+        Native inputs, like the host-directory box: Quasar's carries a hit
+        target and a type scale this design does not have (R2, §8.2). They
+        only update the page's state on `input`; nothing redraws, so the box
+        keeps focus while the analyst types.
+        """
+        default_name = self._delivery.name if self._delivery is not None else ""
+        shown = default_name if self._corpus_name is None else self._corpus_name
+        with ui.element("div").style(
+            "display:flex;align-items:center;gap:8px;padding:9px 14px;flex-wrap:wrap;"
+            "border-bottom:1px solid var(--rule2);"
+        ):
+            name = data_props(
+                ui.element("input")
+                .classes("chip")
+                .props('type="text" data-testid="corpus-name-input"')
+                .mark("corpus-name-input")
+                .style("width:220px;"),
+                {"aria-label": "Corpus name", "placeholder": "Corpus name", "value": shown},
+            )
+            name.on(
+                "input",
+                lambda event: setattr(self, "_corpus_name", str(event.args)),
+                js_handler="(e) => emit(e.target.value)",
+            )
+            description = data_props(
+                ui.element("input")
+                .classes("chip")
+                .props('type="text" data-testid="corpus-description-input"')
+                .mark("corpus-description-input")
+                .style("flex:1;min-width:220px;"),
+                {
+                    "aria-label": "Corpus description",
+                    "placeholder": "Description (optional), e.g. only canton X",
+                    "value": self._corpus_description,
+                },
+            )
+            description.on(
+                "input",
+                lambda event: setattr(self, "_corpus_description", str(event.args)),
+                js_handler="(e) => emit(e.target.value)",
             )
 
     def _scrub_preview_button(self) -> None:
@@ -625,18 +677,23 @@ class _ImportPage:
             ui.label(f"Create corpus · {format_count(records)} records").mark("create-corpus-label")
 
     def _corpus_columns(self) -> tuple[ColumnSpec[CorpusView], ...]:
-        """README §1b's eight columns, widths verbatim.
+        """README §1b's eight columns. Corpus is 225px (the README's first draft
+        said 150px, too narrow for a name an analyst chose); Description gives
+        up the room, being flexible.
 
         Not sortable: the design shows no sort affordance on this table, and
         the service's default — newest first — is the order it renders.
         """
         return (
-            ColumnSpec(key="corpus", label="Corpus", width="150px", render=_render_corpus_name),
+            ColumnSpec(key="corpus", label="Corpus", width="225px", render=_render_corpus_name),
             ColumnSpec(
                 key="description",
                 label="Description",
-                render=lambda row: ui.label(row.description or "").style(
-                    "font-size:12px;color:var(--ink2);"
+                render=lambda row: (
+                    ui.label(row.description or "")
+                    .props('data-testid="corpus-description"')
+                    .mark("corpus-description")
+                    .style("font-size:12px;color:var(--ink2);")
                 ),
             ),
             ColumnSpec(
@@ -890,7 +947,8 @@ class _ImportPage:
         try:
             await self._services.corpus.freeze(
                 self._delivery.delivery_id,
-                name=self._delivery.name,
+                name=self._delivery.name if self._corpus_name is None else self._corpus_name,
+                description=self._corpus_description,
                 scrub_ruleset_id=scrub_ruleset_id,
             )
         except BlockingFindingsError as exc:
@@ -913,6 +971,7 @@ class _ImportPage:
         # toast, which would have no slot left to resolve. The new row in the
         # table is the feedback.
         self._corpus_busy = False
+        self._corpus_name, self._corpus_description = None, ""
         await self.reload()
 
     async def _open_scrub_preview(self) -> None:

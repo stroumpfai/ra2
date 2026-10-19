@@ -206,7 +206,7 @@ A `.card` with `flex:none`, full content width.
 - Sub-caption strip: `padding:9px 14px`, `border-bottom:1px solid --rule2`, 11.5px `--ink2`:
   "A corpus is immutable. Once a run has touched it, it cannot be deleted — the runs that cite it would
   stop being reproducible."
-- Table (auto layout, `overflow-x:auto`), columns: Corpus 150px · Description flexible · Created 118px ·
+- Table (auto layout, `overflow-x:auto`), columns: Corpus 225px · Description flexible · Created 118px ·
   Records 84px · Language composition flexible · Canary 78px · Status 184px · action 104px.
 - Row content: corpus name mono weight 500 + mono 11px `--ink3` version ("v1"); description 12px `--ink2`;
   created timestamp mono 11.5px; records mono; language composition mono 11.5px
