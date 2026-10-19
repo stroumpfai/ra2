@@ -19,12 +19,15 @@ from types import ModuleType
 
 import pytest
 
-from ra2.domain.parsing.headers import CANONICAL_COLUMN_SETS
+from ra2.domain.delivery import FileKind
+from ra2.domain.parsing.headers import CANONICAL_COLUMN_SETS, ColumnSet
 
 #: RADIS — index 0 of every kind's `ColumnSet` tuple, by construction.
 _RADIS = {kind: sets[0] for kind, sets in CANONICAL_COLUMN_SETS.items()}
 #: Astrana — index 1, only present for the three structured kinds.
-_ASTRANA = {kind: sets[1] for kind, sets in CANONICAL_COLUMN_SETS.items() if len(sets) > 1}
+_ASTRANA: dict[FileKind, ColumnSet] = {
+    kind: sets[1] for kind, sets in CANONICAL_COLUMN_SETS.items() if kind is not FileKind.TEXT
+}
 
 GENERATOR = Path(__file__).resolve().parents[2] / "fixtures" / "deliveries" / "generate_hazards.py"
 

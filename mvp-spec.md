@@ -140,12 +140,14 @@ of RADIS's — it is a different, narrower export (67/76/21 columns against
 RADIS's 67/77/18), with its own values for coded fields (`* UAP` columns)
 rather than RADIS's separate codelist join.
 
-**The text file does not vary by format** — it is the same `;`-delimited,
-two-column contract regardless of which structured format accompanies it:
+**The text file does not vary by structured format** — it is the same `;`-delimited,
+two-column contract regardless of which structured format accompanies it. Its key
+column is headed `UNFALLUID` or, in one delivery, `UID`; the header decides which,
+and the join reads whichever the file has (`SD67`):
 
 | File | Key | Delimiter | Quoting | Header case |
 |---|---|---|---|---|
-| text *(one file, all cantons)* | `UNFALLUID` | `;` | RFC4180, `"` doubled | upper (`UNFALLUID`) |
+| text *(one file, all cantons)* | `UNFALLUID` or `UID` | `;` | RFC4180, `"` doubled | upper (`UNFALLUID`) |
 
 The asymmetry matters: the single text file is the join target for every cantonal
 set, so a `UnfallUid` collision between two cantons would silently attach one

@@ -32,7 +32,7 @@ from ra2.domain.delivery import DeliveryAnalysis, FileAnalysis, FileKind
 from ra2.domain.findings import DEFAULT_SEVERITY, Finding, FindingCode
 from ra2.domain.ids import FileId
 from ra2.domain.parsing.analysis import ParsedFile
-from ra2.domain.parsing.headers import CANONICAL_COLUMN_SETS, TEXT_KEY_COLUMN, ColumnSet
+from ra2.domain.parsing.headers import CANONICAL_COLUMN_SETS, ColumnSet
 
 __all__ = ["blocking_findings", "validate_delivery"]
 
@@ -347,8 +347,9 @@ def _text_join(files: Sequence[ParsedFile]) -> list[Finding]:
     text_keys: set[str] = set()
 
     findings: list[Finding] = []
+    text_key_column = _key_column(files, FileKind.TEXT)
     for parsed in text_files:
-        for value in parsed.values(TEXT_KEY_COLUMN):
+        for value in parsed.values(text_key_column):
             if not value:
                 continue
             text_keys.add(value)
@@ -358,7 +359,7 @@ def _text_join(files: Sequence[ParsedFile]) -> list[Finding]:
                         FindingCode.TEXT_KEY_UNMATCHED,
                         file_id=parsed.analysis.file_id,
                         key=value,
-                        detail={"column": TEXT_KEY_COLUMN},
+                        detail={"column": text_key_column},
                     )
                 )
 

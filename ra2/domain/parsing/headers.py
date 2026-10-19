@@ -467,10 +467,15 @@ CANONICAL_COLUMN_SETS: Final[dict[FileKind, tuple[ColumnSet, ...]]] = {
             ordinal_column="Person-Nr",
         ),
     ),
-    FileKind.TEXT: (  # shared/unchanged across formats
-        ColumnSet(
+    FileKind.TEXT: (
+        ColumnSet(  # the original contract, shared by RADIS and Astrana
             columns=("UNFALLUID", "HERGANG"),
             key_column="UNFALLUID",
+            narrative_column="HERGANG",
+        ),
+        ColumnSet(  # a delivery whose key column is just `UID`
+            columns=("UID", "HERGANG"),
+            key_column="UID",
             narrative_column="HERGANG",
         ),
     ),

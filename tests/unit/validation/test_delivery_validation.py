@@ -288,6 +288,33 @@ def test_a_narrative_with_no_accident_and_an_accident_with_no_narrative(build):
     assert blocking_findings(analysis) == ()
 
 
+def test_the_text_join_follows_the_text_files_own_key_column(build):
+    """A text file keyed `UID` joins on that column, not on `UNFALLUID`."""
+    present, textless, narrative_only = (
+        build.uid("aa", 1),
+        build.uid("aa", 2),
+        build.uid("ff", 9),
+    )
+    unfall = build.file(
+        FileKind.UNFALL,
+        [{UNFALL_KEY_COLUMN: present}, {UNFALL_KEY_COLUMN: textless}],
+        canton="AG",
+    )
+    text = build.file(
+        FileKind.TEXT,
+        [
+            {"UID": present, TEXT_NARRATIVE_COLUMN: "ok"},
+            {"UID": narrative_only, TEXT_NARRATIVE_COLUMN: "orphan"},
+        ],
+        name="text.csv",
+        column_set=CANONICAL_COLUMN_SETS[FileKind.TEXT][1],
+    )
+    analysis = validate_delivery([unfall, text])
+
+    assert build.only(analysis, FindingCode.TEXT_KEY_UNMATCHED).key == narrative_only
+    assert build.only(analysis, FindingCode.UNFALL_WITHOUT_TEXT).key == textless
+
+
 def test_no_text_file_means_no_text_findings_at_all(build):
     """Otherwise every `unfall` row in a structured-only selection would be
     reported as textless, which is noise, not information."""

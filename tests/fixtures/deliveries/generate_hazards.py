@@ -54,6 +54,7 @@ from ra2.domain.parsing.headers import (
     TEXT_KEY_COLUMN,
     TEXT_NARRATIVE_COLUMN,
     UNFALL_KEY_COLUMN,
+    ColumnSet,
 )
 
 HAZARDS_DIR = Path(__file__).parent / "hazards"
@@ -62,7 +63,9 @@ HAZARDS_DIR = Path(__file__).parent / "hazards"
 #: construction (`ra2.domain.parsing.headers`). h01-h12 are all RADIS-shaped.
 _RADIS = {kind: sets[0] for kind, sets in CANONICAL_COLUMN_SETS.items()}
 #: The Astrana column vocabulary — index 1. h13/h14 are Astrana-shaped.
-_ASTRANA = {kind: sets[1] for kind, sets in CANONICAL_COLUMN_SETS.items() if len(sets) > 1}
+_ASTRANA: dict[FileKind, ColumnSet] = {
+    kind: sets[1] for kind, sets in CANONICAL_COLUMN_SETS.items() if kind is not FileKind.TEXT
+}
 
 _radis_unfall = _RADIS[FileKind.UNFALL]
 assert _radis_unfall.canton_column is not None

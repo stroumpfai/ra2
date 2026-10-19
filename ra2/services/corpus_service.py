@@ -656,9 +656,11 @@ def _narratives(parsed: Sequence[ParsedFile]) -> dict[str, str]:
     checked across the whole delivery before this map is built.
     """
     narratives: dict[str, str] = {}
+    text_set = _resolved_column_set(parsed, FileKind.TEXT)
+    text_key_column = text_set.key_column if text_set else TEXT_KEY_COLUMN
     for text_file in _of_kind(parsed, FileKind.TEXT):
         header = text_file.header
-        for key, row in text_file.keyed(TEXT_KEY_COLUMN):
+        for key, row in text_file.keyed(text_key_column):
             if key:
                 narratives[key] = _value(header, row, TEXT_NARRATIVE_COLUMN)
     return narratives

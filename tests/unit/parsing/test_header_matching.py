@@ -7,6 +7,7 @@ from ra2.domain.parsing.headers import (
     CANONICAL_COLUMN_SETS,
     TEXT_KEY_COLUMN,
     UNFALL_KEY_COLUMN,
+    ColumnSet,
     classify_header,
     column_index,
     match_header,
@@ -15,8 +16,10 @@ from ra2.domain.parsing.headers import (
 
 #: RADIS — index 0 of every kind's `ColumnSet` tuple, by construction.
 RADIS = {kind: sets[0] for kind, sets in CANONICAL_COLUMN_SETS.items()}
-#: Astrana — index 1, only present for the three structured kinds.
-ASTRANA = {kind: sets[1] for kind, sets in CANONICAL_COLUMN_SETS.items() if len(sets) > 1}
+#: Astrana — index 1 of the three structured kinds (text has no Astrana set).
+ASTRANA: dict[FileKind, ColumnSet] = {
+    kind: sets[1] for kind, sets in CANONICAL_COLUMN_SETS.items() if kind is not FileKind.TEXT
+}
 
 RADIS_WIDTHS = {
     FileKind.UNFALL: 67,
@@ -192,6 +195,20 @@ def test_a_two_column_header_sharing_one_name_with_text_is_still_unknown():
     """Half of a two-column set is below the threshold, so a file that merely
     happens to have an `UNFALLUID` column is not called the narrative file."""
     assert match_header([TEXT_KEY_COLUMN, "BEMERKUNG"]) is FileKind.UNKNOWN
+
+
+def test_a_text_file_whose_key_column_is_uid_is_still_the_text_file():
+    """A delivery's narrative file can head its key `UID`; the header alone
+    says so, and the matched set carries the key column to read."""
+    match = classify_header(["UID", "HERGANG"])
+    assert match.kind is FileKind.TEXT
+    assert match.ok
+    assert match.column_set is not None
+    assert match.column_set.key_column == "UID"
+
+
+def test_a_uid_header_with_another_second_column_is_unknown():
+    assert match_header(["UID", "BEMERKUNG"]) is FileKind.UNKNOWN
 
 
 def test_an_empty_canonical_set_can_never_produce_a_match(monkeypatch):
