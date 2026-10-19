@@ -7,6 +7,7 @@ handlers came to show "1 feature validation error(s)".
 
 import ast
 from pathlib import Path
+from typing import TypeGuard
 
 import pytest
 
@@ -15,7 +16,7 @@ pytestmark = pytest.mark.ui
 _UI = Path(__file__).resolve().parents[2] / "ra2" / "ui"
 
 
-def _is_bare_str_toast(node: ast.AST) -> bool:
+def _is_bare_str_toast(node: ast.AST) -> TypeGuard[ast.Call]:
     return (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
