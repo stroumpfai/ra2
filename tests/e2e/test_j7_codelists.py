@@ -450,3 +450,71 @@ def test_the_column_search_keeps_its_focus_while_the_list_refilters(
     expect(search).to_be_focused()
     expect(search).to_have_value("vortritt")
     expect(page.locator('[data-testid="shown-count"]')).to_contain_text("1 of ")
+
+
+# --- plan-codelists-usability.md §4.3: Automap ---------------------------------
+
+#: `weather` is the attribute the journey maps by hand, then sees copied.
+AUTOMAP_CODELIST = _CODELISTS / "c06_automap" / "codelist.json"
+AUTOMAP_CORPUS = "j7-automap"
+
+
+@pytest.fixture
+def automap_root(e2e_settings: Settings) -> Path:
+    """The same delivery file again, frozen under a second name."""
+    root = e2e_settings.import_root_path / "j7-automap" / AUTOMAP_CORPUS
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "one.txt").write_bytes((_HAZARDS / "h08_all_empty_column" / "unfall.txt").read_bytes())
+    return root
+
+
+def test_automap_copies_a_mapping_into_a_new_corpus(
+    page: Page,
+    server_url: str,
+    codelists_route: str,
+    picker_root: Path,
+    picker_corpus: dict[str, bool],
+    automap_root: Path,
+) -> None:
+    """Map a column by hand in one corpus; freeze another; Automap offers the
+    same key there, pre-ticked because the column is unmapped, and applying
+    maps it. The checkbox is ticked and unticked in a real browser on the way,
+    where Vue's re-render is what could undo it."""
+    _ready_for_picker(page, server_url, picker_root, picker_corpus)
+    _open_import(page)
+    page.set_input_files(
+        '[data-testid="codelist-upload"] input[type="file"]', str(AUTOMAP_CODELIST)
+    )
+    expect(page.locator('[data-testid="import-dialog"]')).not_to_be_visible(timeout=15_000)
+    _open_picker(page)
+    page.locator(KEY_SEARCH).fill("weather")
+    page.locator(KEY_SEARCH).press("Enter")
+    expect(page.locator('[data-testid="detail-mapping"]')).to_contain_text(
+        "mapped to weather", timeout=15_000
+    )
+
+    _seed_corpus(page, server_url, automap_root, name=AUTOMAP_CORPUS)
+    page.click('[data-testid="nav-codelists"]')
+    page.wait_for_selector(ROW)
+    _select_corpus(page, name=AUTOMAP_CORPUS)
+
+    page.click('[data-testid="automap"]')
+    row = page.locator(f'[data-testid="automap-row"][data-column="{UNTOUCHED_COLUMN}"]')
+    expect(row).to_have_attribute("data-source", "copied", timeout=15_000)
+    expect(row).to_contain_text("weather")
+    box = row.locator('[data-testid="automap-check"]')
+    expect(box).to_be_checked()
+
+    box.uncheck()
+    expect(row).to_have_attribute("data-checked", "false")
+    expect(box).not_to_be_checked()
+    box.check()
+    expect(row).to_have_attribute("data-checked", "true")
+    expect(box).to_be_checked()
+
+    page.click('[data-testid="automap-apply"]')
+    expect(page.locator('[data-testid="automap-dialog"]')).not_to_be_visible(timeout=15_000)
+    page.locator(f'{ROW}[data-column="{UNTOUCHED_COLUMN}"]').click()
+    expect(page.locator('[data-testid="detail-mapping"]')).to_contain_text(
+        "mapped to weather", timeout=15_000
+    )

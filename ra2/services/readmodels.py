@@ -18,6 +18,7 @@ from enum import StrEnum
 from ra2.domain.anonymisation import AnonymisationMarking
 from ra2.domain.census import CensusBucket, TypeHint, ValueCount
 from ra2.domain.codelist_coverage import ColumnCoverage
+from ra2.domain.codelist_suggest import SuggestionSource
 from ra2.domain.codes import CodeValue
 from ra2.domain.context_fit import ContextFit
 from ra2.domain.delivery import DeliveryStatus, FileKind, SourceKind
@@ -80,6 +81,8 @@ __all__ = [
     "FeatureView",
     "FlagInconsistencyRow",
     "Goal1Companion",
+    "MappingSuggestionView",
+    "MappingSuggestionsView",
     "MetricCell",
     "MismatchExportRow",
     "MismatchFeatureView",
@@ -123,6 +126,7 @@ __all__ = [
     "SuppressedCell",
     "TagFilter",
     "TagState",
+    "UnresolvedCopyView",
 ]
 
 
@@ -321,6 +325,45 @@ class ColumnMappingView:
     #: Feature names reading this column (C5, plan-phase-2.md §2) — inert
     #: (always empty) until a feature actually exists to populate it.
     used_by_features: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class MappingSuggestionView:
+    """One automap proposal (plan-codelists-usability.md §4.2): map
+    `column_name` to `attribute_key`, and why."""
+
+    column_name: str
+    table_name: str
+    code_attribute_id: CodeAttributeId
+    attribute_key: str
+    source: SuggestionSource
+    #: Distinct corpus values that are codes of the attribute, of `distinct`.
+    contained: int
+    distinct: int
+    #: The key this column is mapped to now, or `None` when unmapped.
+    currently: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class UnresolvedCopyView:
+    """A mapping the source corpus has and the current import cannot
+    honour: its key is not in the file any more."""
+
+    column_name: str
+    table_name: str
+    attribute_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class MappingSuggestionsView:
+    """What `CodelistService.suggest_mappings` returns. Writes nothing."""
+
+    #: The corpus copied from, or `None` when no other corpus has mappings.
+    source_corpus_id: CorpusId | None
+    #: Every other corpus with mappings — what the dialog offers to copy from.
+    sources: tuple[CorpusId, ...]
+    suggestions: tuple[MappingSuggestionView, ...]
+    unresolved: tuple[UnresolvedCopyView, ...]
 
 
 @dataclass(frozen=True, slots=True)

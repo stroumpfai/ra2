@@ -43,6 +43,7 @@ import asyncio
 import os
 from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -56,9 +57,10 @@ from nicegui.testing.general import nicegui_reset_globals
 from nicegui.testing.user import User
 from nicegui.testing.user_interaction import UserInteraction
 from tests.conftest import FrozenClock
-from tests.fixtures.factories import make_census_input, make_census_table_input, seed_corpus
+from tests.fixtures.factories import NOW, make_census_input, make_census_table_input, seed_corpus
 
 from ra2.domain.codelist_coverage import ColumnCoverage, CoverageStatus
+from ra2.domain.codelist_suggest import SuggestionSource
 from ra2.domain.ids import CodeAttributeId, CorpusId, RecordId
 from ra2.infra.config import Settings
 from ra2.infra.idgen import SeededFactory
@@ -70,6 +72,8 @@ from ra2.services.readmodels import CodeAttributeView, ColumnMappingView
 from ra2.ui.views import codelists_view
 from ra2.ui.views.codelists_view import (
     ADD_LABEL,
+    AUTOMAP_APPLY,
+    AUTOMAP_NOTHING,
     FULLY_LABELLED_PILL,
     IMPORT_FAILED_TITLE,
     IMPORT_LABEL,
@@ -82,6 +86,7 @@ from ra2.ui.views.codelists_view import (
     PROMPT_PREVIEW_TITLE,
     REMINDER_BODY,
     SORTED_BY_STATUS,
+    automap_applied_message,
     group_label,
     key_search_text,
     matches_query,
@@ -134,13 +139,23 @@ def codelist_bytes(hazard: str) -> bytes:
     return (_CODELISTS / hazard / "codelist.json").read_bytes()
 
 
-async def _seed_enum_columns(settings: Settings, *, with_person: bool = False) -> None:
+async def _seed_enum_columns(
+    settings: Settings,
+    *,
+    with_person: bool = False,
+    corpus_id: str = CORPUS_ID,
+    version: int = 1,
+    imported_at: datetime = NOW,
+) -> None:
     """One corpus, three enum columns, and the EAV cells behind them.
 
     See the module docstring for why this exists rather than being imported.
     Both the `unfall_row` cells and the materialised `census_column` rows come
     from the same `SEED` mapping, so `coverage_counts()`'s live `GROUP BY` and
     the census's `distinct_count` can never disagree.
+
+    `corpus_id` / `version` / `imported_at` let a test freeze a second
+    version of the same corpus (Automap's copy source) beside the first.
 
     `with_person=True` adds `PERSON_SEED`'s column to the census as a `person`
     table column — census only, no EAV cells: it stays unmapped, so nothing
@@ -152,14 +167,21 @@ async def _seed_enum_columns(settings: Settings, *, with_person: bool = False) -
     record_count = len(next(iter(SEED.values())))
     try:
         async with factory() as session:
-            await seed_corpus(session, CORPUS_ID, name=CORPUS_NAME, record_count=record_count)
+            await seed_corpus(
+                session,
+                corpus_id,
+                name=CORPUS_NAME,
+                version=version,
+                imported_at=imported_at,
+                record_count=record_count,
+            )
             for index in range(record_count):
-                record_id = RecordId(f"{CORPUS_ID}-r{index}")
+                record_id = RecordId(f"{corpus_id}-r{index}")
                 session.add(
                     Record(
                         id=record_id,
-                        corpus_id=CorpusId(CORPUS_ID),
-                        unfall_uid=f"{CORPUS_ID}-u{index}",
+                        corpus_id=CorpusId(corpus_id),
+                        unfall_uid=f"{corpus_id}-u{index}",
                         language="de",
                         language_confidence=1.0,
                     )
@@ -185,8 +207,9 @@ async def _seed_enum_columns(settings: Settings, *, with_person: bool = False) -
                 ]
                 tables.append(make_census_table_input("person", tuple(PERSON_SEED), person_cells))
             census = make_census_input(record_count=record_count, tables=tables)
-            materialiser = RelationalCensusMaterialiser(ids=SeededFactory(seed=7))
-            await materialiser.materialise(session, CorpusId(CORPUS_ID), census)
+            # One seed per version, so two corpora's census rows never share an id.
+            materialiser = RelationalCensusMaterialiser(ids=SeededFactory(seed=7 + version))
+            await materialiser.materialise(session, CorpusId(corpus_id), census)
             await session.commit()
     finally:
         await engine.dispose()
@@ -285,6 +308,52 @@ async def two_tables(
                 )
                 await services.codelist.map_column(
                     CorpusId(CORPUS_ID), PARTIAL_COLUMN, attributes["road_type"].code_attribute_id
+                )
+                yield Seeded(User(client), services, CorpusId(CORPUS_ID))
+        finally:
+            os.environ.pop("NICEGUI_USER_SIMULATION", None)
+            _restore_nicegui_functions()
+
+
+#: Automap's copy source: version 1 of `CORPUS_NAME`, frozen a day before
+#: `CORPUS_ID` — which, as version 2 and the newest, is the one the view opens.
+PREVIOUS_ID = "corpus-codelists-v1"
+
+
+@pytest.fixture
+async def two_versions(
+    app_factory: Callable[..., FastAPI], migrated_db: Settings
+) -> AsyncIterator[Seeded]:
+    """`unmapped`'s corpus as version 2, beside a version 1 whose ok and
+    partial columns are mapped — the state "Automap…" copies from."""
+    with nicegui_reset_globals():
+        os.environ["NICEGUI_USER_SIMULATION"] = "true"
+        try:
+            app = app_factory(mount_ui=True)
+            services: Services = app.state.services
+            codelists_view.register(services)
+            async with (
+                app.router.lifespan_context(app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app), base_url="http://test"
+                ) as client,
+            ):
+                await _seed_enum_columns(
+                    migrated_db,
+                    corpus_id=PREVIOUS_ID,
+                    version=1,
+                    imported_at=NOW - timedelta(days=1),
+                )
+                await _seed_enum_columns(migrated_db, version=2)
+                await services.codelist.import_file(
+                    "codelist.json", codelist_bytes("c01_minimal_valid")
+                )
+                attributes = {a.key: a for a in await services.codelist.list_attributes()}
+                await services.codelist.map_column(
+                    CorpusId(PREVIOUS_ID), OK_COLUMN, attributes["accident_type"].code_attribute_id
+                )
+                await services.codelist.map_column(
+                    CorpusId(PREVIOUS_ID), PARTIAL_COLUMN, attributes["road_type"].code_attribute_id
                 )
                 yield Seeded(User(client), services, CorpusId(CORPUS_ID))
         finally:
@@ -889,6 +958,89 @@ async def test_escape_in_the_key_search_closes_the_popover(unmapped: Seeded) -> 
     _one(user, search).trigger("keydown")
     await _until(lambda: not _find(user, "json-key-popover"))
     assert _row_status(user, OK_COLUMN) == CoverageStatus.MISSING.value
+
+
+# --- automap (plan-codelists-usability.md §4.3) --------------------------------
+
+
+def _automap_rows(user: User) -> dict[str, Element]:
+    return {str(e._props["data-column"]): e for e in _find(user, "automap-row")}
+
+
+async def _open_automap(user: User) -> None:
+    _one(user, _find(user, "automap")[0]).click()
+    await _until(lambda: bool(_find(user, "table-automap")) or bool(_find(user, "automap-empty")))
+
+
+async def test_automap_pre_ticks_the_copied_mappings_of_unmapped_columns(
+    two_versions: Seeded,
+) -> None:
+    """Version 1 mapped the ok and partial columns; version 2 maps nothing.
+    Both copies are offered and ticked; `WetterAusw` (`1`, `2`) sits in no
+    attribute of c01 (whose codes are `01`, `02`), so nothing is proposed for
+    it — and the dialog names the corpus it copied from."""
+    user = two_versions.user
+    await user.open("/codelists")
+    await _open_automap(user)
+
+    rows = _automap_rows(user)
+    assert set(rows) == {OK_COLUMN, PARTIAL_COLUMN}
+    assert {c: r._props["data-source"] for c, r in rows.items()} == {
+        OK_COLUMN: SuggestionSource.COPIED.value,
+        PARTIAL_COLUMN: SuggestionSource.COPIED.value,
+    }
+    assert {c: r._props["data-checked"] for c, r in rows.items()} == {
+        OK_COLUMN: "true",
+        PARTIAL_COLUMN: "true",
+    }
+    assert _chip_text(user, "automap-source") == f"from corpus {CORPUS_NAME} · v1 ▼"
+    (apply,) = _find(user, "automap-apply")
+    assert _own_text(_kids(apply)[0]) == f"{AUTOMAP_APPLY} (2)"
+
+
+async def test_applying_maps_only_the_ticked_rows(two_versions: Seeded) -> None:
+    user = two_versions.user
+    await user.open("/codelists")
+    await _open_automap(user)
+
+    (box,) = _within(_automap_rows(user)[PARTIAL_COLUMN], "automap-check")
+    _one(user, box).trigger("change")
+    await _until(lambda: _automap_rows(user)[PARTIAL_COLUMN]._props["data-checked"] == "false")
+    _one(user, _find(user, "automap-apply")[0]).click()
+    await user.should_see(automap_applied_message(1))
+
+    await _until(lambda: _row_status(user, OK_COLUMN) == CoverageStatus.OK.value)
+    assert _row_status(user, PARTIAL_COLUMN) == CoverageStatus.MISSING.value
+    mapped = {
+        c.column_name: c.mapped_attribute.key if c.mapped_attribute else None
+        for c in await two_versions.services.codelist.list_columns(
+            two_versions.corpus_id, language="de"
+        )
+    }
+    assert mapped == {OK_COLUMN: "accident_type", PARTIAL_COLUMN: None, MISSING_COLUMN: None}
+
+
+async def test_cancelling_automap_maps_nothing(two_versions: Seeded) -> None:
+    user = two_versions.user
+    await user.open("/codelists")
+    await _open_automap(user)
+    _one(user, _find(user, "automap-cancel")[0]).click()
+
+    columns = await two_versions.services.codelist.list_columns(
+        two_versions.corpus_id, language="de"
+    )
+    assert all(c.mapping_id is None for c in columns)
+
+
+async def test_automap_with_nothing_to_propose_says_so(seeded: Seeded) -> None:
+    """One corpus, so nothing to copy; c01's two attributes share their
+    codes, so overlap ties everywhere and proposes nothing either."""
+    user = seeded.user
+    await user.open("/codelists")
+    await _open_automap(user)
+    assert _texts(user, "automap-empty") == [AUTOMAP_NOTHING]
+    (apply,) = _find(user, "automap-apply")
+    assert "disabled" in apply._props
 
 
 def test_key_search_text_is_folded_over_every_language() -> None:

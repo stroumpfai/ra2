@@ -1,0 +1,112 @@
+{
+  "accident_type": {
+    "chapter": "6.1",
+    "codes": {
+      "01": {
+        "de": "Typ 01",
+        "fr": "Type 01",
+        "it": "Tipo 01"
+      },
+      "02": {
+        "de": "Typ 02",
+        "fr": "Type 02",
+        "it": "Tipo 02"
+      },
+      "03": {
+        "de": "Typ 03",
+        "fr": "Type 03",
+        "it": "Tipo 03"
+      },
+      "04": {
+        "de": "Typ 04",
+        "fr": "Type 04",
+        "it": "Tipo 04"
+      }
+    },
+    "name": {
+      "de": "Unfalltyp",
+      "fr": "Type d'accident",
+      "it": "Tipo di incidente"
+    }
+  },
+  "injury_severity": {
+    "chapter": "6.2",
+    "codes": {
+      "1": {
+        "de": "Grad 1",
+        "fr": "Degré 1",
+        "it": "Grado 1"
+      },
+      "2": {
+        "de": "Grad 2",
+        "fr": "Degré 2",
+        "it": "Grado 2"
+      },
+      "3": {
+        "de": "Grad 3",
+        "fr": "Degré 3",
+        "it": "Grado 3"
+      }
+    },
+    "name": {
+      "de": "Verletzungsgrad",
+      "fr": "Gravité",
+      "it": "Gravità"
+    }
+  },
+  "weather": {
+    "chapter": "6.4",
+    "codes": {
+      "1": {
+        "de": "Wetter 1",
+        "fr": "Temps 1",
+        "it": "Tempo 1"
+      },
+      "2": {
+        "de": "Wetter 2",
+        "fr": "Temps 2",
+        "it": "Tempo 2"
+      },
+      "3": {
+        "de": "Wetter 3",
+        "fr": "Temps 3",
+        "it": "Tempo 3"
+      },
+      "4": {
+        "de": "Wetter 4",
+        "fr": "Temps 4",
+        "it": "Tempo 4"
+      },
+      "5": {
+        "de": "Wetter 5",
+        "fr": "Temps 5",
+        "it": "Tempo 5"
+      },
+      "6": {
+        "de": "Wetter 6",
+        "fr": "Temps 6",
+        "it": "Tempo 6"
+      },
+      "7": {
+        "de": "Wetter 7",
+        "fr": "Temps 7",
+        "it": "Tempo 7"
+      },
+      "8": {
+        "de": "Wetter 8",
+        "fr": "Temps 8",
+        "it": "Tempo 8"
+      },
+      "9": {
+        "de": "Wetter 9",
+        "fr": "Temps 9",
+        "it": "Tempo 9"
+      }
+    },
+    "name": {
+      "de": "Witterung",
+      "fr": "Météo",
+      "it": "Meteo"
+    }
+  }
+}

@@ -1130,6 +1130,42 @@ no uvloop.
 
 ---
 
+## Codelists usability — find a key, find a column, automap, a slice
+
+`feat/codelists-usability`, `plan-codelists-usability.md`. **One amendment**
+(`contracts/amendments/feat-codelists-usability.md`), applied in the same
+commits. **No migration**: nothing new is stored, and automap writes the same
+`column_mapping` rows `map_column` does. No API change; automap is reached
+in-process only (plan §4.4). `design/code-feature/README.md` Screen 1 is
+amended first, in the plan's first commit.
+
+### Amended files (already frozen)
+
+| File | Change | Amendment |
+|---|---|---|
+| `ra2/services/readmodels.py` | + `MappingSuggestionView`, `UnresolvedCopyView`, `MappingSuggestionsView` | `feat-codelists-usability` |
+| `ra2/services/codelist_service.py` | + `suggest_mappings(corpus_id, *, source_corpus_id=None)`, `apply_mappings(corpus_id, picks)`. Existing signatures, `EnumCodeTableProvider` included, unchanged | `feat-codelists-usability` |
+
+### New files
+
+| Path | What |
+|---|---|
+| `ra2/domain/codelist_suggest.py` | Automap's pure half: copied, then overlap; exact codes; a tie proposes nothing |
+| `tests/fixtures/codelists/hazards/c06_automap/` | Padded vs bare codes, nested code sets, and a next generation that drops a key — from the generator |
+| `tests/unit/codes/test_codelist_suggest.py`, `tests/backend/services/codelist/test_suggest_mappings.py` | The rules; the service over three corpora and two generations |
+| `plan-codelists-usability.md` | The plan, its deviations, and what it found on the way (§7a) |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/ui/views/codelists_view.py` | The `table ·` chip and the column search; the JSON-key popover with in-browser search; the Automap dialog |
+| `ra2/persistence/repositories/codelist_repo.py` | `get_latest_import` breaks an `imported_at` tie by id (UUIDv7) |
+| `design/code-feature/README.md` | Screen 1 amended: the chip, the search strip, Automap, the popover |
+| `tests/e2e/test_j8_features.py`, `tests/e2e/test_j9_prompts.py` | Count corpora by the API's `meta.total`, not a table that shows ten |
+
+---
+
 ## Phase 5 — owner: M35 (Wave 0), amendment only
 
 Re-established at tag `p5-frozen`, the same way M27 established the phase-4

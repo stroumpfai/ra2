@@ -168,8 +168,20 @@ The rules, each one with a unit test:
    code is what §7 forbids. A column whose leading zeros were lost shows up
    here as *no overlap*, which is the truth.
 4. **An all-empty column** (no cells) gets no suggestion.
+5. **One distinct value is no evidence.** A column holding a single value
+   gets no *overlap* suggestion (`MIN_OVERLAP_DISTINCT = 2`). That value sits
+   inside every attribute that has it, so the tightest fit would just be the
+   smallest attribute. *Added after looking at the dialog:* on the E2E
+   delivery, every single-valued column was proposed `injury_severity`. A
+   copy has no such floor, because it rests on a decision, not on the data.
 
 Pure, as §1 requires: no session, no I/O, plain values in and out.
+
+*As built*, `Overlap` carries counts (`contained`, `distinct`) rather than
+one `distinct_contained` ratio, because the dialog prints `5 / 5`. "Beats the
+runner-up" means beating the runner-up **among the attributes that also cover
+the column**. One that covers less can have a higher Jaccard and still not
+be a candidate.
 
 ### 4.2 The service part — `CodelistService`
 
@@ -260,7 +272,7 @@ from `codes.py` (sw-design.md §14.3).
 | unit | `tests/unit/test_codelist_suggest.py` (new) | copied wins; a copied key missing from the import gives no suggestion; overlap needs full containment and a clear margin; a tie gives none; `"04"` ≠ `"4"`; an all-empty column gives none; deterministic order |
 | backend | `tests/backend/test_codelist_suggest_service.py` (new) | default source = previous version of the same name; keys resolved across import generations; `unresolved` populated; already-mapped columns flagged and never altered by `suggest`; `apply_mappings` is one transaction and writes nothing on an unknown id; `code_value` row count unchanged |
 | ui | `tests/ui/test_codelists_view.py` (extend) | table chip options come from the rows; table ∧ status ∧ query; counts over the complete list; the search box keeps focus across a debounced redraw; the picker shows name and chapter; the dialog pre-checks only copied-and-unmapped; Apply calls the service once |
-| e2e | `tests/e2e/test_j7_codelists.py` (extend) | the popover stays inside the edit pane at the 360 px minimum; typing filters options with no server round trip; ↑/↓/Enter/Esc |
+| e2e | `tests/e2e/test_j7_codelists.py` (extend) | the popover stays inside the edit pane; typing filters options with no server round trip; ↑/↓/Enter/Esc; the column search keeps its focus while the list re-filters; a hand-made mapping is copied into a second corpus, pre-ticked, and the checkbox survives a real browser |
 
 Fixtures: one corpus at version 1 and version 2 under the same name, v1
 mapped. A codelist import with an attribute whose codes are `01..04` and

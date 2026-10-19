@@ -22,7 +22,7 @@ The same three rules that shape `census_view.py` shape every line here:
 3. **The UI calls services in-process as Python** (§1). No HTTP call to this
    app's own API anywhere in this file, and nothing imported from `ra2.api`.
 
-Five of `CodelistService`'s six methods are called from here. The sixth,
+Every `CodelistService` method but one is called from here. The exception,
 `coverage()`, takes an `AsyncSession` — a `ui/` module that called it would be
 holding a session, which §12.7 forbids outright — so coverage reaches this
 view the way it is meant to, inside `ColumnMappingView.coverage`.
@@ -67,12 +67,20 @@ from nicegui.element import Element
 from nicegui.events import MultiUploadEventArguments
 
 from ra2.domain.codelist_coverage import CodeUsage, ColumnCoverage, CoverageStatus
+from ra2.domain.codelist_suggest import SuggestionSource
 from ra2.domain.codes import CodeImportError
 from ra2.domain.ids import CodeAttributeId, CorpusId
 from ra2.domain.language import Language
 from ra2.services.container import Services
 from ra2.services.errors import CodelistImportError, ServiceError
-from ra2.services.readmodels import CodeAttributeView, ColumnMappingView, CorpusView, SortDir
+from ra2.services.readmodels import (
+    CodeAttributeView,
+    ColumnMappingView,
+    CorpusView,
+    MappingSuggestionsView,
+    MappingSuggestionView,
+    SortDir,
+)
 from ra2.ui.components import bar, card, dialog_card, format_count
 from ra2.ui.components.icons import ALERT_TRIANGLE, DOWNLOAD, INFO, svg
 from ra2.ui.components.primitives import (
@@ -85,6 +93,9 @@ from ra2.ui.shell import item_for_key, shell
 
 __all__ = [
     "ADD_LABEL",
+    "AUTOMAP_APPLY",
+    "AUTOMAP_LABEL",
+    "AUTOMAP_NOTHING",
     "CONTENT_GAP",
     "CONTENT_PADDING",
     "CORPUS_KEY",
@@ -108,10 +119,12 @@ __all__ = [
     "REMINDER_TITLE",
     "SEARCH_PLACEHOLDER",
     "SORTED_BY_STATUS",
+    "SOURCE_LABELS",
     "STATE_KEY",
     "STATUS_LABELS",
     "UNUSED",
     "CodelistsState",
+    "automap_applied_message",
     "codelists_state",
     "danger_footer_text",
     "group_label",
@@ -204,6 +217,26 @@ NOT_MAPPED_OPTION: Final = "— not mapped —"
 #: Undesigned states (README, "Loading / empty / error"): one centred line.
 NO_CORPUS_MESSAGE: Final = "No corpus yet — create one on Import."
 NO_COLUMNS_MESSAGE: Final = "No enum columns match this filter."
+#: Automap (amended README, `plan-codelists-usability.md` §4.3). Undesigned
+#: beyond the button and the rule "proposes, never applies"; the dialog is
+#: the same surface the import uses.
+AUTOMAP_LABEL: Final = "Automap…"
+AUTOMAP_TITLE: Final = "Automap · suggested mappings"
+AUTOMAP_INTRO: Final = (
+    "Nothing is mapped until you apply. A copied suggestion repeats a mapping "
+    "another corpus already has; an overlap suggestion is the one attribute "
+    "whose codes contain every value the column holds — check it before "
+    "ticking it. A mapping changes the fingerprint of every feature using it."
+)
+AUTOMAP_NOTHING: Final = "No suggestions — every column is mapped, or nothing fits."
+AUTOMAP_UNRESOLVED_TITLE: Final = "Not in the current codelist"
+AUTOMAP_APPLY: Final = "Apply selected"
+AUTOMAP_NO_SOURCE: Final = "no corpus to copy from"
+#: `SuggestionSource` values are stable identifiers; the words are this table.
+SOURCE_LABELS: Final[dict[SuggestionSource, str]] = {
+    SuggestionSource.COPIED: "copied",
+    SuggestionSource.OVERLAP: "overlap",
+}
 #: The JSON-key popover's search field and its no-result line.
 KEY_SEARCH_PLACEHOLDER: Final = "Search keys…"
 NO_KEY_MATCHES: Final = "No key matches."
@@ -371,6 +404,13 @@ class _CodelistsPage:
         self._open_menu: str | None = None
         #: The JSON-key field as last drawn, so Escape can return focus to it.
         self._json_key_field: Element | None = None
+        #: Automap's dialog, what the service last proposed, and which of its
+        #: columns are ticked — per page, like everything else here (§12.8).
+        self._automap_dialog: ui.dialog | None = None
+        self._automap_body: Element | None = None
+        self._automap: MappingSuggestionsView | None = None
+        self._automap_checked: set[str] = set()
+        self._automap_slot: Element | None = None
         #: The file picker, kept so re-opening replaces it rather than
         #: stacking a second one inside `_root` (see `_open_import`).
         self._import_dialog: ui.dialog | None = None
@@ -411,6 +451,8 @@ class _CodelistsPage:
                     )
                     with self._search_strip:
                         self._search_input()
+                        # Its own slot: the strip itself is never redrawn.
+                        self._automap_slot = ui.element("div").style("flex:none;")
                     self._list_slot = ui.element("div").style(LIST_REST_STYLE)
                 self._detail_slot = detail_pane
         await self.reload()
@@ -518,6 +560,10 @@ class _CodelistsPage:
             self._list_header()
         # Never cleared — see `SEARCH_STRIP_STYLE` — only shown or hidden.
         self._search_strip.set_visibility(self._corpus is not None)
+        assert self._automap_slot is not None
+        self._automap_slot.clear()
+        with self._automap_slot:
+            self._automap_button()
         self._list_slot.clear()
         with self._list_slot:
             self._master_list()
@@ -1269,6 +1315,252 @@ class _CodelistsPage:
         """
         app.storage.client[STATE_KEY] = changed
 
+    # --- automap (plan-codelists-usability.md §4.3) -------------------------
+
+    def _automap_button(self) -> None:
+        """Disabled until there is a corpus to map and a codelist to map it to."""
+        enabled = self._corpus is not None and bool(self._attributes)
+        button = (
+            ui.element("button")
+            .classes("btn secondary")
+            .props(
+                'type="button" data-testid="automap"'
+                + ("" if enabled else ' disabled aria-disabled="true"')
+            )
+            .mark("automap")
+        )
+        if enabled:
+            button.on("click", cast("Callable[[], None]", self._open_automap))
+        with button:
+            ui.label(AUTOMAP_LABEL)
+
+    async def _open_automap(self, source_corpus_id: str | None = None) -> None:
+        """Ask the service for proposals and show them. `source_corpus_id`
+        `None` is the service's own default; the dialog's chip picks another.
+
+        Pre-ticked: **copied** proposals for columns that are unmapped — a
+        decision an analyst already made, landing where nothing is decided.
+        Everything else waits for a tick (plan §1, "Overlap ranks").
+        """
+        assert self._root is not None
+        if self._corpus is None:
+            return
+        try:
+            self._automap = await self._services.codelist.suggest_mappings(
+                CorpusId(self._corpus.corpus_id),
+                source_corpus_id=CorpusId(source_corpus_id) if source_corpus_id else None,
+            )
+        except ServiceError as exc:
+            ui.notify(str(exc), type="negative")
+            return
+        self._automap_checked = {
+            s.column_name
+            for s in self._automap.suggestions
+            if s.source is SuggestionSource.COPIED and s.currently is None
+        }
+        self._open_menu = None
+        if self._automap_dialog is None:
+            with (
+                # Parented to `_root`, which nothing clears (see `_open_import`).
+                self._root,
+                ui.dialog().props('data-testid="automap-dialog"') as dialog,
+                dialog_card(extra="width:760px;max-width:calc(100vw - 32px);max-height:88vh;"),
+            ):
+                self._automap_dialog = dialog
+                self._automap_body = ui.element("div").style(
+                    "display:flex;flex-direction:column;min-height:0;max-height:88vh;"
+                )
+        self._render_automap()
+        self._automap_dialog.value = True
+
+    def _render_automap(self) -> None:
+        assert self._automap_body is not None
+        assert self._automap is not None
+        proposals = self._automap
+        self._automap_body.clear()
+        with self._automap_body:
+            with ui.element("div").style("flex:none;padding:14px 14px 10px;"):
+                ui.label(AUTOMAP_TITLE).style("font-size:13px;font-weight:600;")
+                ui.label(AUTOMAP_INTRO).style(
+                    "font-size:12.5px;color:var(--ink2);margin-top:4px;white-space:normal;"
+                )
+                with ui.element("div").style(
+                    "position:relative;display:flex;gap:8px;margin-top:10px;"
+                ):
+                    self._automap_source_chip(proposals)
+            with ui.element("div").style("flex:1;min-height:0;overflow:auto;padding:0 14px;"):
+                if proposals.suggestions:
+                    self._automap_table(proposals.suggestions)
+                else:
+                    ui.label(AUTOMAP_NOTHING).props('data-testid="automap-empty"').mark(
+                        "automap-empty"
+                    ).style(EMPTY_STYLE)
+                if proposals.unresolved:
+                    ui.label(AUTOMAP_UNRESOLVED_TITLE).classes("lbl").style(
+                        "margin-top:12px;color:var(--warn);"
+                    )
+                    for missing in proposals.unresolved:
+                        ui.label(
+                            f"{_qualified(missing.table_name, missing.column_name)} → "
+                            f"{missing.attribute_key}"
+                        ).classes("mono").props('data-testid="automap-unresolved"').mark(
+                            "automap-unresolved"
+                        ).style("font-size:11px;color:var(--warn);padding:3px 0;")
+            with ui.element("div").style(
+                "flex:none;display:flex;justify-content:flex-end;gap:8px;padding:12px 14px;"
+                "border-top:1px solid var(--rule2);"
+            ):
+                cancel = (
+                    ui.element("button")
+                    .classes("btn secondary")
+                    .props('type="button" data-testid="automap-cancel"')
+                    .mark("automap-cancel")
+                )
+                cancel.on("click", lambda _: self._close_automap())
+                with cancel:
+                    ui.label("Cancel")
+                count = len(self._automap_checked)
+                apply = (
+                    ui.element("button")
+                    .classes("btn")
+                    .props(
+                        'type="button" data-testid="automap-apply"'
+                        + ("" if count else ' disabled aria-disabled="true"')
+                    )
+                    .mark("automap-apply")
+                )
+                if count:
+                    apply.on("click", cast("Callable[[], None]", self._apply_automap))
+                with apply:
+                    ui.label(f"{AUTOMAP_APPLY} ({count})")
+
+    def _automap_source_chip(self, proposals: MappingSuggestionsView) -> None:
+        """Which corpus "copied" copies from — the service's default, or any
+        other corpus that has mappings."""
+        by_id = {c.corpus_id: c for c in self._corpora}
+        current = by_id.get(proposals.source_corpus_id) if proposals.source_corpus_id else None
+        text = f"from {_corpus_chip_text(current)}" if current is not None else AUTOMAP_NO_SOURCE
+        if not proposals.sources:
+            ui.label(text).classes("chip").props('data-chip="automap-source"').style(
+                "color:var(--ink3);"
+            )
+            return
+        self._dropdown(
+            name="automap-source",
+            text=text,
+            aria_label="Copy mappings from",
+            options=[
+                (
+                    corpus_id,
+                    f"from {_corpus_chip_text(by_id[corpus_id])}",
+                    corpus_id == proposals.source_corpus_id,
+                )
+                for corpus_id in proposals.sources
+                if corpus_id in by_id
+            ],
+            on_pick=self._pick_automap_source,
+        )
+
+    def _automap_table(self, suggestions: Sequence[MappingSuggestionView]) -> None:
+        with (
+            ui.element("table")
+            .props('data-testid="table-automap"')
+            .mark("table-automap")
+            .style("table-layout:fixed;width:100%;border-collapse:collapse;")
+        ):
+            with ui.element("thead"), ui.element("tr"):
+                _header_cell("", width="32px")
+                _header_cell("Column", width=None)
+                _header_cell("Suggested key", width=None)
+                _header_cell("Source", width="76px")
+                _header_cell("Codes", width="84px", align="right")
+            with ui.element("tbody"):
+                for suggestion in suggestions:
+                    self._automap_row(suggestion)
+
+    def _automap_row(self, suggestion: MappingSuggestionView) -> None:
+        checked = suggestion.column_name in self._automap_checked
+        row = data_props(
+            ui.element("tr").props('data-testid="automap-row"').mark("automap-row"),
+            {
+                "data-column": suggestion.column_name,
+                "data-source": suggestion.source.value,
+                "data-checked": "true" if checked else "false",
+            },
+        )
+        with row:
+            with ui.element("td").classes("td"):
+                box = data_props(
+                    ui.element("input")
+                    .props('type="checkbox" data-testid="automap-check"')
+                    .mark("automap-check"),
+                    {"aria-label": f"Map {suggestion.column_name} to {suggestion.attribute_key}"},
+                )
+                # Re-sent on every render of this dialog, so the box always
+                # shows the server's set — see `_search_input` on why a stale
+                # prop would otherwise win.
+                box.props["checked"] = checked
+                box.on(
+                    "change",
+                    lambda _, column=suggestion.column_name: self._toggle_automap(column),
+                )
+            with ui.element("td").classes("td mono").style("font-size:11.5px;"):
+                ui.label(_qualified(suggestion.table_name, suggestion.column_name)).style(
+                    "overflow-wrap:anywhere;white-space:normal;"
+                )
+                if suggestion.currently is not None:
+                    ui.label(f"currently {suggestion.currently}").props(
+                        'data-testid="automap-currently"'
+                    ).mark("automap-currently").style("font-size:10.5px;color:var(--warn);")
+            with ui.element("td").classes("td mono").style("font-size:11.5px;"):
+                ui.label(suggestion.attribute_key).style(
+                    "overflow-wrap:anywhere;white-space:normal;"
+                )
+            with ui.element("td").classes("td"):
+                if suggestion.source is SuggestionSource.COPIED:
+                    pill(SOURCE_LABELS[suggestion.source], tone="accent")
+                else:
+                    ui.label(SOURCE_LABELS[suggestion.source]).classes("mono").style(
+                        "font-size:11px;color:var(--ink2);"
+                    )
+            with ui.element("td").classes("td mono").style("text-align:right;font-size:11.5px;"):
+                partial = suggestion.contained < suggestion.distinct
+                ui.label(f"{suggestion.contained} / {suggestion.distinct}").props(
+                    'data-testid="automap-codes"'
+                ).mark("automap-codes").style("color:var(--warn);" if partial else "")
+
+    def _toggle_automap(self, column_name: str) -> None:
+        self._automap_checked ^= {column_name}
+        self._render_automap()
+
+    async def _pick_automap_source(self, corpus_id: str) -> None:
+        await self._open_automap(corpus_id)
+
+    def _close_automap(self) -> None:
+        if self._automap_dialog is not None:
+            self._automap_dialog.close()
+
+    async def _apply_automap(self) -> None:
+        """One `apply_mappings` call for every ticked row — one transaction,
+        all or nothing — then a re-read, since every applied row moves group."""
+        if self._corpus is None or self._automap is None:
+            return
+        picks = [
+            (s.column_name, s.code_attribute_id)
+            for s in self._automap.suggestions
+            if s.column_name in self._automap_checked
+        ]
+        try:
+            written = await self._services.codelist.apply_mappings(
+                CorpusId(self._corpus.corpus_id), picks
+            )
+        except ServiceError as exc:
+            ui.notify(str(exc), type="negative")
+            return
+        self._close_automap()
+        ui.notify(automap_applied_message(written))
+        await self.reload()
+
     # --- import (sw-design.md §14.1) ----------------------------------------
 
     async def _open_import(self) -> None:
@@ -1616,9 +1908,15 @@ def _row_name(column: ColumnMappingView) -> str:
     service fields, and the reason a column name alone is never ambiguous on
     screen.
     """
-    if column.table_name == "unfall":
-        return column.column_name
-    return f"{column.table_name}.{column.column_name}"
+    return _qualified(column.table_name, column.column_name)
+
+
+def _qualified(table_name: str, column_name: str) -> str:
+    """`_row_name`'s rule over the two bare fields, for read models that are
+    not a `ColumnMappingView` (Automap's rows)."""
+    if table_name == "unfall":
+        return column_name
+    return f"{table_name}.{column_name}"
 
 
 def _row_subtitle(column: ColumnMappingView, status: CoverageStatus) -> str:
@@ -1706,6 +2004,12 @@ def percent(rate: float) -> str:
 def _corpus_chip_text(corpus: CorpusView) -> str:
     """The design's "corpus 2026‑09‑02 · v1", identical to Census's chip."""
     return f"corpus {corpus.name} · v{corpus.version}"
+
+
+def automap_applied_message(written: int) -> str:
+    """Undesigned: the toast after "Apply selected"."""
+    noun = "column" if written == 1 else "columns"
+    return f"Mapped {written} {noun}."
 
 
 def _import_message(attribute_count: int, *, no_change: bool) -> str:

@@ -1,8 +1,8 @@
-"""Regenerate the five codelist hazard fixtures (sw-design.md §14.1/§14.2).
+"""Regenerate the six codelist hazard fixtures (sw-design.md §14.1/§14.2).
 
 `codes-2018.json` (the real file `ra2.domain.codes.validate_import` parses in
 production) lives under gitignored `data/Codes/` and must never reach a test
-(CLAUDE.md Do-NOT #11) — it may not even exist on a given checkout. These five
+(CLAUDE.md Do-NOT #11) — it may not even exist on a given checkout. These six
 fixtures stand in for it: small, synthetic, byte-exact, committed, so tests
 never depend on the real upload.
 
@@ -29,6 +29,8 @@ The hazards, and what each one exists to prove:
 | c03     | an attribute with zero codes               | `MISSING` once mapped to it       |
 | c04     | one attribute missing its `codes` key      | the whole import fails, `list[…]` |
 | c05     | valid codelist + a corpus value it lacks   | coverage's orphan/danger row      |
+| c06     | automap: padded vs bare, nested code sets, | copied / overlap / unresolved     |
+|         | a next generation that drops a key         | suggestions                       |
 """
 
 import json
@@ -62,7 +64,7 @@ def _dump(document: dict[str, Any]) -> bytes:
 
 
 # --------------------------------------------------------------------------
-# The five hazards
+# The six hazards
 # --------------------------------------------------------------------------
 
 
@@ -156,6 +158,49 @@ def _c05_orphan_corpus_value() -> dict[str, bytes]:
     return {"codelist.json": _dump(document)}
 
 
+def _numbered(codes: list[str], *, de: str, fr: str, it: str) -> dict[str, dict[str, str]]:
+    """`{code: {de, fr, it}}`, each label the word plus its code — invented."""
+    return {code: _entry(de=f"{de} {code}", fr=f"{fr} {code}", it=f"{it} {code}") for code in codes}
+
+
+def _c06_automap() -> dict[str, bytes]:
+    """Automap's hazards (plan-codelists-usability.md §4.1).
+
+    - `accident_type`'s codes are **padded** (`01`…`04`): a corpus whose
+      leading zeros were lost (`1`, `2`) must not overlap it.
+    - `injury_severity` ⊂ `light_condition` ⊂ `weather` over bare integers:
+      every small-integer column sits inside several attributes at once, and
+      only the tightest fit (Jaccard) may be proposed.
+    - `codelist_next.json` is the next generation, **without**
+      `light_condition`: a mapping copied from a corpus mapped against the
+      first one has a key the current import no longer has.
+    """
+    first = {
+        "accident_type": {
+            "chapter": "6.1",
+            "name": _entry(de="Unfalltyp", fr="Type d'accident", it="Tipo di incidente"),
+            "codes": _numbered(["01", "02", "03", "04"], de="Typ", fr="Type", it="Tipo"),
+        },
+        "injury_severity": {
+            "chapter": "6.2",
+            "name": _entry(de="Verletzungsgrad", fr="Gravité", it="Gravità"),
+            "codes": _numbered(["1", "2", "3"], de="Grad", fr="Degré", it="Grado"),
+        },
+        "light_condition": {
+            "chapter": "6.3",
+            "name": _entry(de="Lichtverhältnis", fr="Lumière", it="Luce"),
+            "codes": _numbered(["1", "2", "3", "4", "5"], de="Licht", fr="Lumière", it="Luce"),
+        },
+        "weather": {
+            "chapter": "6.4",
+            "name": _entry(de="Witterung", fr="Météo", it="Meteo"),
+            "codes": _numbered([str(n) for n in range(1, 10)], de="Wetter", fr="Temps", it="Tempo"),
+        },
+    }
+    second = {key: value for key, value in first.items() if key != "light_condition"}
+    return {"codelist.json": _dump(first), "codelist_next.json": _dump(second)}
+
+
 #: Ordered, so a regenerated tree is byte-identical every time.
 HAZARDS = (
     ("c01_minimal_valid", _c01_minimal_valid),
@@ -163,6 +208,7 @@ HAZARDS = (
     ("c03_attribute_with_zero_codes", _c03_attribute_with_zero_codes),
     ("c04_missing_codes_key", _c04_missing_codes_key),
     ("c05_orphan_corpus_value", _c05_orphan_corpus_value),
+    ("c06_automap", _c06_automap),
 )
 
 

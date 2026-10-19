@@ -18,6 +18,8 @@ coverage data" (`None`) rather than a guess.
 import hashlib
 import io
 import json
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import replace
 
 from sqlalchemy import select
@@ -25,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ra2.domain.census import TypeHint
 from ra2.domain.codelist_coverage import ColumnCoverage, compute_coverage
+from ra2.domain.codelist_suggest import suggest_mappings as _suggest
 from ra2.domain.codes import CodeAttribute as DomainCodeAttribute
 from ra2.domain.codes import CodeImportError, validate_import
 from ra2.domain.codes import CodeValue as DomainCodeValue
@@ -39,6 +42,7 @@ from ra2.persistence.models import (
     CodeTableImport,
     CodeValue,
     ColumnMapping,
+    Corpus,
     Feature,
 )
 from ra2.persistence.repositories.census_repo import CensusRepository
@@ -46,7 +50,14 @@ from ra2.persistence.repositories.codelist_repo import CodelistRepository
 from ra2.persistence.session import session_scope
 from ra2.services.delivery_service import dump_json
 from ra2.services.errors import CodelistImportError, NotFoundError
-from ra2.services.readmodels import CodeAttributeView, CodelistImportResult, ColumnMappingView
+from ra2.services.readmodels import (
+    CodeAttributeView,
+    CodelistImportResult,
+    ColumnMappingView,
+    MappingSuggestionsView,
+    MappingSuggestionView,
+    UnresolvedCopyView,
+)
 
 __all__ = ["CodelistService"]
 
@@ -227,6 +238,115 @@ class CodelistService:
         async with session_scope(self._session_factory) as session:
             await CodelistRepository(session).delete_mapping(corpus_id, source_column)
 
+    # -- automap (plan-codelists-usability.md §4) -------------------------------
+
+    async def suggest_mappings(
+        self, corpus_id: CorpusId, *, source_corpus_id: CorpusId | None = None
+    ) -> MappingSuggestionsView:
+        """Proposed mappings for this corpus's enum columns. Writes nothing.
+
+        `domain.codelist_suggest` decides; this gathers what it decides over:
+        each enum column's live `GROUP BY value_raw` (the query `coverage()`
+        runs), the current import's codes, and — from `source_corpus_id`, or
+        `_default_source` when `None` — the attribute **key** each column is
+        mapped to there. Keys, not ids: the source may have been mapped against
+        an older `code_table_import`, and only the current one is offered.
+
+        A suggestion equal to the column's current mapping is dropped (there is
+        nothing to apply). A copied key the current import lacks is returned
+        in `unresolved`, never replaced by a guess (Do-NOT list #6).
+        """
+        async with self._session_factory() as session:
+            repo = CodelistRepository(session)
+            sources = await _mapped_corpora(session, exclude=corpus_id)
+            source = source_corpus_id
+            if source is None:
+                source = await _default_source(session, corpus_id, sources)
+            latest = await repo.get_latest_import()
+            if latest is None:
+                return MappingSuggestionsView(
+                    source_corpus_id=source, sources=sources, suggestions=(), unresolved=()
+                )
+            attributes = {
+                a.key: a for a in await repo.list_attributes(CodeTableImportId(latest.id))
+            }
+            codes = {key: frozenset(v.code for v in a.values) for key, a in attributes.items()}
+
+            columns = _unique_enum_columns(await _all_census_columns(session, corpus_id))
+            cells = {
+                c.column_name: await repo.coverage_counts(
+                    corpus_id, table_name=c.table_name, source_column=c.column_name
+                )
+                for c in columns
+            }
+            tables = {c.column_name: c.table_name for c in columns}
+            current = await _mapped_keys(session, corpus_id)
+            copied = (
+                {
+                    column: key
+                    for column, key in (await _mapped_keys(session, source)).items()
+                    if column in cells
+                }
+                if source is not None
+                else {}
+            )
+
+            suggestions = tuple(
+                MappingSuggestionView(
+                    column_name=s.column_name,
+                    table_name=tables[s.column_name],
+                    code_attribute_id=CodeAttributeId(attributes[s.attribute_key].id),
+                    attribute_key=s.attribute_key,
+                    source=s.source,
+                    contained=s.overlap.contained,
+                    distinct=s.overlap.distinct,
+                    currently=current.get(s.column_name),
+                )
+                for s in _suggest(cells, codes, copied)
+                if current.get(s.column_name) != s.attribute_key
+            )
+            unresolved = tuple(
+                UnresolvedCopyView(column_name=column, table_name=tables[column], attribute_key=key)
+                for column, key in copied.items()
+                if key not in codes
+            )
+            return MappingSuggestionsView(
+                source_corpus_id=source,
+                sources=sources,
+                suggestions=suggestions,
+                unresolved=unresolved,
+            )
+
+    async def apply_mappings(
+        self, corpus_id: CorpusId, picks: Sequence[tuple[str, CodeAttributeId]]
+    ) -> int:
+        """Map every `(source_column, code_attribute_id)` in **one**
+        transaction: all of them, or — on an unknown attribute or column —
+        none (`NotFoundError`). Writes `column_mapping` only, like
+        `map_column`, and resolves the census columns once for the whole
+        batch rather than once per pick.
+
+        :returns: how many mappings were written.
+        """
+        async with session_scope(self._session_factory) as session:
+            repo = CodelistRepository(session)
+            known = {c.column_name for c in await _all_census_columns(session, corpus_id)}
+            for source_column, code_attribute_id in picks:
+                if source_column not in known:
+                    raise NotFoundError("census_column", source_column)
+                if await repo.get_attribute(code_attribute_id) is None:
+                    raise NotFoundError("code_attribute", code_attribute_id)
+                await repo.set_mapping(
+                    ColumnMapping(
+                        id=ColumnMappingId(self._ids.new_id()),
+                        corpus_id=corpus_id,
+                        source_column=source_column,
+                        code_attribute_id=code_attribute_id,
+                        mapped_at=self._clock.now(),
+                    )
+                )
+            return len(picks)
+
     # -- coverage (implements `EnumCodeTableProvider`) -------------------------
 
     async def coverage(
@@ -384,6 +504,56 @@ async def _table_name_for(
     """
     census_column = await _matching_census_column(session, corpus_id, source_column)
     return census_column.table_name if census_column is not None else None
+
+
+def _unique_enum_columns(columns: Sequence[CensusColumn]) -> list[CensusColumn]:
+    """The enum columns automap can speak about: a `column_mapping` is keyed
+    by column name alone, so a name two tables share is skipped rather than
+    guessed — the same rule `_matching_census_column` applies."""
+    enum = [c for c in columns if TypeHint(c.type_hint) is TypeHint.ENUM]
+    names = Counter(c.column_name for c in enum)
+    return [c for c in enum if names[c.column_name] == 1]
+
+
+async def _mapped_keys(session: AsyncSession, corpus_id: CorpusId) -> dict[str, str]:
+    """`source_column → attribute key` for every mapping of one corpus,
+    whichever import generation the attribute belongs to."""
+    stmt = (
+        select(ColumnMapping.source_column, CodeAttribute.key)
+        .join(CodeAttribute, ColumnMapping.code_attribute_id == CodeAttribute.id)
+        .where(ColumnMapping.corpus_id == corpus_id)
+    )
+    return dict((await session.execute(stmt)).tuples().all())
+
+
+async def _mapped_corpora(session: AsyncSession, *, exclude: CorpusId) -> tuple[CorpusId, ...]:
+    """Every other corpus with at least one mapping — what Automap can copy
+    from — newest import first."""
+    stmt = (
+        select(Corpus.id)
+        .where(Corpus.id != exclude, Corpus.id.in_(select(ColumnMapping.corpus_id)))
+        .order_by(Corpus.imported_at.desc(), Corpus.id.desc())
+    )
+    return tuple(CorpusId(i) for i in (await session.scalars(stmt)).all())
+
+
+async def _default_source(
+    session: AsyncSession, corpus_id: CorpusId, sources: Sequence[CorpusId]
+) -> CorpusId | None:
+    """The corpus Automap copies from when the analyst has not picked one:
+    the newest other version of **this corpus's name** that has mappings,
+    else the newest mapped corpus of any name (a name is the analyst's own
+    choice, so two cuts of one delivery need not share one), else none."""
+    if not sources:
+        return None
+    name = await session.scalar(select(Corpus.name).where(Corpus.id == corpus_id))
+    same_name = await session.scalar(
+        select(Corpus.id)
+        .where(Corpus.id.in_(sources), Corpus.name == name)
+        .order_by(Corpus.version.desc())
+        .limit(1)
+    )
+    return CorpusId(same_name) if same_name is not None else sources[0]
 
 
 async def _features_using_column(session: AsyncSession, column_name: str) -> tuple[str, ...]:

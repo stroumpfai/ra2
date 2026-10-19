@@ -328,7 +328,8 @@ Same view, read-only, for a set an evaluation already cites. Differences:
   the edit zone.
 - **Automap…** proposes, never applies. A suggestion is either *copied* (the column's key in another
   corpus's mapping — by default the previous version of this corpus) or *overlap* (the attribute whose
-  codes contain every value the column holds, clearly ahead of the runner-up). Only copied suggestions
+  codes contain every value the column holds, clearly ahead of the runner-up; never for a column holding
+  a single value, which every attribute would contain). Only copied suggestions
   for unmapped columns are pre-checked; a copied key the current import no longer has is listed as
   unresolved, without a checkbox. Codes match exactly — `04` is not `4`.
 - **Import Codes as JSON** takes one file for all columns. After import, each column's **JSON key**
