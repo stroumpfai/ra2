@@ -24,7 +24,7 @@ from nicegui.testing.user_interaction import UserInteraction
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.fixtures.factories import seed_corpus
 
-from ra2.domain.delivery import SourceKind
+from ra2.domain.delivery import DeliveryStatus, SourceKind
 from ra2.domain.ids import DeliveryId
 from ra2.domain.scrub import ListKind
 from ra2.infra.config import Settings
@@ -67,6 +67,7 @@ async def mounted(
                         delivery_id, name, io.BytesIO((H18 / name).read_bytes())
                     )
                 await services.delivery.analyse(delivery_id)
+                await _analysed(services, delivery_id)
                 yield Mounted(User(client), services, app.state.session_factory, delivery_id)
         finally:
             os.environ.pop("NICEGUI_USER_SIMULATION", None)
@@ -77,6 +78,20 @@ async def mounted(
             ui.navigate = Navigate()
             ui.notify = notify
             ui.download = download
+
+
+async def _analysed(services: Services, delivery_id: DeliveryId) -> None:
+    """Wait out `analyse`, which returns at once and works behind it. A page
+    opened before it ends draws the dry-run button disabled for good, and a
+    loaded host opens the page first."""
+    for _ in range(3000):
+        deliveries = await services.delivery.list_deliveries()
+        if any(
+            d.delivery_id == delivery_id and d.status is DeliveryStatus.ANALYSED for d in deliveries
+        ):
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("the delivery never finished analysing")
 
 
 def _ordered(elements: Iterable[Element]) -> list[Element]:
