@@ -182,6 +182,32 @@ async def test_get_latest_import_returns_most_recent_by_imported_at(
     assert latest.id == CodeTableImportId("import-newer")
 
 
+async def test_get_latest_import_breaks_an_imported_at_tie_by_id(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Two generations in one clock tick: the later id is the later import
+    (UUIDv7 in production). Inserted later-id first, so insertion order is
+    not what makes this pass."""
+    async with db_session_factory() as session:
+        repo = CodelistRepository(session)
+        for suffix in ("0002", "0001"):
+            await repo.add_import(
+                CodeTableImport(
+                    id=CodeTableImportId(f"019a0000-0000-7000-8000-00000000{suffix}"),
+                    source_file=f"codes-{suffix}.json",
+                    source_hash=suffix,
+                    imported_at=NOW,
+                )
+            )
+        await session.commit()
+
+    async with db_session_factory() as session:
+        latest = await CodelistRepository(session).get_latest_import()
+
+    assert latest is not None
+    assert latest.source_hash == "0002"
+
+
 async def test_list_attributes_orders_by_key(
     db_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:

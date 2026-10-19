@@ -37,10 +37,11 @@ that attribute makes every code appearing in the corpus labelled, and the row
 earns **ok**, not merely "no longer missing".
 """
 
+import re
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Locator, Page, expect
 
 from ra2.infra.config import Settings
 
@@ -107,8 +108,11 @@ def codelists_route(server_url: str) -> str:
     raise AssertionError("the running E2E server exposes no Services to register against")
 
 
-def _seed_corpus(page: Page, server_url: str, root: Path) -> None:
-    """Register the delivery and freeze it, through the Import UI (J1's path)."""
+def _seed_corpus(page: Page, server_url: str, root: Path, *, name: str = CORPUS_NAME) -> None:
+    """Register the delivery and freeze it, through the Import UI (J1's path).
+
+    `name` is the delivery folder's name, which the corpus is frozen under.
+    """
     page.goto(f"{server_url}/import")
     page.wait_for_selector('[data-testid="file-grid"]')
     page.click('[aria-label="Add set"]')
@@ -116,12 +120,12 @@ def _seed_corpus(page: Page, server_url: str, root: Path) -> None:
     page.click('[data-testid="register-delivery"]')
     expect(page.locator('[data-testid="filename"]')).to_have_count(1, timeout=15_000)
     page.click('[data-testid="create-corpus"]')
-    expect(
-        page.locator('[data-testid="table-corpora"] tbody tr', has_text=CORPUS_NAME)
-    ).to_have_count(1, timeout=15_000)
+    expect(page.locator('[data-testid="table-corpora"] tbody tr', has_text=name)).to_have_count(
+        1, timeout=15_000
+    )
 
 
-def _select_corpus(page: Page) -> None:
+def _select_corpus(page: Page, *, name: str = CORPUS_NAME) -> None:
     """Name the corpus explicitly rather than trusting the default.
 
     The E2E server is session-scoped and J1 legitimately leaves corpora behind,
@@ -129,13 +133,13 @@ def _select_corpus(page: Page) -> None:
     assume.
     """
     page.click('[data-chip="corpus"]')
-    page.click(f'[data-testid="option-corpus"][aria-label^="corpus {CORPUS_NAME} "]')
+    page.click(f'[data-testid="option-corpus"][aria-label^="corpus {name} "]')
     # Wait for the **menu** to go, not for the chip's text: the chip may
     # already read the right corpus (it defaults to the newest), so its text
     # settles before the re-render the pick triggers has reached the browser —
     # and a click that lands on the pre-render DOM is lost.
     expect(page.locator('[data-testid="menu-corpus"]')).to_have_count(0)
-    expect(page.locator('[data-chip="corpus"]')).to_contain_text(f"corpus {CORPUS_NAME} · v1")
+    expect(page.locator('[data-chip="corpus"]')).to_contain_text(f"corpus {name} · v1")
 
 
 def _open_import(page: Page) -> None:
@@ -259,3 +263,190 @@ def test_an_unlabelled_code_surfaces_the_danger_footer(
     # The design draws "Add label"; mvp-spec.md §7 has no UI path that writes a
     # label, so it is drawn and inert.
     expect(page.locator('[data-testid="add-label"]')).to_be_disabled()
+
+
+# --- plan-codelists-usability.md §2–§3: finding a key, finding a column -------
+
+#: Two attributes, so a search has something to tell apart. `road_type`'s
+#: German name is `Strassenart` — the word an analyst looking at a German
+#: column name actually types.
+PICKER_CODELIST = _CODELISTS / "c01_minimal_valid" / "codelist.json"
+POPOVER = '[data-testid="json-key-popover"]'
+KEY_SEARCH = '[data-testid="json-key-search"]'
+
+
+def _key_option(page: Page, label: str) -> Locator:
+    return page.locator(f'[data-testid="option-json-key"][aria-label="{label}"]')
+
+
+#: The one corpus every journey below works on, frozen by whichever of them
+#: runs first. One, not one each: the E2E server lives for the session, and
+#: J8/J9 count rows of a corpora table that shows ten — every corpus frozen
+#: here spends their margin.
+PICKER_CORPUS = "j7-picker"
+
+
+@pytest.fixture(scope="session")
+def picker_corpus() -> dict[str, bool]:
+    """Whether `PICKER_CORPUS` has been frozen yet in this E2E session."""
+    return {}
+
+
+@pytest.fixture
+def picker_root(e2e_settings: Settings, picker_corpus: dict[str, bool]) -> Path:
+    """`delivery_root`'s file, under a folder named for `PICKER_CORPUS`."""
+    root = e2e_settings.import_root_path / "j7-picker" / PICKER_CORPUS
+    if not picker_corpus:
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "one.txt").write_bytes(
+            (_HAZARDS / "h08_all_empty_column" / "unfall.txt").read_bytes()
+        )
+    return root
+
+
+def _ready_for_picker(
+    page: Page, server_url: str, root: Path, picker_corpus: dict[str, bool]
+) -> None:
+    """`PICKER_CORPUS`, c01 imported, `UNTOUCHED_COLUMN` in the edit zone.
+
+    What an earlier journey mapped on the shared corpus does not matter: each
+    journey below asserts on the mapping it makes, never on the one it found.
+    """
+    if not picker_corpus:
+        _seed_corpus(page, server_url, root, name=PICKER_CORPUS)
+        picker_corpus["frozen"] = True
+        page.click('[data-testid="nav-codelists"]')
+    else:
+        page.goto(f"{server_url}/codelists")
+    page.wait_for_selector(ROW)
+    _select_corpus(page, name=PICKER_CORPUS)
+    _open_import(page)
+    page.set_input_files('[data-testid="codelist-upload"] input[type="file"]', str(PICKER_CODELIST))
+    expect(page.locator('[data-testid="import-dialog"]')).not_to_be_visible(timeout=15_000)
+    # See `test_an_unlabelled_code_surfaces_the_danger_footer`: the import's
+    # re-render can swallow the first click.
+    for attempt in range(5):
+        page.locator(f'{ROW}[data-column="{UNTOUCHED_COLUMN}"]').click()
+        try:
+            expect(page.locator('[data-testid="detail-name"]')).to_have_text(
+                UNTOUCHED_COLUMN, timeout=2_000
+            )
+            break
+        except AssertionError:
+            if attempt == 4:
+                raise
+
+
+def _open_picker(page: Page) -> None:
+    page.click('[data-testid="json-key"]')
+    expect(page.locator(POPOVER)).to_be_visible()
+
+
+def test_the_key_picker_opens_focused_and_inside_the_pane(
+    page: Page,
+    server_url: str,
+    codelists_route: str,
+    picker_root: Path,
+    picker_corpus: dict[str, bool],
+) -> None:
+    """The search field has focus the moment the popover opens, and the
+    popover — 440px, wider than the 320px field — opens leftwards, never past
+    the edit pane's right edge or off the window."""
+    _ready_for_picker(page, server_url, picker_root, picker_corpus)
+    _open_picker(page)
+    expect(page.locator(KEY_SEARCH)).to_be_focused()
+
+    popover = page.locator(POPOVER).bounding_box()
+    pane = page.locator('[data-testid="split-detail"]').bounding_box()
+    assert popover is not None and pane is not None
+    assert popover["width"] == 440
+    assert popover["x"] >= 0
+    assert popover["x"] + popover["width"] <= pane["x"] + pane["width"]
+
+
+def test_the_key_search_filters_in_the_browser(
+    page: Page,
+    server_url: str,
+    codelists_route: str,
+    picker_root: Path,
+    picker_corpus: dict[str, bool],
+) -> None:
+    """Typing hides the options that do not match — by key, by name in any
+    language — and keeps "— not mapped —". The typed text surviving is the
+    proof nothing redrew the popover: a server render would rebuild the field
+    empty."""
+    _ready_for_picker(page, server_url, picker_root, picker_corpus)
+    _open_picker(page)
+    search = page.locator(KEY_SEARCH)
+
+    search.press_sequentially("strasse")
+    expect(_key_option(page, "accident_type 2")).to_be_hidden()
+    expect(_key_option(page, "road_type 2")).to_be_visible()
+    expect(_key_option(page, "— not mapped —")).to_be_visible()
+    expect(search).to_have_value("strasse")
+
+    # Folded the way the server folded `data-search`: case, and ß as ss.
+    search.fill("STRAßE")
+    expect(_key_option(page, "road_type 2")).to_be_visible()
+    search.fill("tipo di incidente")
+    expect(_key_option(page, "accident_type 2")).to_be_visible()
+    expect(_key_option(page, "road_type 2")).to_be_hidden()
+
+    search.fill("zzz")
+    expect(page.locator('[data-testid="json-key-no-match"]')).to_be_visible()
+
+    # Enter with nothing highlighted takes the first search result.
+    search.fill("road")
+    search.press("Enter")
+    expect(page.locator('[data-testid="detail-mapping"]')).to_contain_text(
+        "mapped to road_type", timeout=15_000
+    )
+
+
+def test_the_key_picker_is_driven_by_the_keyboard(
+    page: Page,
+    server_url: str,
+    codelists_route: str,
+    picker_root: Path,
+    picker_corpus: dict[str, bool],
+) -> None:
+    """↓ walks the options from "— not mapped —", Enter picks the highlighted
+    one; Escape closes and hands the focus back to the field."""
+    _ready_for_picker(page, server_url, picker_root, picker_corpus)
+    _open_picker(page)
+    search = page.locator(KEY_SEARCH)
+    search.press("Escape")
+    expect(page.locator(POPOVER)).to_have_count(0)
+    expect(page.locator('[data-testid="json-key"]')).to_be_focused()
+
+    _open_picker(page)
+    search.press("ArrowDown")
+    expect(_key_option(page, "— not mapped —")).to_have_attribute("data-active", "true")
+    search.press("ArrowDown")
+    expect(_key_option(page, "accident_type 2")).to_have_attribute("data-active", "true")
+    expect(search).to_have_attribute("aria-activedescendant", re.compile(r"^c\d+$"))
+    search.press("Enter")
+    expect(page.locator('[data-testid="detail-mapping"]')).to_contain_text(
+        "mapped to accident_type", timeout=15_000
+    )
+
+
+def test_the_column_search_keeps_its_focus_while_the_list_refilters(
+    page: Page,
+    server_url: str,
+    codelists_route: str,
+    picker_root: Path,
+    picker_corpus: dict[str, bool],
+) -> None:
+    """The list redraws on the server as the analyst types; the field must
+    not be part of that redraw, or the caret is lost mid-word."""
+    _ready_for_picker(page, server_url, picker_root, picker_corpus)
+    search = page.locator('[data-testid="column-search"]')
+    search.click()
+    search.press_sequentially("vortritt", delay=40)
+
+    expect(page.locator(ROW)).to_have_count(1, timeout=15_000)
+    expect(page.locator(f'{ROW}[data-column="{UNTOUCHED_COLUMN}"]')).to_be_visible()
+    expect(search).to_be_focused()
+    expect(search).to_have_value("vortritt")
+    expect(page.locator('[data-testid="shown-count"]')).to_contain_text("1 of ")

@@ -57,10 +57,14 @@ already carries `name` and `chapter`, but nothing displays them.
 After:
 
 - **The field** keeps its place in the edit header and grows to
-  `max-width:320px`. The closed field shows `key · name` and ellipsizes. The
-  `count` stays visible.
-- **The popover** is a separate element, `width:min(440px, 100%)`,
-  `right:0`. It opens leftwards, so it never pushes past the pane's right
+  `max-width:320px`. Its closed text stays `key count`, as today. *Built
+  that way rather than `key · name`:* the key is the identifier the mapping
+  line, the prompt preview and J7 all name, and the name is one click away in
+  the popover.
+- **The popover** is a separate element, `width:440px`,
+  `max-width:calc(100vw - 32px)`, `right:0`. *Not* `min(440px, 100%)`: the
+  percentage resolves against the 320 px field box, which would make the
+  popover no wider than the field it replaces. It opens leftwards, so it never pushes past the pane's right
   gutter (README: the header-right group "pushes past the pane's right gutter"
   otherwise). It is `max-height:60vh` with the option list scrolling inside
   it.
@@ -281,6 +285,34 @@ another whose codes are `1..4`, so the leading-zero hazard is in the fixture
   It is worth its own `fix-` branch if the screen feels slow on a full corpus.
 - No change to the stale "blocks 0 features" wording on the danger chip.
   That is noted, but it is not one of the three requests.
+
+## 7a. Found on the way
+
+Three defects that the new E2E journeys exposed. Each is fixed on this
+branch, with a test.
+
+- **`CodelistRepository.get_latest_import` had no total order.** It sorted by
+  `imported_at` alone. Two generations in one clock tick (Windows ticks every
+  ~15 ms; the E2E server's clock is frozen) made "the current code table"
+  whichever row SQLite returned first, so the JSON-key options could be
+  another file's. The fix adds `id DESC` as the tie-breaker. Production ids are
+  UUIDv7 and sort by creation time; the E2E ids (`id-%08d`) do too.
+- **A NiceGUI `<input>` carrying a `value` prop is reset by any update
+  anywhere on the page.** NiceGUI renders the whole tree from one function,
+  and Vue re-applies `value` on every render. So the column search lost its
+  text mid-word as the list it filters redrew. The field now carries no
+  `value` prop, and the browser alone owns the text. `features_view._text_input`
+  has the same shape. It is not touched here, because nothing redraws while
+  those fields are being typed in, but it is worth knowing.
+
+- **J8 and J9 counted corpora on a page that shows ten.** Both asserted
+  `before + 1` rows in the Import view's corpora table after freezing one. On
+  `main`, the session-scoped E2E server reaches J9 holding nine corpora, so
+  *any* new journey that freezes one fails J9, and only in a full run. This
+  branch's J7 journeys did; so will `worktree-corpus-naming`'s new journey.
+  Both now count the API's unpaged `meta.total` instead
+  (`_corpus_total`), and the new J7 journeys share one corpus between them
+  anyway.
 
 ## 8. Order of work
 

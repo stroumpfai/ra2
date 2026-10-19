@@ -70,23 +70,40 @@ def delivery_root(tmp_path: Path, e2e_settings: Settings) -> Path:
     return root
 
 
+def _corpus_total(page: Page, server_url: str) -> int:
+    """How many corpora the server holds — the API's unpaged `meta.total`.
+
+    Not a count of the corpora table's rows: that table shows ten, so on the
+    session-scoped server, once earlier journeys have left ten corpora
+    behind, "one more row than before" can never come true
+    (plan-codelists-usability.md §7a).
+    """
+    response = page.request.get(f"{server_url}/api/v1/corpora?page_size=1")
+    assert response.ok, response.text()
+    return int(response.json()["meta"]["total"])
+
+
+def _wait_for_corpus_total(page: Page, server_url: str, expected: int) -> None:
+    for _ in range(150):
+        if _corpus_total(page, server_url) == expected:
+            return
+        page.wait_for_timeout(100)
+    raise AssertionError(f"the server never held {expected} corpora")
+
+
 def _register_and_freeze_corpus(page: Page, server_url: str, root: Path) -> None:
     """Register + analyse + freeze one corpus through the Import UI —
     `test_j1_delivery_to_census.py`'s own first act, repeated rather than
     imported (tests/ has no shared per-journey helper module by design).
 
-    Asserted as **one more row than before**, not as an absolute count: the
-    E2E server is session-scoped, and J1/J2/J7 legitimately leave corpora
-    behind by the time this journey runs (the same reasoning
-    `test_j2_blocking_validation.py`'s own `_corpus_rows` helper documents —
-    counting `[data-testid="corpus-name"]`, not `tbody tr`: an empty table
-    still renders one placeholder `<tr>`, so a plain row count cannot tell
-    "no corpora" and "one corpus" apart).
+    Asserted as **one more corpus than before**, not as an absolute count:
+    the E2E server is session-scoped, and J1/J2/J7 legitimately leave corpora
+    behind by the time this journey runs. Counted through the API, not the
+    corpora table, which shows ten rows (`_corpus_total`).
     """
     page.goto(f"{server_url}/import")
     page.wait_for_selector('[data-testid="file-grid"]')
-    names = page.locator('[data-testid="table-corpora"] [data-testid="corpus-name"]')
-    before = names.count()
+    before = _corpus_total(page, server_url)
     page.click('[aria-label="Add set"]')
     page.fill('[data-testid="host-path"]', str(root))
     page.click('[data-testid="register-delivery"]')
@@ -96,7 +113,7 @@ def _register_and_freeze_corpus(page: Page, server_url: str, root: Path) -> None
     )
     expect(page.locator('[data-testid="create-corpus"]')).to_be_enabled(timeout=15_000)
     page.click('[data-testid="create-corpus"]')
-    expect(names).to_have_count(before + 1, timeout=15_000)
+    _wait_for_corpus_total(page, server_url, before + 1)
 
 
 def _create_draft_feature_config(page: Page, server_url: str, name: str) -> str:

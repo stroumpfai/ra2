@@ -93,12 +93,14 @@ __all__ = [
     "GROUP_ORDER",
     "IMPORT_FAILED_TITLE",
     "IMPORT_LABEL",
+    "KEY_SEARCH_PLACEHOLDER",
     "NEUTRAL_FOOTER",
     "NOT_MAPPED_OPTION",
     "NO_CODELIST_MESSAGE",
     "NO_CODES_PILL",
     "NO_COLUMNS_MESSAGE",
     "NO_CORPUS_MESSAGE",
+    "NO_KEY_MATCHES",
     "NO_SELECTION_MESSAGE",
     "PROMPT_LANGUAGES",
     "PROMPT_PREVIEW_TITLE",
@@ -113,6 +115,7 @@ __all__ = [
     "codelists_state",
     "danger_footer_text",
     "group_label",
+    "key_search_text",
     "matches_query",
     "percent",
     "prompt_preview",
@@ -201,6 +204,9 @@ NOT_MAPPED_OPTION: Final = "— not mapped —"
 #: Undesigned states (README, "Loading / empty / error"): one centred line.
 NO_CORPUS_MESSAGE: Final = "No corpus yet — create one on Import."
 NO_COLUMNS_MESSAGE: Final = "No enum columns match this filter."
+#: The JSON-key popover's search field and its no-result line.
+KEY_SEARCH_PLACEHOLDER: Final = "Search keys…"
+NO_KEY_MATCHES: Final = "No key matches."
 #: README, Master list (amended, `plan-codelists-usability.md` §3).
 SEARCH_PLACEHOLDER: Final = "Filter columns…"
 #: How long the search field waits between two re-filters while typing. The
@@ -263,9 +269,27 @@ EDIT_HEADER_RIGHT_STYLE: Final = (
     "flex:1 1 auto;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:8px;"
     "justify-content:flex-end;"
 )
-#: README: the JSON-key dropdown is `max-width:210px`. `field_select` is a
-#: `.rof`, which is `width:100%` by contract, so the clamp is on its box.
-JSON_KEY_BOX_STYLE: Final = "max-width:210px;min-width:0;position:relative;flex:none;"
+#: README (amended from 210px, `plan-codelists-usability.md` §2): the JSON-key
+#: dropdown is `max-width:320px`. `field_select` is a `.rof`, which is
+#: `width:100%` by contract, so the clamp is on its box.
+JSON_KEY_BOX_STYLE: Final = "max-width:320px;min-width:0;position:relative;flex:none;"
+#: The amended README's popover: anchored to the field's right edge so it
+#: opens leftwards and never crosses the pane's right gutter, as wide as a
+#: two-line option needs, never wider than the window.
+JSON_KEY_POPOVER_STYLE: Final = (
+    "position:absolute;top:100%;right:0;margin-top:4px;z-index:20;"
+    "width:440px;max-width:calc(100vw - 32px);max-height:60vh;"
+    "display:flex;flex-direction:column;background:var(--surface);"
+    "border:1px solid var(--rule);border-radius:3px;"
+)
+JSON_KEY_SEARCH_STYLE: Final = "flex:none;margin:6px;font-size:12px;padding:4px 8px;"
+JSON_KEY_LIST_STYLE: Final = (
+    "flex:1;min-height:0;overflow:auto;padding:4px 0;border-top:1px solid var(--rule2);"
+)
+_KEY_OPTION_STYLE: Final = (
+    "display:block;width:100%;text-align:left;background:none;border:none;"
+    "padding:5px 10px;cursor:pointer;"
+)
 CARDS_ROW_STYLE: Final = "display:flex;gap:14px;flex-wrap:wrap;margin-top:14px;"
 #: `.fld`: plain text that **wraps** rather than truncating (README's codes
 #: table) — the label column is the one cell allowed to be two lines tall.
@@ -345,6 +369,8 @@ class _CodelistsPage:
         #: line reads without it otherwise. Never guessed.
         self._import_file: str | None = None
         self._open_menu: str | None = None
+        #: The JSON-key field as last drawn, so Escape can return focus to it.
+        self._json_key_field: Element | None = None
         #: The file picker, kept so re-opening replaces it rather than
         #: stacking a second one inside `_root` (see `_open_import`).
         self._import_dialog: ui.dialog | None = None
@@ -638,8 +664,14 @@ class _CodelistsPage:
         """The amended README's "Filter columns…" field.
 
         A plain `<input>` like every other text field in `ui/` (R2: no
-        `ui.input`). Built once in `build()`; its value is set from the stored
-        state then, and from then on the browser owns it — nothing redraws it.
+        `ui.input`), built once in `build()`. **It carries no `value` prop.**
+        NiceGUI renders the whole element tree from one function, so *any*
+        update anywhere on the page re-renders this input too, and Vue
+        re-applies a `value` prop to the DOM on every render — resetting the
+        field to whatever the server last held, mid-word (J7 caught it). With
+        no prop the browser alone owns the text. Nothing is lost by it: the
+        field is built once per page load, and `app.storage.client` starts
+        empty on every load, so the stored query is always `""` here.
         """
         element = (
             ui.element("input")
@@ -648,9 +680,6 @@ class _CodelistsPage:
             .mark("column-search")
             .style(SEARCH_INPUT_STYLE)
         )
-        # Typed text through the props *dict*, never the props string (see
-        # `features_view._text_input`).
-        element.props["value"] = codelists_state().query
         element.props["placeholder"] = SEARCH_PLACEHOLDER
         element.props["aria-label"] = SEARCH_PLACEHOLDER
         element.on(
@@ -829,8 +858,9 @@ class _CodelistsPage:
         file, so a census column can be pointed at the right one.
 
         `field_select` is the kit's `.rof`; README clamps this particular one
-        to 210px, which is what the wrapper does. Picking calls
-        `CodelistService.map_column`; the first entry calls `unmap_column`.
+        to 320px, which is what the wrapper does. Opening it draws
+        `_json_key_popover`. Picking calls `CodelistService.map_column`; the
+        first entry calls `unmap_column`.
         """
         attribute = column.mapped_attribute
         text = (
@@ -840,22 +870,57 @@ class _CodelistsPage:
         )
         expanded = self._open_menu == "json-key"
         with ui.element("div").style(JSON_KEY_BOX_STYLE):
-            field_select(
-                text,
-                label=JSON_KEY_LABEL,
-                disabled=not self._attributes,
-                on_click=lambda: self._toggle_menu("json-key"),
-            ).props(
-                'data-testid="json-key" aria-haspopup="listbox" '
-                f'aria-expanded="{"true" if expanded else "false"}"'
-            ).mark("json-key")
-            if not expanded:
-                return
+            self._json_key_field = (
+                field_select(
+                    text,
+                    label=JSON_KEY_LABEL,
+                    disabled=not self._attributes,
+                    on_click=self._toggle_json_key,
+                )
+                .props(
+                    'data-testid="json-key" aria-haspopup="listbox" '
+                    f'aria-expanded="{"true" if expanded else "false"}"'
+                )
+                .mark("json-key")
+            )
+            if expanded:
+                self._json_key_popover(attribute)
+
+    def _json_key_popover(self, attribute: CodeAttributeView | None) -> None:
+        """The amended README's popover: a search field over the option list.
+
+        **The search runs in the browser.** Every option is already in the
+        DOM carrying its `data-search` text (`key_search_text`), so a
+        keystroke hides and shows options there and never reaches the server —
+        no round trip, and no redraw to steal the field's focus. Only picking
+        an option (a click, or Enter) and Escape are sent back.
+        """
+        language = codelists_state().language
+        with (
+            ui.element("div")
+            .props('data-testid="json-key-popover" data-popover="json-key"')
+            .style(JSON_KEY_POPOVER_STYLE)
+        ):
+            search = (
+                ui.element("input")
+                .classes("chip")
+                .props('type="search" data-testid="json-key-search" aria-controls="json-key-list"')
+                .mark("json-key-search")
+                .style(JSON_KEY_SEARCH_STYLE)
+            )
+            search.props["placeholder"] = KEY_SEARCH_PLACEHOLDER
+            search.props["aria-label"] = KEY_SEARCH_PLACEHOLDER
+            search.on("input", js_handler=_KEY_FILTER_JS)
+            search.on("keydown", self._close_json_key, js_handler=_KEY_NAV_JS)
             with (
                 ui.element("div")
-                .props('role="listbox" aria-label="JSON key" data-testid="menu-json-key"')
-                .style(_MENU_STYLE)
+                .props(
+                    'id="json-key-list" role="listbox" aria-label="JSON key" '
+                    'data-testid="menu-json-key"'
+                )
+                .style(JSON_KEY_LIST_STYLE)
             ):
+                # Pinned: never carries `data-search`, so no query hides it.
                 self._menu_item(
                     name="json-key",
                     value="",
@@ -864,16 +929,75 @@ class _CodelistsPage:
                     on_pick=self._pick_attribute,
                 )
                 for candidate in self._attributes:
-                    self._menu_item(
-                        name="json-key",
-                        value=str(candidate.code_attribute_id),
-                        text=f"{candidate.key} {candidate.code_count}",
+                    self._json_key_option(
+                        candidate,
+                        language=language,
                         selected=(
                             attribute is not None
                             and candidate.code_attribute_id == attribute.code_attribute_id
                         ),
-                        on_pick=self._pick_attribute,
                     )
+                ui.label(NO_KEY_MATCHES).props(
+                    'data-testid="json-key-no-match" data-no-match="true"'
+                ).mark("json-key-no-match").style(EMPTY_STYLE + "padding:10px;display:none;")
+        # Vue builds this input after the page has loaded, where `autofocus`
+        # does nothing; focusing it is the one thing the server has to ask for.
+        _focus(search)
+
+    def _json_key_option(
+        self, candidate: CodeAttributeView, *, language: str, selected: bool
+    ) -> None:
+        """One two-line option: mono key and code count, over the attribute's
+        name in the prompt language and its chapter.
+
+        No name in that language is shown as none — never another language's,
+        which would be a label the prompt is not going to use. `aria-label`
+        stays the first line alone, so the option reads as the key it maps to.
+        """
+        option = data_props(
+            ui.element("button")
+            .props(
+                f'type="button" role="option" aria-selected="{"true" if selected else "false"}" '
+                'data-testid="option-json-key"'
+            )
+            .mark("option-json-key")
+            .style(_KEY_OPTION_STYLE + (_MENU_ITEM_ON_STYLE if selected else "")),
+            {
+                "aria-label": f"{candidate.key} {candidate.code_count}",
+                "data-search": key_search_text(candidate),
+            },
+        )
+        option.on(
+            "click",
+            cast(
+                "Callable[[], None]",
+                lambda: self._pick_attribute(str(candidate.code_attribute_id)),
+            ),
+        )
+        with option:
+            with ui.element("div").style(
+                "display:flex;justify-content:space-between;gap:10px;"
+                "font-family:var(--mono);font-size:11px;color:var(--ink);"
+            ):
+                ui.label(candidate.key).style("min-width:0;overflow-wrap:anywhere;")
+                ui.label(format_count(candidate.code_count)).style("flex:none;color:var(--ink3);")
+            name = candidate.name.get(language)
+            details = " · ".join(part for part in (name, candidate.chapter) if part)
+            if details:
+                ui.label(details).props('data-testid="json-key-details"').mark(
+                    "json-key-details"
+                ).style("font-size:11px;color:var(--ink2);margin-top:1px;white-space:normal;")
+
+    def _toggle_json_key(self) -> None:
+        self._toggle_menu("json-key")
+
+    def _close_json_key(self) -> None:
+        """Escape in the search field: close, and give the focus back to the
+        field the popover opened from (it is redrawn, so asked for by id)."""
+        self._open_menu = None
+        self._render()
+        if self._json_key_field is not None:
+            _focus(self._json_key_field)
 
     def _codes_card(self, column: ColumnMappingView) -> None:
         """The read-only codes table plus its two footers, in one `.card`."""
@@ -1248,9 +1372,83 @@ def matches_query(column: ColumnMappingView, query: str) -> bool:
 
 
 def _fold(text: str) -> str:
-    """Casefold and drop combining marks — the comparison form for search."""
+    """Casefold and drop combining marks — the comparison form for search.
+
+    `_KEY_FILTER_JS` folds the typed text the same way in the browser; the two
+    must agree, which J7's `test_the_key_search_filters_in_the_browser` pins.
+    """
     decomposed = unicodedata.normalize("NFKD", text.casefold())
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
+def _focus(element: Element) -> None:
+    """Ask the browser to focus `element`.
+
+    Through the element's own client, not `ui.run_javascript`: that one finds
+    the client through the *current slot*, and from a handler whose element
+    the redraw just deleted (Escape in the key search) there is no slot left
+    to find it through.
+    """
+    element.client.run_javascript(f"document.getElementById('c{element.id}')?.focus()")
+
+
+def key_search_text(attribute: CodeAttributeView) -> str:
+    """What the JSON-key search matches an option against, already folded:
+    the key, the attribute's name in **every** language (an analyst prompting
+    in `fr` may still know the German word), and the chapter."""
+    parts = [attribute.key, *attribute.name.values(), attribute.chapter or ""]
+    return _fold(" ".join(part for part in parts if part))
+
+
+#: The browser half of the JSON-key search (see `_json_key_popover`): fold the
+#: typed text as `_fold` does, show the options whose `data-search` contains
+#: it, and say so when none does. Hiding is `style.display`, not `hidden`: an
+#: inline `display` would beat the attribute.
+_KEY_FILTER_JS: Final = r"""(e) => {
+  const fold = (s) => s.toLowerCase().replace(/ß/g, 'ss')
+    .normalize('NFKD').replace(/\p{M}/gu, '');
+  const q = fold(e.target.value.trim());
+  const box = e.target.closest('[data-popover]');
+  let shown = 0;
+  for (const o of box.querySelectorAll('[data-search]')) {
+    const hit = o.dataset.search.includes(q);
+    o.style.display = hit ? 'block' : 'none';
+    if (hit) shown += 1;
+    delete o.dataset.active;
+    o.style.boxShadow = '';
+  }
+  box.querySelector('[data-no-match]').style.display = shown ? 'none' : 'block';
+  e.target.removeAttribute('aria-activedescendant');
+}"""
+
+#: ↑/↓ move a highlight over the options still shown, Enter picks the
+#: highlighted one (or the first search result, so "weath ⏎" maps), and
+#: Escape is the one key sent to the server — to close the popover.
+_KEY_NAV_JS: Final = """(e) => {
+  const box = e.target.closest('[data-popover]');
+  const all = [...box.querySelectorAll('[role=option]')];
+  const shown = all.filter((o) => o.style.display !== 'none');
+  let i = shown.findIndex((o) => o.dataset.active === 'true');
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    i = e.key === 'ArrowDown' ? Math.min(i + 1, shown.length - 1) : Math.max(i - 1, 0);
+    for (const o of all) { delete o.dataset.active; o.style.boxShadow = ''; }
+    const o = shown[i];
+    if (!o) return;
+    o.dataset.active = 'true';
+    o.style.boxShadow = 'inset 0 0 0 2px var(--focus)';
+    o.scrollIntoView({ block: 'nearest' });
+    e.target.setAttribute('aria-activedescendant', o.id);
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    const o = shown[i] ?? (e.target.value.trim()
+      ? shown.find((x) => x.dataset.search !== undefined) : undefined);
+    if (o) o.click();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    emit();
+  }
+}"""
 
 
 def _status_marker(column: ColumnMappingView, status: CoverageStatus) -> None:

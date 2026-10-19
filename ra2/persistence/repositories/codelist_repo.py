@@ -71,8 +71,19 @@ class CodelistRepository:
     async def get_latest_import(self) -> CodeTableImport | None:
         """The most recently uploaded generation — sw-design.md §14.1 step 2's
         no-op-reupload dedupe compares a new file's hash against this one's
-        `source_hash`."""
-        stmt = select(CodeTableImport).order_by(CodeTableImport.imported_at.desc()).limit(1)
+        `source_hash`.
+
+        Two imports can share an `imported_at`: the clock is coarser than two
+        uploads (Windows ticks every ~15 ms), and the E2E server's is frozen
+        outright. `imported_at` alone then picked *either*, so which code table
+        the app offered was up to SQLite. The id breaks the tie: production
+        ids are UUIDv7 (`Uuid7Factory`), which sort by creation time.
+        """
+        stmt = (
+            select(CodeTableImport)
+            .order_by(CodeTableImport.imported_at.desc(), CodeTableImport.id.desc())
+            .limit(1)
+        )
         result: CodeTableImport | None = await self._session.scalar(stmt)
         return result
 

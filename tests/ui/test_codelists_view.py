@@ -73,6 +73,7 @@ from ra2.ui.views.codelists_view import (
     FULLY_LABELLED_PILL,
     IMPORT_FAILED_TITLE,
     IMPORT_LABEL,
+    KEY_SEARCH_PLACEHOLDER,
     NEUTRAL_FOOTER,
     NO_CODES_PILL,
     NO_COLUMNS_MESSAGE,
@@ -82,6 +83,7 @@ from ra2.ui.views.codelists_view import (
     REMINDER_BODY,
     SORTED_BY_STATUS,
     group_label,
+    key_search_text,
     matches_query,
 )
 
@@ -805,6 +807,99 @@ async def test_unmapping_a_column_puts_it_back_into_missing(seeded: Seeded) -> N
         for c in await seeded.services.codelist.list_columns(seeded.corpus_id, language="de")
     }
     assert columns[OK_COLUMN].mapping_id is None
+
+
+# --- the JSON-key popover (plan-codelists-usability.md §2) ---------------------
+
+
+async def _open_json_key(user: User, column_name: str) -> Element:
+    _one(user, _row(user, column_name)).click()
+    await _until(lambda: _texts(user, "detail-name") == [column_name])
+    (field,) = user.find(marker="json-key").elements
+    _one(user, field).click()
+    await _until(lambda: bool(_find(user, "json-key-popover")))
+    (popover,) = _find(user, "json-key-popover")
+    return popover
+
+
+async def test_the_json_key_popover_opens_with_a_search_field(unmapped: Seeded) -> None:
+    """Amended README: a search field over the options, "— not mapped —"
+    pinned first, and the popover anchored to the field's right edge so it
+    opens leftwards, inside the pane."""
+    user = unmapped.user
+    await user.open("/codelists")
+    popover = await _open_json_key(user, OK_COLUMN)
+
+    assert popover._style.get("right") == "0"
+    assert popover._style.get("width") == "440px"
+    (search,) = _within(popover, "json-key-search")
+    assert search._props["placeholder"] == KEY_SEARCH_PLACEHOLDER
+    options = _within(popover, "option-json-key")
+    assert [str(o._props["aria-label"]) for o in options] == [
+        NOT_MAPPED_OPTION,
+        "accident_type 2",
+        "road_type 2",
+    ]
+
+
+async def test_each_key_option_names_its_attribute_and_chapter(unmapped: Seeded) -> None:
+    """The second line is the attribute's name **in the prompt language**,
+    then its chapter — the words an analyst recognises when the key is an
+    English identifier and the column is German."""
+    user = unmapped.user
+    await user.open("/codelists")
+    popover = await _open_json_key(user, OK_COLUMN)
+    assert [_own_text(e) for e in _within(popover, "json-key-details")] == [
+        "Unfallart · 4.1.1",
+        "Strassenart · 4.1.2",
+    ]
+
+    await _pick(user, "language", "prompt language · fr")
+    popover = await _open_json_key(user, OK_COLUMN)
+    assert [_own_text(e) for e in _within(popover, "json-key-details")] == [
+        "Type d'accident · 4.1.1",
+        "Type de route · 4.1.2",
+    ]
+
+
+async def test_every_key_option_carries_its_search_text_but_not_mapped_does_not(
+    unmapped: Seeded,
+) -> None:
+    """The browser filters on `data-search`; an option without one is never
+    hidden, which is how "— not mapped —" stays pinned."""
+    user = unmapped.user
+    await user.open("/codelists")
+    popover = await _open_json_key(user, OK_COLUMN)
+    by_label = {str(o._props["aria-label"]): o for o in _within(popover, "option-json-key")}
+
+    assert "data-search" not in by_label[NOT_MAPPED_OPTION]._props
+    assert by_label["road_type 2"]._props["data-search"] == (
+        "road_type strassenart type de route tipo di strada 4.1.2"
+    )
+
+
+async def test_escape_in_the_key_search_closes_the_popover(unmapped: Seeded) -> None:
+    """Escape is the one key the browser sends back: the popover closes and
+    nothing is mapped."""
+    user = unmapped.user
+    await user.open("/codelists")
+    popover = await _open_json_key(user, OK_COLUMN)
+    (search,) = _within(popover, "json-key-search")
+
+    _one(user, search).trigger("keydown")
+    await _until(lambda: not _find(user, "json-key-popover"))
+    assert _row_status(user, OK_COLUMN) == CoverageStatus.MISSING.value
+
+
+def test_key_search_text_is_folded_over_every_language() -> None:
+    attribute = CodeAttributeView(
+        code_attribute_id=CodeAttributeId("a1"),
+        key="Road_Type",
+        chapter="4.1.2",
+        name={"de": "Straße", "fr": "Chaussée"},
+        code_count=2,
+    )
+    assert key_search_text(attribute) == "road_type strasse chaussee 4.1.2"
 
 
 # --- import (sw-design.md §14.1) ----------------------------------------------

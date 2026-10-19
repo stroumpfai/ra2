@@ -113,8 +113,8 @@ Header row (`display:flex; justify-content:space-between; gap:16px; flex-wrap:wr
   the mapping control**: it lists the attribute names found in the imported file so each census column can
   be pointed at the right key.
 - *Amended (`plan-codelists-usability.md` §2).* The dropdown opens a **popover**, not an inline menu:
-  `width:min(440px, 100%)`, anchored `right:0` so it opens leftwards and never crosses the pane's right
-  gutter, `max-height:60vh`. A search field at its top has focus on open and filters the options
+  `width:440px; max-width:calc(100vw - 32px)`, anchored `right:0` so it opens leftwards and never crosses
+  the pane's right gutter, `max-height:60vh`. A search field at its top has focus on open and filters the options
   client-side (key, name, chapter; case- and accent-insensitive). "— not mapped —" stays pinned above the
   results. Each option is two lines: mono 11px `key` + count, over 11px `--ink2` attribute name in the
   prompt language and `--ink3` chapter. ↑/↓ move, Enter picks, Esc closes.
