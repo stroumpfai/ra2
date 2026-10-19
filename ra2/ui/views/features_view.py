@@ -131,6 +131,7 @@ from ra2.ui.components.primitives import (
     pill,
     segmented_control,
 )
+from ra2.ui.components.refusal import refusal_text
 from ra2.ui.shell import NAV_ITEMS, shell
 from ra2.ui.state import TableState, set_table_state, table_state
 
@@ -1446,7 +1447,7 @@ class _FeaturesPage:
                     validate_against=self._validate_against(),
                 )
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         # `reload()` ends by clearing and rebuilding every slot this handler's
         # own triggering element (the Save button) lives inside — including
@@ -1472,7 +1473,7 @@ class _FeaturesPage:
         try:
             await self._services.feature.delete_feature(config.feature_config_id, feature_id)
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         app.storage.client[FEATURE_KEY] = None
         self._draft = None
@@ -1487,7 +1488,7 @@ class _FeaturesPage:
                 config.feature_config_id, validate_against=self._validate_against()
             )
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         await self.reload()
 
@@ -1500,7 +1501,7 @@ class _FeaturesPage:
                 config.feature_config_id, name=f"{config.name} (clone)"
             )
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         app.storage.client[SET_KEY] = str(clone.feature_config_id)
         app.storage.client[FEATURE_KEY] = None
@@ -1511,7 +1512,7 @@ class _FeaturesPage:
         try:
             await self._services.feature.rename(FeatureConfigId(feature_config_id), name=name)
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         await self.reload()
 
@@ -1519,7 +1520,7 @@ class _FeaturesPage:
         try:
             await self._services.feature.delete(FeatureConfigId(feature_config_id))
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         if app.storage.client.get(SET_KEY) == feature_config_id:
             app.storage.client[SET_KEY] = None
@@ -1529,7 +1530,7 @@ class _FeaturesPage:
         try:
             created = await self._services.feature.create_draft(name="New feature set")
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         app.storage.client[SET_KEY] = str(created.feature_config_id)
         app.storage.client[FEATURE_KEY] = None

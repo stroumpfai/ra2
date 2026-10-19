@@ -187,6 +187,7 @@ from ra2.ui.components.primitives import (
 )
 from ra2.ui.components.progress_card import format_duration_ms, progress_card
 from ra2.ui.components.prompt_preview import prompt_preview_panel
+from ra2.ui.components.refusal import refusal_dialog, refusal_reasons, refusal_text
 from ra2.ui.shell import NAV_ITEMS, shell
 from ra2.ui.state import (
     EvaluationSetup,
@@ -547,6 +548,8 @@ UNSAVED_MESSAGE: Final = "“New evaluation” pins the prompt, the decoding set
 #: current, and only the selection needs somewhere to be recorded.
 MODELS_UNSAVED_MESSAGE: Final = "“New evaluation” first — the ticks need a row to record into."
 DRAFT_SAVED_MESSAGE: Final = "Draft saved."
+#: The refusal dialog's title when a launch is turned back (plan-refusal-messages.md).
+LAUNCH_REFUSED_TITLE: Final = "Can't launch yet"
 EVALUATION_CREATED_MESSAGE: Final = "New evaluation created."
 #: After the row is gone. Named, because the screen is about to show a
 #: *different* evaluation and the analyst is owed the reason.
@@ -1976,15 +1979,8 @@ class _EvaluationPage:
         that follows puts the stored value back on screen."""
         try:
             await write
-        except FeatureValidationError as exc:
-            # The service's sentences, not the exception's count: `SD36` made
-            # each refusal a sentence naming the repair, and "1 feature
-            # validation error(s)" is what reached the screen instead. A free
-            # number field (step 6's floor) is the first control that can
-            # actually send a refused value.
-            ui.notify(" ".join(exc.validation_errors), type="negative")
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
 
     async def _save_draft(self) -> None:
         """Re-save an **existing, unlaunched** draft.
@@ -2005,7 +2001,7 @@ class _EvaluationPage:
             )
             ui.notify(DRAFT_SAVED_MESSAGE, type="positive")
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
         await self.redraw()
 
     async def _rename(self, name: str) -> None:
@@ -2058,7 +2054,7 @@ class _EvaluationPage:
                 feature_config_id=FeatureConfigId(config_id),
             )
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             await self.reload()
             return
         self._remember(evaluation_id=str(draft.evaluation_id))
@@ -2098,12 +2094,28 @@ class _EvaluationPage:
         try:
             await self._services.evaluation.launch(evaluation_id)
             await self._services.run.launch_runs(evaluation_id)
+        except FeatureValidationError as exc:
+            # Every reason, each on its own row, and still there when the
+            # analyst has read the first one (plan-refusal-messages.md D2).
+            await self.reload()
+            self._show_refusal(LAUNCH_REFUSED_TITLE, refusal_reasons(exc))
+            return
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             await self.reload()
             return
         await self.reload()
         self._start_polling()
+
+    def _show_refusal(self, title: str, reasons: tuple[str, ...]) -> None:
+        """Parented to `_root`, not to a card a redraw replaces
+        (`_open_discard`'s note); opened with `.value`, not `.open()` (N4)."""
+        if self._root is None:
+            ui.notify(" ".join(reasons), type="negative")
+            return
+        with self._root:
+            dialog = refusal_dialog(title=title, reasons=reasons)
+        dialog.value = True
 
     async def _resume(self, run: RunView) -> None:
         """An `interrupted` run is picked back up **explicitly** — nothing
@@ -2111,7 +2123,7 @@ class _EvaluationPage:
         try:
             await self._services.run.resume(RunId(run.run_id))
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             await self.reload()
             return
         await self.reload()
@@ -2130,7 +2142,7 @@ class _EvaluationPage:
         try:
             await self._services.run.cancel(RunId(run.run_id))
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
         await self.reload()
 
     # --- discard (sw-design.md §18) -----------------------------------------
@@ -2147,7 +2159,7 @@ class _EvaluationPage:
         try:
             preview = await self._services.lifecycle.run_preview(run_id)
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             await self.reload()
             return
         if self._root is None:
@@ -2176,7 +2188,7 @@ class _EvaluationPage:
         try:
             await self._services.lifecycle.discard_run(run_id, force=force)
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             await self.reload()
             return
         ui.notify(f"Discarded run {run_id}.")
@@ -2194,7 +2206,7 @@ class _EvaluationPage:
         try:
             preview = await self._services.lifecycle.evaluation_preview(evaluation_id)
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             await self.reload()
             return
         if self._root is None:
@@ -2233,7 +2245,7 @@ class _EvaluationPage:
         try:
             await self._services.lifecycle.discard_evaluation(evaluation_id, force=force)
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             await self.reload()
             return
         state = self._runs_state()
@@ -2248,7 +2260,7 @@ class _EvaluationPage:
         try:
             view = await self._services.lifecycle.run_export(run_id)
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         self._download_run(view)
 
@@ -2274,7 +2286,7 @@ class _EvaluationPage:
             try:
                 view = await self._services.lifecycle.run_export(run_id)
             except ServiceError as exc:
-                ui.notify(str(exc), type="negative")
+                ui.notify(refusal_text(exc), type="negative")
                 return
             if not view.scores and not view.mismatches:
                 continue
@@ -2500,7 +2512,7 @@ class _EvaluationPage:
                 language=view.draft.prompt_language,
             )
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         with (
             self._root,

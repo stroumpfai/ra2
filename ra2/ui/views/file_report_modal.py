@@ -47,6 +47,7 @@ from ra2.services.container import Services
 from ra2.services.errors import ServiceError
 from ra2.services.readmodels import DeliveryFileView, DeliveryView
 from ra2.ui.components import data_props, dialog_card, format_count
+from ra2.ui.components.refusal import refusal_text
 
 __all__ = ["FINDING_LABELS", "PREVIEW_LINES", "open_file_report", "preview_caption"]
 
@@ -451,7 +452,7 @@ class _FileReport:
                 quote_char=self._quote_char or None,
             )
         except (ServiceError, ValueError) as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         # No toast on success: `_refresh` ends by redrawing this modal, which
         # deletes the button that fired this handler, and a notification after

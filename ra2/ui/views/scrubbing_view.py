@@ -60,6 +60,7 @@ from ra2.ui.components.primitives import (
     pagination_row,
     segmented_control,
 )
+from ra2.ui.components.refusal import refusal_text
 from ra2.ui.shell import item_for_key, shell
 from ra2.ui.state import TableState
 
@@ -645,7 +646,7 @@ class _ScrubbingPage:
             return
         except (ServiceError, OSError) as exc:
             dialog.close()
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         dialog.close()
         ui.notify(

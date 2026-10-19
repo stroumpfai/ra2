@@ -106,6 +106,7 @@ from ra2.ui.components.primitives import (
     slot_highlighted_block,
 )
 from ra2.ui.components.prompt_preview import prompt_preview_panel
+from ra2.ui.components.refusal import refusal_text
 from ra2.ui.shell import item_for_key, shell
 from ra2.ui.state import TableState, set_table_state, table_state
 
@@ -849,12 +850,12 @@ class _PromptsPage:
             self._render()
             return
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         try:
             await self._services.prompt.activate(saved.prompt_template_id)
         except ServiceError as exc:  # pragma: no cover - just-created id exists
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
         # Written before `reload()` clears the slot this handler's own button
         # lives in: any `app.storage.client` write resolves the ambient
         # client through that slot, and once it is gone NiceGUI has nothing
@@ -873,7 +874,7 @@ class _PromptsPage:
         try:
             await self._services.prompt.delete(prompt_template_id)
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         if selected_version_id() == str(prompt_template_id):
             app.storage.client[SELECTED_KEY] = None
@@ -899,7 +900,7 @@ class _PromptsPage:
                 selected.prompt_template_id, feature_config_id, record_id, language=language
             )
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         self._render()
 

@@ -68,6 +68,7 @@ from ra2.services.readmodels import (
     ScoringStatusView,
     SortDir,
 )
+from ra2.ui.components.refusal import refusal_text
 from ra2.ui.shell import item_for_key, shell
 from ra2.ui.state import ResultsState, results_state, set_results_state
 from ra2.ui.views.results.chrome import (
@@ -378,7 +379,7 @@ class _ResultsPage:
             # The run changed under the page — discarded, or resumed and no
             # longer `done`. A redraw is the answer; the notification says
             # why the screen is about to look different.
-            ui.notify(str(error))
+            ui.notify(refusal_text(error))
             await self.reload()
             return
         ui.notify(RESCORE_STARTED.format(run=run_label(ordinal)))

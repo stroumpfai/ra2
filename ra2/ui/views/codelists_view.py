@@ -89,6 +89,7 @@ from ra2.ui.components.primitives import (
     master_detail_split,
     pill,
 )
+from ra2.ui.components.refusal import refusal_text
 from ra2.ui.shell import item_for_key, shell
 
 __all__ = [
@@ -1306,7 +1307,7 @@ class _CodelistsPage:
                     CorpusId(self._corpus.corpus_id), column.column_name
                 )
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             self._render()
             return
         # The row can move between groups, so keep it selected by name.
@@ -1366,7 +1367,7 @@ class _CodelistsPage:
                 source_corpus_id=CorpusId(source_corpus_id) if source_corpus_id else None,
             )
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         self._automap_checked = {s.column_name for s in self._automap.suggestions if s.preselected}
         self._open_menu = None
@@ -1577,7 +1578,7 @@ class _CodelistsPage:
                 CorpusId(self._corpus.corpus_id), picks
             )
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         self._close_automap()
         ui.notify(automap_applied_message(written))
@@ -1649,7 +1650,7 @@ class _CodelistsPage:
             return
         except (ServiceError, OSError, UnicodeDecodeError, ValueError) as exc:
             dialog.close()
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         dialog.close()
         self._import_file = upload.name

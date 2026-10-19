@@ -60,6 +60,7 @@ from ra2.ui.components import (
     tick,
 )
 from ra2.ui.components.icons import CLIPBOARD, REFRESH, TRASH
+from ra2.ui.components.refusal import refusal_text
 from ra2.ui.shell import NAV_ITEMS, shell
 from ra2.ui.state import TableState, set_table_state, table_state
 from ra2.ui.views.file_report_modal import open_file_report
@@ -872,7 +873,7 @@ class _ImportPage:
         except ServiceError as exc:
             self._busy_file_id = None
             self._render()
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         self._busy_file_id = None
         await self.reload()
@@ -910,7 +911,7 @@ class _ImportPage:
         except ServiceError as exc:
             self._busy_file_id = None
             self._render()
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         self._busy_file_id = None
         await self.reload()
@@ -964,7 +965,7 @@ class _ImportPage:
             if self._root is not None and self._root.is_deleted:
                 return
             self._render()
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         # `reload()` redraws the corpora card, which deletes the button that
         # fired this handler — so nothing follows it, and in particular no
@@ -987,7 +988,7 @@ class _ImportPage:
         try:
             preview = await self._services.corpus.scrub_preview(self._delivery.delivery_id)
         except ServiceError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         assert self._root is not None
         if self._scrub_dialog is not None:
@@ -1032,7 +1033,7 @@ class _ImportPage:
         except ServiceError as exc:
             self._deleting_corpus_id = None
             self._render()
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         self._deleting_corpus_id = None
         await self.reload()
@@ -1130,7 +1131,7 @@ class _ImportPage:
                 root_path=root,
             )
         except (ServiceError, OSError, ValueError) as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         dialog.close()
         app.storage.client[DELIVERY_KEY] = delivery_id
@@ -1156,7 +1157,7 @@ class _ImportPage:
                     delivery_id, upload.name, BytesIO(await upload.read())
                 )
         except (ServiceError, OSError) as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(refusal_text(exc), type="negative")
             return
         dialog.close()
         app.storage.client[DELIVERY_KEY] = delivery_id

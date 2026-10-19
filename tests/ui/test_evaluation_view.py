@@ -72,6 +72,7 @@ from ra2.domain.settings import SettingRefusal
 from ra2.infra.config import Settings
 from ra2.persistence.models import Corpus, Evaluation, Feature, Mismatch, Record, Run
 from ra2.services.container import Services
+from ra2.services.errors import FeatureValidationError
 from ra2.services.evaluation_service import (
     EVAL_ERROR_MIN_CELL_COUNT_BELOW_ONE,
     EVAL_ERROR_NAME_BLANK,
@@ -929,6 +930,30 @@ async def test_the_launch_label_counts_the_selected_models(seeded: Seeded) -> No
     # And back down again — the label is the selection's, not a high-water mark.
     _one(user, _model_tick(user, FITS_A)).click()
     await _until(lambda: _all_text(user, "launch") == "Launch 1 run")
+
+
+async def test_a_refused_launch_lists_every_reason_in_a_dialog(
+    seeded: Seeded, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """plan-refusal-messages.md D2: each reason on its own row, in a dialog
+    that stays — and never the exception's count."""
+    reasons = ("model-a: does not fit the host's VRAM.", "no-key: enum column has no code table.")
+
+    async def _refuse(*_args: object, **_kwargs: object) -> None:
+        raise FeatureValidationError(reasons)
+
+    monkeypatch.setattr(seeded.services.evaluation, "launch", _refuse)
+    user = seeded.user
+    await _open_evaluation(user)
+    _one(user, _model_tick(user, FITS_A)).click()
+    await _until(lambda: _all_text(user, "launch") == "Launch 1 run")
+
+    _one(user, _find(user, "launch")[0]).click()
+    await _until(lambda: len(_find(user, "refusal-reason")) == 2)
+
+    shown = [_element_text(e) for e in _find(user, "refusal-reason")]
+    assert shown == list(reasons)
+    await user.should_not_see("feature validation error")
 
 
 # --- C3: an unreachable endpoint disables Launch ------------------------------

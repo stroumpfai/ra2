@@ -71,6 +71,7 @@ from ra2.ui.components import (
     pagination_row,
 )
 from ra2.ui.components.primitives import data_props, segmented_control
+from ra2.ui.components.refusal import refusal_text
 from ra2.ui.shell import item_for_key, shell
 from ra2.ui.state import (
     MismatchesState,
@@ -521,7 +522,7 @@ class _MismatchesPage:
         try:
             await self._services.scoring.submit_rescore(run_id)
         except (NotFoundError, RunNotScoreableError) as error:
-            ui.notify(str(error))
+            ui.notify(refusal_text(error))
             await self.reload()
             return
         ui.notify(RESCORE_STARTED.format(run=run_label(ordinal)))
