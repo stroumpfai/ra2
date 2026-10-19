@@ -242,6 +242,13 @@ class _ImportPage:
         redraw and every button in it.
         """
         assert self._root is not None  # built in `build()`, before any reload
+        if self._root.is_deleted:
+            # The analyst left (closed the tab, navigated, reloaded) while a
+            # slow action — a freeze with scrubbing — was still running. The
+            # work finished; there is no page left to redraw, and entering a
+            # deleted element's context raises "the client this element
+            # belongs to has been deleted" out of the orphaned handler.
+            return
         # Any action at all disarms a pending delete: sorting, paging, a
         # selection toggle or a corpus action all land here, and a "Sure?"
         # left armed behind an unrelated click is a trap (P3-D22).
@@ -888,12 +895,16 @@ class _ImportPage:
             )
         except BlockingFindingsError as exc:
             self._corpus_busy = False
-            self._render()
             assert self._root is not None
+            if self._root.is_deleted:  # the analyst left mid-freeze; see `reload()`
+                return
+            self._render()
             _show_blocking(exc.findings, host=self._root)
             return
         except ServiceError as exc:
             self._corpus_busy = False
+            if self._root is not None and self._root.is_deleted:
+                return
             self._render()
             ui.notify(str(exc), type="negative")
             return
