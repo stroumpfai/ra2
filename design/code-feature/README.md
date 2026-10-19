@@ -58,16 +58,28 @@ main
 ```
 
 ### Toolbar
-Left group (`display:flex; gap:10px; flex-wrap:wrap; min-width:0`): three `.sl` dropdown chips —
-`corpus 2026‑09‑02 · v1 ▾`, `prompt language · de ▾`, `status · all 18 ▾` — then a danger chip
+Left group (`display:flex; gap:10px; flex-wrap:wrap; min-width:0`): four `.sl` dropdown chips —
+`corpus 2026‑09‑02 · v1 ▾`, `prompt language · de ▾`, `table · all 18 ▾`, `status · all 18 ▾` — then a danger chip
 (background `--danger-soft`, colour `--danger`, 11.5px, weight 500, 13px warning icon):
 "2 columns have no codes · blocks 1 feature".
 Right group: `margin-left:auto; flex:none` (WIREFRAME stamp only — no actions).
+
+*Amended (`plan-codelists-usability.md` §3).* The **`table ·`** chip's options are the table names the
+rows themselves carry (`unfall`, `person`, `objekt`), each with its live count — never a fixed list.
+Every chip's count is taken over the complete list after the *other* chips' filters, so the number on
+the chip is the number of rows it would leave on screen.
 
 ### Master list
 Header: `.lbl` "18 columns" (truncating, `min-width:0`) + a secondary button **"Import Codes as JSON"**
 (12px download icon). This is the **only** import action — codelists arrive as ONE file for all columns,
 not one file per column. Measured fit: 69px + 157px in a 299px content box.
+
+*Amended (`plan-codelists-usability.md` §3, §4.3).* Below the header, a second strip
+(`flex:none; padding:8px 16px; border-bottom:1px solid --rule2`) holds a search field
+(`flex:1; min-width:0`, 12px, placeholder "Filter columns…") that matches the column name and the mapped
+key, and a secondary **"Automap…"** button (`flex:none`). The header line itself keeps its measured fit.
+Automap opens a dialog of suggested mappings, each with a checkbox, which writes nothing until
+**"Apply selected (N)"** is pressed (see Interactions).
 
 Rows are grouped by status, group label = `.lbl` in a `padding:12px 16px 6px` (first) /
 `16px 16px 6px` (subsequent) div; the counts live in the group labels:
@@ -97,8 +109,15 @@ Header row (`display:flex; justify-content:space-between; gap:16px; flex-wrap:wr
 - Right group — **must be `flex:1 1 auto; min-width:0; flex-wrap:wrap; justify-content:flex-end`**, or it
   pushes past the pane's right gutter: `.lbl` "Labels" + three `.chip`s `de` (active: border
   `--accent`, colour `--ink`, weight 500) / `fr` / `it`, then `.lbl` "JSON key" + a `.sl` dropdown
-  `witterung_codes 9 ▾` (`max-width:210px`). **The JSON-key dropdown is the mapping control**: it lists
-  the attribute names found in the imported file so each census column can be pointed at the right key.
+  `witterung_codes 9 ▾` (`max-width:320px`, ellipsizing; amended from 210px). **The JSON-key dropdown is
+  the mapping control**: it lists the attribute names found in the imported file so each census column can
+  be pointed at the right key.
+- *Amended (`plan-codelists-usability.md` §2).* The dropdown opens a **popover**, not an inline menu:
+  `width:min(440px, 100%)`, anchored `right:0` so it opens leftwards and never crosses the pane's right
+  gutter, `max-height:60vh`. A search field at its top has focus on open and filters the options
+  client-side (key, name, chapter; case- and accent-insensitive). "— not mapped —" stays pinned above the
+  results. Each option is two lines: mono 11px `key` + count, over 11px `--ink2` attribute name in the
+  prompt language and `--ink3` chapter. ↑/↓ move, Enter picks, Esc closes.
 
 Codes table (inside a `.card`, `table-layout:fixed`):
 
@@ -305,7 +324,13 @@ Same view, read-only, for a set an evaluation already cites. Differences:
 ## Interactions & Behavior
 
 **Codelists**
-- The three toolbar chips filter the master list; selecting a row loads it into the edit zone.
+- The four toolbar chips and the search field filter the master list; selecting a row loads it into
+  the edit zone.
+- **Automap…** proposes, never applies. A suggestion is either *copied* (the column's key in another
+  corpus's mapping — by default the previous version of this corpus) or *overlap* (the attribute whose
+  codes contain every value the column holds, clearly ahead of the runner-up). Only copied suggestions
+  for unmapped columns are pre-checked; a copied key the current import no longer has is listed as
+  unresolved, without a checkbox. Codes match exactly — `04` is not `4`.
 - **Import Codes as JSON** takes one file for all columns. After import, each column's **JSON key**
   dropdown maps it to a key in that file; unmapped columns show as "no codes". Expect
   `{ "<key>": [ { "code": …, "label_de": …, "label_fr": …, "label_it": … } ] }` or equivalent — the exact
@@ -346,7 +371,7 @@ plus the contextual note in the edit zone, not as toasts.
 
 **Codelists**
 ```
-filters:  { corpusId, promptLanguage, status }
+filters:  { corpusId, promptLanguage, table, status, query }
 selected: columnName
 columns:  CodelistColumn[]
   { name, table, distinctInCorpus, codeCount, coveragePct,
