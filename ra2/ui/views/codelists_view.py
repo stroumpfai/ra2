@@ -14,8 +14,9 @@ The same three rules that shape `census_view.py` shape every line here:
    The only arithmetic below is `pct * 100`, because `bar(fill_pct=…)` and the
    design's readouts are in percent while `coverage_pct`/`share` are stored in
    `[0, 1]` — a unit conversion of a service's number, not a derived one.
-2. **No module-level mutable state** (§12.8). The three filter chips and the
-   selected column live in `app.storage.client` under this module's own key;
+2. **No module-level mutable state** (§12.8). The four filter chips, the
+   search text and the selected column live in `app.storage.client` under
+   this module's own key;
    what the view last read from a service lives on a `_CodelistsPage` built
    inside the page function, one per client.
 3. **The UI calls services in-process as Python** (§1). No HTTP call to this
@@ -30,11 +31,15 @@ view the way it is meant to, inside `ColumnMappingView.coverage`.
 point of decision:
 
 - the master list is **not paged** in the design, so the group counts, the
-  status chip's counts and the "N of M shown" footer are `len()` over the
+  chips' counts and the "N of M shown" footer are `len()` over the
   *complete* list `list_columns()` returned — never over a page (the mistake
-  §8.1.1 actually names). The status chip likewise filters that complete
-  list by the status the service already assigned each row; `CodelistService`
-  has no status parameter to push it into.
+  §8.1.1 actually names). Each chip's count is taken after the *other*
+  filters (the table chip, the status chip and the search text), so the
+  number on a chip is the number of rows picking it would leave on screen
+  (README, Toolbar, as amended by `plan-codelists-usability.md` §3). The
+  chips filter that complete list by fields the service already set on each
+  row — the status it assigned, the table it read; `CodelistService` has no
+  filter parameter to push them into.
 - **"used by"** reads `used_by_features` verbatim — nothing here computes it
   (that would be exactly the business logic §12.7 forbids). It started out
   permanently empty (C5, plan-phase-2.md §2); `CodelistService.list_columns`
@@ -52,8 +57,9 @@ point of decision:
   a list the analyst has to read and act on is not a toast.
 """
 
+import unicodedata
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final, cast
 
 from nicegui import app, ui
@@ -98,6 +104,7 @@ __all__ = [
     "PROMPT_PREVIEW_TITLE",
     "REMINDER_BODY",
     "REMINDER_TITLE",
+    "SEARCH_PLACEHOLDER",
     "SORTED_BY_STATUS",
     "STATE_KEY",
     "STATUS_LABELS",
@@ -106,6 +113,7 @@ __all__ = [
     "codelists_state",
     "danger_footer_text",
     "group_label",
+    "matches_query",
     "percent",
     "prompt_preview",
     "register",
@@ -193,6 +201,13 @@ NOT_MAPPED_OPTION: Final = "— not mapped —"
 #: Undesigned states (README, "Loading / empty / error"): one centred line.
 NO_CORPUS_MESSAGE: Final = "No corpus yet — create one on Import."
 NO_COLUMNS_MESSAGE: Final = "No enum columns match this filter."
+#: README, Master list (amended, `plan-codelists-usability.md` §3).
+SEARCH_PLACEHOLDER: Final = "Filter columns…"
+#: How long the search field waits between two re-filters while typing. The
+#: filter redraws the list on the server, so one per keystroke is wasted work
+#: on a full corpus; the trailing event is kept, so the last keystroke always
+#: lands.
+SEARCH_THROTTLE_S: Final = 0.25
 NO_SELECTION_MESSAGE: Final = "Select a column to see its codes."
 NO_CODELIST_MESSAGE: Final = (
     "No codes yet. Import a codelist JSON, then map this column to one of its keys."
@@ -218,6 +233,16 @@ LIST_HEADER_STYLE: Final = (
     "border-bottom:1px solid var(--rule);"
 )
 LIST_BODY_STYLE: Final = "flex:1;min-height:0;overflow:auto;"
+#: The search strip under the header (amended README). Built once and never
+#: redrawn, so the field keeps its focus and caret while the list under it
+#: re-filters.
+SEARCH_STRIP_STYLE: Final = (
+    "flex:none;padding:8px 16px;border-bottom:1px solid var(--rule2);"
+    "display:flex;align-items:center;gap:8px;"
+)
+SEARCH_INPUT_STYLE: Final = "flex:1;min-width:0;font-size:12px;padding:4px 8px;"
+#: Body and footer, redrawn together as one slot under the persistent strip.
+LIST_REST_STYLE: Final = "flex:1;min-height:0;display:flex;flex-direction:column;"
 LIST_FOOTER_STYLE: Final = (
     "flex:none;padding:9px 16px;border-top:1px solid var(--rule);"
     "display:flex;align-items:center;justify-content:space-between;gap:10px;"
@@ -265,7 +290,7 @@ _FOOTER_BASE_STYLE: Final = (
 
 @dataclass(frozen=True, slots=True)
 class CodelistsState:
-    """The three filter chips and the selected row, per client.
+    """The filter chips, the search text and the selected row, per client.
 
     A typed dataclass in `app.storage.client` (§8.1.2). It lives here rather
     than in `ui/state.py` because `ui/state.py` is frozen for this milestone
@@ -279,6 +304,10 @@ class CodelistsState:
     language: str = Language.DE.value
     #: `None` is the design's "status · all".
     status: CoverageStatus | None = None
+    #: A `ColumnMappingView.table_name`, or `None` for "table · all".
+    table: str | None = None
+    #: The search field's text, matched by `matches_query`.
+    query: str = ""
     #: The column name loaded in the edit zone, or `None` for "first shown".
     selected: str | None = None
 
@@ -321,6 +350,8 @@ class _CodelistsPage:
         self._import_dialog: ui.dialog | None = None
         self._root: Element | None = None
         self._toolbar: Element | None = None
+        self._list_head: Element | None = None
+        self._search_strip: Element | None = None
         self._list_slot: Element | None = None
         self._detail_slot: Element | None = None
 
@@ -345,7 +376,16 @@ class _CodelistsPage:
                     ui.element("div").props('data-testid="codelists-toolbar"').style(TOOLBAR_STYLE)
                 )
                 list_pane, detail_pane = master_detail_split()
-                self._list_slot = list_pane
+                with list_pane:
+                    self._list_head = ui.element("div").style("flex:none;")
+                    self._search_strip = (
+                        ui.element("div")
+                        .props('data-testid="search-strip"')
+                        .style(SEARCH_STRIP_STYLE)
+                    )
+                    with self._search_strip:
+                        self._search_input()
+                    self._list_slot = ui.element("div").style(LIST_REST_STYLE)
                 self._detail_slot = detail_pane
         await self.reload()
 
@@ -370,6 +410,10 @@ class _CodelistsPage:
                     self._corpus.corpus_id, language=codelists_state().language
                 )
             )
+        if codelists_state().table not in (None, *self._tables()):
+            # A table the current corpus has no enum column in would leave a
+            # chip naming an option its menu does not offer.
+            self._store(replace(codelists_state(), table=None))
         self._render()
 
     def _current_corpus(self) -> CorpusView | None:
@@ -390,16 +434,31 @@ class _CodelistsPage:
     # --- the rows this render is working from ------------------------------
 
     def _shown(self) -> tuple[ColumnMappingView, ...]:
-        """The rows the status chip leaves visible.
+        """The rows the chips and the search text leave visible."""
+        return self._filtered()
+
+    def _filtered(self, *, ignore: str | None = None) -> tuple[ColumnMappingView, ...]:
+        """The complete list, narrowed by every filter except `ignore`
+        (`"status"` or `"table"`) — what that filter's own chip counts over.
 
         A display filter over rows the service already classified — the status
-        on each row is `compute_coverage`'s, never re-derived here, and this is
-        the complete list rather than a page (see the module docstring).
+        on each row is `compute_coverage`'s, the table is the census's, never
+        re-derived here, and this is the complete list rather than a page (see
+        the module docstring).
         """
-        chosen = codelists_state().status
-        if chosen is None:
-            return self._columns
-        return tuple(c for c in self._columns if _status_of(c) is chosen)
+        state = codelists_state()
+        return tuple(
+            c
+            for c in self._columns
+            if (ignore == "status" or state.status is None or _status_of(c) is state.status)
+            and (ignore == "table" or state.table is None or c.table_name == state.table)
+            and matches_query(c, state.query)
+        )
+
+    def _tables(self) -> tuple[str, ...]:
+        """The tables this corpus's enum columns live in, as the service
+        named them — the table chip's options, never a fixed list."""
+        return tuple(sorted({c.table_name for c in self._columns}))
 
     def _of_status(self, status: CoverageStatus) -> tuple[ColumnMappingView, ...]:
         """Every column the service classified `status`, over the complete
@@ -421,11 +480,18 @@ class _CodelistsPage:
     def _render(self) -> None:
         # All three are built in `build()`, before anything can render.
         assert self._toolbar is not None
+        assert self._list_head is not None
+        assert self._search_strip is not None
         assert self._list_slot is not None
         assert self._detail_slot is not None
         self._toolbar.clear()
         with self._toolbar:
             self._filter_toolbar()
+        self._list_head.clear()
+        with self._list_head:
+            self._list_header()
+        # Never cleared — see `SEARCH_STRIP_STYLE` — only shown or hidden.
+        self._search_strip.set_visibility(self._corpus is not None)
         self._list_slot.clear()
         with self._list_slot:
             self._master_list()
@@ -440,6 +506,7 @@ class _CodelistsPage:
             if self._corpus is not None:
                 self._corpus_chip(self._corpus)
                 self._language_chip()
+                self._table_chip()
                 self._status_chip()
                 self._blocking_chip()
             else:
@@ -479,19 +546,46 @@ class _CodelistsPage:
             on_pick=self._pick_language,
         )
 
+    def _table_chip(self) -> None:
+        """ "table · all 18 ▼" (amended README): the tables the rows name,
+        each option carrying its live count over the other filters."""
+        chosen = codelists_state().table
+        rows = self._filtered(ignore="table")
+        options = [
+            ("", f"table · all {len(rows)}", chosen is None),
+            *(
+                (
+                    table,
+                    f"table · {table} {sum(1 for c in rows if c.table_name == table)}",
+                    table == chosen,
+                )
+                for table in self._tables()
+            ),
+        ]
+        text = next(option_text for _, option_text, on in options if on)
+        self._dropdown(
+            name="table",
+            text=text,
+            aria_label="Table",
+            options=options,
+            on_pick=self._pick_table,
+        )
+
     def _status_chip(self) -> None:
         """ "status · all 18 ▼", each option carrying its live count.
 
-        `len()` over the complete list the service returned — not over a page,
-        and not a recomputed status (module docstring).
+        `len()` over the complete list the service returned, narrowed by the
+        other filters — not over a page, and not a recomputed status (module
+        docstring).
         """
         chosen = codelists_state().status
+        rows = self._filtered(ignore="status")
         options = [
-            ("", f"status · all {len(self._columns)}", chosen is None),
+            ("", f"status · all {len(rows)}", chosen is None),
             *(
                 (
                     status.value,
-                    f"status · {status.value} {len(self._of_status(status))}",
+                    f"status · {status.value} {sum(1 for c in rows if _status_of(c) is status)}",
                     status is chosen,
                 )
                 for status in GROUP_ORDER
@@ -533,13 +627,42 @@ class _CodelistsPage:
 
     # --- the master list ---------------------------------------------------
 
-    def _master_list(self) -> None:
-        shown = self._shown()
+    def _list_header(self) -> None:
         with ui.element("div").style(LIST_HEADER_STYLE):
             ui.label(_columns_count(len(self._columns))).classes("lbl").props(
                 'data-testid="columns-count"'
             ).mark("columns-count").style("min-width:0;overflow:hidden;text-overflow:ellipsis;")
             self._import_button()
+
+    def _search_input(self) -> None:
+        """The amended README's "Filter columns…" field.
+
+        A plain `<input>` like every other text field in `ui/` (R2: no
+        `ui.input`). Built once in `build()`; its value is set from the stored
+        state then, and from then on the browser owns it — nothing redraws it.
+        """
+        element = (
+            ui.element("input")
+            .classes("chip")
+            .props('type="search" data-testid="column-search"')
+            .mark("column-search")
+            .style(SEARCH_INPUT_STYLE)
+        )
+        # Typed text through the props *dict*, never the props string (see
+        # `features_view._text_input`).
+        element.props["value"] = codelists_state().query
+        element.props["placeholder"] = SEARCH_PLACEHOLDER
+        element.props["aria-label"] = SEARCH_PLACEHOLDER
+        element.on(
+            "input",
+            lambda event: self._set_query(str(event.args)),
+            js_handler="(e) => emit(e.target.value)",
+            throttle=SEARCH_THROTTLE_S,
+            leading_events=False,
+        )
+
+    def _master_list(self) -> None:
+        shown = self._shown()
         with ui.element("div").props('data-testid="codelist-list"').style(LIST_BODY_STYLE):
             if not shown:
                 ui.label(
@@ -951,32 +1074,32 @@ class _CodelistsPage:
     async def _pick_corpus(self, corpus_id: str) -> None:
         app.storage.client[CORPUS_KEY] = corpus_id
         # A column name is only meaningful inside one corpus.
-        current = codelists_state()
-        self._store(CodelistsState(language=current.language, status=current.status, selected=None))
+        self._store(replace(codelists_state(), selected=None))
         self._open_menu = None
         await self.reload()
 
     async def _pick_language(self, language: str) -> None:
         """The status is **per language** (§14.2), so this is a re-read, not a
         redraw: every row's status can change."""
-        current = codelists_state()
-        self._store(
-            CodelistsState(language=language, status=current.status, selected=current.selected)
-        )
+        self._store(replace(codelists_state(), language=language))
         self._open_menu = None
         await self.reload()
 
     async def _pick_status(self, status: str) -> None:
-        current = codelists_state()
-        self._store(
-            CodelistsState(
-                language=current.language,
-                status=CoverageStatus(status) if status else None,
-                selected=current.selected,
-            )
-        )
+        self._store(replace(codelists_state(), status=CoverageStatus(status) if status else None))
         self._open_menu = None
         await self.reload()
+
+    async def _pick_table(self, table: str) -> None:
+        """A display filter over rows already held, so a redraw, not a re-read."""
+        self._store(replace(codelists_state(), table=table or None))
+        self._open_menu = None
+        self._render()
+
+    def _set_query(self, query: str) -> None:
+        """The search field changed. A redraw of everything *but* the field."""
+        self._store(replace(codelists_state(), query=query))
+        self._render()
 
     async def _pick_attribute(self, code_attribute_id: str) -> None:
         """Map or unmap the selected column. Both write `column_mapping` only
@@ -1011,10 +1134,7 @@ class _CodelistsPage:
         self._render()
 
     def _select_only(self, column_name: str) -> None:
-        current = codelists_state()
-        self._store(
-            CodelistsState(language=current.language, status=current.status, selected=column_name)
-        )
+        self._store(replace(codelists_state(), selected=column_name))
 
     def _store(self, changed: CodelistsState) -> None:
         """Replace this client's `CodelistsState`.
@@ -1108,6 +1228,29 @@ def _status_of(column: ColumnMappingView) -> CoverageStatus:
     a mapping with no codes, and the reason `ColumnMappingView.coverage` is
     documented as `None` exactly when `mapped_attribute` is."""
     return column.coverage.status if column.coverage is not None else CoverageStatus.MISSING
+
+
+def matches_query(column: ColumnMappingView, query: str) -> bool:
+    """Does the search text appear in the row's name or its mapped key?
+
+    Case- and accent-insensitive, so `strasse` finds `StrassenartAusw` and
+    `chaussee` finds a key spelt `chaussée`. The name is matched both bare and
+    table-qualified, so `person.` narrows to one table the way the screen
+    writes it (`_row_name`). Blank text matches every row.
+    """
+    needle = _fold(query.strip())
+    if not needle:
+        return True
+    haystacks = [column.column_name, _row_name(column)]
+    if column.mapped_attribute is not None:
+        haystacks.append(column.mapped_attribute.key)
+    return any(needle in _fold(text) for text in haystacks)
+
+
+def _fold(text: str) -> str:
+    """Casefold and drop combining marks — the comparison form for search."""
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
 
 
 def _status_marker(column: ColumnMappingView, status: CoverageStatus) -> None:

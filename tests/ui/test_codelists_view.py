@@ -59,13 +59,14 @@ from tests.conftest import FrozenClock
 from tests.fixtures.factories import make_census_input, make_census_table_input, seed_corpus
 
 from ra2.domain.codelist_coverage import ColumnCoverage, CoverageStatus
-from ra2.domain.ids import CorpusId, RecordId
+from ra2.domain.ids import CodeAttributeId, CorpusId, RecordId
 from ra2.infra.config import Settings
 from ra2.infra.idgen import SeededFactory
 from ra2.persistence.models import Record, UnfallRow
 from ra2.persistence.session import create_engine, create_session_factory
 from ra2.services.census_materialiser import RelationalCensusMaterialiser
 from ra2.services.container import Services
+from ra2.services.readmodels import CodeAttributeView, ColumnMappingView
 from ra2.ui.views import codelists_view
 from ra2.ui.views.codelists_view import (
     ADD_LABEL,
@@ -74,12 +75,14 @@ from ra2.ui.views.codelists_view import (
     IMPORT_LABEL,
     NEUTRAL_FOOTER,
     NO_CODES_PILL,
+    NO_COLUMNS_MESSAGE,
     NO_CORPUS_MESSAGE,
     NOT_MAPPED_OPTION,
     PROMPT_PREVIEW_TITLE,
     REMINDER_BODY,
     SORTED_BY_STATUS,
     group_label,
+    matches_query,
 )
 
 pytestmark = pytest.mark.ui
@@ -108,6 +111,11 @@ SEED: dict[str, tuple[str, ...]] = {
 }
 
 
+#: The `two_tables` fixture's one `person` column — unmapped, so `missing`.
+PERSON_COLUMN = "VerletzungAusw"
+PERSON_SEED: dict[str, tuple[str, ...]] = {PERSON_COLUMN: ("1", "2", "1")}
+
+
 @dataclass(frozen=True)
 class Seeded:
     user: User
@@ -124,13 +132,18 @@ def codelist_bytes(hazard: str) -> bytes:
     return (_CODELISTS / hazard / "codelist.json").read_bytes()
 
 
-async def _seed_enum_columns(settings: Settings) -> None:
+async def _seed_enum_columns(settings: Settings, *, with_person: bool = False) -> None:
     """One corpus, three enum columns, and the EAV cells behind them.
 
     See the module docstring for why this exists rather than being imported.
     Both the `unfall_row` cells and the materialised `census_column` rows come
     from the same `SEED` mapping, so `coverage_counts()`'s live `GROUP BY` and
     the census's `distinct_count` can never disagree.
+
+    `with_person=True` adds `PERSON_SEED`'s column to the census as a `person`
+    table column — census only, no EAV cells: it stays unmapped, so nothing
+    ever runs its `GROUP BY`, and the table filter needs a second table name,
+    not a second table's coverage.
     """
     engine = create_engine(settings.database_url)
     factory = create_session_factory(engine)
@@ -161,10 +174,15 @@ async def _seed_enum_columns(settings: Settings) -> None:
             cells = [
                 (column_name, value) for column_name, values in SEED.items() for value in values
             ]
-            census = make_census_input(
-                record_count=record_count,
-                tables=[make_census_table_input("unfall", tuple(SEED), cells)],
-            )
+            tables = [make_census_table_input("unfall", tuple(SEED), cells)]
+            if with_person:
+                person_cells = [
+                    (column_name, value)
+                    for column_name, values in PERSON_SEED.items()
+                    for value in values
+                ]
+                tables.append(make_census_table_input("person", tuple(PERSON_SEED), person_cells))
+            census = make_census_input(record_count=record_count, tables=tables)
             materialiser = RelationalCensusMaterialiser(ids=SeededFactory(seed=7))
             await materialiser.materialise(session, CorpusId(CORPUS_ID), census)
             await session.commit()
@@ -230,6 +248,41 @@ async def unmapped(
                 await _seed_enum_columns(migrated_db)
                 await services.codelist.import_file(
                     "codelist.json", codelist_bytes("c01_minimal_valid")
+                )
+                yield Seeded(User(client), services, CorpusId(CORPUS_ID))
+        finally:
+            os.environ.pop("NICEGUI_USER_SIMULATION", None)
+            _restore_nicegui_functions()
+
+
+@pytest.fixture
+async def two_tables(
+    app_factory: Callable[..., FastAPI], migrated_db: Settings
+) -> AsyncIterator[Seeded]:
+    """`seeded`, plus one unmapped enum column in `person` — the table chip
+    needs a second table name to have anything to choose between."""
+    with nicegui_reset_globals():
+        os.environ["NICEGUI_USER_SIMULATION"] = "true"
+        try:
+            app = app_factory(mount_ui=True)
+            services: Services = app.state.services
+            codelists_view.register(services)
+            async with (
+                app.router.lifespan_context(app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app), base_url="http://test"
+                ) as client,
+            ):
+                await _seed_enum_columns(migrated_db, with_person=True)
+                await services.codelist.import_file(
+                    "codelist.json", codelist_bytes("c01_minimal_valid")
+                )
+                attributes = {a.key: a for a in await services.codelist.list_attributes()}
+                await services.codelist.map_column(
+                    CorpusId(CORPUS_ID), OK_COLUMN, attributes["accident_type"].code_attribute_id
+                )
+                await services.codelist.map_column(
+                    CorpusId(CORPUS_ID), PARTIAL_COLUMN, attributes["road_type"].code_attribute_id
                 )
                 yield Seeded(User(client), services, CorpusId(CORPUS_ID))
         finally:
@@ -816,6 +869,163 @@ async def test_a_structurally_invalid_import_is_refused_and_writes_nothing(
     # Nothing was written: the previous generation is still the current one.
     after = await unmapped.services.codelist.list_attributes()
     assert [a.key for a in after] == [a.key for a in before]
+
+
+# --- filtering the list (plan-codelists-usability.md §3) ----------------------
+
+
+def _shown_columns(user: User) -> list[str]:
+    return [str(e._props["data-column"]) for e in _rows(user)]
+
+
+async def _search(user: User, text: str) -> None:
+    """Type into the search field the way the browser's `input` event does."""
+    (field,) = _find(user, "column-search")
+    _one(user, field).trigger("input", args=text)
+
+
+async def test_the_table_chip_offers_the_tables_the_rows_name(two_tables: Seeded) -> None:
+    """Amended README, Toolbar: the options are the tables the service
+    returned rows for, each with its live count — never a fixed list, so
+    `objekt`, which this corpus has no enum column in, is not offered."""
+    user = two_tables.user
+    await user.open("/codelists")
+    assert _chip_text(user, "table") == "table · all 4 ▼"
+
+    (chip,) = user.find(marker="chip-table").elements
+    _one(user, chip).click()
+    await _until(lambda: bool(_find(user, "menu-table")))
+    assert [str(e._props["aria-label"]) for e in _find(user, "option-table")] == [
+        "table · all 4",
+        "table · person 1",
+        "table · unfall 3",
+    ]
+
+
+async def test_picking_a_table_narrows_the_list_and_the_status_counts(
+    two_tables: Seeded,
+) -> None:
+    """A chip's count is the number of rows it would leave on screen, so the
+    status chip counts over the table already picked — while the header and
+    the danger chip still describe the whole corpus."""
+    user = two_tables.user
+    await user.open("/codelists")
+
+    await _pick(user, "table", "table · person 1")
+    await _until(lambda: _shown_columns(user) == [PERSON_COLUMN])
+
+    assert _chip_text(user, "table") == "table · person 1 ▼"
+    assert _chip_text(user, "status") == "status · all 1 ▼"
+    assert _texts(user, "shown-count") == ["1 of 4 shown"]
+    assert _texts(user, "columns-count") == ["4 columns"]
+    (blocking,) = _find(user, "blocking-chip")
+    assert _own_text(_kids(blocking)[-1]) == "2 columns have no codes · blocks 0 features"
+    # The edit zone follows: the first row shown is loaded, never a hidden one.
+    assert _texts(user, "detail-name") == [f"person.{PERSON_COLUMN}"]
+
+
+async def test_the_table_and_status_chips_combine(two_tables: Seeded) -> None:
+    """Both filters apply at once, and each one's counts honour the other."""
+    user = two_tables.user
+    await user.open("/codelists")
+    await _pick(user, "status", "status · missing 2")
+    await _until(lambda: len(_rows(user)) == 2)
+    assert _chip_text(user, "table") == "table · all 2 ▼"
+
+    await _pick(user, "table", "table · unfall 1")
+    await _until(lambda: _shown_columns(user) == [MISSING_COLUMN])
+
+
+async def test_the_search_field_filters_by_column_name(seeded: Seeded) -> None:
+    """Case-insensitive, on the name as the census stored it."""
+    user = seeded.user
+    await user.open("/codelists")
+    await _search(user, "strassen")
+    await _until(lambda: _shown_columns(user) == [PARTIAL_COLUMN])
+
+    assert _texts(user, "shown-count") == ["1 of 3 shown"]
+    assert _chip_text(user, "status") == "status · all 1 ▼"
+
+
+async def test_the_search_field_also_matches_the_mapped_key(seeded: Seeded) -> None:
+    """`accident_type` is nowhere in `UnfallartAusw`'s name; it is the key
+    the column is mapped to, which is what an analyst who knows the codelist
+    types."""
+    user = seeded.user
+    await user.open("/codelists")
+    await _search(user, "ACCIDENT")
+    await _until(lambda: _shown_columns(user) == [OK_COLUMN])
+
+
+async def test_a_search_matching_nothing_says_so(seeded: Seeded) -> None:
+    user = seeded.user
+    await user.open("/codelists")
+    await _search(user, "no-such-column")
+    await _until(lambda: _rows(user) == [])
+
+    assert _texts(user, "list-empty") == [NO_COLUMNS_MESSAGE]
+    assert _texts(user, "shown-count") == ["0 of 3 shown"]
+
+
+async def test_the_search_field_survives_the_redraw_it_causes(seeded: Seeded) -> None:
+    """The list re-filters on every (throttled) keystroke. Were the field
+    rebuilt with it, the browser would drop its focus and caret mid-word, so
+    it must be the *same* element afterwards — and clearing it shows every
+    row again."""
+    user = seeded.user
+    await user.open("/codelists")
+    (before,) = _find(user, "column-search")
+
+    await _search(user, "wetter")
+    await _until(lambda: _shown_columns(user) == [MISSING_COLUMN])
+    (after,) = _find(user, "column-search")
+    assert after is before
+
+    await _search(user, "")
+    await _until(lambda: len(_rows(user)) == 3)
+
+
+def _view(column_name: str, *, table: str = "unfall", key: str | None = None) -> ColumnMappingView:
+    attribute = (
+        CodeAttributeView(
+            code_attribute_id=CodeAttributeId("a1"), key=key, chapter=None, name={}, code_count=0
+        )
+        if key is not None
+        else None
+    )
+    return ColumnMappingView(
+        corpus_id=CorpusId(CORPUS_ID),
+        table_name=table,
+        column_name=column_name,
+        distinct_in_corpus=0,
+        mapping_id=None,
+        mapped_attribute=attribute,
+        coverage=None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("", True),
+        ("   ", True),
+        ("strasse", True),
+        ("STRASSENART", True),
+        ("person.", False),
+        ("chaussee", True),  # the mapped key is spelt `chaussée`
+        ("CHAUSSÉE", True),
+        ("weather", False),
+    ],
+)
+def test_matches_query_folds_case_and_accents(query: str, expected: bool) -> None:
+    column = _view("StrassenartAusw", key="type_de_chaussée")
+    assert matches_query(column, query) is expected
+
+
+def test_matches_query_reads_the_table_qualified_name() -> None:
+    """`person.` narrows to one table the way the screen writes the name."""
+    assert matches_query(_view(PERSON_COLUMN, table="person"), "person.verl")
+    assert not matches_query(_view(OK_COLUMN), "person.")
 
 
 # --- the undesigned empty state ----------------------------------------------
