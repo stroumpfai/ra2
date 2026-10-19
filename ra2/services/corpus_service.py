@@ -193,7 +193,11 @@ class CorpusService:
             scrubber = await compile_scrubber(loaded.rules)
             corpus_repo = CorpusRepository(session)
             corpus_id = CorpusId(self._ids.new_id())
-            built = self._build_records(corpus_id, parsed, scrubber)
+            # Off the event loop: scrubbing every narrative is seconds of pure
+            # CPU on a real delivery, and a loop that cannot answer the
+            # websocket's ping loses the page — the freeze then finishes into
+            # a deleted client and the corpora table never redraws.
+            built = await asyncio.to_thread(self._build_records, corpus_id, parsed, scrubber)
 
             # The canary counts the delivered characters, so it reads the
             # narratives as they were before a scrubbed name took some away.
