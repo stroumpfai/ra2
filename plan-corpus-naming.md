@@ -25,7 +25,7 @@ Settled with the project owner before this was written:
 |---|---|---|
 | F1 | The service and the API already take a free `name` (1–200) and `description` | `corpus_service.py:147-155`, `api/schemas.py:278-285` |
 | F2 | The UI never offers either: it passes the delivery's own name, i.e. the host folder name, so every corpus frozen from one delivery carries the same name and differs only by `vN` | `import_view.py:893` |
-| F3 | `CorpusView.description` is already on the read model and returned; nothing in `ui/` draws it | `readmodels.py:209`, `corpus_service.py:858` |
+| F3 | `CorpusView.description` is on the read model and already drawn by the table's Description column (this plan first said nothing drew it; wrong, and corrected during the build) | `readmodels.py:209`, `import_view.py` `_corpus_columns` |
 | F4 | The service does not check the name it is given: the 1–200 rule lives only in the API's pydantic model, so a caller of `freeze()` can store `"   "` or 300 characters (the column is `String(200)`) | `corpus_service.py:217` |
 | F5 | `(name, version)` is unique and `version` is `next_version(name)`, so re-using a name is how a second freeze becomes `v2` | `models.py:324`, `corpus_repo.py:32` |
 | F6 | `corpus` rows are never updated (Do-NOT #2), which is why renaming an existing corpus is **out of scope** (answer 1) and would need its own amendment | `models.py:315-320` |
@@ -41,7 +41,7 @@ so the analyst names the corpus once whichever route they take.
 - **Name** is pre-filled with the delivery's name and can be overwritten.
   Leaving it as it is changes nothing from today.
 - **Description** is empty by default and optional. It is a single line of
-  text, shown as a second line under the name in the corpora table.
+  text, shown in the corpora table's existing Description column.
 - **Validation lives in the service** (Do-NOT #7): `freeze()` strips the name,
   refuses blank and refuses more than 200 characters with a `ServiceError`,
   which the view already shows as a toast. The description is stripped and an
@@ -70,8 +70,7 @@ asserting on the stored row or the raised error, never on message text.
 ### Stage 2 — the fields
 
 Name and description inputs in the corpora card, wired into both
-`_create_corpus` call sites; the description drawn under the name by
-`_render_corpus_name`. Text-carrying props go through `data_props` (SD34): a
+`_create_corpus` call sites. Text-carrying props go through `data_props` (SD34): a
 corpus name is typed by a person.
 
 **Done when:** `tests/ui` shows (a) the default is the delivery name, (b) a

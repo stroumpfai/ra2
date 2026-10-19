@@ -677,18 +677,23 @@ class _ImportPage:
             ui.label(f"Create corpus · {format_count(records)} records").mark("create-corpus-label")
 
     def _corpus_columns(self) -> tuple[ColumnSpec[CorpusView], ...]:
-        """README §1b's eight columns, widths verbatim.
+        """README §1b's eight columns. Corpus is 225px (the README's first draft
+        said 150px, too narrow for a name an analyst chose); Description gives
+        up the room, being flexible.
 
         Not sortable: the design shows no sort affordance on this table, and
         the service's default — newest first — is the order it renders.
         """
         return (
-            ColumnSpec(key="corpus", label="Corpus", width="150px", render=_render_corpus_name),
+            ColumnSpec(key="corpus", label="Corpus", width="225px", render=_render_corpus_name),
             ColumnSpec(
                 key="description",
                 label="Description",
-                render=lambda row: ui.label(row.description or "").style(
-                    "font-size:12px;color:var(--ink2);"
+                render=lambda row: (
+                    ui.label(row.description or "")
+                    .props('data-testid="corpus-description"')
+                    .mark("corpus-description")
+                    .style("font-size:12px;color:var(--ink2);")
                 ),
             ),
             ColumnSpec(
@@ -1248,19 +1253,11 @@ def _render_filename(file: DeliveryFileView) -> None:
 
 
 def _render_corpus_name(corpus: CorpusView) -> None:
-    with ui.element("div").style("min-width:0;"):
-        with ui.element("div").style("display:flex;align-items:baseline;gap:6px;min-width:0;"):
-            ui.label(corpus.name).classes("mono").props('data-testid="corpus-name"').mark(
-                "corpus-name"
-            ).style("font-weight:500;overflow:hidden;text-overflow:ellipsis;")
-            ui.label(f"v{corpus.version}").classes("mono ink3").style("font-size:11px;")
-        if corpus.description:
-            ui.label(corpus.description).props('data-testid="corpus-description"').mark(
-                "corpus-description"
-            ).style(
-                "font-size:11px;color:var(--ink3);overflow:hidden;text-overflow:ellipsis;"
-                "white-space:nowrap;"
-            )
+    with ui.element("div").style("display:flex;align-items:baseline;gap:6px;min-width:0;"):
+        ui.label(corpus.name).classes("mono").props('data-testid="corpus-name"').mark(
+            "corpus-name"
+        ).style("font-weight:500;overflow:hidden;text-overflow:ellipsis;")
+        ui.label(f"v{corpus.version}").classes("mono ink3").style("font-size:11px;")
 
 
 def _render_languages(corpus: CorpusView) -> None:
