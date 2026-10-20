@@ -1,5 +1,5 @@
 """`domain.code_label.decode` — a mismatch value against the launch snapshot
-(`SD70`, `plan-mismatch-context.md` §3.1)."""
+(`SD71`, `plan-mismatch-context.md` §3.1)."""
 
 import pytest
 

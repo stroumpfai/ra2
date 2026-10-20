@@ -227,7 +227,7 @@ class MismatchesState:
     values are disjoint, so the string round-trips through storage without a
     second field saying which of them it came from.
 
-    `open_mismatch_id` is the one row whose detail is open (`SD70`), empty
+    `open_mismatch_id` is the one row whose detail is open (`SD71`), empty
     for none. One at a time, and any change of filter, sort or page closes
     it: the row it names may not be on the new page.
     """

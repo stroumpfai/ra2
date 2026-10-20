@@ -1,5 +1,5 @@
 """`domain.span_locate.locate` — where the evidence span sits in the narrative
-(`SD70`, `plan-mismatch-context.md` §4.1). It locates and never judges."""
+(`SD71`, `plan-mismatch-context.md` §4.1). It locates and never judges."""
 
 import pytest
 

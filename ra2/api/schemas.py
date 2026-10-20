@@ -1304,7 +1304,7 @@ class MismatchResponse(_Schema):
 
     mismatch_id: str
     record_id: str
-    #: mvp-spec.md §12's record key (`SD70`). `record_id` is the surrogate.
+    #: mvp-spec.md §12's record key (`SD71`). `record_id` is the surrogate.
     #: **Required**, unlike the read model's field (which a frozen test builds
     #: without): a response that forgot it must fail, not ship an empty key.
     unfall_uid: str
@@ -1318,7 +1318,7 @@ class MismatchResponse(_Schema):
     record_value: str | None = None
     extracted_value: str | None = None
     #: What the two codes mean in the code table the model was shown at
-    #: launch, in the prompt language (`SD70`). `*_label_state` is the closed
+    #: launch, in the prompt language (`SD71`). `*_label_state` is the closed
     #: `LabelState`, so the schema lists its values; the label is set only
     #: when `labelled`.
     record_label: str | None

@@ -1169,7 +1169,7 @@ amended first, in the plan's first commit.
 
 ## Mismatch context — the UID, the labels, the narrative, a slice
 
-`feat/mismatch-context`, `plan-mismatch-context.md`, `SD70`. **One amendment**
+`feat/mismatch-context`, `plan-mismatch-context.md`, `SD71`. **One amendment**
 (`contracts/amendments/feat-mismatch-context.md`), applied in the same
 commits. **No migration**: everything shown is already stored. `plan-phase-5.md`
 C5 and `sw-design.md` §17.8 are corrected first, in the plan's commit.

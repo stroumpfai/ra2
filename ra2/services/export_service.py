@@ -113,11 +113,11 @@ _MISMATCHES_CSV_HEADER: Final = (
     "analyst_tag",
     "tagged_at",
     "note",
-    #: Appended, never inserted (`SD70`): a column added later goes at the end,
+    #: Appended, never inserted (`SD71`): a column added later goes at the end,
     #: so a script reading this file by position keeps working.
     "unfall_uid",
     #: The launch-snapshot label in the prompt language, empty unless the
-    #: code had one (`SD70`), and the `LabelState` that says why it is empty:
+    #: code had one (`SD71`), and the `LabelState` that says why it is empty:
     #: a code the model invented (`not_in_table`) must not read like a value
     #: with nothing to decode (`not_enum`).
     "record_label",

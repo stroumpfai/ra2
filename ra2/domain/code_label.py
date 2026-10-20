@@ -1,4 +1,4 @@
-"""A mismatch value, decoded against the code table the model was shown (`SD70`).
+"""A mismatch value, decoded against the code table the model was shown (`SD71`).
 
 The Mismatches view puts `code · label` beside both the record's value and the
 model's. The code table is the **launch-time snapshot**

@@ -400,3 +400,20 @@ async def test_the_dry_run_names_the_rule_that_would_time_out(
     await _plant_slow_rule(db_session_factory, clock)
     preview = await corpus_service.scrub_preview(await slow_delivery())
     assert preview.timed_out_rule == "slow"
+
+
+async def test_the_preview_shows_what_it_replaced_and_the_totals_agree(
+    import_fixture_lists: Callable[[], Awaitable[None]],
+    h18_delivery: Callable[[], Awaitable[DeliveryId]],
+    corpus_service: CorpusService,
+) -> None:
+    """SD70: examples per rule, each adding up to that rule's count, with the
+    matched span as delivered and the context already scrubbed."""
+    await import_fixture_lists()
+    preview = await corpus_service.scrub_preview(await h18_delivery())
+
+    assert [r.rule_id for r in preview.examples] == [c.rule_id for c in preview.counts]
+    for count, rule in zip(preview.counts, preview.examples, strict=True):
+        assert sum(v.hits for v in rule.values) + rule.other_hits == count.hits
+    plate = next(r for r in preview.examples if r.rule_id == "license-plate")
+    assert plate.values and all(v.examples for v in plate.values)

@@ -155,7 +155,7 @@ class MismatchService:
 
     async def detail(self, mismatch_id: MismatchId) -> MismatchDetailView:
         """One row, opened: the narrative with the span located in it, and the
-        feature's facts (`SD70`).
+        feature's facts (`SD71`).
 
         **Read when a row is opened, never with the page.** The narrative is
         record text; a page shows at most one, so loading 25 would move text
@@ -405,7 +405,7 @@ async def _features_for(session: AsyncSession, evaluation_id: EvaluationId) -> l
 @dataclass(frozen=True, slots=True)
 class _Codebook:
     """The code tables one evaluation's model was shown, and the language it
-    was asked in (`SD70`).
+    was asked in (`SD71`).
 
     Read from `evaluation_feature.enum_codelist_json`, **not** from the live
     Codelists mapping: a mapping changed after launch must not relabel an

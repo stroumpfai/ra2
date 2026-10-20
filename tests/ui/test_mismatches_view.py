@@ -129,7 +129,7 @@ async def _app(
             os.environ.pop("NICEGUI_USER_SIMULATION", None)
 
 
-#: The launch snapshots `labelled` adds (`SD70`): weather 1-4 in German and 5
+#: The launch snapshots `labelled` adds (`SD71`): weather 1-4 in German and 5
 #: only in French; light without 99, so `s06`'s answer is in no table.
 WEATHER_SNAPSHOT: Final = {
     "1": {"de": "trocken"},
@@ -171,7 +171,7 @@ async def scored(
 async def labelled(
     app_factory: Callable[..., FastAPI], migrated_db: Settings, frozen_clock: Clock
 ) -> AsyncIterator[Seeded]:
-    """The ordinary case, launched with codelist snapshots (`SD70`)."""
+    """The ordinary case, launched with codelist snapshots (`SD71`)."""
     async for seeded in _app(app_factory, frozen_clock, score=True, snapshots=True):
         yield seeded
 
@@ -330,7 +330,7 @@ async def test_the_anonymisation_chip_is_on_every_row_that_shows_text(scored: Se
 
 
 async def test_the_record_cell_shows_the_whole_unfall_uid(scored: Seeded) -> None:
-    """mvp-spec.md §12's record key, whole (`SD70`). The cell used to show 14
+    """mvp-spec.md §12's record key, whole (`SD71`). The cell used to show 14
     characters of the surrogate `record.id`, which is in no delivery; a cut
     key cannot be searched for in the source system either."""
     await scored.user.open(_url(scored.corpus))
@@ -342,7 +342,7 @@ async def test_the_record_cell_shows_the_whole_unfall_uid(scored: Seeded) -> Non
 
 
 async def test_each_code_carries_what_it_means_under_it(labelled: Seeded) -> None:
-    """`SD70`: the label the model was shown, in the prompt language, under
+    """`SD71`: the label the model was shown, in the prompt language, under
     the code; and when there is none, words saying why, never a blank. Run 1's
     wrong answers cover all three: labelled weather codes, `5` labelled only
     in French, and `s06`'s light `99`, which is in no table."""
@@ -366,7 +366,7 @@ async def test_a_value_with_nothing_to_decode_has_no_line_under_it(scored: Seede
     await scored.user.should_not_see(marker="mismatch-extracted-value-label")
 
 
-# --- the detail row (SD70) -----------------------------------------------------
+# --- the detail row (SD71) -----------------------------------------------------
 
 
 def _weather_url(corpus: ScoredCorpus, run: int) -> str:

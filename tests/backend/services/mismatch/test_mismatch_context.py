@@ -1,5 +1,5 @@
 """What a mismatch row carries to tell a hallucination from a record error
-(`plan-mismatch-context.md`, `SD70`).
+(`plan-mismatch-context.md`, `SD71`).
 
 The fixture is `scored_corpus`, scored for real, with changes made while
 seeding and before anything reads it:
@@ -249,7 +249,7 @@ async def test_a_tag_write_returns_the_row_with_its_uid(
     (row,) = view.rows.items
     tagged = await mismatch_service.tag(row.mismatch_id, tag=MismatchTag.UNCLEAR)
     assert tagged.unfall_uid == row.unfall_uid
-    #: …and decoded against the same snapshot (SD70).
+    #: …and decoded against the same snapshot (SD71).
     assert tagged.record_decoded == row.record_decoded
     assert tagged.extracted_decoded == row.extracted_decoded
     assert tagged.record_decoded.state is LabelState.LABELLED
@@ -312,7 +312,7 @@ async def test_labels_come_from_the_launch_snapshot_not_the_live_mapping(
     mismatch_service: MismatchService, context: ScoredCorpus
 ) -> None:
     """The live mapping says `LIVE n` for every code. The model was shown the
-    snapshot, so the snapshot's words are the only right ones (`SD70`)."""
+    snapshot, so the snapshot's words are the only right ones (`SD71`)."""
     rows = [r for r in await _all_rows(mismatch_service, context) if r.feature_key == WEATHER]
     assert rows
     for row in rows:
@@ -533,6 +533,6 @@ async def test_opening_an_unknown_mismatch_is_not_found(
 
 
 async def test_the_list_never_carries_the_narrative() -> None:
-    """Fetched on open, never with the page (`SD70`): the row type has no
+    """Fetched on open, never with the page (`SD71`): the row type has no
     field that could hold it."""
     assert "narrative" not in MismatchRowView.__dataclass_fields__

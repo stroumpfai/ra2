@@ -147,7 +147,7 @@ TAG_LABELS: Final[dict[MismatchTag, str]] = {
     MismatchTag.UNCLEAR: "Unclear",
 }
 
-#: `LabelState` -> `(words, ink)` (`SD70`): **the one rendering table** for
+#: `LabelState` -> `(words, ink)` (`SD71`): **the one rendering table** for
 #: what sits under a value, in the cell and in the detail. `None` words mean
 #: "the label itself"; `{language}` is the prompt language the label was looked
 #: up in. A state not in the table (`not_enum`, `empty`) shows nothing.
@@ -210,7 +210,7 @@ NO_MISMATCHES_BODY: Final = "Every labelled feature this model answered, it answ
 NO_MATCHES_MESSAGE: Final = "No mismatches match this filter."
 NOTHING_REVIEWED: Final = "none reviewed yet"
 
-#: The Record cell's UID: whole, and wrapping rather than cut (`SD70`). A
+#: The Record cell's UID: whole, and wrapping rather than cut (`SD71`). A
 #: truncated key cannot be searched for in the source system, and that search
 #: is why it is on screen. A 32-character UID (the column's width) takes two
 #: lines here and pushes the chip to a third; rows grow, and that was accepted
@@ -220,7 +220,7 @@ UID_STYLE: Final = "font-size:11.5px;white-space:normal;overflow-wrap:anywhere;l
 EMPTY_CELL: Final = "—"
 
 #: The label under a code: the body face rather than the code's mono, in a
-#: 110px column, wrapping and clamped to two lines (`SD70`). Rows grow, and
+#: 110px column, wrapping and clamped to two lines (`SD71`). Rows grow, and
 #: that was accepted (`plan-mismatch-context.md` §10).
 VALUE_LABEL_STYLE: Final = (
     "font-family:var(--sans);font-size:11px;line-height:1.3;white-space:normal;"
@@ -229,7 +229,7 @@ VALUE_LABEL_STYLE: Final = (
     "margin-top:2px;"
 )
 
-# --- the detail row (SD70) ----------------------------------------------------
+# --- the detail row (SD71) ----------------------------------------------------
 
 #: The toggle's glyphs: text, like the sort headers' ▲▼, not a new icon.
 CLOSED_GLYPH: Final = "▸"
@@ -356,7 +356,7 @@ class _MismatchesPage:
         self._drafts: tuple[EvaluationDraftView, ...] = ()
         self._open_menu: str | None = None
         #: The open row's detail, read from the service when it opened
-        #: (`SD70`). Which row is open lives in `MismatchesState`.
+        #: (`SD71`). Which row is open lives in `MismatchesState`.
         self._detail: MismatchDetailView | None = None
         self._toolbar: Element | None = None
         self._table_slot: Element | None = None
@@ -892,7 +892,7 @@ class _MismatchesPage:
         )
 
     def _render_feature(self, row: MismatchRowView) -> None:
-        """The detail toggle, then the feature key (`SD70`).
+        """The detail toggle, then the feature key (`SD71`).
 
         **A button, not a clickable row.** Tab reaches it and it states
         `aria-expanded`; a row-wide target would also swallow clicks on the
@@ -933,7 +933,7 @@ class _MismatchesPage:
             )
 
     def _render_detail(self, row: MismatchRowView) -> None:
-        """The open row's detail, under it, across the whole table (`SD70`).
+        """The open row's detail, under it, across the whole table (`SD71`).
 
         The narrative on the left with the span marked wherever it occurs,
         the feature's facts on the right. **Located, never judged**: a span
@@ -1049,7 +1049,7 @@ class _MismatchesPage:
 
     async def _toggle(self, mismatch_id: str) -> None:
         """Open this row's detail, closing any other; or close it if it is
-        the open one. One at a time (`SD70`)."""
+        the open one. One at a time (`SD71`)."""
         state = mismatches_state()
         state.open_mismatch_id = "" if state.open_mismatch_id == mismatch_id else mismatch_id
         set_mismatches_state(state)
@@ -1147,7 +1147,7 @@ def _render_record(row: MismatchRowView) -> None:
 
     mvp-spec.md §12's record key, not the surrogate `record.id` this cell
     used to truncate: no delivery contains that id, so an analyst could not
-    look the accident up anywhere else (`SD70`).
+    look the accident up anywhere else (`SD71`).
 
     `mvp-spec.md` §13 requires the per-record marking "everywhere text is
     shown", and this row shows an evidence span — so the chip belongs on every
@@ -1164,7 +1164,7 @@ def _render_record(row: MismatchRowView) -> None:
 
 
 def _render_value(decoded: DecodedValue, testid: str) -> None:
-    """The code as stored, and under it what the code means (`SD70`).
+    """The code as stored, and under it what the code means (`SD71`).
 
     The label is the one the model was shown at launch, in the prompt
     language, and arrives decided from the service; this only chooses words

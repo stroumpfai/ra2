@@ -61,6 +61,7 @@ from ra2.ui.components import (
 )
 from ra2.ui.components.icons import CLIPBOARD, REFRESH, TRASH
 from ra2.ui.components.refusal import refusal_text
+from ra2.ui.components.scrub_examples import expanded_at_first, render_rule_examples
 from ra2.ui.shell import NAV_ITEMS, shell
 from ra2.ui.state import TableState, set_table_state, table_state
 from ra2.ui.views.file_report_modal import open_file_report
@@ -1325,6 +1326,12 @@ def _render_scrub_status(corpus: CorpusView) -> None:
         data_props(label, {"title": counts})
 
 
+def _flip(toggle: ui.button, detail: Element) -> None:
+    """Open or close one placeholder's examples, and say so to a screen reader."""
+    detail.set_visibility(not detail.visible)
+    toggle.props(f"aria-expanded={str(detail.visible).lower()}")
+
+
 def _render_scrub_preview(preview: ScrubPreviewView) -> None:
     """The dry run's counts, every rule that would run, zero hits included;
     then the most-hit list entries (public data, floored), which is where
@@ -1351,20 +1358,44 @@ def _render_scrub_preview(preview: ScrubPreviewView) -> None:
                 for heading in ("Placeholder", "Rule", "Replaced", "Records"):
                     with ui.element("th").classes("th").style("text-align:left;"):
                         ui.label(heading)
+            by_rule = {r.rule_id: r for r in preview.examples}
             for count in preview.counts:
+                examples = by_rule.get(count.rule_id)
+                has_examples = examples is not None and bool(examples.values)
                 with (
                     ui.element("tr")
                     .props(f'data-testid="scrub-preview-row" data-rule-id="{count.rule_id}"')
                     .mark("scrub-preview-row")
                 ):
+                    with ui.element("td").classes("td"):
+                        if has_examples:
+                            toggle = ui.button(f"<{count.tag}_n>").props(
+                                "flat dense no-caps "
+                                f'data-testid="scrub-toggle" data-rule-id="{count.rule_id}"'
+                            )
+                            toggle.mark("scrub-toggle")
+                        else:
+                            ui.label(f"<{count.tag}_n>").classes("mono")
                     for text, mono in (
-                        (f"<{count.tag}_n>", True),
                         (f"{count.rule_id} · {count.source}", False),
                         (format_count(count.hits), True),
                         (format_count(count.records), True),
                     ):
                         with ui.element("td").classes("td"):
                             ui.label(text).classes("mono" if mono else "ink2")
+                if examples is not None and has_examples:
+                    with (
+                        ui.element("tr").props('data-testid="scrub-detail"') as detail,
+                        ui.element("td").props("colspan=4").classes("td"),
+                    ):
+                        host = ui.element("div").style(
+                            "display:flex;flex-direction:column;gap:2px;padding:0 0 6px 12px;"
+                        )
+                    render_rule_examples(host, examples, f"<{count.tag}_n>")
+                    opened = expanded_at_first(examples)
+                    detail.set_visibility(opened)
+                    toggle.props(f"aria-expanded={str(opened).lower()}")
+                    toggle.on_click(lambda t=toggle, d=detail: _flip(t, d))
         ui.label(MOST_HIT_TITLE).classes("lbl")
         if preview.most_hit:
             ui.label(

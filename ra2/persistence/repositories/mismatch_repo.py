@@ -65,7 +65,7 @@ class MismatchListRow:
     draw a page, which is exactly the shape sw-design.md §17.8 rules out.
 
     All three come out of the same `SELECT` as the mismatch itself, the
-    `UnfallUid` included (`SD70`): the record key is what the Record column
+    `UnfallUid` included (`SD71`): the record key is what the Record column
     shows and what the `record` sort orders by.
     """
 
@@ -78,7 +78,7 @@ class MismatchListRow:
     feature_key: str
     #: `record.text_anonymised_flag` (mvp-spec.md §13).
     anonymised: bool
-    #: `record.unfall_uid` — mvp-spec.md §12's record key (`SD70`).
+    #: `record.unfall_uid` — mvp-spec.md §12's record key (`SD71`).
     unfall_uid: str
     record_value: str | None
     extracted_value: str | None
@@ -345,7 +345,7 @@ class MismatchRepository:
             "feature": Feature.key,
             #: The record **key**, not the surrogate id: the column shows the
             #: `UnfallUid`, and a sort that ordered by something the screen
-            #: does not show would look random (`SD70`).
+            #: does not show would look random (`SD71`).
             "record": Record.unfall_uid,
             "tag": Mismatch.analyst_tag,
             "reviewed": Mismatch.tagged_at,

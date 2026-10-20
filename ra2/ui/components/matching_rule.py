@@ -1,7 +1,7 @@
 """The words for a feature's matching rule, used by two screens.
 
 Features shows them under the frozen rule read-out; the Mismatches detail row
-(`SD70`) shows them beside a wrong answer, because "how was this compared"
+(`SD71`) shows them beside a wrong answer, because "how was this compared"
 is half of "was it really wrong". One function per sentence, so the two
 screens cannot word one rule differently. Moved here from `features_view`'s
 private `_matching_rule_label` / `_matching_rule_help`, unchanged in wording.
@@ -15,7 +15,7 @@ __all__ = ["rule_help", "rule_label", "rule_parameter"]
 def rule_parameter(rule: MatchingRule) -> str | None:
     """The rule's number, which decides whether 10:00 against 10:20 is wrong.
     Features shows it in its own control; the Mismatches detail shows it
-    beside `rule_label` (`SD70`)."""
+    beside `rule_label` (`SD71`)."""
     if rule.kind is MatchingRuleKind.WITHIN_TOLERANCE and rule.tolerance_minutes is not None:
         return f"± {rule.tolerance_minutes} min"
     if rule.decimal_precision is not None:

@@ -208,7 +208,7 @@ def expression(spec: DerivationSpec) -> str:
     (design, Case C).
 
     Public because the Mismatches detail row names a derived feature's source
-    with the same line (`SD70`): one wording for one derivation."""
+    with the same line (`SD71`): one wording for one derivation."""
     dtype = _derivation_type_of(spec)
     if isinstance(spec, (CountObjects, CountPersons)):
         if spec.filter is None:

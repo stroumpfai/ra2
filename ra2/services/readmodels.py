@@ -48,6 +48,7 @@ from ra2.domain.llm import DEFAULT_REASONING_EFFORT, EndpointStatus, ProbeCode
 from ra2.domain.mismatch import MismatchTag, ReviewTally, TagFilter, TagState
 from ra2.domain.prompt import PromptValidationError, SlotName
 from ra2.domain.qualification import QualificationState
+from ra2.domain.scrub import ScrubRuleExamples
 from ra2.domain.stats import TieMark
 
 __all__ = [
@@ -1570,12 +1571,12 @@ class MismatchRowView:
     #: `SD50`, risk B5: what the marking may claim, rendered on every row.
     anonymisation: AnonymisationMarking = AnonymisationMarking.UNKNOWN
     #: mvp-spec.md §12's **record key**, which is what the Record column and
-    #: the CSV show (`SD70`). `record_id` is the surrogate and names nothing a
+    #: the CSV show (`SD71`). `record_id` is the surrogate and names nothing a
     #: delivery contains. Defaulted only because a field without one cannot
     #: follow `anonymisation`; the service always sets it.
     unfall_uid: str = ""
     #: `record_value` and `extracted_value`, decoded against the code table
-    #: the model was shown at launch, in the prompt language (`SD70`). The
+    #: the model was shown at launch, in the prompt language (`SD71`). The
     #: raw values above stay verbatim; these say what the codes mean.
     record_decoded: DecodedValue = UNDECODED
     extracted_decoded: DecodedValue = UNDECODED
@@ -1609,7 +1610,7 @@ class MismatchRowView:
 @dataclass(frozen=True, slots=True)
 class MismatchDetailView:
     """One opened mismatch row: what the analyst needs beside the list to tell
-    a hallucination from a record error (`SD70`, `plan-mismatch-context.md` §4).
+    a hallucination from a record error (`SD71`, `plan-mismatch-context.md` §4).
 
     Read by `MismatchService.detail` **only when a row is opened**, never with
     the page: the narrative is record text, and a page shows at most one.
@@ -1849,6 +1850,9 @@ class ScrubPreviewView:
     records_changed: int
     #: The rule that timed out, when one did. A freeze would refuse (`SD66`).
     timed_out_rule: str | None = None
+    #: What each rule replaced, one entry per rule in `counts`' order. Personal
+    #: data, held in memory for the dialog; the API does not carry it (`SD70`).
+    examples: tuple[ScrubRuleExamples, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

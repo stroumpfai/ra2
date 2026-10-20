@@ -6,7 +6,7 @@
 
 The Mismatches view gains what an analyst needs to tell a hallucination from a
 record error ([`plan-mismatch-context.md`](../../plan-mismatch-context.md),
-`SD70`): the `UnfallUid`, both values decoded against the launch-time codelist
+`SD71`): the `UnfallUid`, both values decoded against the launch-time codelist
 snapshot, and a detail row with the narrative and the evidence span
 highlighted in it. The pure halves are two new domain modules,
 `ra2/domain/code_label.py` and `ra2/domain/span_locate.py`, which are not
@@ -33,9 +33,9 @@ screen shows (step 4's review).
      anonymised: bool
      ...
      anonymisation: AnonymisationMarking = AnonymisationMarking.UNKNOWN
-+    #: mvp-spec.md §12's record key — what the screen and the CSV show (SD70).
++    #: mvp-spec.md §12's record key — what the screen and the CSV show (SD71).
 +    unfall_uid: str = ""
-+    #: Both values decoded against the launch snapshot (SD70).
++    #: Both values decoded against the launch snapshot (SD71).
 +    record_decoded: DecodedValue = UNDECODED
 +    extracted_decoded: DecodedValue = UNDECODED
  ...

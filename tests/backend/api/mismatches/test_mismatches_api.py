@@ -50,10 +50,10 @@ async def test_the_list_is_200_with_the_rows_the_scorer_wrote(
     #: §12's own list, plus §13's marking — the span is record text.
     for field in ("record_value", "extracted_value", "evidence_span", "anonymised"):
         assert field in row
-    #: The record key, not only the surrogate id (SD70).
+    #: The record key, not only the surrogate id (SD71).
     assert row["unfall_uid"].startswith("U")
     assert row["unfall_uid"] != row["record_id"]
-    #: What the codes mean, as data (SD70). This fixture launched with no
+    #: What the codes mean, as data (SD71). This fixture launched with no
     #: snapshots, so nothing is decoded; the service tests cover the rest.
     assert row["record_label_state"] == "not_enum"
     assert row["extracted_label_state"] == "not_enum"

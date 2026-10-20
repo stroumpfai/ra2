@@ -1,4 +1,4 @@
-"""Where a mismatch's evidence span occurs in its narrative (`SD70`).
+"""Where a mismatch's evidence span occurs in its narrative (`SD71`).
 
 The Mismatches detail row highlights the span inside the full text, so the
 analyst sees what the model quoted *in context*. **It locates; it never

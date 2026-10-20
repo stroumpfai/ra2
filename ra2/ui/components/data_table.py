@@ -94,7 +94,7 @@ def data_table[T](
     :param wide: 12px cell padding (full-width tables) instead of 9px
         (half-width tables). README §2b.
     :param after_row: called after each body row, inside the `<tbody>`, to
-        draw what belongs under that row — the Mismatches detail (`SD70`).
+        draw what belongs under that row — the Mismatches detail (`SD71`).
         It draws its own `<tr>` or nothing; this component decides neither.
     """
     table = (

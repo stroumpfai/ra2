@@ -12,7 +12,7 @@ its body changes. Those three changes are made under
 [`contracts/amendments/feat-mismatch-context.md`](contracts/amendments/feat-mismatch-context.md).
 *(Corrected by the branch review: this paragraph first also listed
 `mismatch_repo.py` and `ui/state.py`, whose headers say they are not frozen.)*
-It corrects `plan-phase-5.md` C5 and adds `SD70` to `sw-design.md` first, in
+It corrects `plan-phase-5.md` C5 and adds `SD71` to `sw-design.md` first, in
 the same commit. **No Alembic revision**: everything shown is already stored.
 Branch `feat/mismatch-context`. No wave is running, so the amendment is
 applied in the same commits, as has been standard practice since
@@ -254,7 +254,7 @@ data-derived prop (`SD31`).
 | Document | Change |
 |---|---|
 | `plan-phase-5.md` C5 | The premise was false: there is **no** Results per-record drill-down that shows the narrative (only Goal 2's per-record list, which shows none). The answer becomes "not in the list; in an on-demand detail row, `plan-mismatch-context.md`". §3.2's column table gets the UID and label lines |
-| `sw-design.md` §17.8 | + `MismatchDetailView`, `DecodedValue`; **`SD70`**: labels decode from the launch snapshot in the prompt language with no fallback, and the span is highlighted but never judged |
+| `sw-design.md` §17.8 | + `MismatchDetailView`, `DecodedValue`; **`SD71`**: labels decode from the launch snapshot in the prompt language with no fallback, and the span is highlighted but never judged |
 | `mvp-spec.md` | **Nothing.** §12 already asks for the record key, and §13 already allows text on a drill-down |
 
 **Found on the way, not fixed here:** mvp-spec.md §13 surface 6 asks for a
@@ -347,7 +347,7 @@ reads labels from Codelists instead of the snapshot fails.
 ## 9. Order of work
 
 1. **Docs and amendment**: `plan-phase-5.md` C5 and §3.2, `sw-design.md`
-   §17.8 + `SD70`, `contracts/amendments/feat-mismatch-context.md`.
+   §17.8 + `SD71`, `contracts/amendments/feat-mismatch-context.md`.
 2. **P1 UID**: repo → read model → view → CSV → API, with backend, UI and
    the E2E width test. Standalone, low risk, and a spec fix on its own.
 3. **P2 labels**: `domain/code_label.py` → service → table cells → CSV → API.

@@ -88,7 +88,7 @@ def review_evaluation(e2e_settings: Settings, server_url: str) -> ScoredCorpus:
             corpus = await seed_scored_corpus(
                 session, suffix="j14", records=40, template_version=9141
             )
-            # SD70: launched with codelist snapshots, so the value cells carry
+            # SD71: launched with codelist snapshots, so the value cells carry
             # labels for the layout assertions. A long label is the hazard.
             for key, labels in (
                 (WEATHER, {"1": "trocken", "2": LONG_LABEL, "3": "Schnee", "4": "Eis"}),
@@ -237,7 +237,7 @@ def test_j14_review_a_run_from_results_to_an_exported_csv(
     reader = csv.reader(io.StringIO(body), delimiter=CSV_DELIMITER)
     header = next(reader)
     assert header[:4] == ["mismatch_id", "record_id", "anonymised", "feature_key"]
-    #: The review columns keep their positions; SD70's columns are appended
+    #: The review columns keep their positions; SD71's columns are appended
     #: after them, never inserted.
     assert header[7:10] == ["analyst_tag", "tagged_at", "note"]
     assert header[10] == "unfall_uid"
@@ -317,7 +317,7 @@ def test_j14_the_sidebar_reaches_the_list_and_the_grid_holds_together(
     for header in page.locator(f"{TABLE} th").all():
         assert header.evaluate("e => e.scrollWidth <= e.clientWidth"), header.inner_text()
 
-    # --- the whole UID wraps inside its 190px cell (SD70) --------------------
+    # --- the whole UID wraps inside its 190px cell (SD71) --------------------
     uid = first.locator('[data-testid="mismatch-record"]')
     #: The fixture's `j14` suffix makes these 34 characters, past the column's
     #: 32: the harder case for the wrap, and whole on screen all the same.
@@ -358,7 +358,7 @@ def test_j14_the_sidebar_reaches_the_list_and_the_grid_holds_together(
 def test_j14_a_row_opens_onto_its_narrative_from_the_keyboard(
     page: Page, server_url: str, review_evaluation: ScoredCorpus
 ) -> None:
-    """`SD70`: the detail row, as only a browser can check it.
+    """`SD71`: the detail row, as only a browser can check it.
 
     - The toggle is a real button: focused and Enter opens it.
     - The detail spans the whole table and the fixed columns keep their
