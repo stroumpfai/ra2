@@ -2884,7 +2884,6 @@
             "title": "Tagged At"
           },
           "unfall_uid": {
-            "default": "",
             "title": "Unfall Uid",
             "type": "string"
           }
@@ -2892,6 +2891,7 @@
         "required": [
           "mismatch_id",
           "record_id",
+          "unfall_uid",
           "anonymised",
           "feature_id",
           "feature_key"

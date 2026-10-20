@@ -198,7 +198,10 @@ NOTHING_REVIEWED: Final = "none reviewed yet"
 
 #: The Record cell's UID: whole, and wrapping rather than cut (`SD70`). A
 #: truncated key cannot be searched for in the source system, and that search
-#: is why it is on screen. Up to 32 mono characters is two lines at 190px.
+#: is why it is on screen. A 32-character UID (the column's width) takes two
+#: lines here and pushes the chip to a third; rows grow, and that was accepted
+#: (`plan-mismatch-context.md` §10). Nothing bounds the line count: a longer
+#: value wraps further rather than being cut.
 UID_STYLE: Final = "font-size:11.5px;white-space:normal;overflow-wrap:anywhere;line-height:1.35;"
 EMPTY_CELL: Final = "—"
 

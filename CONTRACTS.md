@@ -1167,6 +1167,40 @@ amended first, in the plan's first commit.
 
 ---
 
+## Mismatch context — the UID, the labels, the narrative, a slice
+
+`feat/mismatch-context`, `plan-mismatch-context.md`, `SD70`. **One amendment**
+(`contracts/amendments/feat-mismatch-context.md`), applied in the same
+commits. **No migration**: everything shown is already stored. `plan-phase-5.md`
+C5 and `sw-design.md` §17.8 are corrected first, in the plan's commit.
+
+### Amended files (already frozen)
+
+| File | Change | Amendment |
+|---|---|---|
+| `ra2/services/readmodels.py` | `MismatchRowView` + `unfall_uid` (defaulted and last: the frozen `tests/test_p5_contract.py` builds a row without it) | `feat-mismatch-context` |
+| `ra2/api/schemas.py` | `MismatchResponse` + `unfall_uid`, **required**. OpenAPI snapshot: additions only | `feat-mismatch-context` |
+| `ra2/services/export_service.py` | *body only*: `_MISMATCHES_CSV_HEADER` gains `unfall_uid`, **appended**. Signature unchanged | — |
+
+### New files
+
+| Path | What |
+|---|---|
+| `tests/backend/services/mismatch/test_mismatch_context.py` | The UID on every row, the `record` sort by UID and total, the CSV column appended; UIDs seeded to run against the surrogate ids |
+| `plan-mismatch-context.md` | The plan, its step and branch reviews (§11) |
+
+### Not frozen, and changed
+
+| Path | What |
+|---|---|
+| `ra2/persistence/repositories/mismatch_repo.py` | `MismatchListRow.unfall_uid`, joined in the list and the tag read-back; `record` sorts by `Record.unfall_uid` |
+| `ra2/services/mismatch_service.py`, `ra2/api/v1/mismatches.py` | carry the UID through |
+| `ra2/ui/views/mismatches_view.py` | The Record cell shows the whole UID, wrapping, the chip beneath; `RECORD_ID_CHARS` deleted; the tag control is named by UID |
+| `data-handling.md` §3 | The review-list export now carries a delivery key |
+| `tests/e2e/test_results_j14_mismatches.py` | The UID wraps inside its 190px cell; the CSV's review columns asserted by position, not from the end |
+
+---
+
 ## Phase 5 — owner: M35 (Wave 0), amendment only
 
 Re-established at tag `p5-frozen`, the same way M27 established the phase-4

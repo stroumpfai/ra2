@@ -295,6 +295,12 @@ reads labels from Codelists instead of the snapshot fails.
 - **No narrative in the CSV.** The file already carries spans and is
   sensitive for it; the full text would make it a copy of the corpus.
 - **No record page** (§5, found on the way).
+- **No UID in the discard-time export.** `run_mismatches_csv` (the discard
+  dialog's file, sw-design.md §18.3) still keys records by the surrogate
+  `record_id`, and after a discard that id points at nothing. It is the same
+  gap as P1 in a different file, found by step 2's review. It is left for its
+  own `fix-` slice because it touches `MismatchExportRow` and the discard path,
+  neither of which is on this plan's path.
 
 ---
 
@@ -357,3 +363,11 @@ Filled in as the reviews run: step reviews under their step number (2, 3,
 
 | # | Step | Finding | Outcome |
 |---|---|---|---|
+| 2.1 | 2 | `MismatchRowView.unfall_uid` and `MismatchResponse.unfall_uid` default to `""`, so a forgotten field ships an empty key | **Fixed** on the wire: `MismatchResponse.unfall_uid` is required. **Kept** on the read model: the frozen `tests/test_p5_contract.py` builds a row without it. The backend test asserts every row's UID against its record |
+| 2.2 | 2 | `data-handling.md` §3's export table no longer says what the review-list CSV carries (a delivery key now) | **Fixed** |
+| 2.3 | 2 | `run_mismatches_csv` (the discard dialog) still keys records by the surrogate id | **Recorded** in §8 as its own `fix-` slice |
+| 2.4 | 2 | The CSV test split lines and fields by hand, which misreads a quoted `;` or newline | **Fixed**: `csv.reader`, and every row's UID asserted |
+| 2.5 | 2 | Frozen files edited in place | **Kept**: house practice since `fix-b1-census-value-samples` while no wave runs; the amendment says "applied", and CONTRACTS.md now has the slice entry the review asked for |
+| 2.6 | 2 | The `j14` fixture's UIDs are 34 characters, past `String(32)`, which SQLite does not enforce | **Kept**: it is the shared fixture, and a longer value is the harder test of the wrap. The UI test pins the 32-character case |
+| 2.7 | 2 | `UID_STYLE`'s comment promised a line count nothing enforces | **Fixed**: the comment says what happens, not a bound |
+| 2.8 | 2 | Sorting by `Record.unfall_uid` across the join sorts the whole filtered run per page | **Kept**: runs are thousands of rows; the old `record_id` order had no usable index either |

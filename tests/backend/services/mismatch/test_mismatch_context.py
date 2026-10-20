@@ -10,6 +10,8 @@ seeding and before anything reads it:
 - (later steps add the codelist snapshots and the narrative hazards.)
 """
 
+import csv
+import io
 from collections.abc import AsyncIterator
 
 import pytest
@@ -18,7 +20,7 @@ from tests.fixtures.scored_corpus import ScoredCorpus, seed_scored_corpus
 
 from ra2.domain.mismatch import MismatchTag
 from ra2.persistence.models import Record
-from ra2.services.export_service import ExportService
+from ra2.services.export_service import CSV_DELIMITER, ExportService
 from ra2.services.mismatch_service import MismatchService
 from ra2.services.readmodels import SortDir
 from ra2.services.scoring_service import ScoringService
@@ -115,17 +117,15 @@ async def test_the_csv_appends_the_uid_and_moves_no_earlier_column(
     """Appended, never inserted: a script reading the file by position keeps
     working."""
     rows = await mismatch_service.export_rows(context.evaluation_id)
-    lines = (
+    table = _csv_rows(
         export_service.mismatches_csv(
             rows.rows.items,
             evaluation_id=context.evaluation_id,
             run_label=rows.run_label,
             filter_label="all",
         )
-        .decode("utf-8-sig")
-        .splitlines()
     )
-    header = lines[2].split(";")
+    header = table[0]
     assert header[:10] == [
         "mismatch_id",
         "record_id",
@@ -139,5 +139,12 @@ async def test_the_csv_appends_the_uid_and_moves_no_earlier_column(
         "note",
     ]
     assert header[10] == "unfall_uid"
-    first = lines[3].split(";")
-    assert first[10] == rows.rows.items[0].unfall_uid
+    assert [row[10] for row in table[1:]] == [row.unfall_uid for row in rows.rows.items]
+
+
+def _csv_rows(payload: bytes) -> list[list[str]]:
+    """The header and the data rows, through a real CSV reader: a span with a
+    `;` or a newline in it is quoted, and splitting by hand would misread it.
+    The first two lines are the classification and the comment."""
+    body = payload.decode("utf-8-sig").split("\r\n", 2)[2]
+    return [row for row in csv.reader(io.StringIO(body), delimiter=CSV_DELIMITER) if row]

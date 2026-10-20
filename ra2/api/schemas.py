@@ -1304,7 +1304,9 @@ class MismatchResponse(_Schema):
     mismatch_id: str
     record_id: str
     #: mvp-spec.md §12's record key (`SD70`). `record_id` is the surrogate.
-    unfall_uid: str = ""
+    #: **Required**, unlike the read model's field (which a frozen test builds
+    #: without): a response that forgot it must fail, not ship an empty key.
+    unfall_uid: str
     #: mvp-spec.md §13 — required wherever text is shown, and this row shows an
     #: evidence span.
     anonymised: bool
