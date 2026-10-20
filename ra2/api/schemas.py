@@ -1316,6 +1316,14 @@ class MismatchResponse(_Schema):
     feature_key: str
     record_value: str | None = None
     extracted_value: str | None = None
+    #: What the two codes mean in the code table the model was shown at
+    #: launch, in the prompt language (`SD70`). `*_label_state` is a
+    #: `LabelState` value: `labelled` | `no_label` | `not_in_table` |
+    #: `not_enum` | `empty`; the label is set only when `labelled`.
+    record_label: str | None
+    record_label_state: str
+    extracted_label: str | None
+    extracted_label_state: str
     evidence_span: str | None = None
     #: The **stored** value, verbatim. A tag `MismatchTag` does not name
     #: travels as itself rather than being nulled on the way out.

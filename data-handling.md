@@ -100,7 +100,7 @@ That line is a label. This section is the rule.
 | **Presence / per-record lists** | Record keys and per-feature outcomes | **DECISION REQUIRED** |
 | **Run scores** | Aggregated metrics per feature | **DECISION REQUIRED** |
 | **Run mismatches** (discard dialog) | `record_value`, `extracted_value`, **`evidence_span`**, `analyst_tag`, **`note`** | **Verbatim narrative.** Named recipients only |
-| **Mismatch review list** | The same, plus the anonymisation marking and each record's delivery key, **`unfall_uid`** (`SD70`) | **Verbatim narrative and a delivery key.** Named recipients only |
+| **Mismatch review list** | The same, plus the anonymisation marking, each record's delivery key, **`unfall_uid`**, and the code-table label of both values (`SD70`) | **Verbatim narrative and a delivery key.** Named recipients only |
 
 **Standing rules, pending those decisions:**
 

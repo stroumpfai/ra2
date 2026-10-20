@@ -2802,6 +2802,21 @@
             ],
             "title": "Evidence Span"
           },
+          "extracted_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extracted Label"
+          },
+          "extracted_label_state": {
+            "title": "Extracted Label State",
+            "type": "string"
+          },
           "extracted_value": {
             "anyOf": [
               {
@@ -2843,6 +2858,21 @@
           },
           "record_id": {
             "title": "Record Id",
+            "type": "string"
+          },
+          "record_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Label"
+          },
+          "record_label_state": {
+            "title": "Record Label State",
             "type": "string"
           },
           "record_value": {
@@ -2894,7 +2924,11 @@
           "unfall_uid",
           "anonymised",
           "feature_id",
-          "feature_key"
+          "feature_key",
+          "record_label",
+          "record_label_state",
+          "extracted_label",
+          "extracted_label_state"
         ],
         "title": "MismatchResponse",
         "type": "object"

@@ -27,18 +27,22 @@ resolves one model, and there is no "all runs" scope to represent.
 """
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ra2.domain.anonymisation import DeliveredTextAnonymised, anonymisation_marking
+from ra2.domain.code_label import DecodedValue, decode
+from ra2.domain.codes import CodeValue
 from ra2.domain.ids import EvaluationId, FeatureId, MismatchId, RunId
 from ra2.domain.mismatch import MismatchTag, ReviewTally, TagFilter, TagState, tally
 from ra2.infra.clock import Clock
-from ra2.persistence.models import Evaluation, Feature, Run
+from ra2.persistence.models import Evaluation, EvaluationFeature, Feature, Mismatch, Run
 from ra2.persistence.repositories.mismatch_repo import MismatchListRow, MismatchRepository
 from ra2.persistence.session import session_scope
 from ra2.services.errors import NotFoundError
+from ra2.services.evaluation_service import snapshot_from_json
 from ra2.services.readmodels import (
     MismatchFeatureView,
     MismatchFilters,
@@ -221,6 +225,7 @@ class MismatchService:
                 for feature in await _features_for(session, evaluation_id)
             }
 
+            codebook = await _codebook(session, evaluation)
             repo = MismatchRepository(session)
             rows, total = await repo.list_for(
                 RunId(chosen.id),
@@ -265,7 +270,7 @@ class MismatchService:
                     tag_state=tag_state,
                 ),
                 rows=Page(
-                    items=tuple(_row_view(row, self._delivered) for row in rows),
+                    items=tuple(_row_view(row, self._delivered, codebook) for row in rows),
                     total=total,
                     page=page,
                     page_size=page_size,
@@ -300,7 +305,14 @@ class MismatchService:
             )
             if row is None:
                 raise NotFoundError("mismatch", mismatch_id)
-            return _row_view(row, self._delivered)
+            evaluation = await session.scalar(
+                select(Evaluation)
+                .join(Run, Run.evaluation_id == Evaluation.id)
+                .join(Mismatch, Mismatch.run_id == Run.id)
+                .where(Mismatch.id == mismatch_id)
+            )
+            assert evaluation is not None, "a mismatch always belongs to a run of an evaluation"
+            return _row_view(row, self._delivered, await _codebook(session, evaluation))
 
 
 # ---------------------------------------------------------------------------
@@ -327,12 +339,50 @@ async def _features_for(session: AsyncSession, evaluation_id: EvaluationId) -> l
     return list(result.scalars())
 
 
-def _row_view(row: MismatchListRow, delivered: DeliveredTextAnonymised) -> MismatchRowView:
+@dataclass(frozen=True, slots=True)
+class _Codebook:
+    """The code tables one evaluation's model was shown, and the language it
+    was asked in (`SD70`).
+
+    Read from `evaluation_feature.enum_codelist_json`, **not** from the live
+    Codelists mapping: a mapping changed after launch must not relabel an
+    answer given before it. A feature with no snapshot (not an enum, or an
+    evaluation launched before snapshots existed) decodes as `not_enum`.
+    """
+
+    language: str
+    codes: Mapping[FeatureId, tuple[CodeValue, ...] | None]
+
+    def decode(self, feature_id: FeatureId, value: str | None) -> DecodedValue:
+        return decode(value, self.codes.get(feature_id), self.language)
+
+
+async def _codebook(session: AsyncSession, evaluation: Evaluation) -> _Codebook:
+    """**One statement per page**, however many rows or features: the
+    snapshots are read once and every row decodes against the parsed result."""
+    result = await session.execute(
+        select(EvaluationFeature.feature_id, EvaluationFeature.enum_codelist_json).where(
+            EvaluationFeature.evaluation_id == evaluation.id
+        )
+    )
+    return _Codebook(
+        language=evaluation.prompt_language,
+        codes={
+            FeatureId(feature_id): snapshot_from_json(payload) if payload else None
+            for feature_id, payload in result.all()
+        },
+    )
+
+
+def _row_view(
+    row: MismatchListRow, delivered: DeliveredTextAnonymised, codebook: _Codebook
+) -> MismatchRowView:
     """The repository's row as the read model `ui/` renders.
 
     A straight mapping, deliberately: `analyst_tag` crosses **verbatim** and is
     narrowed by `MismatchRowView.tag` / `.is_other`, in one place, so a value
-    `MismatchTag` does not name survives to the screen (`SD24`, §17.5).
+    `MismatchTag` does not name survives to the screen (`SD24`, §17.5). The
+    two values cross verbatim too; their decodings travel beside them.
     """
     return MismatchRowView(
         mismatch_id=row.id,
@@ -348,6 +398,8 @@ def _row_view(row: MismatchListRow, delivered: DeliveredTextAnonymised) -> Misma
         note=row.note,
         anonymisation=anonymisation_marking(row.anonymised, delivered),
         unfall_uid=row.unfall_uid,
+        record_decoded=codebook.decode(row.feature_id, row.record_value),
+        extracted_decoded=codebook.decode(row.feature_id, row.extracted_value),
     )
 
 

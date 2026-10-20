@@ -42,12 +42,15 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page, expect
 from sqlalchemy.ext.asyncio import async_sessionmaker
-from tests.fixtures.scored_corpus import ScoredCorpus, seed_scored_corpus
+from tests.fixtures.scored_corpus import LIGHT, WEATHER, ScoredCorpus, seed_scored_corpus
 
+from ra2.domain.codes import CodeValue
 from ra2.domain.mismatch import MismatchTag
 from ra2.infra.config import Settings
+from ra2.persistence.models import EvaluationFeature
 from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
 from ra2.persistence.session import create_engine
+from ra2.services.evaluation_service import snapshot_to_json
 from ra2.services.export_service import CLASSIFICATION_COMMENT, CSV_BOM, CSV_DELIMITER
 from ra2.services.scoring_service import ScoringService
 from ra2.ui.views.mismatches_view import SPAN_MIN_WIDTH_PX, TAG_LABELS
@@ -55,6 +58,9 @@ from ra2.ui.views.mismatches_view import SPAN_MIN_WIDTH_PX, TAG_LABELS
 pytestmark = pytest.mark.e2e
 
 TABLE = '[data-testid="table-mismatches"]'
+
+#: Longer than two lines of a 110px column, so the clamp has to act.
+LONG_LABEL = "nass, mit stehendem Wasser auf der Fahrbahn und Aquaplaninggefahr"
 
 
 class _Ids:
@@ -82,6 +88,25 @@ def review_evaluation(e2e_settings: Settings, server_url: str) -> ScoredCorpus:
             corpus = await seed_scored_corpus(
                 session, suffix="j14", records=40, template_version=9141
             )
+            # SD70: launched with codelist snapshots, so the value cells carry
+            # labels for the layout assertions. A long label is the hazard.
+            for key, labels in (
+                (WEATHER, {"1": "trocken", "2": LONG_LABEL, "3": "Schnee", "4": "Eis"}),
+                (LIGHT, {"1": "Tag", "2": "Dämmerung", "3": "Nacht"}),
+            ):
+                session.add(
+                    EvaluationFeature(
+                        evaluation_id=corpus.evaluation_id,
+                        feature_id=corpus.feature_ids[key],
+                        enum_codelist_json=snapshot_to_json(
+                            [
+                                CodeValue(attribute_key=key, code=code, label={"de": label})
+                                for code, label in labels.items()
+                            ]
+                        ),
+                        fingerprint="e" * 64,
+                    )
+                )
             await session.commit()
         scoring = ScoringService(
             session_factory=factory,
@@ -305,6 +330,21 @@ def test_j14_the_sidebar_reaches_the_list_and_the_grid_holds_together(
     assert uid_box["x"] + uid_box["width"] <= cell_box["x"] + cell_box["width"] + 0.5
     assert uid.evaluate("e => e.scrollWidth <= e.clientWidth"), "the UID is clipped, not wrapped"
     assert record_cell.evaluate("e => e.getBoundingClientRect().width") == pytest.approx(190, abs=1)
+
+    # --- each label sits under its code, inside its 110px cell, two lines ----
+    labels = page.locator(f'{TABLE} [data-testid$="-value-label"]')
+    expect(labels).not_to_have_count(0)
+    expect(
+        page.locator(f'{TABLE} [data-testid$="-value-label"]', has_text="nass, mit")
+    ).not_to_have_count(0)
+    for label in labels.all():
+        cell = label.locator("xpath=ancestor::td[1]")
+        label_box = label.bounding_box()
+        cell_box = cell.bounding_box()
+        assert label_box is not None and cell_box is not None
+        assert label_box["x"] + label_box["width"] <= cell_box["x"] + cell_box["width"] + 0.5
+        line = label.evaluate("e => parseFloat(getComputedStyle(e).lineHeight)")
+        assert label_box["height"] <= 2 * line + 1, label.inner_text()
 
     # --- every tally sentence is inside a tally card -------------------------
     sentences = page.locator('[data-testid="tally-sentence"]')

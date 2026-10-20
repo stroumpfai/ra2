@@ -96,12 +96,14 @@ class LabelState(StrEnum):
     NO_LABEL = "no_label"          # in the snapshot, but no label in that language
     NOT_IN_TABLE = "not_in_table"  # an enum feature, and the code is not in its snapshot
     NOT_ENUM = "not_enum"          # nothing to decode; the value is shown as it is
+    EMPTY = "empty"                # no value at all (as built, rule 3)
 
 @dataclass(frozen=True, slots=True)
 class DecodedValue:
     raw: str | None
     label: str | None
     state: LabelState
+    language: str | None = None    # as built: so "no de label" can name the language
 
 def decode(
     value: str | None,
@@ -117,8 +119,12 @@ The rules, each with a unit test:
 2. **The prompt language, and no fallback to another one.** A `de` evaluation
    with only an `fr` label gives `NO_LABEL`. Showing the French label would
    show the analyst words the model was never given.
-3. `None` or empty stays `None` with the state of its feature (`NOT_ENUM`, or
-   `LABELLED` with `label=None`). The view renders `—`, as it does today.
+3. ~~`None` or empty stays `None` with the state of its feature (`NOT_ENUM`, or
+   `LABELLED` with `label=None`).~~ *As built:* `None` or empty is its own
+   state, `EMPTY`, whatever the feature. `LABELLED` with no label would have
+   been a state that contradicts its name. The view renders `—`, as it does
+   today. (In practice an empty value is scored `missing`, never `wrong`, so it
+   doesn't reach this list; the state exists so the decoder is total.)
 4. Pure: no session, no JSON. The service parses the snapshot with the
    existing `snapshot_from_json` and hands over values.
 

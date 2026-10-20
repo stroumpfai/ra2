@@ -49,6 +49,7 @@ from typing import Final, cast
 from nicegui import ui
 from nicegui.element import Element
 
+from ra2.domain.code_label import DecodedValue, LabelState
 from ra2.domain.ids import EvaluationId, FeatureId, MismatchId, RunId
 from ra2.domain.mismatch import MismatchTag, ReviewTally, TagFilter, TagState
 from ra2.services.container import Services
@@ -143,6 +144,15 @@ TAG_LABELS: Final[dict[MismatchTag, str]] = {
     MismatchTag.UNCLEAR: "Unclear",
 }
 
+#: `LabelState` -> the words under a code when there is no label to show
+#: (`SD70`). The one rendering table for it; `{language}` is the prompt
+#: language the label was looked up in. `labelled` shows the label itself, and
+#: `not_enum` / `empty` show nothing under the value.
+LABEL_STATE_WORDS: Final[dict[LabelState, str]] = {
+    LabelState.NOT_IN_TABLE: "not in code table",
+    LabelState.NO_LABEL: "no {language} label",
+}
+
 #: What a stored tag `MismatchTag` does not name renders as. Nothing in the MVP
 #: writes one (the wire is closed, §17.5); such a row shows its stored value
 #: verbatim in the Tag cell and is counted under this heading in the strip.
@@ -204,6 +214,16 @@ NOTHING_REVIEWED: Final = "none reviewed yet"
 #: value wraps further rather than being cut.
 UID_STYLE: Final = "font-size:11.5px;white-space:normal;overflow-wrap:anywhere;line-height:1.35;"
 EMPTY_CELL: Final = "—"
+
+#: The label under a code: the body face rather than the code's mono, in a
+#: 110px column, wrapping and clamped to two lines (`SD70`). Rows grow, and
+#: that was accepted (`plan-mismatch-context.md` §10).
+VALUE_LABEL_STYLE: Final = (
+    "font-family:var(--sans);font-size:11px;line-height:1.3;white-space:normal;"
+    "overflow-wrap:anywhere;overflow:hidden;max-height:calc(2 * 1.3em);"
+    "display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;"
+    "margin-top:2px;"
+)
 
 # --- layout, the Census toolbar's own inline styles --------------------------
 
@@ -778,14 +798,14 @@ class _MismatchesPage:
                 label="In record",
                 width="110px",
                 cell_class="mono td-clip",
-                render=lambda row: _value_label(row.record_value, "mismatch-record-value"),
+                render=lambda row: _render_value(row.record_decoded, "mismatch-record-value"),
             ),
             ColumnSpec(
                 key="extracted_value",
                 label="Extracted",
                 width="110px",
                 cell_class="mono td-clip",
-                render=lambda row: _value_label(row.extracted_value, "mismatch-extracted-value"),
+                render=lambda row: _render_value(row.extracted_decoded, "mismatch-extracted-value"),
             ),
             ColumnSpec(
                 key="evidence_span",
@@ -999,10 +1019,43 @@ def _render_record(row: MismatchRowView) -> None:
         anonymisation_chip(row.anonymisation)
 
 
-def _value_label(value: str | None, testid: str) -> None:
-    ui.label(value if value else EMPTY_CELL).props(f'data-testid="{testid}"').mark(testid).style(
-        "font-size:11.5px;"
+def _render_value(decoded: DecodedValue, testid: str) -> None:
+    """The code as stored, and under it what the code means (`SD70`).
+
+    The label is the one the model was shown at launch, in the prompt
+    language, and arrives decided from the service; this only chooses words
+    and ink. Clamped to two lines: the detail row carries it whole.
+    """
+    ui.label(decoded.raw if decoded.raw else EMPTY_CELL).props(f'data-testid="{testid}"').mark(
+        testid
+    ).style("font-size:11.5px;")
+    meaning = _value_meaning(decoded)
+    if meaning is None:
+        return
+    text, ink = meaning
+    data_props(
+        ui.label(text)
+        .props(f'data-testid="{testid}-label"')
+        .mark(f"{testid}-label")
+        .style(f"{VALUE_LABEL_STYLE}color:var({ink});"),
+        {"data-label-state": decoded.state.value},
     )
+
+
+def _value_meaning(decoded: DecodedValue) -> tuple[str, str] | None:
+    """`(words, ink token)` for what sits under a value, or `None` for nothing.
+
+    Shared by the table cell and the detail row, so the two cannot word one
+    state differently.
+    """
+    if decoded.state is LabelState.LABELLED and decoded.label:
+        return decoded.label, "--ink2"
+    if decoded.state is LabelState.NOT_IN_TABLE:
+        return LABEL_STATE_WORDS[LabelState.NOT_IN_TABLE], "--warn"
+    if decoded.state is LabelState.NO_LABEL:
+        words = LABEL_STATE_WORDS[LabelState.NO_LABEL].format(language=decoded.language or "")
+        return words, "--ink3"
+    return None
 
 
 def _render_span(row: MismatchRowView) -> None:

@@ -22,7 +22,7 @@ the detail have to arrive in read models. `record_id` stays on the row: the
 detail and the API still address the record by it.
 
 ```diff
-+from ra2.domain.code_label import DecodedValue
++from ra2.domain.code_label import UNDECODED, DecodedValue
 +from ra2.domain.feature import DerivationSpec, Kind, MatchingRule, ValueType
  ...
  class MismatchRowView:
@@ -34,8 +34,8 @@ detail and the API still address the record by it.
 +    #: mvp-spec.md §12's record key — what the screen and the CSV show (SD70).
 +    unfall_uid: str = ""
 +    #: Both values decoded against the launch snapshot (SD70).
-+    record_decoded: DecodedValue = DecodedValue.plain(None)
-+    extracted_decoded: DecodedValue = DecodedValue.plain(None)
++    record_decoded: DecodedValue = UNDECODED
++    extracted_decoded: DecodedValue = UNDECODED
  ...
 +@dataclass(frozen=True, slots=True)
 +class MismatchDetailView:
@@ -73,15 +73,18 @@ a client does not re-derive a rule the service owns").
  class MismatchResponse(_Schema):
      mismatch_id: str
      record_id: str
-+    unfall_uid: str = ""
++    unfall_uid: str
      ...
-+    record_label: str | None = None
-+    record_label_state: str = "not_enum"
-+    extracted_label: str | None = None
-+    extracted_label_state: str = "not_enum"
++    record_label: str | None
++    record_label_state: str
++    extracted_label: str | None
++    extracted_label_state: str
 ```
 
-The OpenAPI snapshot is regenerated: additions only. **No route is added**:
+**All five are required**, `unfall_uid` included (step 2's review): a
+response that forgot one fails rather than shipping an empty key. The one
+constructor is `api/v1/mismatches._row`. The OpenAPI snapshot is regenerated:
+additions only. **No route is added**:
 `MismatchService.detail` is reached in-process only (plan §6, settled §10).
 
 ## 3. Not frozen, named for completeness

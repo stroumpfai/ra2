@@ -1178,15 +1178,17 @@ C5 and `sw-design.md` §17.8 are corrected first, in the plan's commit.
 
 | File | Change | Amendment |
 |---|---|---|
-| `ra2/services/readmodels.py` | `MismatchRowView` + `unfall_uid` (defaulted and last: the frozen `tests/test_p5_contract.py` builds a row without it) | `feat-mismatch-context` |
-| `ra2/api/schemas.py` | `MismatchResponse` + `unfall_uid`, **required**. OpenAPI snapshot: additions only | `feat-mismatch-context` |
-| `ra2/services/export_service.py` | *body only*: `_MISMATCHES_CSV_HEADER` gains `unfall_uid`, **appended**. Signature unchanged | — |
+| `ra2/services/readmodels.py` | `MismatchRowView` + `unfall_uid` (defaulted and last: the frozen `tests/test_p5_contract.py` builds a row without it), + `record_decoded`, `extracted_decoded` (`DecodedValue`) | `feat-mismatch-context` |
+| `ra2/api/schemas.py` | `MismatchResponse` + `unfall_uid`, `record_label`, `record_label_state`, `extracted_label`, `extracted_label_state`, all **required**. OpenAPI snapshot: additions only | `feat-mismatch-context` |
+| `ra2/services/export_service.py` | *body only*: `_MISMATCHES_CSV_HEADER` gains `unfall_uid`, `record_label`, `extracted_label`, **appended**. Signature unchanged | — |
 
 ### New files
 
 | Path | What |
 |---|---|
-| `tests/backend/services/mismatch/test_mismatch_context.py` | The UID on every row, the `record` sort by UID and total, the CSV column appended; UIDs seeded to run against the surrogate ids |
+| `ra2/domain/code_label.py` | `LabelState`, `DecodedValue`, `decode`: a value against the launch snapshot, exact codes, the prompt language and no other |
+| `tests/unit/mismatch/test_code_label.py` | Each state; `"04"` ≠ `"4"`; no fallback across languages |
+| `tests/backend/services/mismatch/test_mismatch_context.py` | The UID on every row, the `record` sort by UID and total, the CSV columns appended; labels from the snapshot while a live mapping says otherwise; one snapshot read per page. UIDs seeded to run against the surrogate ids |
 | `plan-mismatch-context.md` | The plan, its step and branch reviews (§11) |
 
 ### Not frozen, and changed
@@ -1194,10 +1196,12 @@ C5 and `sw-design.md` §17.8 are corrected first, in the plan's commit.
 | Path | What |
 |---|---|
 | `ra2/persistence/repositories/mismatch_repo.py` | `MismatchListRow.unfall_uid`, joined in the list and the tag read-back; `record` sorts by `Record.unfall_uid` |
-| `ra2/services/mismatch_service.py`, `ra2/api/v1/mismatches.py` | carry the UID through |
-| `ra2/ui/views/mismatches_view.py` | The Record cell shows the whole UID, wrapping, the chip beneath; `RECORD_ID_CHARS` deleted; the tag control is named by UID |
+| `ra2/services/mismatch_service.py` | carries the UID; `_Codebook`, one `evaluation_feature` read per page (and per tag write), decodes both values. Imports `evaluation_service.snapshot_from_json`, which reaches no scoring module |
+| `ra2/api/v1/mismatches.py` | maps the UID and the decodings |
+| `ra2/ui/views/mismatches_view.py` | The Record cell shows the whole UID, wrapping, the chip beneath; `RECORD_ID_CHARS` deleted; the tag control is named by UID. The value cells put the label (or `LABEL_STATE_WORDS`) under the code, clamped to two lines |
 | `data-handling.md` §3 | The review-list export now carries a delivery key |
-| `tests/e2e/test_results_j14_mismatches.py` | The UID wraps inside its 190px cell; the CSV's review columns asserted by position, not from the end |
+| `tests/e2e/test_results_j14_mismatches.py` | Seeded with snapshots. The UID wraps inside its 190px cell; every label stays in its 110px cell within two lines; the CSV's review columns asserted by position, not from the end |
+| `tests/ui/test_mismatches_view.py` | The whole UID; labels and the two no-label wordings (`labelled` fixture); nothing under an undecodable value |
 
 ---
 

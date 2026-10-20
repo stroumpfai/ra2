@@ -53,6 +53,11 @@ async def test_the_list_is_200_with_the_rows_the_scorer_wrote(
     #: The record key, not only the surrogate id (SD70).
     assert row["unfall_uid"].startswith("U")
     assert row["unfall_uid"] != row["record_id"]
+    #: What the codes mean, as data (SD70). This fixture launched with no
+    #: snapshots, so nothing is decoded; the service tests cover the rest.
+    assert row["record_label_state"] == "not_enum"
+    assert row["extracted_label_state"] == "not_enum"
+    assert row["record_label"] is None
     assert row["analyst_tag"] is None
     assert row["reviewed"] is False
 

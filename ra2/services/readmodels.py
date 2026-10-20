@@ -17,6 +17,7 @@ from enum import StrEnum
 
 from ra2.domain.anonymisation import AnonymisationMarking
 from ra2.domain.census import CensusBucket, TypeHint, ValueCount
+from ra2.domain.code_label import UNDECODED, DecodedValue
 from ra2.domain.codelist_coverage import ColumnCoverage
 from ra2.domain.codelist_suggest import SuggestionSource, UnresolvedReason
 from ra2.domain.codes import CodeValue
@@ -1572,6 +1573,11 @@ class MismatchRowView:
     #: delivery contains. Defaulted only because a field without one cannot
     #: follow `anonymisation`; the service always sets it.
     unfall_uid: str = ""
+    #: `record_value` and `extracted_value`, decoded against the code table
+    #: the model was shown at launch, in the prompt language (`SD70`). The
+    #: raw values above stay verbatim; these say what the codes mean.
+    record_decoded: DecodedValue = UNDECODED
+    extracted_decoded: DecodedValue = UNDECODED
 
     @property
     def tag(self) -> MismatchTag | None:

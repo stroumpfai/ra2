@@ -116,6 +116,10 @@ _MISMATCHES_CSV_HEADER: Final = (
     #: Appended, never inserted (`SD70`): a column added later goes at the end,
     #: so a script reading this file by position keeps working.
     "unfall_uid",
+    #: The launch-snapshot label in the prompt language, empty unless the
+    #: code had one (`SD70`).
+    "record_label",
+    "extracted_label",
 )
 
 #: Tab 2's per-record list. `anonymised` is a column rather than a footnote
@@ -361,6 +365,8 @@ class ExportService:
                     "" if row.tagged_at is None else row.tagged_at.isoformat(),
                     row.note or "",
                     row.unfall_uid,
+                    row.record_decoded.label or "",
+                    row.extracted_decoded.label or "",
                 )
                 for row in rows
             ],

@@ -16,6 +16,7 @@ import os
 from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass
 from itertools import count
+from typing import Final
 
 import httpx
 import pytest
@@ -26,13 +27,17 @@ from nicegui.testing.general import nicegui_reset_globals
 from nicegui.testing.user import User
 from nicegui.testing.user_interaction import UserInteraction
 from sqlalchemy import delete
-from tests.fixtures.scored_corpus import WEATHER, ScoredCorpus, seed_scored_corpus
+from sqlalchemy.ext.asyncio import AsyncSession
+from tests.fixtures.scored_corpus import LIGHT, WEATHER, ScoredCorpus, seed_scored_corpus
 
+from ra2.domain.code_label import LabelState
+from ra2.domain.codes import CodeValue
 from ra2.domain.mismatch import MismatchTag
 from ra2.infra.clock import Clock
 from ra2.infra.config import Settings
-from ra2.persistence.models import Mismatch
+from ra2.persistence.models import EvaluationFeature, Mismatch
 from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
+from ra2.services.evaluation_service import snapshot_to_json
 from ra2.services.scoring_service import ScoringService
 from ra2.ui.views.mismatches_view import (
     EMPTY_BODY,
@@ -72,6 +77,7 @@ async def _app(
     *,
     score: bool,
     wipe_mismatches: bool = False,
+    snapshots: bool = False,
 ) -> AsyncIterator[Seeded]:
     with nicegui_reset_globals():
         os.environ["NICEGUI_USER_SIMULATION"] = "true"
@@ -86,6 +92,8 @@ async def _app(
             ):
                 async with session_factory() as session:
                     corpus = await seed_scored_corpus(session, records=40)
+                    if snapshots:
+                        _add_snapshots(session, corpus)
                     await session.commit()
                 if score:
                     scoring = ScoringService(
@@ -106,12 +114,50 @@ async def _app(
             os.environ.pop("NICEGUI_USER_SIMULATION", None)
 
 
+#: The launch snapshots `labelled` adds (`SD70`): weather 1-4 in German and 5
+#: only in French; light without 99, so `s06`'s answer is in no table.
+WEATHER_SNAPSHOT: Final = {
+    "1": {"de": "trocken"},
+    "2": {"de": "nass"},
+    "3": {"de": "Schnee"},
+    "4": {"de": "Eis"},
+    "5": {"fr": "brouillard"},
+}
+LIGHT_SNAPSHOT: Final = {"1": {"de": "Tag"}, "2": {"de": "Dämmerung"}, "3": {"de": "Nacht"}}
+
+
+def _add_snapshots(session: AsyncSession, corpus: ScoredCorpus) -> None:
+    for key, labels in ((WEATHER, WEATHER_SNAPSHOT), (LIGHT, LIGHT_SNAPSHOT)):
+        session.add(
+            EvaluationFeature(
+                evaluation_id=corpus.evaluation_id,
+                feature_id=corpus.feature_ids[key],
+                enum_codelist_json=snapshot_to_json(
+                    [
+                        CodeValue(attribute_key=key, code=code, label=label)
+                        for code, label in labels.items()
+                    ]
+                ),
+                fingerprint="e" * 64,
+            )
+        )
+
+
 @pytest.fixture
 async def scored(
     app_factory: Callable[..., FastAPI], migrated_db: Settings, frozen_clock: Clock
 ) -> AsyncIterator[Seeded]:
     """A scored evaluation with real mismatches — the ordinary case."""
     async for seeded in _app(app_factory, frozen_clock, score=True):
+        yield seeded
+
+
+@pytest.fixture
+async def labelled(
+    app_factory: Callable[..., FastAPI], migrated_db: Settings, frozen_clock: Clock
+) -> AsyncIterator[Seeded]:
+    """The ordinary case, launched with codelist snapshots (`SD70`)."""
+    async for seeded in _app(app_factory, frozen_clock, score=True, snapshots=True):
         yield seeded
 
 
@@ -278,6 +324,31 @@ async def test_the_record_cell_shows_the_whole_unfall_uid(scored: Seeded) -> Non
     for text in texts:
         assert len(text) == 32, text
         assert text.startswith("Us"), "the fixture's UIDs, not its rec-… ids"
+
+
+async def test_each_code_carries_what_it_means_under_it(labelled: Seeded) -> None:
+    """`SD70`: the label the model was shown, in the prompt language, under
+    the code; and when there is none, words saying why, never a blank. Run 1's
+    wrong answers cover all three: labelled weather codes, `5` labelled only
+    in French, and `s06`'s light `99`, which is in no table."""
+    await labelled.user.open(_url(labelled.corpus))
+    record_labels = labelled.user.find(marker="mismatch-record-value-label").elements
+    extracted_labels = labelled.user.find(marker="mismatch-extracted-value-label").elements
+
+    assert {_own_text(e) for e in record_labels} >= {"trocken", "nass"}
+    by_state = {e.props["data-label-state"]: _own_text(e) for e in extracted_labels}
+    assert by_state[LabelState.NOT_IN_TABLE.value] == "not in code table"
+    assert by_state[LabelState.NO_LABEL.value] == "no de label"
+    assert LabelState.LABELLED.value in by_state
+
+
+async def test_a_value_with_nothing_to_decode_has_no_line_under_it(scored: Seeded) -> None:
+    """The ordinary fixture launched without snapshots: every value is
+    `not_enum`, and nothing is invented under it."""
+    await scored.user.open(_url(scored.corpus))
+    assert scored.user.find(marker="mismatch-record-value").elements
+    await scored.user.should_not_see(marker="mismatch-record-value-label")
+    await scored.user.should_not_see(marker="mismatch-extracted-value-label")
 
 
 async def test_the_table_carries_the_designs_widths_and_one_flexible_column(
