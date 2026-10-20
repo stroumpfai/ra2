@@ -1620,7 +1620,6 @@ class MismatchDetailView:
     """
 
     mismatch_id: MismatchId
-    record_id: RecordId
     unfall_uid: str
     #: `record.text_raw`, as scrubbed at freeze (§19). `None` for a record
     #: with no narrative.

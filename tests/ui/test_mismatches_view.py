@@ -27,7 +27,7 @@ from nicegui.testing.general import nicegui_reset_globals
 from nicegui.testing.user import User
 from nicegui.testing.user_interaction import UserInteraction
 from sqlalchemy import delete
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.fixtures.scored_corpus import (
     FRENCH_LOSSY,
     LIGHT,
@@ -38,6 +38,7 @@ from tests.fixtures.scored_corpus import (
 
 from ra2.domain.code_label import LabelState
 from ra2.domain.codes import CodeValue
+from ra2.domain.feature import MatchingRule, MatchingRuleKind
 from ra2.domain.mismatch import MismatchTag
 from ra2.infra.clock import Clock
 from ra2.infra.config import Settings
@@ -46,7 +47,10 @@ from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
 from ra2.services.evaluation_service import snapshot_to_json
 from ra2.services.scoring_service import ScoringService
 from ra2.ui.views.mismatches_view import (
+    DETAIL_GONE,
+    DETAIL_LABEL,
     EMPTY_BODY,
+    HIDE_DETAIL_LABEL,
     NO_MATCHES_MESSAGE,
     NO_MISMATCHES_BODY,
     NO_MISMATCHES_TITLE,
@@ -56,6 +60,7 @@ from ra2.ui.views.mismatches_view import (
     SPAN_MIN_WIDTH_PX,
     TABLE_MIN_WIDTH,
     TAG_LABELS,
+    _rule_parameter,
     tally_sentence,
 )
 from ra2.ui.views.scoring_states import STALLED_TITLE
@@ -75,6 +80,9 @@ class Seeded:
 
     user: User
     corpus: ScoredCorpus
+    #: The app's own sessions, for a test that changes the database under an
+    #: open page (a run discarded in another tab).
+    session_factory: async_sessionmaker[AsyncSession]
 
 
 async def _app(
@@ -115,7 +123,7 @@ async def _app(
                     async with session_factory() as session:
                         await session.execute(delete(Mismatch))
                         await session.commit()
-                yield Seeded(User(client), corpus)
+                yield Seeded(User(client), corpus, session_factory)
         finally:
             os.environ.pop("NICEGUI_USER_SIMULATION", None)
 
@@ -376,13 +384,13 @@ async def _toggle(seeded: Seeded, index: int) -> None:
     """Click one row's toggle and wait for **that** toggle to flip: the page
     redraws, so the element is found again by the row it controls."""
     toggles = _marked(seeded.user, "mismatch-toggle")
-    target = str(toggles[index]._props["aria-controls"])
+    target = str(toggles[index]._props["data-mismatch"])
     before = toggles[index]._props["aria-expanded"]
     _one(seeded.user, toggles[index]).click()
 
     def flipped() -> bool:
         return any(
-            t._props["aria-controls"] == target and t._props["aria-expanded"] != before
+            t._props["data-mismatch"] == target and t._props["aria-expanded"] != before
             for t in _marked(seeded.user, "mismatch-toggle")
         )
 
@@ -443,6 +451,47 @@ async def test_tagging_the_open_row_leaves_its_detail_open(scored: Seeded) -> No
     await _tag_first_row(scored, TAG_LABELS[MismatchTag.HALLUCINATION])
     assert len(_marked(scored.user, "mismatch-detail")) == 1
     assert _marked(scored.user, "detail-narrative")
+
+
+async def test_the_toggle_names_what_pressing_it_will_do(scored: Seeded) -> None:
+    """Its name follows its state, and it points at a row only while that
+    row exists."""
+    await scored.user.open(_weather_url(scored.corpus, 1))
+    closed = _marked(scored.user, "mismatch-toggle")[0]
+    assert str(closed._props["aria-label"]).startswith(DETAIL_LABEL)
+    assert "aria-controls" not in closed._props
+    await _toggle(scored, 0)
+    opened = _marked(scored.user, "mismatch-toggle")[0]
+    assert str(opened._props["aria-label"]).startswith(HIDE_DETAIL_LABEL)
+    (detail,) = _marked(scored.user, "mismatch-detail")
+    assert opened._props["aria-controls"] == detail._props["id"]
+
+
+@pytest.mark.parametrize(
+    ("rule", "words"),
+    [
+        (MatchingRule(kind=MatchingRuleKind.WITHIN_TOLERANCE, tolerance_minutes=15), "± 15 min"),
+        (MatchingRule(kind=MatchingRuleKind.EXACT, decimal_precision=2), "2 decimals"),
+        (MatchingRule(kind=MatchingRuleKind.EXACT), None),
+    ],
+)
+def test_the_rule_carries_the_number_that_decides_it(rule: MatchingRule, words: str | None) -> None:
+    """10:00 against 10:20 is wrong or right depending on the tolerance, so
+    the detail shows it beside the shared rule words (step 4's review). The
+    shared fixture has no tolerance feature, hence a direct check."""
+    assert _rule_parameter(rule) == words
+
+
+async def test_a_row_that_vanished_says_so_when_opened(scored: Seeded) -> None:
+    """A run discarded in another tab: the detail is not silently empty."""
+    await scored.user.open(_weather_url(scored.corpus, 1))
+    toggle = _marked(scored.user, "mismatch-toggle")[0]
+    async with scored.session_factory() as session:
+        await session.execute(delete(Mismatch).where(Mismatch.id == toggle._props["data-mismatch"]))
+        await session.commit()
+    _one(scored.user, toggle).click()
+    await scored.user.should_see(DETAIL_GONE)
+    assert not _marked(scored.user, "mismatch-detail")
 
 
 async def test_sorting_closes_the_detail(scored: Seeded) -> None:

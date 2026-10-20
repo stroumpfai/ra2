@@ -18,8 +18,9 @@ migration: everything shown is already stored.
 ## 1. `ra2/services/readmodels.py` — `MismatchRowView` widened, `MismatchDetailView` added
 
 **Why.** The UI may not see an ORM row (§12.7), so the UID, the decodings and
-the detail have to arrive in read models. `record_id` stays on the row: the
-detail and the API still address the record by it.
+the detail have to arrive in read models. `record_id` stays on the row, where
+the API and the CSV carry it; the detail carries only the UID, which is all the
+screen shows (step 4's review).
 
 ```diff
 +from ra2.domain.code_label import UNDECODED, DecodedValue
@@ -40,7 +41,6 @@ detail and the API still address the record by it.
 +@dataclass(frozen=True, slots=True)
 +class MismatchDetailView:
 +    mismatch_id: MismatchId
-+    record_id: RecordId
 +    unfall_uid: str
 +    narrative: str | None
 +    highlights: tuple[tuple[int, int], ...]

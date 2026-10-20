@@ -36,7 +36,7 @@ from ra2.domain.anonymisation import DeliveredTextAnonymised, anonymisation_mark
 from ra2.domain.code_label import DecodedValue, by_code, decode
 from ra2.domain.codes import CodeValue
 from ra2.domain.feature import Kind, ValueType, derivation_from_json
-from ra2.domain.ids import EvaluationId, FeatureId, MismatchId, RecordId, RunId
+from ra2.domain.ids import EvaluationId, FeatureId, MismatchId, RunId
 from ra2.domain.mismatch import MismatchTag, ReviewTally, TagFilter, TagState, tally
 from ra2.domain.span_locate import locate
 from ra2.infra.clock import Clock
@@ -182,7 +182,6 @@ class MismatchService:
             codebook = await _codebook(session, evaluation, feature_id=feature_id)
             return MismatchDetailView(
                 mismatch_id=MismatchId(mismatch.id),
-                record_id=RecordId(record.id),
                 unfall_uid=record.unfall_uid,
                 narrative=record.text_raw,
                 highlights=locate(record.text_raw, mismatch.evidence_span),
@@ -191,6 +190,10 @@ class MismatchService:
                 anonymisation=anonymisation_marking(record.text_anonymised_flag, self._delivered),
                 feature_key=feature.key,
                 feature_description=feature.description,
+                # Narrowed, not trusted: the columns are typed `Kind` and
+                # `ValueType`, but a row the session already holds comes back
+                # as it was written, which may be the plain string. The read
+                # model promises the enum, so this is where it becomes one.
                 kind=Kind(feature.kind),
                 value_type=ValueType(feature.value_type),
                 matching_rule=matching_rule_from_json(feature.matching_rule),

@@ -50,6 +50,7 @@ from nicegui import ui
 from nicegui.element import Element
 
 from ra2.domain.code_label import DecodedValue, LabelState
+from ra2.domain.feature import MatchingRule, MatchingRuleKind
 from ra2.domain.ids import EvaluationId, FeatureId, MismatchId, RunId
 from ra2.domain.mismatch import MismatchTag, ReviewTally, TagFilter, TagState
 from ra2.services.container import Services
@@ -234,6 +235,9 @@ VALUE_LABEL_STYLE: Final = (
 CLOSED_GLYPH: Final = "▸"
 OPEN_GLYPH: Final = "▾"
 DETAIL_LABEL: Final = "Show the narrative for"
+HIDE_DETAIL_LABEL: Final = "Hide the narrative for"
+#: The open row's mismatch is gone, typically a run discarded in another tab.
+DETAIL_GONE: Final = "That mismatch no longer exists; its run may have been discarded."
 TOGGLE_STYLE: Final = (
     "background:none;border:none;padding:0 2px;font:inherit;font-size:12px;line-height:1;"
     "color:var(--ink2);cursor:pointer;flex:none;"
@@ -461,7 +465,9 @@ class _MismatchesPage:
             try:
                 return await self._services.mismatch.detail(MismatchId(state.open_mismatch_id))
             except NotFoundError:
-                pass
+                # Said, not swallowed: a detail that vanished without a word
+                # reads as a glitch (plan §4.2).
+                ui.notify(DETAIL_GONE, type="warning")
         state.open_mismatch_id = ""
         set_mismatches_state(state)
         return None
@@ -895,6 +901,18 @@ class _MismatchesPage:
         """
         mid = str(row.mismatch_id)
         is_open = mismatches_state().open_mismatch_id == mid
+        #: `aria-controls` only while the row it names exists; the name says
+        #: what pressing will do, so it changes with the state.
+        aria: dict[str, str] = {
+            "aria-expanded": "true" if is_open else "false",
+            "aria-label": (
+                f"{HIDE_DETAIL_LABEL if is_open else DETAIL_LABEL} "
+                f"{row.feature_key} {row.unfall_uid}"
+            ),
+            "data-mismatch": mid,
+        }
+        if is_open:
+            aria["aria-controls"] = _detail_dom_id(mid)
         with ui.element("div").style("display:flex;align-items:center;gap:6px;min-width:0;"):
             toggle = data_props(
                 ui.element("button")
@@ -902,18 +920,17 @@ class _MismatchesPage:
                 .props('type="button" data-testid="mismatch-toggle"')
                 .mark("mismatch-toggle")
                 .style(TOGGLE_STYLE),
-                {
-                    "aria-expanded": "true" if is_open else "false",
-                    "aria-controls": _detail_dom_id(mid),
-                    "aria-label": f"{DETAIL_LABEL} {row.feature_key} {row.unfall_uid}",
-                },
+                aria,
             )
             toggle.on("click", lambda _, mid=mid: self._toggle(mid))
             with toggle:
                 ui.label(OPEN_GLYPH if is_open else CLOSED_GLYPH)
             ui.label(row.feature_key).props('data-testid="mismatch-feature"').mark(
                 "mismatch-feature"
-            ).style("font-size:11.5px;overflow:hidden;text-overflow:ellipsis;")
+            ).style(
+                "font-size:11.5px;overflow:hidden;text-overflow:ellipsis;"
+                "white-space:nowrap;min-width:0;"
+            )
 
     def _render_detail(self, row: MismatchRowView) -> None:
         """The open row's detail, under it, across the whole table (`SD70`).
@@ -1036,7 +1053,10 @@ class _MismatchesPage:
         state = mismatches_state()
         state.open_mismatch_id = "" if state.open_mismatch_id == mismatch_id else mismatch_id
         set_mismatches_state(state)
-        await self.reload()
+        #: Not `reload()`: opening a row changes no row, so the page's list,
+        #: statuses and evaluations stay as read. One service call, one redraw.
+        self._detail = await self._read_detail()
+        self._render()
 
     async def _sort(self, key: str) -> None:
         set_table_state(MISMATCH_TABLE, _state().toggled(key))
@@ -1205,6 +1225,9 @@ def _narrative_panel(detail: MismatchDetailView) -> None:
     with ui.element("div").style("display:flex;flex-direction:column;gap:6px;min-width:0;"):
         with ui.element("div").style("display:flex;align-items:center;gap:8px;"):
             ui.label(NARRATIVE_TITLE).classes("lbl")
+            ui.label(detail.unfall_uid).classes("mono").props('data-testid="detail-uid"').mark(
+                "detail-uid"
+            ).style("font-size:11px;color:var(--ink2);")
             ui.label(f"{detail.language} · {detail.language_confidence:.2f}").classes("mono").props(
                 'data-testid="detail-language"'
             ).mark("detail-language").style("font-size:11px;color:var(--ink3);")
@@ -1264,7 +1287,11 @@ def _facts_panel(detail: MismatchDetailView) -> None:
             ui.label(detail.feature_description).style("font-size:11.5px;color:var(--ink2);")
         _fact(FACT_RULE, "detail-rule")
         with ui.element("dd").style("margin:0;min-width:0;"):
-            ui.label(rule_label(detail.kind, detail.matching_rule)).style("font-size:12px;")
+            parameter = _rule_parameter(detail.matching_rule)
+            rule = rule_label(detail.kind, detail.matching_rule)
+            ui.label(rule if parameter is None else f"{rule} · {parameter}").props(
+                'data-testid="detail-rule-value"'
+            ).mark("detail-rule-value").style("font-size:12px;")
             ui.label(rule_help(detail.kind, detail.value_type, detail.matching_rule)).style(
                 "font-size:11px;color:var(--ink3);"
             )
@@ -1302,6 +1329,17 @@ def _facts_panel(detail: MismatchDetailView) -> None:
             ui.label(detail.evidence_span or EMPTY_CELL).style(
                 "font-size:12px;color:var(--ink2);white-space:pre-wrap;overflow-wrap:anywhere;"
             )
+
+
+def _rule_parameter(rule: MatchingRule) -> str | None:
+    """The rule's number, which decides whether 10:00 against 10:20 is
+    wrong: Features shows it in its own control, so the shared rule words
+    leave it out and this adds it."""
+    if rule.kind is MatchingRuleKind.WITHIN_TOLERANCE and rule.tolerance_minutes is not None:
+        return f"± {rule.tolerance_minutes} min"
+    if rule.decimal_precision is not None:
+        return f"{rule.decimal_precision} decimals"
+    return None
 
 
 def _fact(title: str, testid: str) -> None:

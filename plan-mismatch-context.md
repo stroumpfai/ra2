@@ -410,3 +410,11 @@ Filled in as the reviews run: step reviews under their step number (2, 3,
 | 3.6 | 3 | `_value_meaning`'s docstring names a detail row that did not exist yet | **Kept**: step 4 adds it, in the next commit |
 | 3.7 | 3 | `_value_meaning` re-checks that a `labelled` value has a label; a `no_label` without a language reads "no  label" | **Kept**: the check is what makes an empty label render nothing (3.3); the service always sets the language |
 | 3.8 | 3 | The API's label states were plain `str` | **Fixed**: typed `LabelState`, so OpenAPI lists the five values |
+| 4.1 | 4 | `reload()` re-reads the detail and redraws the table on every poll tick, resetting the narrative's scroll | **Kept**: polling runs only while a run or scoring pass is in flight; a diffing redraw is a larger change than this slice. Opening a row no longer reloads at all (4.3) |
+| 4.2 | 4 | A detail that vanished closed without a word, where §4.2 said it would say so | **Fixed**: `DETAIL_GONE` notice; UI-tested by deleting the row under an open page |
+| 4.3 | 4 | Opening a row ran the whole `reload()` (evaluations, statuses, list) | **Fixed**: `_toggle` reads the detail and redraws; nothing else |
+| 4.4 | 4 | The rule said "within tolerance" without the tolerance | **Fixed**: `± N min` / `N decimals` beside the shared rule words; tested directly, as the fixture has no tolerance feature |
+| 4.5 | 4 | The toggle's name said "Show" while open; `aria-controls` named a missing element while closed | **Fixed**: "Hide" while open; `aria-controls` only while the row exists; tests find rows by `data-mismatch` |
+| 4.6 | 4 | The feature key's ellipsis could never apply | **Fixed**: `white-space:nowrap;min-width:0` |
+| 4.7 | 4 | `MismatchDetailView.record_id` and `.unfall_uid` were read by nothing | **Fixed**: `record_id` removed; the UID is now shown in the narrative's header, where a scrolled-away row still needs its key |
+| 4.8 | 4 | `Kind(...)` / `ValueType(...)` re-wrap typed columns | **Kept, and commented**: the backend test failed without them; a row the session holds comes back as written, which may be the plain string |
