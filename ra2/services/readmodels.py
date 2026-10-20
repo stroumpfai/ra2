@@ -1567,6 +1567,11 @@ class MismatchRowView:
     note: str | None
     #: `SD50`, risk B5: what the marking may claim, rendered on every row.
     anonymisation: AnonymisationMarking = AnonymisationMarking.UNKNOWN
+    #: mvp-spec.md §12's **record key**, which is what the Record column and
+    #: the CSV show (`SD70`). `record_id` is the surrogate and names nothing a
+    #: delivery contains. Defaulted only because a field without one cannot
+    #: follow `anonymisation`; the service always sets it.
+    unfall_uid: str = ""
 
     @property
     def tag(self) -> MismatchTag | None:

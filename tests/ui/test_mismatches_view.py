@@ -268,6 +268,18 @@ async def test_the_anonymisation_chip_is_on_every_row_that_shows_text(scored: Se
     assert {chip.props["data-marking"] for chip in chips} == {"anonymised_column", "unknown"}
 
 
+async def test_the_record_cell_shows_the_whole_unfall_uid(scored: Seeded) -> None:
+    """mvp-spec.md §12's record key, whole (`SD70`). The cell used to show 14
+    characters of the surrogate `record.id`, which is in no delivery; a cut
+    key cannot be searched for in the source system either."""
+    await scored.user.open(_url(scored.corpus))
+    texts = [_own_text(e) for e in scored.user.find(marker="mismatch-record").elements]
+    assert texts
+    for text in texts:
+        assert len(text) == 32, text
+        assert text.startswith("Us"), "the fixture's UIDs, not its rec-… ids"
+
+
 async def test_the_table_carries_the_designs_widths_and_one_flexible_column(
     scored: Seeded,
 ) -> None:

@@ -347,6 +347,7 @@ def _row_view(row: MismatchListRow, delivered: DeliveredTextAnonymised) -> Misma
         tagged_at=row.tagged_at,
         note=row.note,
         anonymisation=anonymisation_marking(row.anonymised, delivered),
+        unfall_uid=row.unfall_uid,
     )
 
 

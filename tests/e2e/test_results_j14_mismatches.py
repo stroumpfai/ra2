@@ -212,7 +212,10 @@ def test_j14_review_a_run_from_results_to_an_exported_csv(
     reader = csv.reader(io.StringIO(body), delimiter=CSV_DELIMITER)
     header = next(reader)
     assert header[:4] == ["mismatch_id", "record_id", "anonymised", "feature_key"]
-    assert header[-3:] == ["analyst_tag", "tagged_at", "note"]
+    #: The review columns keep their positions; SD70's columns are appended
+    #: after them, never inserted.
+    assert header[7:10] == ["analyst_tag", "tagged_at", "note"]
+    assert header[10] == "unfall_uid"
     rows = [row for row in reader if row]
 
     # The export is the **currently filtered** table, whole — no paging.
@@ -288,6 +291,20 @@ def test_j14_the_sidebar_reaches_the_list_and_the_grid_holds_together(
     assert well.evaluate("e => e.scrollWidth > e.clientWidth"), "the well should scroll sideways"
     for header in page.locator(f"{TABLE} th").all():
         assert header.evaluate("e => e.scrollWidth <= e.clientWidth"), header.inner_text()
+
+    # --- the whole UID wraps inside its 190px cell (SD70) --------------------
+    uid = first.locator('[data-testid="mismatch-record"]')
+    #: The fixture's `j14` suffix makes these 34 characters, past the column's
+    #: 32: the harder case for the wrap, and whole on screen all the same.
+    assert uid.inner_text().startswith("Uj14")
+    assert len(uid.inner_text()) >= 32
+    record_cell = first.locator("td").nth(1)
+    uid_box = uid.bounding_box()
+    cell_box = record_cell.bounding_box()
+    assert uid_box is not None and cell_box is not None
+    assert uid_box["x"] + uid_box["width"] <= cell_box["x"] + cell_box["width"] + 0.5
+    assert uid.evaluate("e => e.scrollWidth <= e.clientWidth"), "the UID is clipped, not wrapped"
+    assert record_cell.evaluate("e => e.getBoundingClientRect().width") == pytest.approx(190, abs=1)
 
     # --- every tally sentence is inside a tally card -------------------------
     sentences = page.locator('[data-testid="tally-sentence"]')

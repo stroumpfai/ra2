@@ -55,7 +55,7 @@ class MismatchWrite:
 
 @dataclass(frozen=True, slots=True)
 class MismatchListRow:
-    """One row of the review list, **with the two joined facts it needs**.
+    """One row of the review list, **with the three joined facts it needs**.
 
     `list_for` returns these rather than `Mismatch` objects, and that is what
     makes the N+1 unwritable rather than merely discouraged (`R4`, one table
@@ -64,7 +64,9 @@ class MismatchListRow:
     caller handed bare ORM rows would have to walk a relationship per row to
     draw a page, which is exactly the shape sw-design.md §17.8 rules out.
 
-    Both come out of the same `SELECT` as the mismatch itself.
+    All three come out of the same `SELECT` as the mismatch itself, the
+    `UnfallUid` included (`SD70`): the record key is what the Record column
+    shows and what the `record` sort orders by.
     """
 
     id: MismatchId
@@ -76,6 +78,8 @@ class MismatchListRow:
     feature_key: str
     #: `record.text_anonymised_flag` (mvp-spec.md §13).
     anonymised: bool
+    #: `record.unfall_uid` — mvp-spec.md §12's record key (`SD70`).
+    unfall_uid: str
     record_value: str | None
     extracted_value: str | None
     evidence_span: str | None
@@ -195,12 +199,12 @@ class MismatchRepository:
         show a row twice or skip one.
 
         **Two statements, whatever the run holds**: one page, one count. The
-        feature key and the anonymisation flag are joined rather than looked up
+        feature key, the anonymisation flag and the UID are joined rather than looked up
         (`MismatchListRow`), which is what keeps that true.
         """
         where = self._filters(run_id, feature_id=feature_id, tag_state=tag_state)
         page = (
-            select(Mismatch, Feature.key, Record.text_anonymised_flag)
+            select(Mismatch, Feature.key, Record.text_anonymised_flag, Record.unfall_uid)
             .join(Feature, Feature.id == Mismatch.feature_id)
             .join(Record, Record.id == Mismatch.record_id)
             .where(*where)
@@ -254,7 +258,7 @@ class MismatchRepository:
 
     async def _row(self, mismatch_id: MismatchId) -> MismatchListRow | None:
         one = (
-            select(Mismatch, Feature.key, Record.text_anonymised_flag)
+            select(Mismatch, Feature.key, Record.text_anonymised_flag, Record.unfall_uid)
             .join(Feature, Feature.id == Mismatch.feature_id)
             .join(Record, Record.id == Mismatch.record_id)
             .where(Mismatch.id == mismatch_id)
@@ -339,7 +343,10 @@ class MismatchRepository:
         """
         columns: dict[str, Any] = {
             "feature": Feature.key,
-            "record": Mismatch.record_id,
+            #: The record **key**, not the surrogate id: the column shows the
+            #: `UnfallUid`, and a sort that ordered by something the screen
+            #: does not show would look random (`SD70`).
+            "record": Record.unfall_uid,
             "tag": Mismatch.analyst_tag,
             "reviewed": Mismatch.tagged_at,
         }
@@ -351,8 +358,10 @@ class MismatchRepository:
         return [ordered, Mismatch.id.asc()]
 
 
-def _to_row(mismatch: Mismatch, feature_key: str, anonymised: bool) -> MismatchListRow:
-    """One joined `(mismatch, feature.key, record.anonymised)` triple as the
+def _to_row(
+    mismatch: Mismatch, feature_key: str, anonymised: bool, unfall_uid: str
+) -> MismatchListRow:
+    """One joined `(mismatch, feature.key, record.anonymised, record.unfall_uid)` row as the
     detached row the service renders.
 
     A module function rather than a classmethod because it holds no session and
@@ -366,6 +375,7 @@ def _to_row(mismatch: Mismatch, feature_key: str, anonymised: bool) -> MismatchL
         feature_id=FeatureId(mismatch.feature_id),
         feature_key=feature_key,
         anonymised=anonymised,
+        unfall_uid=unfall_uid,
         record_value=mismatch.record_value,
         extracted_value=mismatch.extracted_value,
         evidence_span=mismatch.evidence_span,

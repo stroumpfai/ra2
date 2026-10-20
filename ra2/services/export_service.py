@@ -113,6 +113,9 @@ _MISMATCHES_CSV_HEADER: Final = (
     "analyst_tag",
     "tagged_at",
     "note",
+    #: Appended, never inserted (`SD70`): a column added later goes at the end,
+    #: so a script reading this file by position keeps working.
+    "unfall_uid",
 )
 
 #: Tab 2's per-record list. `anonymised` is a column rather than a footnote
@@ -357,6 +360,7 @@ class ExportService:
                     row.analyst_tag or "",
                     "" if row.tagged_at is None else row.tagged_at.isoformat(),
                     row.note or "",
+                    row.unfall_uid,
                 )
                 for row in rows
             ],

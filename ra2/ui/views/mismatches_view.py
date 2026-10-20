@@ -196,8 +196,10 @@ NO_MISMATCHES_BODY: Final = "Every labelled feature this model answered, it answ
 NO_MATCHES_MESSAGE: Final = "No mismatches match this filter."
 NOTHING_REVIEWED: Final = "none reviewed yet"
 
-#: How much of a record id the 190px column holds beside its chip.
-RECORD_ID_CHARS: Final = 14
+#: The Record cell's UID: whole, and wrapping rather than cut (`SD70`). A
+#: truncated key cannot be searched for in the source system, and that search
+#: is why it is on screen. Up to 32 mono characters is two lines at 190px.
+UID_STYLE: Final = "font-size:11.5px;white-space:normal;overflow-wrap:anywhere;line-height:1.35;"
 EMPTY_CELL: Final = "—"
 
 # --- layout, the Census toolbar's own inline styles --------------------------
@@ -829,7 +831,7 @@ class _MismatchesPage:
         control = segmented_control(
             options=[TAG_LABELS[tag] for tag in MismatchTag],
             value=None if row.tag is None else TAG_LABELS[row.tag],
-            label=f"Tag {row.feature_key} {row.record_id}",
+            label=f"Tag {row.feature_key} {row.unfall_uid}",
             on_change=cast(
                 "Callable[[str], None]",
                 lambda label, mid=str(row.mismatch_id): self._tag(mid, label),
@@ -974,17 +976,24 @@ class _MismatchesPage:
 
 
 def _render_record(row: MismatchRowView) -> None:
-    """The record id, truncated, plus **the anonymisation chip**.
+    """The `UnfallUid`, whole, plus **the anonymisation chip** on its own line.
+
+    mvp-spec.md §12's record key, not the surrogate `record.id` this cell
+    used to truncate: no delivery contains that id, so an analyst could not
+    look the accident up anywhere else (`SD70`).
 
     `mvp-spec.md` §13 requires the per-record marking "everywhere text is
     shown", and this row shows an evidence span — so the chip belongs on every
     row that carries one, not on a detail view somebody has to open.
     """
-    ui.label(str(row.record_id)[:RECORD_ID_CHARS]).props('data-testid="mismatch-record"').mark(
-        "mismatch-record"
-    ).style("font-size:11.5px;")
-    # Every row, every state (SD50): an absent chip would read as "no".
-    anonymisation_chip(row.anonymisation)
+    with ui.element("div").style(
+        "display:flex;flex-direction:column;align-items:flex-start;gap:4px;"
+    ):
+        ui.label(row.unfall_uid).props('data-testid="mismatch-record"').mark(
+            "mismatch-record"
+        ).style(UID_STYLE)
+        # Every row, every state (SD50): an absent chip would read as "no".
+        anonymisation_chip(row.anonymisation)
 
 
 def _value_label(value: str | None, testid: str) -> None:

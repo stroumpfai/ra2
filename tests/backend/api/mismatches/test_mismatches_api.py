@@ -50,6 +50,9 @@ async def test_the_list_is_200_with_the_rows_the_scorer_wrote(
     #: §12's own list, plus §13's marking — the span is record text.
     for field in ("record_value", "extracted_value", "evidence_span", "anonymised"):
         assert field in row
+    #: The record key, not only the surrogate id (SD70).
+    assert row["unfall_uid"].startswith("U")
+    assert row["unfall_uid"] != row["record_id"]
     assert row["analyst_tag"] is None
     assert row["reviewed"] is False
 

@@ -28,11 +28,11 @@ detail and the API still address the record by it.
  class MismatchRowView:
      mismatch_id: MismatchId
      record_id: RecordId
-+    #: mvp-spec.md §12's record key — what the screen and the CSV show (SD70).
-+    unfall_uid: str
      anonymised: bool
      ...
      anonymisation: AnonymisationMarking = AnonymisationMarking.UNKNOWN
++    #: mvp-spec.md §12's record key — what the screen and the CSV show (SD70).
++    unfall_uid: str = ""
 +    #: Both values decoded against the launch snapshot (SD70).
 +    record_decoded: DecodedValue = DecodedValue.plain(None)
 +    extracted_decoded: DecodedValue = DecodedValue.plain(None)
@@ -59,9 +59,10 @@ detail and the API still address the record by it.
 +    evidence_span: str | None
 ```
 
-`__all__` gains `MismatchDetailView`. `unfall_uid` is a required field placed
-after `record_id`; the one constructor, `mismatch_service._row_view`, and the
-UI test builders pass it by keyword.
+`__all__` gains `MismatchDetailView`. **`unfall_uid` is defaulted and last**,
+not required beside `record_id`: `tests/test_p5_contract.py` is frozen and
+builds a row without it, and a required field cannot follow a defaulted one.
+The one production constructor, `mismatch_service._row_view`, always sets it.
 
 ## 2. `ra2/api/schemas.py` — `MismatchResponse`, additive
 

@@ -2882,6 +2882,11 @@
               }
             ],
             "title": "Tagged At"
+          },
+          "unfall_uid": {
+            "default": "",
+            "title": "Unfall Uid",
+            "type": "string"
           }
         },
         "required": [

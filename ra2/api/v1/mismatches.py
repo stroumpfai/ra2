@@ -71,6 +71,7 @@ def _row(view: MismatchRowView) -> MismatchResponse:
     return MismatchResponse(
         mismatch_id=str(view.mismatch_id),
         record_id=str(view.record_id),
+        unfall_uid=view.unfall_uid,
         anonymised=view.anonymised,
         anonymisation=view.anonymisation.value,
         feature_id=str(view.feature_id),
