@@ -377,3 +377,11 @@ Filled in as the reviews run: step reviews under their step number (2, 3,
 | 2.6 | 2 | The `j14` fixture's UIDs are 34 characters, past `String(32)`, which SQLite does not enforce | **Kept**: it is the shared fixture, and a longer value is the harder test of the wrap. The UI test pins the 32-character case |
 | 2.7 | 2 | `UID_STYLE`'s comment promised a line count nothing enforces | **Fixed**: the comment says what happens, not a bound |
 | 2.8 | 2 | Sorting by `Record.unfall_uid` across the join sorts the whole filtered run per page | **Kept**: runs are thousands of rows; the old `record_id` order had no usable index either |
+| 3.1 | 3 | The CSV wrote only the label, so `not_in_table`, `no_label`, `not_enum` and `empty` were all one blank cell | **Fixed**: `record_label_state`, `extracted_label_state` appended; the invented `99` asserted in the file |
+| 3.2 | 3 | The tag write checked its evaluation with `assert`, gone under `-O` | **Fixed**: `NotFoundError` |
+| 3.3 | 3 | An empty-string label decoded as `no_label`, where the prompt printed `[no de label]` only for an absent language | **Fixed**: `no_label` means the language is absent; an empty label is `labelled` with `""`, and the cell shows nothing under the code, as the model was shown nothing. Unit-tested |
+| 3.4 | 3 | Each tag write read and parsed every snapshot of the evaluation to decode one row | **Fixed**: `_codebook(..., feature_id=)` reads that feature's only |
+| 3.5 | 3 | `decode` scanned the code table per value | **Fixed**: `by_code` keys each snapshot once; `decode` takes the mapping |
+| 3.6 | 3 | `_value_meaning`'s docstring names a detail row that did not exist yet | **Kept**: step 4 adds it, in the next commit |
+| 3.7 | 3 | `_value_meaning` re-checks that a `labelled` value has a label; a `no_label` without a language reads "no  label" | **Kept**: the check is what makes an empty label render nothing (3.3); the service always sets the language |
+| 3.8 | 3 | The API's label states were plain `str` | **Fixed**: typed `LabelState`, so OpenAPI lists the five values |

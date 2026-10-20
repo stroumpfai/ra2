@@ -76,9 +76,9 @@ a client does not re-derive a rule the service owns").
 +    unfall_uid: str
      ...
 +    record_label: str | None
-+    record_label_state: str
++    record_label_state: LabelState
 +    extracted_label: str | None
-+    extracted_label_state: str
++    extracted_label_state: LabelState
 ```
 
 **All five are required**, `unfall_uid` included (step 2's review): a
@@ -90,7 +90,8 @@ additions only. **No route is added**:
 ## 3. Not frozen, named for completeness
 
 - `ra2/services/export_service.py`: `_MISMATCHES_CSV_HEADER` and the
-  `mismatches_csv` body gain `unfall_uid`, `record_label`, `extracted_label`,
+  `mismatches_csv` body gain `unfall_uid`, `record_label`, `extracted_label`, `record_label_state`,
+  `extracted_label_state`,
   **appended**. The signature is unchanged, and the signature is what is
   frozen.
 - `ra2/services/mismatch_service.py`, `ra2/persistence/repositories/mismatch_repo.py`,

@@ -117,9 +117,13 @@ _MISMATCHES_CSV_HEADER: Final = (
     #: so a script reading this file by position keeps working.
     "unfall_uid",
     #: The launch-snapshot label in the prompt language, empty unless the
-    #: code had one (`SD70`).
+    #: code had one (`SD70`), and the `LabelState` that says why it is empty:
+    #: a code the model invented (`not_in_table`) must not read like a value
+    #: with nothing to decode (`not_enum`).
     "record_label",
     "extracted_label",
+    "record_label_state",
+    "extracted_label_state",
 )
 
 #: Tab 2's per-record list. `anonymised` is a column rather than a footnote
@@ -367,6 +371,8 @@ class ExportService:
                     row.unfall_uid,
                     row.record_decoded.label or "",
                     row.extracted_decoded.label or "",
+                    row.record_decoded.state.value,
+                    row.extracted_decoded.state.value,
                 )
                 for row in rows
             ],

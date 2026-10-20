@@ -15,6 +15,7 @@ from typing import Final
 from pydantic import BaseModel, ConfigDict, Field
 
 from ra2.domain.census import CensusBucketLabel, TypeHint
+from ra2.domain.code_label import LabelState
 from ra2.domain.delivery import DeliveryStatus, Encoding, FileKind, SourceKind
 from ra2.domain.extraction import EvaluationSize, RunStatus
 from ra2.domain.findings import FindingCode, Severity
@@ -1317,13 +1318,13 @@ class MismatchResponse(_Schema):
     record_value: str | None = None
     extracted_value: str | None = None
     #: What the two codes mean in the code table the model was shown at
-    #: launch, in the prompt language (`SD70`). `*_label_state` is a
-    #: `LabelState` value: `labelled` | `no_label` | `not_in_table` |
-    #: `not_enum` | `empty`; the label is set only when `labelled`.
+    #: launch, in the prompt language (`SD70`). `*_label_state` is the closed
+    #: `LabelState`, so the schema lists its values; the label is set only
+    #: when `labelled`.
     record_label: str | None
-    record_label_state: str
+    record_label_state: LabelState
     extracted_label: str | None
-    extracted_label_state: str
+    extracted_label_state: LabelState
     evidence_span: str | None = None
     #: The **stored** value, verbatim. A tag `MismatchTag` does not name
     #: travels as itself rather than being nulled on the way out.

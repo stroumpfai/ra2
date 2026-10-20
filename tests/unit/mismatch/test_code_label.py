@@ -3,17 +3,20 @@
 
 import pytest
 
-from ra2.domain.code_label import UNDECODED, DecodedValue, LabelState, decode
+from ra2.domain.code_label import UNDECODED, DecodedValue, LabelState, by_code, decode
 from ra2.domain.codes import CodeValue
 
 pytestmark = pytest.mark.unit
 
 #: A code table with the hazards in it: a zero-padded code beside a bare one,
-#: and a code labelled only in French.
-CODES = (
-    CodeValue(attribute_key="weather", code="1", label={"de": "trocken", "fr": "sec"}),
-    CodeValue(attribute_key="weather", code="04", label={"de": "Schnee", "fr": "neige"}),
-    CodeValue(attribute_key="weather", code="7", label={"fr": "brouillard"}),
+#: a code labelled only in French, and one whose German label is empty.
+CODES = by_code(
+    (
+        CodeValue(attribute_key="weather", code="1", label={"de": "trocken", "fr": "sec"}),
+        CodeValue(attribute_key="weather", code="04", label={"de": "Schnee", "fr": "neige"}),
+        CodeValue(attribute_key="weather", code="7", label={"fr": "brouillard"}),
+        CodeValue(attribute_key="weather", code="8", label={"de": "", "fr": "vent"}),
+    )
 )
 
 
@@ -38,6 +41,15 @@ def test_a_label_in_another_language_is_not_offered_in_its_place() -> None:
     assert decoded.state is LabelState.NO_LABEL
     assert decoded.label is None
     assert decoded.language == "de"
+
+
+def test_an_empty_label_is_what_the_model_was_shown_not_a_missing_one() -> None:
+    """`render_feature_block` prints `[no de label]` only when the language
+    is absent; an empty string it prints as it is. `no_label` has to mean the
+    same thing, or the screen misstates what the model saw."""
+    decoded = decode("8", CODES, "de")
+    assert decoded.state is LabelState.LABELLED
+    assert decoded.label == ""
 
 
 def test_a_code_outside_the_table_is_said_to_be_outside_it() -> None:

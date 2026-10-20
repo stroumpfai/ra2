@@ -1179,8 +1179,8 @@ C5 and `sw-design.md` §17.8 are corrected first, in the plan's commit.
 | File | Change | Amendment |
 |---|---|---|
 | `ra2/services/readmodels.py` | `MismatchRowView` + `unfall_uid` (defaulted and last: the frozen `tests/test_p5_contract.py` builds a row without it), + `record_decoded`, `extracted_decoded` (`DecodedValue`) | `feat-mismatch-context` |
-| `ra2/api/schemas.py` | `MismatchResponse` + `unfall_uid`, `record_label`, `record_label_state`, `extracted_label`, `extracted_label_state`, all **required**. OpenAPI snapshot: additions only | `feat-mismatch-context` |
-| `ra2/services/export_service.py` | *body only*: `_MISMATCHES_CSV_HEADER` gains `unfall_uid`, `record_label`, `extracted_label`, **appended**. Signature unchanged | — |
+| `ra2/api/schemas.py` | `MismatchResponse` + `unfall_uid`, `record_label`, `record_label_state`, `extracted_label`, `extracted_label_state`, all **required**, the states typed `LabelState`. OpenAPI snapshot: additions only | `feat-mismatch-context` |
+| `ra2/services/export_service.py` | *body only*: `_MISMATCHES_CSV_HEADER` gains `unfall_uid`, `record_label`, `extracted_label`, `record_label_state`, `extracted_label_state`, **appended**. Signature unchanged | — |
 
 ### New files
 

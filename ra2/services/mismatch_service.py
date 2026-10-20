@@ -33,7 +33,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ra2.domain.anonymisation import DeliveredTextAnonymised, anonymisation_marking
-from ra2.domain.code_label import DecodedValue, decode
+from ra2.domain.code_label import DecodedValue, by_code, decode
 from ra2.domain.codes import CodeValue
 from ra2.domain.ids import EvaluationId, FeatureId, MismatchId, RunId
 from ra2.domain.mismatch import MismatchTag, ReviewTally, TagFilter, TagState, tally
@@ -311,8 +311,12 @@ class MismatchService:
                 .join(Mismatch, Mismatch.run_id == Run.id)
                 .where(Mismatch.id == mismatch_id)
             )
-            assert evaluation is not None, "a mismatch always belongs to a run of an evaluation"
-            return _row_view(row, self._delivered, await _codebook(session, evaluation))
+            if evaluation is None:
+                raise NotFoundError("evaluation", mismatch_id)
+            #: Only this row's feature: a tag click decodes one row, and
+            #: parsing every code table in the evaluation for it is waste.
+            codebook = await _codebook(session, evaluation, feature_id=row.feature_id)
+            return _row_view(row, self._delivered, codebook)
 
 
 # ---------------------------------------------------------------------------
@@ -351,25 +355,29 @@ class _Codebook:
     """
 
     language: str
-    codes: Mapping[FeatureId, tuple[CodeValue, ...] | None]
+    codes: Mapping[FeatureId, Mapping[str, CodeValue] | None]
 
     def decode(self, feature_id: FeatureId, value: str | None) -> DecodedValue:
         return decode(value, self.codes.get(feature_id), self.language)
 
 
-async def _codebook(session: AsyncSession, evaluation: Evaluation) -> _Codebook:
+async def _codebook(
+    session: AsyncSession, evaluation: Evaluation, *, feature_id: FeatureId | None = None
+) -> _Codebook:
     """**One statement per page**, however many rows or features: the
-    snapshots are read once and every row decodes against the parsed result."""
-    result = await session.execute(
-        select(EvaluationFeature.feature_id, EvaluationFeature.enum_codelist_json).where(
-            EvaluationFeature.evaluation_id == evaluation.id
-        )
+    snapshots are read once, keyed by code once, and every row decodes
+    against the result. `feature_id` narrows it to one feature's table."""
+    query = select(EvaluationFeature.feature_id, EvaluationFeature.enum_codelist_json).where(
+        EvaluationFeature.evaluation_id == evaluation.id
     )
+    if feature_id is not None:
+        query = query.where(EvaluationFeature.feature_id == feature_id)
+    result = await session.execute(query)
     return _Codebook(
         language=evaluation.prompt_language,
         codes={
-            FeatureId(feature_id): snapshot_from_json(payload) if payload else None
-            for feature_id, payload in result.all()
+            FeatureId(found): by_code(snapshot_from_json(payload)) if payload else None
+            for found, payload in result.all()
         },
     )
 

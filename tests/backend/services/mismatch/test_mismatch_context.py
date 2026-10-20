@@ -367,7 +367,7 @@ async def test_the_csv_appends_both_labels_after_the_uid(
     context: ScoredCorpus,
     export_service: ExportService,
 ) -> None:
-    rows = await mismatch_service.export_rows(context.evaluation_id, run_id=context.run_ids[1])
+    rows = await mismatch_service.export_rows(context.evaluation_id, run_id=context.run_ids[0])
     table = _csv_rows(
         export_service.mismatches_csv(
             rows.rows.items,
@@ -376,8 +376,20 @@ async def test_the_csv_appends_both_labels_after_the_uid(
             filter_label="all",
         )
     )
-    assert table[0][10:] == ["unfall_uid", "record_label", "extracted_label"]
+    assert table[0][10:] == [
+        "unfall_uid",
+        "record_label",
+        "extracted_label",
+        "record_label_state",
+        "extracted_label_state",
+    ]
     for csv_row, row in zip(table[1:], rows.rows.items, strict=True):
         assert csv_row[11] == (row.record_decoded.label or "")
         assert csv_row[12] == (row.extracted_decoded.label or "")
+        assert csv_row[13] == row.record_decoded.state.value
+        assert csv_row[14] == row.extracted_decoded.state.value
     assert any(csv_row[11] == "trocken" for csv_row in table[1:])
+    #: An invented code is not a blank in the file either.
+    (invented,) = [r for r in table[1:] if r[5] == "99"]
+    assert invented[12] == ""
+    assert invented[14] == LabelState.NOT_IN_TABLE.value

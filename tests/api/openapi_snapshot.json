@@ -2535,6 +2535,18 @@
         "title": "KeepEvaluationRequest",
         "type": "object"
       },
+      "LabelState": {
+        "description": "What decoding found. A stable identifier, like `FindingCode`: the words\nfor each state live in one table in `ui/`.",
+        "enum": [
+          "labelled",
+          "no_label",
+          "not_in_table",
+          "not_enum",
+          "empty"
+        ],
+        "title": "LabelState",
+        "type": "string"
+      },
       "ListKind": {
         "description": "The four files an analyst can import into a rule set.",
         "enum": [
@@ -2814,8 +2826,7 @@
             "title": "Extracted Label"
           },
           "extracted_label_state": {
-            "title": "Extracted Label State",
-            "type": "string"
+            "$ref": "#/components/schemas/LabelState"
           },
           "extracted_value": {
             "anyOf": [
@@ -2872,8 +2883,7 @@
             "title": "Record Label"
           },
           "record_label_state": {
-            "title": "Record Label State",
-            "type": "string"
+            "$ref": "#/components/schemas/LabelState"
           },
           "record_value": {
             "anyOf": [

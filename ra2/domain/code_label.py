@@ -11,14 +11,14 @@ Pure, as `domain/` is: plain values in, a plain value out. The service parses
 the snapshot and hands its `CodeValue`s over.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
 from ra2.domain.codes import CodeValue
 
-__all__ = ["UNDECODED", "DecodedValue", "LabelState", "decode"]
+__all__ = ["UNDECODED", "DecodedValue", "LabelState", "by_code", "decode"]
 
 
 class LabelState(StrEnum):
@@ -58,26 +58,37 @@ class DecodedValue:
 UNDECODED: Final = DecodedValue(raw=None, label=None, state=LabelState.EMPTY)
 
 
+def by_code(codes: Sequence[CodeValue]) -> Mapping[str, CodeValue]:
+    """A snapshot keyed by its codes, built once per feature, so decoding a
+    page is a lookup per value rather than a scan of the table."""
+    return {code.code: code for code in codes}
+
+
 def decode(
     value: str | None,
-    codes: Sequence[CodeValue] | None,
+    codes: Mapping[str, CodeValue] | None,
     language: str,
 ) -> DecodedValue:
-    """Decode `value` against `codes` in `language`.
+    """Decode `value` against `codes` (from `by_code`) in `language`.
 
     `codes` is `None` for a feature that is not an enum, which is what the
     snapshot column holds for one. **Exact codes only**: `"04"` is not `"4"`,
     the rule `compute_coverage` and the scorer already apply. Coercing a code
     to its nearest neighbour is what mvp-spec.md §7 forbids.
+
+    **`no_label` means what the prompt means by it**: the language is absent
+    from the code's labels, which is exactly when `render_feature_block`
+    printed `[no de label]`. A label that is present but empty is what the
+    model was shown, so it decodes as `labelled` with an empty label.
     """
     if not value:
         return DecodedValue(raw=value, label=None, state=LabelState.EMPTY, language=language)
     if codes is None:
         return DecodedValue(raw=value, label=None, state=LabelState.NOT_ENUM, language=language)
-    found = next((code for code in codes if code.code == value), None)
+    found = codes.get(value)
     if found is None:
         return DecodedValue(raw=value, label=None, state=LabelState.NOT_IN_TABLE, language=language)
     label = found.label.get(language)
-    if not label:
+    if label is None:
         return DecodedValue(raw=value, label=None, state=LabelState.NO_LABEL, language=language)
     return DecodedValue(raw=value, label=label, state=LabelState.LABELLED, language=language)
