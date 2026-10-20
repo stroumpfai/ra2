@@ -45,7 +45,7 @@ from ra2.domain.feature import (
 )
 from ra2.ui.components.primitives import data_props
 
-__all__ = ["derivation_builder"]
+__all__ = ["derivation_builder", "expression"]
 
 #: The closed catalogue, in the order the type chip cycles through it
 #: (mvp-spec.md §8.3, `DerivationType`'s own declaration order).
@@ -203,9 +203,12 @@ def _filter_expression(filter_: Filter) -> str:
     return f"{filter_.column} {symbol} {filter_.value or '…'}"
 
 
-def _expression(spec: DerivationSpec) -> str:
+def expression(spec: DerivationSpec) -> str:
     """The "Saved as" mono line — assembled from `spec` alone, never fetched
-    (design, Case C)."""
+    (design, Case C).
+
+    Public because the Mismatches detail row names a derived feature's source
+    with the same line (`SD70`): one wording for one derivation."""
     dtype = _derivation_type_of(spec)
     if isinstance(spec, (CountObjects, CountPersons)):
         if spec.filter is None:
@@ -517,7 +520,7 @@ def derivation_builder(
             _render_type_specific(spec, on_change=on_change)
         with ui.element("div").style("display:flex;flex-direction:column;gap:2px;"):
             ui.label("Saved as").classes("lbl")
-            ui.label(_expression(spec)).classes("mono").props(
+            ui.label(expression(spec)).classes("mono").props(
                 'data-testid="derivation-expression"'
             ).mark("derivation-expression").style("font-size:11.5px;color:var(--ink2);")
     return container

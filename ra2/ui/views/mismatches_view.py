@@ -56,6 +56,7 @@ from ra2.services.container import Services
 from ra2.services.errors import NotFoundError, RunNotScoreableError
 from ra2.services.readmodels import (
     EvaluationDraftView,
+    MismatchDetailView,
     MismatchListView,
     MismatchRowView,
     ReviewTallyView,
@@ -71,6 +72,8 @@ from ra2.ui.components import (
     format_local,
     pagination_row,
 )
+from ra2.ui.components.derivation_builder import expression
+from ra2.ui.components.matching_rule import rule_help, rule_label
 from ra2.ui.components.primitives import data_props, segmented_control
 from ra2.ui.components.refusal import refusal_text
 from ra2.ui.shell import item_for_key, shell
@@ -225,6 +228,41 @@ VALUE_LABEL_STYLE: Final = (
     "margin-top:2px;"
 )
 
+# --- the detail row (SD70) ----------------------------------------------------
+
+#: The toggle's glyphs: text, like the sort headers' ▲▼, not a new icon.
+CLOSED_GLYPH: Final = "▸"
+OPEN_GLYPH: Final = "▾"
+DETAIL_LABEL: Final = "Show the narrative for"
+TOGGLE_STYLE: Final = (
+    "background:none;border:none;padding:0 2px;font:inherit;font-size:12px;line-height:1;"
+    "color:var(--ink2);cursor:pointer;flex:none;"
+)
+#: Narrative on the left, taking the rest; the facts at a fixed 320px.
+DETAIL_GRID_STYLE: Final = (
+    "display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:18px;align-items:start;"
+    "white-space:normal;"
+)
+#: `pre-wrap` keeps the narrative's own line breaks, which is where the
+#: embedded-newline hazard lives. Scrolls inside its box past 240px.
+NARRATIVE_STYLE: Final = (
+    "white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;"
+    "font-size:12.5px;line-height:1.5;color:var(--ink);background:var(--surface);"
+    "border:1px solid var(--rule);border-radius:4px;padding:8px 10px;"
+)
+#: The located span. Existing tokens only (R2): the warn tint marks, it does
+#: not alarm.
+MARK_STYLE: Final = "background:var(--warn-soft);color:var(--ink);padding:0 1px;border-radius:2px;"
+NO_NARRATIVE: Final = "no narrative on this record"
+NARRATIVE_TITLE: Final = "Narrative"
+#: The facts panel's labels, in order.
+FACT_FEATURE: Final = "Feature"
+FACT_RULE: Final = "Matching rule"
+FACT_SOURCE: Final = "Source"
+FACT_RECORD: Final = "In record"
+FACT_EXTRACTED: Final = "Extracted"
+FACT_SPAN: Final = "Evidence span"
+
 # --- layout, the Census toolbar's own inline styles --------------------------
 
 #: **Two rows, each with one job** (`SD54`). This was one wrapping row of two
@@ -313,6 +351,9 @@ class _MismatchesPage:
         #: The launched evaluations, for the picker and the evaluation chip.
         self._drafts: tuple[EvaluationDraftView, ...] = ()
         self._open_menu: str | None = None
+        #: The open row's detail, read from the service when it opened
+        #: (`SD70`). Which row is open lives in `MismatchesState`.
+        self._detail: MismatchDetailView | None = None
         self._toolbar: Element | None = None
         self._table_slot: Element | None = None
         self._tally_slot: Element | None = None
@@ -404,8 +445,26 @@ class _MismatchesPage:
             except NotFoundError:
                 self._missing = state.evaluation_id
                 self._view = None
+        self._detail = await self._read_detail()
         self._render()
         self._start_polling()
+
+    async def _read_detail(self) -> MismatchDetailView | None:
+        """The open row's detail, or `None` — and the open row forgotten if
+        it is no longer on this page or no longer exists (a discarded run
+        under an open tab)."""
+        state = mismatches_state()
+        if not state.open_mismatch_id:
+            return None
+        shown = {str(row.mismatch_id) for row in self._view.rows.items} if self._view else set()
+        if state.open_mismatch_id in shown:
+            try:
+                return await self._services.mismatch.detail(MismatchId(state.open_mismatch_id))
+            except NotFoundError:
+                pass
+        state.open_mismatch_id = ""
+        set_mismatches_state(state)
+        return None
 
     # --- rendering ---------------------------------------------------------
 
@@ -737,6 +796,7 @@ class _MismatchesPage:
                     empty_message=NO_MATCHES_MESSAGE,
                     wide=True,
                     testid="table-mismatches",
+                    after_row=self._render_detail,
                 ).style(f"min-width:{TABLE_MIN_WIDTH};")
             pagination_row(
                 state=state,
@@ -778,12 +838,7 @@ class _MismatchesPage:
                 width="180px",
                 sortable=True,
                 cell_class="mono",
-                render=lambda row: (
-                    ui.label(row.feature_key)
-                    .props('data-testid="mismatch-feature"')
-                    .mark("mismatch-feature")
-                    .style("font-size:11.5px;")
-                ),
+                render=self._render_feature,
             ),
             ColumnSpec(
                 key="record",
@@ -829,6 +884,63 @@ class _MismatchesPage:
                 render=_render_reviewed,
             ),
         )
+
+    def _render_feature(self, row: MismatchRowView) -> None:
+        """The detail toggle, then the feature key (`SD70`).
+
+        **A button, not a clickable row.** Tab reaches it and it states
+        `aria-expanded`; a row-wide target would also swallow clicks on the
+        tag control, which is why Extraction's breakdown row has to stop its
+        link's click from propagating.
+        """
+        mid = str(row.mismatch_id)
+        is_open = mismatches_state().open_mismatch_id == mid
+        with ui.element("div").style("display:flex;align-items:center;gap:6px;min-width:0;"):
+            toggle = data_props(
+                ui.element("button")
+                .classes("mono")
+                .props('type="button" data-testid="mismatch-toggle"')
+                .mark("mismatch-toggle")
+                .style(TOGGLE_STYLE),
+                {
+                    "aria-expanded": "true" if is_open else "false",
+                    "aria-controls": _detail_dom_id(mid),
+                    "aria-label": f"{DETAIL_LABEL} {row.feature_key} {row.unfall_uid}",
+                },
+            )
+            toggle.on("click", lambda _, mid=mid: self._toggle(mid))
+            with toggle:
+                ui.label(OPEN_GLYPH if is_open else CLOSED_GLYPH)
+            ui.label(row.feature_key).props('data-testid="mismatch-feature"').mark(
+                "mismatch-feature"
+            ).style("font-size:11.5px;overflow:hidden;text-overflow:ellipsis;")
+
+    def _render_detail(self, row: MismatchRowView) -> None:
+        """The open row's detail, under it, across the whole table (`SD70`).
+
+        The narrative on the left with the span marked wherever it occurs,
+        the feature's facts on the right. **Located, never judged**: a span
+        that is not in the text is simply not marked (`D1`).
+        """
+        detail = self._detail
+        if detail is None or detail.mismatch_id != row.mismatch_id:
+            return
+        tr = data_props(
+            ui.element("tr")
+            .props('data-testid="mismatch-detail"')
+            .mark("mismatch-detail")
+            .style("background:var(--accent-soft);"),
+            {"id": _detail_dom_id(str(row.mismatch_id))},
+        )
+        with (
+            tr,
+            ui.element("td")
+            .props(f'colspan="{len(self._columns())}"')
+            .style("padding:12px 14px;border-bottom:1px solid var(--rule);"),
+            ui.element("div").style(DETAIL_GRID_STYLE),
+        ):
+            _narrative_panel(detail)
+            _facts_panel(detail)
 
     def _render_tag(self, row: MismatchRowView) -> None:
         """The inline three-way control plus a clear (Q2, `P3-D22`).
@@ -918,9 +1030,18 @@ class _MismatchesPage:
         await self._services.mismatch.clear_tag(MismatchId(mismatch_id))
         await self.reload()
 
+    async def _toggle(self, mismatch_id: str) -> None:
+        """Open this row's detail, closing any other; or close it if it is
+        the open one. One at a time (`SD70`)."""
+        state = mismatches_state()
+        state.open_mismatch_id = "" if state.open_mismatch_id == mismatch_id else mismatch_id
+        set_mismatches_state(state)
+        await self.reload()
+
     async def _sort(self, key: str) -> None:
         set_table_state(MISMATCH_TABLE, _state().toggled(key))
         self._open_menu = None
+        _close_detail()
         await self.reload()
 
     async def _page(self, page: int) -> None:
@@ -928,11 +1049,13 @@ class _MismatchesPage:
         set_table_state(
             MISMATCH_TABLE, TableState(current.sort_key, current.sort_dir, page, current.page_size)
         )
+        _close_detail()
         await self.reload()
 
     async def _page_size(self, size: int) -> None:
         current = _state()
         set_table_state(MISMATCH_TABLE, TableState(current.sort_key, current.sort_dir, 1, size))
+        _close_detail()
         await self.reload()
 
     async def _pick_run(self, run_id: str) -> None:
@@ -958,6 +1081,7 @@ class _MismatchesPage:
         rule Census and Import follow. The service is told the page; it never
         remembers one."""
         _reset_page()
+        _close_detail()
         self._open_menu = None
         await self.reload()
 
@@ -1069,6 +1193,134 @@ def _render_span(row: MismatchRowView) -> None:
     ui.label(row.evidence_span or EMPTY_CELL).props('data-testid="mismatch-span"').mark(
         "mismatch-span"
     ).style("font-size:12.5px;color:var(--ink2);")
+
+
+def _narrative_panel(detail: MismatchDetailView) -> None:
+    """The narrative, with every located occurrence of the span marked.
+
+    Text goes in as text nodes, never as HTML (`SD31`): the narrative is
+    record text and may contain anything. The marking chip sits above it,
+    because mvp-spec.md §13 requires it wherever text is shown.
+    """
+    with ui.element("div").style("display:flex;flex-direction:column;gap:6px;min-width:0;"):
+        with ui.element("div").style("display:flex;align-items:center;gap:8px;"):
+            ui.label(NARRATIVE_TITLE).classes("lbl")
+            ui.label(f"{detail.language} · {detail.language_confidence:.2f}").classes("mono").props(
+                'data-testid="detail-language"'
+            ).mark("detail-language").style("font-size:11px;color:var(--ink3);")
+            anonymisation_chip(detail.anonymisation)
+        if detail.narrative is None:
+            ui.label(NO_NARRATIVE).props('data-testid="detail-narrative"').mark(
+                "detail-narrative"
+            ).style("font-size:12.5px;color:var(--ink3);")
+            return
+        box = ui.element("div").props('data-testid="detail-narrative"').mark("detail-narrative")
+        with box.style(NARRATIVE_STYLE):
+            for text, marked in _segments(detail.narrative, detail.highlights):
+                if marked:
+                    with (
+                        ui.element("mark")
+                        .props('data-testid="detail-highlight"')
+                        .mark("detail-highlight")
+                        .style(MARK_STYLE)
+                    ):
+                        ui.label(text).style("display:inline;")
+                else:
+                    ui.label(text).style("display:inline;")
+
+
+def _segments(text: str, highlights: Sequence[tuple[int, int]]) -> list[tuple[str, bool]]:
+    """`text` cut at the service's offsets into `(piece, is_marked)` runs.
+
+    Pure slicing of offsets that arrive decided (`domain.span_locate`);
+    nothing is searched for here.
+    """
+    pieces: list[tuple[str, bool]] = []
+    cursor = 0
+    for start, end in highlights:
+        if start > cursor:
+            pieces.append((text[cursor:start], False))
+        pieces.append((text[start:end], True))
+        cursor = end
+    if cursor < len(text):
+        pieces.append((text[cursor:], False))
+    return pieces
+
+
+def _facts_panel(detail: MismatchDetailView) -> None:
+    """What the feature is, how it was compared, and both values decoded.
+
+    The rule and the derivation are worded by the functions Features uses, so
+    one rule never reads two ways (`components.matching_rule`,
+    `derivation_builder.expression`).
+    """
+    panel = ui.element("dl").props('data-testid="detail-facts"').mark("detail-facts")
+    with panel.style(
+        "display:grid;grid-template-columns:96px minmax(0,1fr);gap:6px 10px;margin:0;"
+    ):
+        _fact(FACT_FEATURE, "detail-feature")
+        with ui.element("dd").style("margin:0;min-width:0;"):
+            ui.label(detail.feature_key).classes("mono").style("font-size:11.5px;")
+            ui.label(detail.feature_description).style("font-size:11.5px;color:var(--ink2);")
+        _fact(FACT_RULE, "detail-rule")
+        with ui.element("dd").style("margin:0;min-width:0;"):
+            ui.label(rule_label(detail.kind, detail.matching_rule)).style("font-size:12px;")
+            ui.label(rule_help(detail.kind, detail.value_type, detail.matching_rule)).style(
+                "font-size:11px;color:var(--ink3);"
+            )
+        _fact(FACT_SOURCE, "detail-source")
+        source = (
+            expression(detail.derivation)
+            if detail.derivation is not None
+            else (detail.source_column or EMPTY_CELL)
+        )
+        with ui.element("dd").style("margin:0;min-width:0;"):
+            ui.label(source).classes("mono").props('data-testid="detail-source-value"').mark(
+                "detail-source-value"
+            ).style("font-size:11.5px;overflow-wrap:anywhere;")
+        for title, decoded, testid in (
+            (FACT_RECORD, detail.record_decoded, "detail-record"),
+            (FACT_EXTRACTED, detail.extracted_decoded, "detail-extracted"),
+        ):
+            _fact(title, testid)
+            with ui.element("dd").style("margin:0;min-width:0;"):
+                ui.label(decoded.raw or EMPTY_CELL).classes("mono").props(
+                    f'data-testid="{testid}-value"'
+                ).mark(f"{testid}-value").style("font-size:11.5px;")
+                meaning = _value_meaning(decoded)
+                if meaning is not None:
+                    text, ink = meaning
+                    data_props(
+                        ui.label(text)
+                        .props(f'data-testid="{testid}-label"')
+                        .mark(f"{testid}-label")
+                        .style(f"font-size:11.5px;color:var({ink});"),
+                        {"data-label-state": decoded.state.value},
+                    )
+        _fact(FACT_SPAN, "detail-span")
+        with ui.element("dd").style("margin:0;min-width:0;"):
+            ui.label(detail.evidence_span or EMPTY_CELL).style(
+                "font-size:12px;color:var(--ink2);white-space:pre-wrap;overflow-wrap:anywhere;"
+            )
+
+
+def _fact(title: str, testid: str) -> None:
+    term = ui.element("dt").classes("lbl").props(f'data-testid="{testid}"').mark(testid)
+    with term.style("margin:0;padding-top:1px;"):
+        ui.label(title)
+
+
+def _detail_dom_id(mismatch_id: str) -> str:
+    """The detail row's DOM id, for the toggle's `aria-controls`. Mismatch ids
+    are minted by the app, never typed by a person."""
+    return f"mismatch-detail-{mismatch_id}"
+
+
+def _close_detail() -> None:
+    state = mismatches_state()
+    if state.open_mismatch_id:
+        state.open_mismatch_id = ""
+        set_mismatches_state(state)
 
 
 def _render_reviewed(row: MismatchRowView) -> None:

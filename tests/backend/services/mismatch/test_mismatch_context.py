@@ -34,9 +34,11 @@ from tests.fixtures.scored_corpus import (
     seed_scored_corpus,
 )
 
+from ra2.domain.anonymisation import AnonymisationMarking
 from ra2.domain.code_label import LabelState
 from ra2.domain.codes import CodeValue as DomainCodeValue
-from ra2.domain.ids import CodeAttributeId, CodeTableImportId, ColumnMappingId
+from ra2.domain.feature import CountObjects, Kind, MatchingRuleKind, ValueType
+from ra2.domain.ids import CodeAttributeId, CodeTableImportId, ColumnMappingId, MismatchId
 from ra2.domain.mismatch import MismatchTag
 from ra2.persistence.models import (
     CodeAttribute,
@@ -44,12 +46,14 @@ from ra2.persistence.models import (
     CodeValue,
     ColumnMapping,
     EvaluationFeature,
+    ExtractionValue,
     Record,
 )
+from ra2.services.errors import NotFoundError
 from ra2.services.evaluation_service import snapshot_to_json
 from ra2.services.export_service import CSV_DELIMITER, ExportService
 from ra2.services.mismatch_service import MismatchService
-from ra2.services.readmodels import MismatchRowView, SortDir
+from ra2.services.readmodels import MismatchDetailView, MismatchRowView, SortDir
 from ra2.services.scoring_service import ScoringService
 
 pytestmark = pytest.mark.backend
@@ -57,8 +61,8 @@ pytestmark = pytest.mark.backend
 RECORDS = 40
 
 #: The weather snapshot: 1-4 labelled in German, 5 **only in French**. The
-#: second model's wrong weather answers are `index % 4 + 2`, so 5 is among
-#: them and decodes as `no_label` under this German evaluation.
+#: first model's wrong weather answers are `index % 4 + 2` on every ninth
+#: record, so record 27's 5 decodes as `no_label` under this German evaluation.
 WEATHER_LABELS: Final = {
     "1": {"de": "trocken", "fr": "sec"},
     "2": {"de": "nass", "fr": "mouillé"},
@@ -79,6 +83,39 @@ def _uid(index: int) -> str:
     return f"CH{RECORDS - index:030d}"
 
 
+#: The narrative hazards (`plan-mismatch-context.md` §7), on the records whose
+#: weather the first model gets wrong (every ninth). Its span is
+#: "Schneefall" unless the entry changes it.
+TWICE: Final = 9  # the span occurs twice
+ACROSS_NEWLINE: Final = 18  # the span crosses the narrative's line break
+NO_NARRATIVE: Final = 27  # the record has no text at all
+#: Record 0 keeps `s05`'s lossy French, which does not contain the span.
+NOT_THERE: Final = 0
+#: A derived answer made wrong, so a `vehicles` mismatch exists to open.
+WRONG_COUNT: Final = 1
+
+
+async def _narrative_hazards(session: AsyncSession, corpus: ScoredCorpus) -> None:
+    texts: dict[int, str | None] = {
+        TWICE: "Schneefall am Morgen, Schneefall am Abend.",
+        ACROSS_NEWLINE: "Der Lenker fuhr bei\nstarkem Schneefall auf die A1.",
+        NO_NARRATIVE: None,
+    }
+    for index, text in texts.items():
+        record = await session.get(Record, corpus.record_ids[index])
+        assert record is not None
+        record.text_raw = text
+    weather = corpus.feature_ids[WEATHER]
+    quoted = await session.get(ExtractionValue, (f"ext-s-0-{ACROSS_NEWLINE:03d}", weather))
+    assert quoted is not None
+    quoted.evidence_span = "bei starkem Schneefall"
+    count = await session.get(
+        ExtractionValue, (f"ext-s-0-{WRONG_COUNT:03d}", corpus.feature_ids["vehicles"])
+    )
+    assert count is not None
+    count.value_raw = count.value_normalised = "3"
+
+
 def _snapshot(key: str, labels: dict[str, dict[str, str]]) -> str:
     return snapshot_to_json(
         [DomainCodeValue(attribute_key=key, code=code, label=lab) for code, lab in labels.items()]
@@ -96,6 +133,7 @@ async def context(
             record = await session.get(Record, record_id)
             assert record is not None
             record.unfall_uid = _uid(index)
+        await _narrative_hazards(session, corpus)
         snapshots = {
             WEATHER: _snapshot("weather", WEATHER_LABELS),
             LIGHT: _snapshot("light", LIGHT_LABELS),
@@ -393,3 +431,108 @@ async def test_the_csv_appends_both_labels_after_the_uid(
     (invented,) = [r for r in table[1:] if r[5] == "99"]
     assert invented[12] == ""
     assert invented[14] == LabelState.NOT_IN_TABLE.value
+
+
+# --- P3 + P5: the detail -------------------------------------------------------
+
+
+async def _open(
+    mismatch_service: MismatchService, context: ScoredCorpus, index: int, feature: str = WEATHER
+) -> MismatchDetailView:
+    rows = await _all_rows(mismatch_service, context, run=0)
+    (row,) = [
+        r for r in rows if r.record_id == context.record_ids[index] and r.feature_key == feature
+    ]
+    return await mismatch_service.detail(row.mismatch_id)
+
+
+def _highlighted(detail: MismatchDetailView) -> list[str]:
+    assert detail.narrative is not None
+    return [detail.narrative[start:end] for start, end in detail.highlights]
+
+
+async def test_the_detail_carries_the_narrative_and_every_place_the_span_is(
+    mismatch_service: MismatchService, context: ScoredCorpus
+) -> None:
+    detail = await _open(mismatch_service, context, TWICE)
+    assert detail.narrative == "Schneefall am Morgen, Schneefall am Abend."
+    assert _highlighted(detail) == ["Schneefall", "Schneefall"]
+    assert detail.unfall_uid == _uid(TWICE)
+    assert detail.evidence_span == "Schneefall"
+
+
+async def test_a_span_across_a_line_break_is_highlighted_in_the_original_text(
+    mismatch_service: MismatchService, context: ScoredCorpus
+) -> None:
+    detail = await _open(mismatch_service, context, ACROSS_NEWLINE)
+    assert _highlighted(detail) == ["bei\nstarkem Schneefall"]
+
+
+async def test_a_span_not_in_the_text_is_neither_highlighted_nor_flagged(
+    mismatch_service: MismatchService, context: ScoredCorpus
+) -> None:
+    """`D1`: the detail locates and never judges. There is no field that
+    could say "not found", and the empty tuple is the whole answer."""
+    detail = await _open(mismatch_service, context, NOT_THERE)
+    assert detail.narrative is not None and "Schneefall" not in detail.narrative
+    assert detail.highlights == ()
+    assert not any("found" in name for name in MismatchDetailView.__dataclass_fields__)
+
+
+async def test_a_record_without_a_narrative_opens_with_none(
+    mismatch_service: MismatchService, context: ScoredCorpus
+) -> None:
+    detail = await _open(mismatch_service, context, NO_NARRATIVE)
+    assert detail.narrative is None
+    assert detail.highlights == ()
+
+
+async def test_the_detail_carries_the_language_and_the_marking(
+    mismatch_service: MismatchService, context: ScoredCorpus
+) -> None:
+    """mvp-spec.md §13: the marking wherever text is shown. Record 0 is the
+    fixture's French record and falls back to the anonymised column."""
+    detail = await _open(mismatch_service, context, NOT_THERE)
+    assert detail.language == "fr"
+    assert detail.language_confidence == pytest.approx(0.41)
+    assert detail.anonymisation is AnonymisationMarking.ANONYMISED_COLUMN
+
+
+async def test_a_native_enum_feature_opens_with_its_column_rule_and_labels(
+    mismatch_service: MismatchService, context: ScoredCorpus
+) -> None:
+    detail = await _open(mismatch_service, context, TWICE)
+    assert detail.feature_key == WEATHER
+    assert detail.feature_description == f"{WEATHER} for scoring tests"
+    assert detail.kind is Kind.LABELLED
+    assert detail.value_type is ValueType.ENUM
+    assert detail.matching_rule.kind is MatchingRuleKind.EXACT
+    assert detail.source_column == WEATHER
+    assert detail.derivation is None
+    #: Record 9: the record says 2, the model said 3 (`index % 4 + 2`).
+    assert (detail.record_decoded.raw, detail.record_decoded.label) == ("2", "nass")
+    assert (detail.extracted_decoded.raw, detail.extracted_decoded.label) == ("3", "Schnee")
+
+
+async def test_a_derived_feature_opens_with_its_derivation_and_no_column(
+    mismatch_service: MismatchService, context: ScoredCorpus
+) -> None:
+    detail = await _open(mismatch_service, context, WRONG_COUNT, feature="vehicles")
+    assert detail.source_column is None
+    assert isinstance(detail.derivation, CountObjects)
+    assert detail.value_type is ValueType.INTEGER
+    assert detail.extracted_decoded.state is LabelState.NOT_ENUM
+    assert (detail.record_decoded.raw, detail.extracted_decoded.raw) == ("0", "3")
+
+
+async def test_opening_an_unknown_mismatch_is_not_found(
+    mismatch_service: MismatchService, context: ScoredCorpus
+) -> None:
+    with pytest.raises(NotFoundError):
+        await mismatch_service.detail(MismatchId("gone"))
+
+
+async def test_the_list_never_carries_the_narrative() -> None:
+    """Fetched on open, never with the page (`SD70`): the row type has no
+    field that could hold it."""
+    assert "narrative" not in MismatchRowView.__dataclass_fields__

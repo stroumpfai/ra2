@@ -35,15 +35,19 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ra2.domain.anonymisation import DeliveredTextAnonymised, anonymisation_marking
 from ra2.domain.code_label import DecodedValue, by_code, decode
 from ra2.domain.codes import CodeValue
-from ra2.domain.ids import EvaluationId, FeatureId, MismatchId, RunId
+from ra2.domain.feature import Kind, ValueType, derivation_from_json
+from ra2.domain.ids import EvaluationId, FeatureId, MismatchId, RecordId, RunId
 from ra2.domain.mismatch import MismatchTag, ReviewTally, TagFilter, TagState, tally
+from ra2.domain.span_locate import locate
 from ra2.infra.clock import Clock
-from ra2.persistence.models import Evaluation, EvaluationFeature, Feature, Mismatch, Run
+from ra2.persistence.models import Evaluation, EvaluationFeature, Feature, Mismatch, Record, Run
 from ra2.persistence.repositories.mismatch_repo import MismatchListRow, MismatchRepository
 from ra2.persistence.session import session_scope
 from ra2.services.errors import NotFoundError
 from ra2.services.evaluation_service import snapshot_from_json
+from ra2.services.feature_service import matching_rule_from_json
 from ra2.services.readmodels import (
+    MismatchDetailView,
     MismatchFeatureView,
     MismatchFilters,
     MismatchListView,
@@ -148,6 +152,58 @@ class MismatchService:
         cleared too: it annotated a judgement that no longer exists.
         """
         return await self._write(mismatch_id, tag=None, note=None)
+
+    async def detail(self, mismatch_id: MismatchId) -> MismatchDetailView:
+        """One row, opened: the narrative with the span located in it, and the
+        feature's facts (`SD70`).
+
+        **Read when a row is opened, never with the page.** The narrative is
+        record text; a page shows at most one, so loading 25 would move text
+        through every render for nothing.
+
+        `NotFoundError` for an unknown id, which is also what a row whose run
+        was discarded under an open tab becomes.
+        """
+        async with self._session_factory() as session:
+            found = (
+                await session.execute(
+                    select(Mismatch, Record, Feature, Evaluation)
+                    .join(Record, Record.id == Mismatch.record_id)
+                    .join(Feature, Feature.id == Mismatch.feature_id)
+                    .join(Run, Run.id == Mismatch.run_id)
+                    .join(Evaluation, Evaluation.id == Run.evaluation_id)
+                    .where(Mismatch.id == mismatch_id)
+                )
+            ).first()
+            if found is None:
+                raise NotFoundError("mismatch", mismatch_id)
+            mismatch, record, feature, evaluation = found
+            feature_id = FeatureId(feature.id)
+            codebook = await _codebook(session, evaluation, feature_id=feature_id)
+            return MismatchDetailView(
+                mismatch_id=MismatchId(mismatch.id),
+                record_id=RecordId(record.id),
+                unfall_uid=record.unfall_uid,
+                narrative=record.text_raw,
+                highlights=locate(record.text_raw, mismatch.evidence_span),
+                language=record.language,
+                language_confidence=record.language_confidence,
+                anonymisation=anonymisation_marking(record.text_anonymised_flag, self._delivered),
+                feature_key=feature.key,
+                feature_description=feature.description,
+                kind=Kind(feature.kind),
+                value_type=ValueType(feature.value_type),
+                matching_rule=matching_rule_from_json(feature.matching_rule),
+                source_column=feature.source_column,
+                derivation=(
+                    derivation_from_json(feature.derivation_json)
+                    if feature.derivation_json
+                    else None
+                ),
+                record_decoded=codebook.decode(feature_id, mismatch.record_value),
+                extracted_decoded=codebook.decode(feature_id, mismatch.extracted_value),
+                evidence_span=mismatch.evidence_span,
+            )
 
     async def tally(self, session: AsyncSession, run_id: RunId) -> Mapping[FeatureId, ReviewTally]:
         """`services.protocols.MismatchTally` — per-feature review counts.

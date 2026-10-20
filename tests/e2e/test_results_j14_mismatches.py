@@ -353,3 +353,72 @@ def test_j14_the_sidebar_reaches_the_list_and_the_grid_holds_together(
         sentences.count()
         == page.locator('[data-card="tally"] [data-testid="tally-sentence"]').count()
     )
+
+
+def test_j14_a_row_opens_onto_its_narrative_from_the_keyboard(
+    page: Page, server_url: str, review_evaluation: ScoredCorpus
+) -> None:
+    """`SD70`: the detail row, as only a browser can check it.
+
+    - The toggle is a real button: focused and Enter opens it.
+    - The detail spans the whole table and the fixed columns keep their
+      widths around it (`table-layout:fixed` overlaps rather than reflows).
+    - The span is marked inside the narrative, and the text is wrapped.
+    - The tag control in the open row still writes.
+
+    Weather on the second run: record 4's German text holds the span.
+    """
+    page.set_viewport_size({"width": 1280, "height": 800})
+    corpus = review_evaluation
+    page.goto(
+        f"{server_url}/mismatches?evaluation={corpus.evaluation_id}"
+        f"&run={corpus.run_ids[1]}&feature={corpus.feature_ids[WEATHER]}"
+    )
+    expect(page.locator(TABLE)).to_be_visible()
+    widths_before = [
+        th.evaluate("e => e.getBoundingClientRect().width")
+        for th in page.locator(f"{TABLE} th").all()
+    ]
+
+    # Record 4 is the second weather row (rows come in record order).
+    toggle = page.locator(f'{TABLE} [data-testid="mismatch-toggle"]').nth(1)
+    expect(toggle).to_have_attribute("aria-expanded", "false")
+    toggle.focus()
+    page.keyboard.press("Enter")
+    detail = page.locator(f'{TABLE} [data-testid="mismatch-detail"]')
+    expect(detail).to_have_count(1)
+    expect(page.locator(f'{TABLE} [data-testid="mismatch-toggle"]').nth(1)).to_have_attribute(
+        "aria-expanded", "true"
+    )
+
+    # --- the row spans the table, and the columns did not move ---------------
+    table_box = page.locator(TABLE).bounding_box()
+    cell_box = detail.locator("td").first.bounding_box()
+    assert table_box is not None and cell_box is not None
+    assert cell_box["width"] == pytest.approx(table_box["width"], abs=1)
+    widths_after = [
+        th.evaluate("e => e.getBoundingClientRect().width")
+        for th in page.locator(f"{TABLE} th").all()
+    ]
+    assert widths_after == pytest.approx(widths_before, abs=1)
+
+    # --- the span is marked, in a narrative that wraps inside its box --------
+    mark = detail.locator('[data-testid="detail-highlight"]')
+    expect(mark).to_have_count(1)
+    expect(mark).to_have_text("Schneefall")
+    narrative = detail.locator('[data-testid="detail-narrative"]')
+    assert narrative.evaluate("e => e.scrollWidth <= e.clientWidth"), "the narrative overflows"
+    expect(detail.locator('[data-testid="anonymised-chip"]')).to_have_count(1)
+
+    # --- the tag control in the open row still writes ------------------------
+    row = page.locator(f"{TABLE} tbody tr").nth(1)
+    row.locator(f'[data-testid="seg-option"]:has-text("{TAG_LABELS[MismatchTag.UNCLEAR]}")').click()
+    expect(row.locator('[data-testid="seg-option"][aria-pressed="true"]')).to_have_count(1)
+    expect(detail).to_have_count(1)
+
+    # --- and the toggle closes it --------------------------------------------
+    page.locator(f'{TABLE} [data-testid="mismatch-toggle"]').nth(1).click()
+    expect(detail).to_have_count(0)
+    # Leave the row as found: the other journeys count tags.
+    row.locator('[data-testid="seg-clear"]').click()
+    expect(row.locator('[data-testid="seg-option"][aria-pressed="true"]')).to_have_count(0)

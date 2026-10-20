@@ -28,7 +28,13 @@ from nicegui.testing.user import User
 from nicegui.testing.user_interaction import UserInteraction
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from tests.fixtures.scored_corpus import LIGHT, WEATHER, ScoredCorpus, seed_scored_corpus
+from tests.fixtures.scored_corpus import (
+    FRENCH_LOSSY,
+    LIGHT,
+    WEATHER,
+    ScoredCorpus,
+    seed_scored_corpus,
+)
 
 from ra2.domain.code_label import LabelState
 from ra2.domain.codes import CodeValue
@@ -349,6 +355,128 @@ async def test_a_value_with_nothing_to_decode_has_no_line_under_it(scored: Seede
     assert scored.user.find(marker="mismatch-record-value").elements
     await scored.user.should_not_see(marker="mismatch-record-value-label")
     await scored.user.should_not_see(marker="mismatch-extracted-value-label")
+
+
+# --- the detail row (SD70) -----------------------------------------------------
+
+
+def _weather_url(corpus: ScoredCorpus, run: int) -> str:
+    """Weather only, on one run: its rows come in record order, so the first
+    is record 0 (`s05`'s lossy French) and, on the second run, the next is
+    record 4 (German, "Schneefall, Strasse nass.")."""
+    return _url(corpus, run=corpus.run_ids[run], feature=corpus.feature_ids[WEATHER])
+
+
+def _text_of(element: Element) -> str:
+    """The text an element shows, in document order."""
+    return "".join(_own_text(e) for e in _ordered((element, *element.descendants())))
+
+
+async def _toggle(seeded: Seeded, index: int) -> None:
+    """Click one row's toggle and wait for **that** toggle to flip: the page
+    redraws, so the element is found again by the row it controls."""
+    toggles = _marked(seeded.user, "mismatch-toggle")
+    target = str(toggles[index]._props["aria-controls"])
+    before = toggles[index]._props["aria-expanded"]
+    _one(seeded.user, toggles[index]).click()
+
+    def flipped() -> bool:
+        return any(
+            t._props["aria-controls"] == target and t._props["aria-expanded"] != before
+            for t in _marked(seeded.user, "mismatch-toggle")
+        )
+
+    await _until(flipped, "the toggle to flip")
+
+
+async def test_no_detail_is_open_until_a_row_asks(scored: Seeded) -> None:
+    """Fetched on open, never with the page: no narrative on first draw."""
+    await scored.user.open(_weather_url(scored.corpus, 1))
+    toggles = _marked(scored.user, "mismatch-toggle")
+    assert toggles
+    assert {t._props["aria-expanded"] for t in toggles} == {"false"}
+    assert not _marked(scored.user, "mismatch-detail")
+
+
+async def test_a_row_opens_onto_its_narrative_with_the_span_marked_where_it_is(
+    scored: Seeded,
+) -> None:
+    """Record 4's text holds the span and it is marked; record 0's lossy
+    French does not, and nothing is marked **or said** about it (`D1`)."""
+    await scored.user.open(_weather_url(scored.corpus, 1))
+
+    await _toggle(scored, 0)
+    await _until(lambda: bool(_marked(scored.user, "detail-narrative")), "the narrative")
+    (narrative,) = _marked(scored.user, "detail-narrative")
+    assert _text_of(narrative) == FRENCH_LOSSY
+    assert not _marked(scored.user, "detail-highlight")
+
+    await _toggle(scored, 1)
+    await _until(lambda: bool(_marked(scored.user, "detail-highlight")), "the marked span")
+    (narrative,) = _marked(scored.user, "detail-narrative")
+    assert _text_of(narrative) == "Schneefall, Strasse nass."
+    (mark,) = _marked(scored.user, "detail-highlight")
+    assert mark.tag == "mark"
+    assert _text_of(mark) == "Schneefall"
+
+
+async def test_one_detail_at_a_time_and_its_toggle_closes_it(scored: Seeded) -> None:
+    await scored.user.open(_weather_url(scored.corpus, 1))
+    await _toggle(scored, 0)
+    await _toggle(scored, 1)
+    (detail,) = _marked(scored.user, "mismatch-detail")
+    expanded = [
+        t for t in _marked(scored.user, "mismatch-toggle") if t._props["aria-expanded"] == "true"
+    ]
+    assert len(expanded) == 1
+    assert expanded[0]._props["aria-controls"] == detail._props["id"]
+
+    await _toggle(scored, 1)
+    await _until(lambda: not _marked(scored.user, "mismatch-detail"), "the detail closing")
+
+
+async def test_tagging_the_open_row_leaves_its_detail_open(scored: Seeded) -> None:
+    """The judgement is made while reading the narrative; the write must not
+    take the text away."""
+    await scored.user.open(_weather_url(scored.corpus, 1))
+    await _toggle(scored, 0)
+    await _tag_first_row(scored, TAG_LABELS[MismatchTag.HALLUCINATION])
+    assert len(_marked(scored.user, "mismatch-detail")) == 1
+    assert _marked(scored.user, "detail-narrative")
+
+
+async def test_sorting_closes_the_detail(scored: Seeded) -> None:
+    """The open row may not be on the re-sorted page."""
+    await scored.user.open(_weather_url(scored.corpus, 1))
+    await _toggle(scored, 0)
+    assert _marked(scored.user, "mismatch-detail")
+    _one(scored.user, _marked(scored.user, "sort-tag")[0]).click()
+    await _until(lambda: not _marked(scored.user, "mismatch-detail"), "the detail closing")
+
+
+async def test_the_detail_carries_the_marking_and_the_language(scored: Seeded) -> None:
+    """mvp-spec.md §13: the chip wherever text is shown, and the detail is
+    the most text this screen shows."""
+    await scored.user.open(_weather_url(scored.corpus, 1))
+    await _toggle(scored, 0)
+    (detail,) = _marked(scored.user, "mismatch-detail")
+    assert "anonymised-chip" in _markers_in(detail)
+    (language,) = _marked(scored.user, "detail-language")
+    assert _own_text(language) == "fr · 0.41"
+
+
+async def test_the_facts_say_what_was_compared_and_what_the_codes_mean(labelled: Seeded) -> None:
+    """Record 0 on the first run: the record says 1, the model said 2."""
+    await labelled.user.open(_weather_url(labelled.corpus, 0))
+    await _toggle(labelled, 0)
+    (facts,) = _marked(labelled.user, "detail-facts")
+    assert facts.tag == "dl"
+    (source,) = _marked(labelled.user, "detail-source-value")
+    assert _own_text(source) == WEATHER
+    assert "exact" in _text_of(facts)
+    (record,) = _marked(labelled.user, "detail-record-label")
+    (extracted,) = _marked(labelled.user, "detail-extracted-label")
+    assert (_own_text(record), _own_text(extracted)) == ("trocken", "nass")
 
 
 async def test_the_table_carries_the_designs_widths_and_one_flexible_column(

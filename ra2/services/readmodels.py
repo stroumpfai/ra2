@@ -85,6 +85,7 @@ __all__ = [
     "MappingSuggestionView",
     "MappingSuggestionsView",
     "MetricCell",
+    "MismatchDetailView",
     "MismatchExportRow",
     "MismatchFeatureView",
     "MismatchFilters",
@@ -1603,6 +1604,47 @@ class MismatchRowView:
         """Whether an analyst has been here. The `Reviewed` column's fact, and
         one of the four sort keys."""
         return bool(self.analyst_tag)
+
+
+@dataclass(frozen=True, slots=True)
+class MismatchDetailView:
+    """One opened mismatch row: what the analyst needs beside the list to tell
+    a hallucination from a record error (`SD70`, `plan-mismatch-context.md` §4).
+
+    Read by `MismatchService.detail` **only when a row is opened**, never with
+    the page: the narrative is record text, and a page shows at most one.
+
+    The feature facts are **structured values**, not sentences. Their words
+    are `ui/`'s, shared with Features (`components.matching_rule`,
+    `derivation_builder.expression`), so a rule reads the same on both.
+    """
+
+    mismatch_id: MismatchId
+    record_id: RecordId
+    unfall_uid: str
+    #: `record.text_raw`, as scrubbed at freeze (§19). `None` for a record
+    #: with no narrative.
+    narrative: str | None
+    #: Where the evidence span occurs in `narrative`, as `(start, end)`
+    #: offsets (`domain.span_locate`). Empty when it is not found, and nothing
+    #: else is said about that (`D1`).
+    highlights: tuple[tuple[int, int], ...]
+    language: str
+    language_confidence: float
+    #: mvp-spec.md §13: required wherever text is shown, and this is the text.
+    anonymisation: AnonymisationMarking
+    feature_key: str
+    feature_description: str
+    kind: Kind
+    value_type: ValueType
+    matching_rule: MatchingRule
+    #: One or the other: a native feature names its column, a derived one its
+    #: derivation.
+    source_column: str | None
+    derivation: DerivationSpec | None
+    record_decoded: DecodedValue
+    extracted_decoded: DecodedValue
+    evidence_span: str | None
 
 
 @dataclass(frozen=True, slots=True)

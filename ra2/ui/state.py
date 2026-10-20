@@ -226,12 +226,17 @@ class MismatchesState:
     `tag_state` holds a `TagState` or a `MismatchTag` **value**; the two enums'
     values are disjoint, so the string round-trips through storage without a
     second field saying which of them it came from.
+
+    `open_mismatch_id` is the one row whose detail is open (`SD70`), empty
+    for none. One at a time, and any change of filter, sort or page closes
+    it: the row it names may not be on the new page.
     """
 
     evaluation_id: str = ""
     run_id: str = ""
     feature_id: str = ""
     tag_state: str = TagState.ANY.value
+    open_mismatch_id: str = ""
 
 
 def mismatches_state() -> MismatchesState:

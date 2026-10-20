@@ -123,6 +123,7 @@ from ra2.ui.components import (
 from ra2.ui.components.derivation_builder import derivation_builder
 from ra2.ui.components.feature_sets_table import feature_sets_table
 from ra2.ui.components.icons import ALERT_TRIANGLE, PLUS, svg
+from ra2.ui.components.matching_rule import rule_help, rule_label
 from ra2.ui.components.primitives import (
     data_props,
     fingerprint_badge,
@@ -1137,8 +1138,8 @@ class _FeaturesPage:
     def _matching_rule_grid(self, draft: _FeatureDraft) -> None:
         with ui.element("div"):
             ui.label("Matching rule").classes("lbl")
-            frozen_readout(_matching_rule_label(draft))
-            ui.label(_matching_rule_help(draft)).style(
+            frozen_readout(rule_label(draft.kind, draft.matching_rule))
+            ui.label(rule_help(draft.kind, draft.value_type, draft.matching_rule)).style(
                 "font-size:11px;color:var(--ink3);margin-top:4px;"
             )
         with ui.element("div"):
@@ -1685,24 +1686,6 @@ def _value_type_for_derivation(derivation: DerivationSpec) -> ValueType:
     if name in ("MaxOrdinal", "MinOrdinal"):
         return ValueType.ENUM
     return ValueType.INTEGER
-
-
-def _matching_rule_label(draft: _FeatureDraft) -> str:
-    if draft.kind is Kind.EXPLORATORY:
-        return "n/a — no ground truth"
-    if draft.matching_rule.kind is MatchingRuleKind.WITHIN_TOLERANCE:
-        return "within tolerance"
-    return "exact"
-
-
-def _matching_rule_help(draft: _FeatureDraft) -> str:
-    if draft.kind is Kind.EXPLORATORY:
-        return "no structured counterpart exists to match against."
-    if draft.value_type is ValueType.ENUM:
-        return "the emitted code must equal the ground-truth code."
-    if draft.matching_rule.kind is MatchingRuleKind.WITHIN_TOLERANCE:
-        return "matches within the parameter's tolerance, in minutes."
-    return "matches after normalisation (mvp-spec.md §8.4)."
 
 
 def _scored_label(draft: _FeatureDraft) -> tuple[str, str]:

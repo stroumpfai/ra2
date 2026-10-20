@@ -231,6 +231,13 @@ open tab), and the view shows the existing refusal toast.
 - `data-testid`s: `mismatch-toggle`, `mismatch-detail`, `detail-narrative`,
   `detail-highlight`, `detail-facts`.
 
+*As built:* the detail row needed a way into `data_table`, which draws only
+body rows. It gained an `after_row` hook that draws whatever the caller
+returns under a row, inside the `<tbody>`, and decides nothing itself. The
+facts are a `<dl>`. The mark is `--warn-soft` over `--ink`, existing tokens
+(R2). The row's DOM id goes through `data_props`, like every other
+data-derived prop (`SD31`).
+
 ---
 
 ## 5. Documents this changes first
@@ -284,6 +291,24 @@ missing from the snapshot; a code with only an `fr` label under a `de`
 evaluation; a derived feature and a time feature with a tolerance; a
 32-character UID; and the live mapping changed after launch, so a test that
 reads labels from Codelists instead of the snapshot fails.
+
+*As built:*
+- **The unit tests live in `tests/unit/mismatch/`**, beside `test_tally.py`.
+- **There is no separate `tests/backend/services/export/` test.** The CSV
+  columns are asserted in `test_mismatch_context.py`, through a real CSV
+  reader.
+- **There is no time feature with a tolerance.** `scored_corpus` has none,
+  and the rule's words are the ones Features already renders and tests
+  (`components.matching_rule`); the detail passes the rule through
+  unchanged.
+- **A `NULL` record value and an empty extracted value never become
+  mismatches**: they score `missing`, not `wrong`. The `empty` state is
+  covered by the unit tests only.
+- **The derived mismatch is made by changing one `vehicles` answer** before
+  scoring, because the shared fixture gets every count right.
+- **The keyboard check is focus and Enter on the toggle, not a Tab walk.**
+  The toggle is a real `<button>`, so it is in the tab order by
+  construction.
 
 ---
 

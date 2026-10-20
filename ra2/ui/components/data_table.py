@@ -82,6 +82,7 @@ def data_table[T](
     empty_message: str = "No rows.",
     wide: bool = False,
     testid: str = "data-table",
+    after_row: Callable[[T], None] | None = None,
 ) -> Element:
     """Render one page of rows.
 
@@ -92,6 +93,9 @@ def data_table[T](
         activated. The caller decides the resulting direction.
     :param wide: 12px cell padding (full-width tables) instead of 9px
         (half-width tables). README §2b.
+    :param after_row: called after each body row, inside the `<tbody>`, to
+        draw what belongs under that row — the Mismatches detail (`SD70`).
+        It draws its own `<tr>` or nothing; this component decides neither.
     """
     table = (
         ui.element("table")
@@ -110,6 +114,8 @@ def data_table[T](
                 _empty_row(columns=columns, message=empty_message)
             for row in rows:
                 _body_row(row, columns=columns, row_class=row_class, row_style=row_style)
+                if after_row is not None:
+                    after_row(row)
     return table
 
 
