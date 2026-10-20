@@ -132,6 +132,8 @@ async def test_the_dry_run_and_the_freeze_agree_over_http(
     preview = await api_client.get("/api/v1/scrub/preview", params={"delivery_id": delivery_id})
     assert preview.status_code == 200, preview.text
     shown = preview.json()
+    # The examples are personal data for the dialog alone (SD70).
+    assert "examples" not in shown
 
     created = await api_client.post(
         "/api/v1/corpora",

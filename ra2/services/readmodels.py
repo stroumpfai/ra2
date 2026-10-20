@@ -47,6 +47,7 @@ from ra2.domain.llm import DEFAULT_REASONING_EFFORT, EndpointStatus, ProbeCode
 from ra2.domain.mismatch import MismatchTag, ReviewTally, TagFilter, TagState
 from ra2.domain.prompt import PromptValidationError, SlotName
 from ra2.domain.qualification import QualificationState
+from ra2.domain.scrub import ScrubRuleExamples
 from ra2.domain.stats import TieMark
 
 __all__ = [
@@ -1797,6 +1798,9 @@ class ScrubPreviewView:
     records_changed: int
     #: The rule that timed out, when one did. A freeze would refuse (`SD66`).
     timed_out_rule: str | None = None
+    #: What each rule replaced, one entry per rule in `counts`' order. Personal
+    #: data, held in memory for the dialog; the API does not carry it (`SD70`).
+    examples: tuple[ScrubRuleExamples, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

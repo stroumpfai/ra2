@@ -167,3 +167,22 @@ async def test_a_corpus_from_before_scrubbing_says_not_scrubbed(mounted: Mounted
     assert status._props["data-scrubbed"] == "false"
     await user.should_see(NOT_SCRUBBED)
     await user.should_see("Not used by any evaluation")
+
+
+async def test_a_placeholder_row_opens_to_what_it_replaced(mounted: Mounted) -> None:
+    """SD70 through the real dialog: the span is shown as delivered inside a
+    sentence, only rules that replaced something have a toggle, and the dialog
+    still has its one Create."""
+    await mounted.services.scrub.import_list(
+        ListKind.LASTNAME, "l.txt", (SCRUB / "s02_lastnames.txt").read_bytes()
+    )
+    user = mounted.user
+    await _open_preview(user)
+    preview = await mounted.services.corpus.scrub_preview(mounted.delivery_id)
+    replaced = {c.rule_id for c in preview.counts if c.hits}
+    assert replaced
+    assert {e._props["data-rule-id"] for e in _find(user, "scrub-toggle")} == replaced
+    spans = _find(user, "scrub-example-span")
+    assert spans, "a rule with a handful of values opens expanded"
+    assert all(str(getattr(s, "text", "")).strip() for s in spans)
+    assert len(_find(user, "scrub-preview-create")) == 1

@@ -314,6 +314,7 @@ class CorpusService:
             records=tally.records,
             records_changed=tally.records_changed,
             timed_out_rule=timed_out,
+            examples=tally.examples,
         )
 
     async def get(self, corpus_id: CorpusId) -> CorpusView:
@@ -776,7 +777,7 @@ def _scrub_record(
     try:
         narrative = scrubber.scrub(text) if text else None
         if narrative is not None:
-            counter.add(unfall_uid, narrative)
+            counter.add(unfall_uid, narrative, text)
         scrubbed: list[_Cell] = []
         for cell in unfall_cells:
             if _is_anonymised_column(cell.column_name) and cell.value_raw:
@@ -784,7 +785,7 @@ def _scrub_record(
                     value = narrative.text
                 else:
                     result = scrubber.scrub(cell.value_raw)
-                    counter.add(unfall_uid, result)
+                    counter.add(unfall_uid, result, cell.value_raw)
                     value = result.text
                 cell = _Cell(cell.column_name, value)
             scrubbed.append(cell)
@@ -916,7 +917,7 @@ def _loads(payload: str) -> dict[str, int]:
 def _dry_run(parsed: Sequence[ParsedFile], scrubber: Scrubber) -> tuple[ScrubTally, str | None]:
     """`scrub_preview`'s walk: the freeze's own rows and `_scrub_record`, with
     the rule that timed out, if one did, instead of a raise."""
-    counter = ScrubCounter(scrubber)
+    counter = ScrubCounter(scrubber, collect_examples=True)
     narratives = _narratives(parsed)
     timed_out: str | None = None
     try:

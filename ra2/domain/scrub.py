@@ -49,11 +49,14 @@ import regex
 __all__ = [
     "ADVERSARIAL_LENGTH",
     "BOTH_LISTS_RULE_ID",
+    "EXAMPLES_PER_VALUE",
+    "EXAMPLE_CONTEXT_CHARS",
     "FIRSTNAME_RULE_ID",
     "HONORIFICS",
     "IMPORT_TIMEOUT_S",
     "LASTNAME_RULE_ID",
     "MATCH_TIMEOUT_S",
+    "MAX_VALUES_PER_RULE",
     "MIN_ENTRY_LETTERS",
     "MOST_HIT_FLOOR",
     "PROTECTED_STRINGS",
@@ -70,13 +73,16 @@ __all__ = [
     "RuleSource",
     "RuleTally",
     "ScrubCounter",
+    "ScrubExample",
     "ScrubHit",
     "ScrubImportError",
     "ScrubImportErrorCode",
     "ScrubResult",
+    "ScrubRuleExamples",
     "ScrubRules",
     "ScrubTally",
     "ScrubTimeoutError",
+    "ScrubValueExamples",
     "Scrubber",
     "check_rules",
     "compute_rules_fingerprint",
@@ -119,6 +125,19 @@ MIN_ENTRY_LETTERS: Final = 3
 #: The table shows list entries, which are public, but a low count could still
 #: say that a rare name occurs in the corpus (Q6).
 MOST_HIT_FLOOR: Final = 10
+
+#: What the dry run keeps to show *what* was replaced (`SD70`). Not part of the
+#: fingerprint: they decide what a reader is shown, never what is scrubbed.
+#: Characters of scrubbed context either side of a replacement.
+EXAMPLE_CONTEXT_CHARS: Final = 40
+
+#: Snippets kept per distinct matched value; the rest are counted.
+EXAMPLES_PER_VALUE: Final = 3
+
+#: Distinct matched values tracked per rule, **the first met**; past it a hit is
+#: counted, not listed, however often its value then recurs. Bounds memory on a
+#: rule whose every hit is a new value (a phone).
+MAX_VALUES_PER_RULE: Final = 2000
 
 #: Words that, immediately before a whitelisted list entry, lift the whitelist
 #: for it: `Herr Fuchs` loses his name while `ein Fuchs querte` keeps its fox
@@ -522,6 +541,9 @@ class ScrubHit:
     number: int
     #: The matched list entry's `entry_key` for a name; `None` for a regex.
     entry: str | None = None
+    #: Where the placeholder starts in the **scrubbed** text, so a reader can
+    #: cut context from the output and never from the original (`SD70`).
+    out_start: int = 0
 
     @property
     def placeholder(self) -> str:
@@ -808,6 +830,7 @@ def _replace(text: str, chosen: Sequence[_Candidate]) -> ScrubResult:
     hits: list[ScrubHit] = []
     pieces: list[str] = []
     cursor = 0
+    written = 0
     for candidate in chosen:
         key = (candidate.tag, candidate.value_key)
         number = numbers.get(key)
@@ -822,9 +845,11 @@ def _replace(text: str, chosen: Sequence[_Candidate]) -> ScrubResult:
             candidate.end,
             number,
             candidate.entry,
+            out_start=written + candidate.start - cursor,
         )
         pieces.append(text[cursor : candidate.start])
         pieces.append(hit.placeholder)
+        written += candidate.start - cursor + len(hit.placeholder)
         cursor = candidate.end
         hits.append(hit)
     pieces.append(text[cursor:])
@@ -849,6 +874,44 @@ class RuleTally:
 
 
 @dataclass(frozen=True, slots=True)
+class ScrubExample:
+    """One replacement in its sentence (`SD70`). `matched` is the span as
+    delivered, which is personal data; `before` and `after` are cut from the
+    **scrubbed** text, so a neighbouring name is its placeholder here."""
+
+    record_key: str
+    placeholder: str
+    before: str
+    matched: str = field(repr=False)
+    after: str
+
+
+@dataclass(frozen=True, slots=True)
+class ScrubValueExamples:
+    """Every hit of one rule on one value, grouped: what is being replaced."""
+
+    #: The first spelling met. Spellings the scrubber gives one placeholder
+    #: number share a row: `079 123 45 67` and `079-123-45-67`, `Müller` and
+    #: `MUELLER`.
+    value: str = field(repr=False)
+    hits: int
+    records: int
+    examples: tuple[ScrubExample, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ScrubRuleExamples:
+    rule_id: str
+    #: Most hits first, then by value.
+    values: tuple[ScrubValueExamples, ...]
+    #: Hits on values past `MAX_VALUES_PER_RULE`: counted and not listed. The
+    #: first values met are the ones listed, so `values` plus this add up to
+    #: the rule's hits. A count only, because a set of the overflow would grow
+    #: with the data and the cap exists to stop that.
+    other_hits: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class ScrubTally:
     #: Every rule that ran, in rule-set order, zero-hit rules included.
     rules: tuple[RuleTally, ...]
@@ -857,6 +920,31 @@ class ScrubTally:
     #: Records seen, and records with at least one hit.
     records: int
     records_changed: int
+    #: One per rule that ran, in the same order; empty unless the counter was
+    #: asked to collect (`SD70`).
+    examples: tuple[ScrubRuleExamples, ...] = ()
+
+
+class _ValueAcc:
+    __slots__ = ("examples", "hits", "records", "value")
+
+    def __init__(self, value: str) -> None:
+        self.value = value
+        self.hits = 0
+        self.records: set[str] = set()
+        self.examples: list[ScrubExample] = []
+
+
+class _RuleAcc:
+    __slots__ = ("other_hits", "values")
+
+    def __init__(self) -> None:
+        self.values: dict[str, _ValueAcc] = {}
+        self.other_hits = 0
+
+
+def _one_line(text: str) -> str:
+    return " ".join(text.split())
 
 
 class ScrubCounter:
@@ -866,7 +954,9 @@ class ScrubCounter:
     `UnfHergangTextAnonym` cell). `add` takes the record's key, so such a
     record counts once in `records` while its hits add up."""
 
-    def __init__(self, scrubber: Scrubber) -> None:
+    def __init__(self, scrubber: Scrubber, *, collect_examples: bool = False) -> None:
+        self._collect = collect_examples
+        self._examples: dict[str, _RuleAcc] = {}
         self._order: list[tuple[str, str, RuleSource]] = [
             (r.rule_id, r.tag, r.source) for r in scrubber.rules.regex_rules
         ]
@@ -882,7 +972,7 @@ class ScrubCounter:
         self._seen: set[str] = set()
         self._changed: set[str] = set()
 
-    def add(self, record_key: str, result: ScrubResult) -> None:
+    def add(self, record_key: str, result: ScrubResult, original: str | None = None) -> None:
         self._seen.add(record_key)
         for hit in result.hits:
             self._hits[hit.rule_id] = self._hits.get(hit.rule_id, 0) + 1
@@ -890,6 +980,41 @@ class ScrubCounter:
             if hit.entry is not None:
                 self._entries[hit.entry] = self._entries.get(hit.entry, 0) + 1
             self._changed.add(record_key)
+            if self._collect and original is not None:
+                self._collect_example(record_key, result.text, original, hit)
+
+    def _collect_example(
+        self, record_key: str, scrubbed: str, original: str, hit: ScrubHit
+    ) -> None:
+        """`original` is the text `result` was made from: the span is sliced
+        here, from the caller's own copy, so a `ScrubHit` never carries it and a
+        freeze, which does not collect, never copies it."""
+        rule = self._examples.setdefault(hit.rule_id, _RuleAcc())
+        matched = _one_line(original[hit.start : hit.end])
+        # The scrubber's own identity: a list entry, or a regex match without
+        # its separators, so what shares a placeholder number shares a row.
+        key = hit.entry if hit.entry is not None else _VALUE_NOISE.sub("", matched).casefold()
+        acc = rule.values.get(key)
+        if acc is None:
+            if len(rule.values) >= MAX_VALUES_PER_RULE:
+                rule.other_hits += 1
+                return
+            acc = rule.values[key] = _ValueAcc(matched)
+        acc.hits += 1
+        acc.records.add(record_key)
+        if len(acc.examples) < EXAMPLES_PER_VALUE:
+            start = hit.out_start
+            placeholder = hit.placeholder
+            end = start + len(placeholder)
+            acc.examples.append(
+                ScrubExample(
+                    record_key,
+                    placeholder,
+                    _one_line(scrubbed[max(0, start - EXAMPLE_CONTEXT_CHARS) : start]),
+                    matched,
+                    _one_line(scrubbed[end : end + EXAMPLE_CONTEXT_CHARS]),
+                )
+            )
 
     def tally(self) -> ScrubTally:
         rows = tuple(
@@ -906,7 +1031,30 @@ class ScrubCounter:
             ((entry, hits) for entry, hits in self._entries.items() if hits >= MOST_HIT_FLOOR),
             key=lambda eh: (-eh[1], eh[0]),
         )
-        return ScrubTally(rows, tuple(most_hit), len(self._seen), len(self._changed))
+        return ScrubTally(
+            rows,
+            tuple(most_hit),
+            len(self._seen),
+            len(self._changed),
+            self._example_tally() if self._collect else (),
+        )
+
+    def _example_tally(self) -> tuple[ScrubRuleExamples, ...]:
+        out: list[ScrubRuleExamples] = []
+        for rule_id, _, _ in self._order:
+            rule = self._examples.get(rule_id, _RuleAcc())
+            values = sorted(rule.values.values(), key=lambda v: (-v.hits, v.value))
+            out.append(
+                ScrubRuleExamples(
+                    rule_id,
+                    tuple(
+                        ScrubValueExamples(v.value, v.hits, len(v.records), tuple(v.examples))
+                        for v in values
+                    ),
+                    rule.other_hits,
+                )
+            )
+        return tuple(out)
 
 
 # ===========================================================================

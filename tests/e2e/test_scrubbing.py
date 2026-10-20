@@ -86,6 +86,18 @@ def test_names_are_scrubbed_before_a_corpus_stores_them(
     expect(
         dialog.locator('[data-testid="scrub-preview-row"][data-rule-id="lastnames"]')
     ).to_contain_text("5")
+
+    # --- what it would replace: the plate, as delivered, in a sentence (SD70)
+    plate = dialog.locator('[data-testid="scrub-toggle"][data-rule-id="license-plate"]')
+    expect(plate).to_be_visible()
+    plate_spans = dialog.locator(
+        '[data-rule-id="license-plate"] [data-testid="scrub-example-span"]'
+    )
+    expect(plate_spans.first).to_be_visible()
+    plate.click()
+    expect(plate_spans.first).not_to_be_visible()
+    plate.click()
+    expect(plate_spans.first).to_be_visible()
     dialog.locator('[data-testid="scrub-preview-create"]').click()
 
     row = page.locator('[data-testid="table-corpora"] tbody tr', has_text="scrub-delivery")
