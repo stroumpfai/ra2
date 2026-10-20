@@ -97,7 +97,7 @@ Smaller items, resolved here rather than left blocking:
 | C2 | `design/results/README.md`'s Interactions section says: *""Evidence"/span links and mismatch drill-downs open the Mismatches view filtered to that run × feature."* Phase 4 did not build that link, because there was nowhere for it to go. | **Phase 5 builds both ends.** The route accepts `&run=` and `&feature=` (Q3), and `ra2/ui/views/results/extraction_tab.py` gains the link. That is a frozen file belonging to another phase's agent, so it is a **named exception** (§6.1) rather than a quiet edit. |
 | C3 | Which columns sort? | Feature, record key, tag, and reviewed-state. **Not** by "how wrong" — there is no such number, and inventing one would be the ordering §16's "mismatch clustering, cross-model agreement, unbiased sampling" deferral exists to refuse. |
 | C4 | The tally's wording. `mvp-spec.md` §12's own example reads *"of 40 reviewed, 32 hallucination, 8 record error"* — note "record error", not `structured_data_error`. | **One rendering table in `ui/`**, exactly as `FindingCode` and `ProbeCode` work: `MismatchTag` values are the stable identifiers, asserted on in tests; the words are `ui/`'s. |
-| C5 | Does the list show the narrative text itself? | **No.** It shows the record value, the extracted value and the evidence span — §12's own list. The full narrative is the Results per-record drill-down's job (`mvp-spec.md` §13 surface 6), already built. Showing it here would make a scannable list unscannable. |
+| C5 | Does the list show the narrative text itself? | ~~**No.** It shows the record value, the extracted value and the evidence span — §12's own list. The full narrative is the Results per-record drill-down's job (`mvp-spec.md` §13 surface 6), already built. Showing it here would make a scannable list unscannable.~~ **Not in the list; in a detail row opened from it** (`plan-mismatch-context.md`, `SD70`). The premise was false: no Results drill-down shows the narrative, so nothing on any screen did. The list stays scannable: the detail opens one row at a time and loads its text only when opened. |
 | C6 | Export format. | `export_service.py`'s existing conventions, reused not re-derived: UTF-8 with a BOM (N3), `;`-delimited, a comment line naming the evaluation, and the **currently filtered, currently sorted** rows only (§7). It carries the tag and the note, because an export whose point is review has to carry the review. |
 | C7 | Does anything need a migration? | **Probably not.** `mismatch` exists with its unique key and its `(run_id, feature_id)` index (phase 4). If Wave 1 finds the filtered list wants one more index, that revision belongs to **W1**, phase 5's one migration author. |
 
@@ -239,10 +239,10 @@ one flexible column is the span.
 
 | Column | Width | Contents |
 |---|---|---|
-| Feature | 180px | the feature key, mono |
-| Record | 190px | truncated record id, mono, + the `anonymised` chip |
-| ~~Record value~~ **In record** | ~~140px~~ **110px** | authoritative, always (§12) |
-| ~~Extracted value~~ **Extracted** | ~~140px~~ **110px** | what the model said |
+| Feature | 180px | the detail toggle + the feature key, mono |
+| Record | 190px | ~~truncated record id~~ **the whole `UnfallUid`, wrapping** (`SD70`), mono, + the `anonymised` chip |
+| ~~Record value~~ **In record** | ~~140px~~ **110px** | authoritative, always (§12); the code, and its launch-snapshot label under it (`SD70`) |
+| ~~Extracted value~~ **Extracted** | ~~140px~~ **110px** | what the model said; the code, and its label under it (`SD70`) |
 | Evidence span | flexible | wrapped, three lines (Q6) |
 | Tag | ~~210px~~ **270px** | the three-way `segmented_control` + clear |
 | Reviewed | 96px | `tagged_at` date, or `—` |

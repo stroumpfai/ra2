@@ -1,0 +1,359 @@
+# plan-mismatch-context.md — enough context on a mismatch row to tell a hallucination from a record error
+
+**Status.** Written 2026-10-20 against `543eb0f`, from a request made while
+reviewing mismatches rather than from a reproduced defect. Authority as
+always: `mvp-spec.md` on *what*, `sw-design.md` on *how* (CLAUDE.md). The
+change is mostly presentation. It adds one pure domain module, one service
+method and one read model, and widens three existing read models, so it
+touches **frozen files** (`ra2/services/readmodels.py`,
+`ra2/services/mismatch_service.py`'s signatures, `ra2/api/schemas.py`,
+`ra2/services/export_service.py`, `ra2/persistence/repositories/mismatch_repo.py`,
+`ra2/ui/state.py`) under
+[`contracts/amendments/feat-mismatch-context.md`](contracts/amendments/feat-mismatch-context.md).
+It corrects `plan-phase-5.md` C5 and adds `SD70` to `sw-design.md` first, in
+the same commit. **No Alembic revision**: everything shown is already stored.
+Branch `feat/mismatch-context`. No wave is running, so the amendment is
+applied in the same commits, as has been standard practice since
+`fix-b1-census-value-samples`.
+
+---
+
+## 1. What was asked, and what was settled
+
+The analyst tags each mismatch `hallucination` · `structured_data_error` ·
+`unclear` (mvp-spec.md §12). Today the row gives them the feature key, a
+truncated **internal** record id, two bare codes and the evidence span.
+That is not enough to decide.
+
+| # | Asked | Settled as |
+|---|---|---|
+| P1 | A reference to the UnfallUid | The **`UnfallUid`** replaces the internal `RecordId` in the Record column, in the CSV and as the `record` sort key |
+| P2 | The structured data, with its codes and enum | **`code · label`** for both values, in the table and in the detail, decoded from the **launch-time codelist snapshot** (`evaluation_feature.enum_codelist_json`) in the evaluation's prompt language |
+| P3 | The accident description | An **inline detail row**, opened from the row, one at a time: the full narrative with the evidence span **highlighted** where it occurs |
+| P5 | (structured data, scope) | **This feature only**: its description, matching rule, source column or derivation expression, and both values decoded. Not the whole record |
+
+Three decisions behind this need stating, because each rules something out.
+
+**P1 is a spec gap, not a feature.** mvp-spec.md §12 lists "record key" as
+part of every mismatch row, and plan-phase-5.md C3 makes "record key" a sort.
+`MismatchRowView.record_id` is the surrogate key, so the screen shows an id
+no delivery contains and sorts on it. `MISMATCH_SORT_KEYS` keeps the name
+`record`; only what it sorts on changes.
+
+**The labels come from the snapshot, not from Codelists.** A mapping or a
+codelist import can change after launch. The snapshot is what the model was
+actually shown (§8.5 hashes it, label text included), so decoding against
+anything else could put a label on screen that the model never saw. A code
+that isn't in the snapshot is shown as a fact, `4 · not in code table`, and
+never left blank (Do-NOT #6's reasoning: nothing disappears silently).
+
+**Highlight only. The screen never says "span not found".** A span that
+doesn't occur in the narrative is strong evidence of a hallucination, and
+flagging it is the first step of the automatic triage that mvp-spec.md §16
+defers as `D1`. The highlight is display; if nothing lights up, the analyst
+sees that for themselves. If D1 is ever taken up, the domain function in §4.1
+is already the input it needs.
+
+---
+
+## 2. The UnfallUid (P1)
+
+Today: `MismatchRepository.list_for` and `_row` join `Feature.key` and
+`Record.text_anonymised_flag`. `_view` in
+[`mismatches_view.py`](ra2/ui/views/mismatches_view.py) prints
+`str(row.record_id)[:RECORD_ID_CHARS]` (14) in a 190 px cell beside the
+anonymisation chip.
+
+After:
+
+- **Repository.** Both queries also select `Record.unfall_uid`;
+  `MismatchListRow` gains `unfall_uid: str`. `_order("record")` sorts on
+  `Record.unfall_uid`, then `Mismatch.id` as the tie-breaker, so the order is
+  total.
+- **Read model.** `MismatchRowView` gains `unfall_uid: str`. `record_id`
+  stays: the detail (§4) and the API need it to address the record.
+- **View.** The Record cell shows the **whole** UID, mono, with
+  `overflow-wrap:anywhere`, and the chip on a line of its own beneath it. The
+  column stays 190 px and the fixed total stays 956 px. `RECORD_ID_CHARS` is
+  deleted. A UID is up to 32 characters (`_UID_LEN`); one that is longer than
+  the column wraps onto a second line instead of being cut. A truncated key
+  can't be searched for in the source system, and that search is the reason
+  it's on screen.
+- **CSV.** `unfall_uid` is **appended** to `_MISMATCHES_CSV_HEADER`, so
+  every existing column keeps its position.
+- **API.** `MismatchResponse.unfall_uid: str`, additive. OpenAPI snapshot
+  regenerated.
+
+---
+
+## 3. Code · label (P2)
+
+### 3.1 The pure part — `ra2/domain/code_label.py` (new)
+
+```python
+class LabelState(StrEnum):
+    LABELLED = "labelled"          # the code is in the snapshot, with a label in the language
+    NO_LABEL = "no_label"          # in the snapshot, but no label in that language
+    NOT_IN_TABLE = "not_in_table"  # an enum feature, and the code is not in its snapshot
+    NOT_ENUM = "not_enum"          # nothing to decode; the value is shown as it is
+
+@dataclass(frozen=True, slots=True)
+class DecodedValue:
+    raw: str | None
+    label: str | None
+    state: LabelState
+
+def decode(
+    value: str | None,
+    codes: Sequence[CodeValue] | None,   # snapshot_from_json(...) or None
+    language: str,
+) -> DecodedValue: ...
+```
+
+The rules, each with a unit test:
+
+1. **Exact codes only.** `"04"` does not decode as `"4"`, which is the rule
+   `compute_coverage` and the scorer already apply.
+2. **The prompt language, and no fallback to another one.** A `de` evaluation
+   with only an `fr` label gives `NO_LABEL`. Showing the French label would
+   show the analyst words the model was never given.
+3. `None` or empty stays `None` with the state of its feature (`NOT_ENUM`, or
+   `LABELLED` with `label=None`). The view renders `—`, as it does today.
+4. Pure: no session, no JSON. The service parses the snapshot with the
+   existing `snapshot_from_json` and hands over values.
+
+### 3.2 The service and the table
+
+- `MismatchService._view` already loads the evaluation's features. It also
+  loads their `EvaluationFeature` rows: **one query per page**, not one per
+  row, with each snapshot parsed once per feature. `MismatchRowView` gains
+  `record_decoded: DecodedValue` and `extracted_decoded: DecodedValue`, and
+  `record_value` / `extracted_value` stay as they are, verbatim.
+- **In record** and **Extracted** (110 px each) show the code on the first
+  line, as today. Under it, the label in `--ink2`, clamped to two lines. The
+  full label is in the detail, so the clamp hides nothing that isn't
+  reachable by keyboard. `NOT_IN_TABLE` renders `not in code table` in
+  `--warn`, and `NO_LABEL` renders `no <lang> label` in `--ink3`. The words
+  live in this view's copy table, keyed by `LabelState` (*Findings, not
+  prose*).
+- **CSV**: `record_label` and `extracted_label` are appended after
+  `unfall_uid` (empty unless `LABELLED`).
+- **API**: `MismatchResponse.record_label`, `.extracted_label`,
+  `.record_label_state`, `.extracted_label_state`, additive.
+
+---
+
+## 4. The detail row (P3 + P5)
+
+### 4.1 The pure part — `ra2/domain/span_locate.py` (new)
+
+```python
+def locate(text: str, span: str) -> tuple[tuple[int, int], ...]:
+    """Every non-overlapping occurrence of `span` in `text`, as (start, end)
+    offsets into `text`, left to right. Empty when there is none."""
+```
+
+1. **Exact first.** Every non-overlapping verbatim occurrence.
+2. **Whitespace-tolerant second, only if exact found nothing.** Runs of
+   whitespace on both sides compare equal, and offsets map back into the
+   original text. This is the embedded-newline hazard: the narrative breaks
+   a line where the model's quote has a space.
+3. **Nothing else**: case-sensitive, no Unicode normalisation, no fuzzy
+   distance. A lossy French `chauss?e` in the narrative matches only a span
+   that carries the same `?`. Anything looser would be a similarity
+   threshold, and that is `D1`.
+4. An empty span or a `None` text gives `()`.
+
+### 4.2 The service part — `MismatchService.detail`
+
+```python
+async def detail(self, mismatch_id: MismatchId) -> MismatchDetailView: ...
+```
+
+`MismatchDetailView` (new, frozen dataclass in `readmodels.py`):
+
+| Field | From |
+|---|---|
+| `mismatch_id`, `unfall_uid` | `mismatch`, `record` |
+| `narrative: str \| None` | `record.text_raw`, which was scrubbed at freeze (§19) |
+| `highlights: tuple[tuple[int, int], ...]` | `span_locate.locate(narrative, evidence_span)` |
+| `language`, `language_confidence` | `record` (French loses characters to encoding, §4.5; the analyst should see which language a text is in) |
+| `anonymisation: AnonymisationMarking` | the same resolution `_row_view` already uses (§13, SD50) |
+| `feature_key`, `feature_description` | `feature` |
+| `matching_rule: MatchingRule` | `feature.matching_rule`, through `feature_service.matching_rule_from_json` |
+| `source_column: str \| None`, `derivation: DerivationSpec \| None` | `feature`: one or the other |
+| `record_decoded`, `extracted_decoded` | §3.1, with the full label |
+| `evidence_span` | verbatim |
+
+**Structured values, worded in `ui/`.** The words for a rule and for a
+derivation already exist, but they're private to Features:
+`features_view._matching_rule_label` (which takes a `_FeatureDraft`) and
+`derivation_builder._expression`. Step 4 makes them public, as
+`rule_label(MatchingRule)` and `expression(DerivationSpec)` in
+`ui/components/`, and has Features and Mismatches call the same functions.
+That's a move, not a rewrite. Features' existing UI tests pin the wording.
+
+**Fetched when the row opens, not with the page.** Loading 25 narratives to
+show at most one would move narrative text through every page render for
+nothing. `NotFoundError` if the mismatch is gone (a discarded run under an
+open tab), and the view shows the existing refusal toast.
+
+### 4.3 The view
+
+- **A toggle, not a clickable row.** A chevron button at the start of the
+  Feature cell: a real `<button>` with `aria-expanded` and `aria-controls`,
+  so Tab reaches it. A row-wide click target would also capture clicks on
+  the Tag control. Extraction's breakdown row has to `stopPropagation` its
+  link for exactly that reason.
+- **One open at a time.** `MismatchesState` gains `open_mismatch_id: str = ""`
+  (`app.storage.client`, Do-NOT #8). Changing a filter, the sort or the page
+  clears it. A tag written while a detail is open leaves it open.
+- **The row** is a `<tr>` with `colspan="7"` on the `--accent-soft`
+  background, the shape of Extraction's `_breakdown_row`. Inside it, two
+  columns:
+  - **left, flexible:** the narrative, `white-space:pre-wrap`,
+    `max-height:240px`, scrolling inside its box, with the language and the
+    anonymisation `chip` above it. Each highlight is a `<mark>` styled with an
+    **existing** token (chosen while building; no new colour, R2). Text goes
+    in through `ui.label`/text nodes, never as HTML (SD31). With no narrative,
+    `no narrative on this record` in `--ink3`.
+  - **right, 320 px:** the feature facts as label/value pairs: key and
+    description · rule · source · In record `code · label` · Extracted
+    `code · label` · the evidence span. *The structured record is
+    authoritative in every case* stays in the toolbar caption, not repeated
+    here.
+- `data-testid`s: `mismatch-toggle`, `mismatch-detail`, `detail-narrative`,
+  `detail-highlight`, `detail-facts`.
+
+---
+
+## 5. Documents this changes first
+
+| Document | Change |
+|---|---|
+| `plan-phase-5.md` C5 | The premise was false: there is **no** Results per-record drill-down that shows the narrative (only Goal 2's per-record list, which shows none). The answer becomes "not in the list; in an on-demand detail row, `plan-mismatch-context.md`". §3.2's column table gets the UID and label lines |
+| `sw-design.md` §17.8 | + `MismatchDetailView`, `DecodedValue`; **`SD70`**: labels decode from the launch snapshot in the prompt language with no fallback, and the span is highlighted but never judged |
+| `mvp-spec.md` | **Nothing.** §12 already asks for the record key, and §13 already allows text on a drill-down |
+
+**Found on the way, not fixed here:** mvp-spec.md §13 surface 6 asks for a
+Results "per-record drill-down showing text, extracted values, spans" and it
+doesn't exist. This plan's detail row covers the need *for a mismatch*. A
+record page for Results is its own plan, and `detail()` is half of it.
+
+---
+
+## 6. Frozen files, and the amendment
+
+| File | Change |
+|---|---|
+| `ra2/services/readmodels.py` | `MismatchRowView` + `unfall_uid`, `record_decoded`, `extracted_decoded`; + `MismatchDetailView` |
+| `ra2/services/mismatch_service.py` | + `detail()` signature |
+| `ra2/persistence/repositories/mismatch_repo.py` | `MismatchListRow` + `unfall_uid`; the `record` sort key's column |
+| `ra2/services/export_service.py` | three appended CSV columns |
+| `ra2/api/schemas.py` + OpenAPI snapshot | additive fields on `MismatchResponse` |
+| `ra2/ui/state.py` | `MismatchesState.open_mismatch_id` |
+
+**Not in this slice:** an API route for `detail()`. The UI calls services
+in-process, and nothing outside the UI needs it yet (settled, §10).
+
+---
+
+## 7. Tests
+
+| Layer | File | Asserts |
+|---|---|---|
+| unit | `tests/unit/test_code_label.py` (new) | each `LabelState`; `"04"` ≠ `"4"`; no fallback across languages; `None` stays `None` |
+| unit | `tests/unit/test_span_locate.py` (new) | every exact occurrence, non-overlapping; whitespace-tolerant only when exact misses, offsets back into the original across a `\n` and a `\r\n`; case-sensitive; a lossy `?` matches only itself; empty span / `None` text gives `()` |
+| backend | `tests/backend/services/mismatch/test_mismatch_context.py` (new) | list rows carry `unfall_uid` and both decodings; `record` sorts by UID with a total order; snapshot queries bounded per page (statement count, not wall clock, §16.2); labels come from the **snapshot** after the live mapping has been changed; `detail()` carries narrative, highlights, marking, rule and source for a native, a derived and a non-enum feature; `NotFoundError` on a missing id |
+| backend | `tests/backend/services/export/…` (extend) | the three columns appended, earlier columns unmoved |
+| backend | `tests/backend/api/…` (extend) + snapshot | the additive fields; snapshot diff is additions only |
+| ui | `tests/ui/test_mismatches_view.py` (extend) | the full UID in the Record cell; `code · label` and the two non-label states' words; the toggle opens one detail, a second toggle moves it, filter/sort/page close it; highlights rendered as `<mark>`; no-narrative state; the chip present in the detail |
+| e2e | `tests/e2e/test_results_j14_mismatches.py` (extend) | at 1280 px: a 32-character UID wraps and stays inside its cell; the fixed total is still 956 px; the detail row spans the table; the toggle is reachable by Tab and Enter; the Tag control inside an open row still writes; **J6 unchanged**: no request leaves the server under test |
+
+**Fixtures** (synthetic and committed, mvp-spec.md §15, never from `data/`):
+a narrative whose span crosses an embedded newline; a span that occurs
+twice; a span that isn't in the text; lossy French in both text and span; a
+record with `text_raw = None`; a `NULL` record value; an extracted code
+missing from the snapshot; a code with only an `fr` label under a `de`
+evaluation; a derived feature and a time feature with a tolerance; a
+32-character UID; and the live mapping changed after launch, so a test that
+reads labels from Codelists instead of the snapshot fails.
+
+---
+
+## 8. What this plan does not do
+
+- **No "span not found" marker**, no similarity score, no sort or filter by
+  either (§1, `D1`, and plan-phase-5.md §3.2's "one thing this screen must
+  not grow").
+- **No whole-record view.** Other `unfall` cells and `objekt`/`person` rows
+  are out, by the scope choice. That includes a derived feature's inputs: the
+  detail shows the expression and the derived value, not the objects behind
+  it.
+- **No raw model output and no other mismatches of the same record.** Both
+  were offered and not chosen.
+- **No narrative in the CSV.** The file already carries spans and is
+  sensitive for it; the full text would make it a copy of the corpus.
+- **No record page** (§5, found on the way).
+
+---
+
+## 9. Order of work
+
+1. **Docs and amendment**: `plan-phase-5.md` C5 and §3.2, `sw-design.md`
+   §17.8 + `SD70`, `contracts/amendments/feat-mismatch-context.md`.
+2. **P1 UID**: repo → read model → view → CSV → API, with backend, UI and
+   the E2E width test. Standalone, low risk, and a spec fix on its own.
+3. **P2 labels**: `domain/code_label.py` → service → table cells → CSV → API.
+4. **P3/P5 detail**: `domain/span_locate.py` → `detail()` → state → view,
+   then the E2E journey.
+   **A step review closes each of steps 2–4**, before the next one starts.
+   `/code-review` runs on that step's commit alone (`git diff HEAD~1`), and
+   it looks for correctness bugs and breaks of the layer rule. Each finding
+   is fixed in the same step, or carried into this plan as a deliberate
+   deviation with its reason. Both go into §11's table under the step's
+   number. A bug in P1 is cheaper to fix before P2 builds on the same read
+   model.
+5. **Branch review**, before anything is merged. The diff since `543eb0f` is
+   reviewed along the two axes `/code-review` (the mattpocock skill) uses, in
+   parallel sub-agents:
+   - **Standards**: CLAUDE.md's Do-NOT list and layer rule. The places this
+     slice is most likely to slip: decoding or span logic in `ui/` (#7), the
+     open row in a module global (#8), narrative or labels reaching the page
+     as HTML rather than text (SD31), a test-only branch (#12), and any
+     fixture or debug step that read `data/` (#13).
+   - **Spec**: this plan against the diff. Every row of §1 and §7
+     delivered, nothing from §8 added, and the amendment file naming every
+     frozen file the diff touches (`git diff --name-only` against
+     CONTRACTS.md).
+
+   A finding is either fixed in a follow-up commit on the branch or written
+   up here as a deliberate deviation, with its reason. After the fixes,
+   `just lint`, `just test` and the E2E suite run again from scratch, and
+   §11's table records every finding and its outcome.
+
+Each implementation step ends with `just lint` and `just test` green, and is
+checked by eye in the E2E harness or `just dev-agent` with a throwaway seed,
+never a real corpus. Steps 2–4 are committed separately, so the review in
+step 5 can read them one at a time.
+
+---
+
+## 10. Questions settled (2026-10-20)
+
+1. **UID length.** 32 characters is fine. The Record column stays 190 px and
+   a long UID wraps onto two lines (§2).
+2. **Labels in the table.** Taller rows are acceptable. The label stays under
+   the code in both value columns (§3.2).
+3. **API route for `detail()`.** Not now (§6). It waits until something
+   outside the UI asks for it.
+
+---
+
+## 11. Code review findings, and what happened to each
+
+Filled in as the reviews run: step reviews under their step number (2, 3,
+4), the branch review under 5.
+
+| # | Step | Finding | Outcome |
+|---|---|---|---|
