@@ -10,7 +10,8 @@ record error ([`plan-mismatch-context.md`](../../plan-mismatch-context.md),
 snapshot, and a detail row with the narrative and the evidence span
 highlighted in it. The pure halves are two new domain modules,
 `ra2/domain/code_label.py` and `ra2/domain/span_locate.py`, which are not
-frozen. Two frozen files are touched, both additively. No schema change and no
+frozen. Three frozen files are amended, all additively, and a fourth is frozen
+for its signatures only and changes only in its body. No schema change and no
 migration: everything shown is already stored.
 
 ---
@@ -87,13 +88,28 @@ constructor is `api/v1/mismatches._row`. The OpenAPI snapshot is regenerated:
 additions only. **No route is added**:
 `MismatchService.detail` is reached in-process only (plan §6, settled §10).
 
-## 3. Not frozen, named for completeness
+## 3. `ra2/services/mismatch_service.py` — one signature
+
+**Why.** Phase 5 froze this service's constructor and signatures (CONTRACTS.md).
+The detail row reads one opened mismatch, only when it is opened, so it needs
+its own entry point.
+
+```diff
++    async def detail(self, mismatch_id: MismatchId) -> MismatchDetailView: ...
+```
+
+`NotFoundError` for an unknown id. Existing signatures unchanged. *(Added by
+the branch review: this section was missing, though the plan named it.)*
+
+## 4. Frozen for signatures only, body changed
 
 - `ra2/services/export_service.py`: `_MISMATCHES_CSV_HEADER` and the
-  `mismatches_csv` body gain `unfall_uid`, `record_label`, `extracted_label`, `record_label_state`,
-  `extracted_label_state`,
-  **appended**. The signature is unchanged, and the signature is what is
-  frozen.
-- `ra2/services/mismatch_service.py`, `ra2/persistence/repositories/mismatch_repo.py`,
-  `ra2/ui/state.py`, `ra2/ui/components/data_table.py`: stub-owned bodies,
-  not frozen.
+  `mismatches_csv` body gain `unfall_uid`, `record_label`, `extracted_label`,
+  `record_label_state` and `extracted_label_state`, **appended**. The signature
+  is unchanged, and the signature is what is frozen.
+
+## 5. Not frozen, named for completeness
+
+- `ra2/persistence/repositories/mismatch_repo.py`, `ra2/ui/state.py`,
+  `ra2/ui/components/data_table.py`, and the bodies in `mismatch_service.py`:
+  stub-owned, not frozen.

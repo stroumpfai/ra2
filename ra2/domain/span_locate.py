@@ -26,8 +26,8 @@ __all__ = ["locate"]
 
 #: What the tolerant pass treats as one run. `str.isspace` would also fold
 #: the exotic separators, and the hazard is the ordinary three.
-_WHITESPACE: Final = frozenset(" \t\r\n")
 _WHITESPACE_CHARS: Final = " \t\r\n"
+_WHITESPACE: Final = frozenset(_WHITESPACE_CHARS)
 
 
 def locate(text: str | None, span: str | None) -> tuple[tuple[int, int], ...]:

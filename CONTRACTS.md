@@ -1180,7 +1180,8 @@ C5 and `sw-design.md` §17.8 are corrected first, in the plan's commit.
 |---|---|---|
 | `ra2/services/readmodels.py` | `MismatchRowView` + `unfall_uid` (defaulted and last: the frozen `tests/test_p5_contract.py` builds a row without it), + `record_decoded`, `extracted_decoded` (`DecodedValue`); + `MismatchDetailView` | `feat-mismatch-context` |
 | `ra2/api/schemas.py` | `MismatchResponse` + `unfall_uid`, `record_label`, `record_label_state`, `extracted_label`, `extracted_label_state`, all **required**, the states typed `LabelState`. OpenAPI snapshot: additions only | `feat-mismatch-context` |
-| `ra2/services/export_service.py` | *body only*: `_MISMATCHES_CSV_HEADER` gains `unfall_uid`, `record_label`, `extracted_label`, `record_label_state`, `extracted_label_state`, **appended**. Signature unchanged | — |
+| `ra2/services/mismatch_service.py` | + `detail(mismatch_id) -> MismatchDetailView`. Existing signatures unchanged | `feat-mismatch-context` |
+| `ra2/services/export_service.py` | *body only*: `_MISMATCHES_CSV_HEADER` gains `unfall_uid`, `record_label`, `extracted_label`, `record_label_state`, `extracted_label_state`, **appended**. Signatures unchanged, so no amendment | — |
 
 ### New files
 
@@ -1188,7 +1189,7 @@ C5 and `sw-design.md` §17.8 are corrected first, in the plan's commit.
 |---|---|
 | `ra2/domain/code_label.py` | `LabelState`, `DecodedValue`, `UNDECODED`, `by_code`, `decode`: a value against the launch snapshot, exact codes, the prompt language and no other |
 | `ra2/domain/span_locate.py` | `locate`: every exact occurrence, then whitespace-tolerant only if none; case-sensitive, no normalisation, no threshold. Locates, never judges (`D1`) |
-| `ra2/ui/components/matching_rule.py` | `rule_label`, `rule_help`: moved from `features_view`'s private helpers, wording unchanged, so Features and the Mismatches detail word a rule once |
+| `ra2/ui/components/matching_rule.py` | `rule_label`, `rule_help`: moved from `features_view`'s private helpers, wording unchanged, so Features and the Mismatches detail word a rule once; + `rule_parameter` (`± N min`, `N decimals`) |
 | `tests/unit/mismatch/test_code_label.py`, `tests/unit/mismatch/test_span_locate.py` | Each state; `"04"` ≠ `"4"`; no fallback across languages; an empty label is what the model saw. Every occurrence, non-overlapping; across `\n` and `\r\n`; lossy French matches only itself |
 | `tests/backend/services/mismatch/test_mismatch_context.py` | The UID on every row, the `record` sort by UID and total, the CSV columns appended; labels from the snapshot while a live mapping says otherwise; one snapshot read per page. UIDs seeded to run against the surrogate ids |
 | `plan-mismatch-context.md` | The plan, its step and branch reviews (§11) |
@@ -1198,16 +1199,17 @@ C5 and `sw-design.md` §17.8 are corrected first, in the plan's commit.
 | Path | What |
 |---|---|
 | `ra2/persistence/repositories/mismatch_repo.py` | `MismatchListRow.unfall_uid`, joined in the list and the tag read-back; `record` sorts by `Record.unfall_uid` |
-| `ra2/services/mismatch_service.py` | carries the UID; `_Codebook`, one `evaluation_feature` read per page (one feature's per tag write), decodes both values; + `detail(mismatch_id)`. Imports `evaluation_service.snapshot_from_json` and `feature_service.matching_rule_from_json`, neither of which reaches a scoring module |
+| `ra2/services/mismatch_service.py` *(bodies)* | carries the UID; `_Codebook`, one `evaluation_feature` read per page (one feature's per tag write), decodes both values; the `detail` body. Imports `evaluation_service.snapshot_from_json` and `feature_service.matching_rule_from_json`, neither of which reaches a scoring module |
 | `ra2/ui/state.py` | `MismatchesState.open_mismatch_id` |
 | `ra2/ui/components/data_table.py` | + `after_row`: draws what belongs under a body row, inside the `<tbody>`. The component still decides nothing |
 | `ra2/ui/components/derivation_builder.py` | `_expression` is public as `expression`, for the detail's source line |
 | `ra2/ui/views/features_view.py` | calls `components.matching_rule` instead of its own two helpers |
 | `ra2/api/v1/mismatches.py` | maps the UID and the decodings |
 | `ra2/ui/views/mismatches_view.py` | The Record cell shows the whole UID, wrapping, the chip beneath; `RECORD_ID_CHARS` deleted; the tag control is named by UID. The value cells put the label (or `LABEL_STATE_WORDS`) under the code, clamped to two lines. A toggle button in the Feature cell opens one detail row at a time: the narrative with the span marked, the marking chip and language, and the feature's facts |
-| `data-handling.md` §3 | The review-list export now carries a delivery key |
+| `data-handling.md` §3 | The review-list export now carries a delivery key, and the code labels and their states |
+| `tests/backend/api/mismatches/test_mismatches_api.py`, `tests/api/openapi_snapshot.json` | The API row carries the UID and the label states; snapshot regenerated, additions only |
 | `tests/e2e/test_results_j14_mismatches.py` | Seeded with snapshots. The UID wraps inside its 190px cell; every label stays in its 110px cell within two lines; the CSV's review columns asserted by position, not from the end. + a journey that opens a detail from the keyboard: it spans the table, no column moves, the span is marked, the open row still tags |
-| `tests/ui/test_mismatches_view.py` | The whole UID; labels and the two no-label wordings (`labelled` fixture); nothing under an undecodable value; the detail: closed until asked, the span marked where it is and nothing said where it is not, one at a time, sorting closes it, tagging keeps it, the chip and the facts |
+| `tests/ui/test_mismatches_view.py` | The whole UID; labels and the two no-label wordings (`labelled` fixture); nothing under an undecodable value; the detail: closed until asked, the span marked where it is and nothing said where it is not, one at a time, sorting and filtering close it, tagging keeps it, a vanished row says so, no narrative says so, the chip, the facts and the rule's parameter |
 
 ---
 

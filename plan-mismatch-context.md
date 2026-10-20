@@ -3,13 +3,15 @@
 **Status.** Written 2026-10-20 against `543eb0f`, from a request made while
 reviewing mismatches rather than from a reproduced defect. Authority as
 always: `mvp-spec.md` on *what*, `sw-design.md` on *how* (CLAUDE.md). The
-change is mostly presentation. It adds one pure domain module, one service
-method and one read model, and widens three existing read models, so it
-touches **frozen files** (`ra2/services/readmodels.py`,
-`ra2/services/mismatch_service.py`'s signatures, `ra2/api/schemas.py`,
-`ra2/services/export_service.py`, `ra2/persistence/repositories/mismatch_repo.py`,
-`ra2/ui/state.py`) under
+change is mostly presentation. It adds two pure domain modules, one service
+method and one read model, and widens two existing read models, so it
+touches **frozen files**: `ra2/services/readmodels.py`, `ra2/api/schemas.py`,
+and the signatures of `ra2/services/mismatch_service.py` (+ `detail()`).
+`ra2/services/export_service.py` is frozen for its signatures only, and only
+its body changes. Those three changes are made under
 [`contracts/amendments/feat-mismatch-context.md`](contracts/amendments/feat-mismatch-context.md).
+*(Corrected by the branch review: this paragraph first also listed
+`mismatch_repo.py` and `ui/state.py`, whose headers say they are not frozen.)*
 It corrects `plan-phase-5.md` C5 and adds `SD70` to `sw-design.md` first, in
 the same commit. **No Alembic revision**: everything shown is already stored.
 Branch `feat/mismatch-context`. No wave is running, so the amendment is
@@ -143,7 +145,9 @@ The rules, each with a unit test:
   live in this view's copy table, keyed by `LabelState` (*Findings, not
   prose*).
 - **CSV**: `record_label` and `extracted_label` are appended after
-  `unfall_uid` (empty unless `LABELLED`).
+  `unfall_uid` (empty unless `LABELLED`). *As built (step 3's review, 3.1):*
+  `record_label_state` and `extracted_label_state` follow them, so an
+  invented code is not a blank in the file.
 - **API**: `MismatchResponse.record_label`, `.extracted_label`,
   `.record_label_state`, `.extracted_label_state`, additive.
 
@@ -198,6 +202,11 @@ derivation already exist, but they're private to Features:
 `rule_label(MatchingRule)` and `expression(DerivationSpec)` in
 `ui/components/`, and has Features and Mismatches call the same functions.
 That's a move, not a rewrite. Features' existing UI tests pin the wording.
+*As built:* `components/matching_rule.py` has `rule_label(kind, rule)` and
+`rule_help(kind, value_type, rule)`, because Features words an exploratory
+feature and an enum feature differently. After review 4.4, it also has
+`rule_parameter(rule)` (`± N min`, `N decimals`); `derivation_builder.expression`
+is the derivation's line.
 
 **Fetched when the row opens, not with the page.** Loading 25 narratives to
 show at most one would move narrative text through every page render for
@@ -257,14 +266,14 @@ record page for Results is its own plan, and `detail()` is half of it.
 
 ## 6. Frozen files, and the amendment
 
-| File | Change |
-|---|---|
-| `ra2/services/readmodels.py` | `MismatchRowView` + `unfall_uid`, `record_decoded`, `extracted_decoded`; + `MismatchDetailView` |
-| `ra2/services/mismatch_service.py` | + `detail()` signature |
-| `ra2/persistence/repositories/mismatch_repo.py` | `MismatchListRow` + `unfall_uid`; the `record` sort key's column |
-| `ra2/services/export_service.py` | three appended CSV columns |
-| `ra2/api/schemas.py` + OpenAPI snapshot | additive fields on `MismatchResponse` |
-| `ra2/ui/state.py` | `MismatchesState.open_mismatch_id` |
+| File | Frozen? | Change |
+|---|---|---|
+| `ra2/services/readmodels.py` | yes | `MismatchRowView` + `unfall_uid`, `record_decoded`, `extracted_decoded`; + `MismatchDetailView` |
+| `ra2/services/mismatch_service.py` | signatures | + `detail()` signature |
+| `ra2/api/schemas.py` + OpenAPI snapshot | yes | additive fields on `MismatchResponse` |
+| `ra2/services/export_service.py` | signatures; body changed only | ~~three~~ *as built:* five appended CSV columns (`unfall_uid`, two labels, two label states) |
+| `ra2/persistence/repositories/mismatch_repo.py` | no | `MismatchListRow` + `unfall_uid`; the `record` sort key's column |
+| `ra2/ui/state.py` | no | `MismatchesState.open_mismatch_id` |
 
 **Not in this slice:** an API route for `detail()`. The UI calls services
 in-process, and nothing outside the UI needs it yet (settled, §10).
@@ -275,7 +284,7 @@ in-process, and nothing outside the UI needs it yet (settled, §10).
 
 | Layer | File | Asserts |
 |---|---|---|
-| unit | `tests/unit/test_code_label.py` (new) | each `LabelState`; `"04"` ≠ `"4"`; no fallback across languages; `None` stays `None` |
+| unit | `tests/unit/test_code_label.py` (new) | each `LabelState`; `"04"` ≠ `"4"`; no fallback across languages; ~~`None` stays `None`~~ `None` is `EMPTY` (rule 3 as built) |
 | unit | `tests/unit/test_span_locate.py` (new) | every exact occurrence, non-overlapping; whitespace-tolerant only when exact misses, offsets back into the original across a `\n` and a `\r\n`; case-sensitive; a lossy `?` matches only itself; empty span / `None` text gives `()` |
 | backend | `tests/backend/services/mismatch/test_mismatch_context.py` (new) | list rows carry `unfall_uid` and both decodings; `record` sorts by UID with a total order; snapshot queries bounded per page (statement count, not wall clock, §16.2); labels come from the **snapshot** after the live mapping has been changed; `detail()` carries narrative, highlights, marking, rule and source for a native, a derived and a non-enum feature; `NotFoundError` on a missing id |
 | backend | `tests/backend/services/export/…` (extend) | the three columns appended, earlier columns unmoved |
@@ -418,3 +427,15 @@ Filled in as the reviews run: step reviews under their step number (2, 3,
 | 4.6 | 4 | The feature key's ellipsis could never apply | **Fixed**: `white-space:nowrap;min-width:0` |
 | 4.7 | 4 | `MismatchDetailView.record_id` and `.unfall_uid` were read by nothing | **Fixed**: `record_id` removed; the UID is now shown in the narrative's header, where a scrolled-away row still needs its key |
 | 4.8 | 4 | `Kind(...)` / `ValueType(...)` re-wrap typed columns | **Kept, and commented**: the backend test failed without them; a row the session holds comes back as written, which may be the plain string |
+| 5.S1 | 5 · Standards | Duplicated code: the code-then-label block was written twice (cell and detail) | **Fixed**: `_meaning_label`, one renderer taking the style |
+| 5.S2 | 5 · Standards | The label states' words and ink were split across a dict and an if-chain, where CLAUDE.md asks for one rendering table | **Fixed**: `LABEL_STATE_WORDS` maps each state to `(words, ink)` |
+| 5.S3 | 5 · Standards | `_rule_parameter` worded a rule outside the module that exists to word rules once | **Fixed**: `components.matching_rule.rule_parameter` |
+| 5.S4 | 5 · Standards | The tag path raised `NotFoundError("evaluation", mismatch_id)` | **Fixed**: `"mismatch"` |
+| 5.S5 | 5 · Standards | `span_locate`'s whitespace set was written twice | **Fixed**: the set is derived from the string |
+| 5.S6 | 5 · Standards | `detail()` queries in the service rather than the repository | **Kept**: this service already ran its own `select`s (`_runs_for`, `_features_for`); one read with no paging gains nothing from a repository method |
+| 5.P1 | 5 · Spec | Closing on filter and page untested | **Fixed** for filter (UI test); paging shares `_close_detail` and the fixture has no second page |
+| 5.P2 | 5 · Spec | No UI test for the no-narrative state | **Fixed** |
+| 5.P3 | 5 · Spec | Lossy French not tested through the detail | **Kept**: the matching rule is `locate`'s and is unit-tested byte-exactly; the backend's record 0 is the lossy narrative, opened and asserted unmarked |
+| 5.P4 | 5 · Spec | Scope additions (decimals, UID in the header, `rule_help`, `DETAIL_GONE`, the state columns) | **Kept**: each came out of a step review and is recorded above (3.1, 4.2, 4.4, 4.7) |
+| 5.P5 | 5 · Spec | The plan, the amendment and CONTRACTS.md disagreed on which files are frozen; `detail()`'s frozen signature was filed as "not frozen" | **Fixed**: the Status paragraph and §6 corrected, the amendment gains §3 (`detail`) and §4, CONTRACTS.md lists `mismatch_service` under amended files |
+| 5.P6 | 5 · Spec | The plan was stale on the CSV columns, on rule 3's test, and on the rule functions' signatures; data-handling.md omitted the label states; CONTRACTS.md omitted the API test | **Fixed**, each where it was stale |

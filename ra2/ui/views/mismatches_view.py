@@ -50,7 +50,6 @@ from nicegui import ui
 from nicegui.element import Element
 
 from ra2.domain.code_label import DecodedValue, LabelState
-from ra2.domain.feature import MatchingRule, MatchingRuleKind
 from ra2.domain.ids import EvaluationId, FeatureId, MismatchId, RunId
 from ra2.domain.mismatch import MismatchTag, ReviewTally, TagFilter, TagState
 from ra2.services.container import Services
@@ -74,7 +73,7 @@ from ra2.ui.components import (
     pagination_row,
 )
 from ra2.ui.components.derivation_builder import expression
-from ra2.ui.components.matching_rule import rule_help, rule_label
+from ra2.ui.components.matching_rule import rule_help, rule_label, rule_parameter
 from ra2.ui.components.primitives import data_props, segmented_control
 from ra2.ui.components.refusal import refusal_text
 from ra2.ui.shell import item_for_key, shell
@@ -148,13 +147,14 @@ TAG_LABELS: Final[dict[MismatchTag, str]] = {
     MismatchTag.UNCLEAR: "Unclear",
 }
 
-#: `LabelState` -> the words under a code when there is no label to show
-#: (`SD70`). The one rendering table for it; `{language}` is the prompt
-#: language the label was looked up in. `labelled` shows the label itself, and
-#: `not_enum` / `empty` show nothing under the value.
-LABEL_STATE_WORDS: Final[dict[LabelState, str]] = {
-    LabelState.NOT_IN_TABLE: "not in code table",
-    LabelState.NO_LABEL: "no {language} label",
+#: `LabelState` -> `(words, ink)` (`SD70`): **the one rendering table** for
+#: what sits under a value, in the cell and in the detail. `None` words mean
+#: "the label itself"; `{language}` is the prompt language the label was looked
+#: up in. A state not in the table (`not_enum`, `empty`) shows nothing.
+LABEL_STATE_WORDS: Final[dict[LabelState, tuple[str | None, str]]] = {
+    LabelState.LABELLED: (None, "--ink2"),
+    LabelState.NOT_IN_TABLE: ("not in code table", "--warn"),
+    LabelState.NO_LABEL: ("no {language} label", "--ink3"),
 }
 
 #: What a stored tag `MismatchTag` does not name renders as. Nothing in the MVP
@@ -1173,33 +1173,28 @@ def _render_value(decoded: DecodedValue, testid: str) -> None:
     ui.label(decoded.raw if decoded.raw else EMPTY_CELL).props(f'data-testid="{testid}"').mark(
         testid
     ).style("font-size:11.5px;")
-    meaning = _value_meaning(decoded)
-    if meaning is None:
+    _meaning_label(decoded, testid, VALUE_LABEL_STYLE)
+
+
+def _meaning_label(decoded: DecodedValue, testid: str, style: str) -> None:
+    """What sits under a value, from `LABEL_STATE_WORDS`, or nothing. One
+    renderer for the cell and the detail, so they cannot word a state
+    differently. An empty label is what the model was shown, and shows as
+    nothing."""
+    entry = LABEL_STATE_WORDS.get(decoded.state)
+    if entry is None:
         return
-    text, ink = meaning
+    words, ink = entry
+    text = decoded.label if words is None else words.format(language=decoded.language or "")
+    if not text:
+        return
     data_props(
         ui.label(text)
         .props(f'data-testid="{testid}-label"')
         .mark(f"{testid}-label")
-        .style(f"{VALUE_LABEL_STYLE}color:var({ink});"),
+        .style(f"{style}color:var({ink});"),
         {"data-label-state": decoded.state.value},
     )
-
-
-def _value_meaning(decoded: DecodedValue) -> tuple[str, str] | None:
-    """`(words, ink token)` for what sits under a value, or `None` for nothing.
-
-    Shared by the table cell and the detail row, so the two cannot word one
-    state differently.
-    """
-    if decoded.state is LabelState.LABELLED and decoded.label:
-        return decoded.label, "--ink2"
-    if decoded.state is LabelState.NOT_IN_TABLE:
-        return LABEL_STATE_WORDS[LabelState.NOT_IN_TABLE], "--warn"
-    if decoded.state is LabelState.NO_LABEL:
-        words = LABEL_STATE_WORDS[LabelState.NO_LABEL].format(language=decoded.language or "")
-        return words, "--ink3"
-    return None
 
 
 def _render_span(row: MismatchRowView) -> None:
@@ -1287,7 +1282,7 @@ def _facts_panel(detail: MismatchDetailView) -> None:
             ui.label(detail.feature_description).style("font-size:11.5px;color:var(--ink2);")
         _fact(FACT_RULE, "detail-rule")
         with ui.element("dd").style("margin:0;min-width:0;"):
-            parameter = _rule_parameter(detail.matching_rule)
+            parameter = rule_parameter(detail.matching_rule)
             rule = rule_label(detail.kind, detail.matching_rule)
             ui.label(rule if parameter is None else f"{rule} · {parameter}").props(
                 'data-testid="detail-rule-value"'
@@ -1314,32 +1309,12 @@ def _facts_panel(detail: MismatchDetailView) -> None:
                 ui.label(decoded.raw or EMPTY_CELL).classes("mono").props(
                     f'data-testid="{testid}-value"'
                 ).mark(f"{testid}-value").style("font-size:11.5px;")
-                meaning = _value_meaning(decoded)
-                if meaning is not None:
-                    text, ink = meaning
-                    data_props(
-                        ui.label(text)
-                        .props(f'data-testid="{testid}-label"')
-                        .mark(f"{testid}-label")
-                        .style(f"font-size:11.5px;color:var({ink});"),
-                        {"data-label-state": decoded.state.value},
-                    )
+                _meaning_label(decoded, testid, "font-size:11.5px;")
         _fact(FACT_SPAN, "detail-span")
         with ui.element("dd").style("margin:0;min-width:0;"):
             ui.label(detail.evidence_span or EMPTY_CELL).style(
                 "font-size:12px;color:var(--ink2);white-space:pre-wrap;overflow-wrap:anywhere;"
             )
-
-
-def _rule_parameter(rule: MatchingRule) -> str | None:
-    """The rule's number, which decides whether 10:00 against 10:20 is
-    wrong: Features shows it in its own control, so the shared rule words
-    leave it out and this adds it."""
-    if rule.kind is MatchingRuleKind.WITHIN_TOLERANCE and rule.tolerance_minutes is not None:
-        return f"± {rule.tolerance_minutes} min"
-    if rule.decimal_precision is not None:
-        return f"{rule.decimal_precision} decimals"
-    return None
 
 
 def _fact(title: str, testid: str) -> None:

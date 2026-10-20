@@ -9,7 +9,18 @@ private `_matching_rule_label` / `_matching_rule_help`, unchanged in wording.
 
 from ra2.domain.feature import Kind, MatchingRule, MatchingRuleKind, ValueType
 
-__all__ = ["rule_help", "rule_label"]
+__all__ = ["rule_help", "rule_label", "rule_parameter"]
+
+
+def rule_parameter(rule: MatchingRule) -> str | None:
+    """The rule's number, which decides whether 10:00 against 10:20 is wrong.
+    Features shows it in its own control; the Mismatches detail shows it
+    beside `rule_label` (`SD70`)."""
+    if rule.kind is MatchingRuleKind.WITHIN_TOLERANCE and rule.tolerance_minutes is not None:
+        return f"± {rule.tolerance_minutes} min"
+    if rule.decimal_precision is not None:
+        return f"{rule.decimal_precision} decimals"
+    return None
 
 
 def rule_label(kind: Kind, rule: MatchingRule) -> str:

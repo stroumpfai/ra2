@@ -371,7 +371,7 @@ class MismatchService:
                 .where(Mismatch.id == mismatch_id)
             )
             if evaluation is None:
-                raise NotFoundError("evaluation", mismatch_id)
+                raise NotFoundError("mismatch", mismatch_id)
             #: Only this row's feature: a tag click decodes one row, and
             #: parsing every code table in the evaluation for it is waste.
             codebook = await _codebook(session, evaluation, feature_id=row.feature_id)

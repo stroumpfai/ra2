@@ -26,7 +26,7 @@ from nicegui.element import Element
 from nicegui.testing.general import nicegui_reset_globals
 from nicegui.testing.user import User
 from nicegui.testing.user_interaction import UserInteraction
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.fixtures.scored_corpus import (
     FRENCH_LOSSY,
@@ -42,10 +42,11 @@ from ra2.domain.feature import MatchingRule, MatchingRuleKind
 from ra2.domain.mismatch import MismatchTag
 from ra2.infra.clock import Clock
 from ra2.infra.config import Settings
-from ra2.persistence.models import EvaluationFeature, Mismatch
+from ra2.persistence.models import EvaluationFeature, Mismatch, Record
 from ra2.persistence.repositories.ground_truth_repo import GroundTruthRepository
 from ra2.services.evaluation_service import snapshot_to_json
 from ra2.services.scoring_service import ScoringService
+from ra2.ui.components.matching_rule import rule_parameter
 from ra2.ui.views.mismatches_view import (
     DETAIL_GONE,
     DETAIL_LABEL,
@@ -54,13 +55,13 @@ from ra2.ui.views.mismatches_view import (
     NO_MATCHES_MESSAGE,
     NO_MISMATCHES_BODY,
     NO_MISMATCHES_TITLE,
+    NO_NARRATIVE,
     NOT_SCORED_TITLE,
     NOTHING_REVIEWED,
     OTHER_LABEL,
     SPAN_MIN_WIDTH_PX,
     TABLE_MIN_WIDTH,
     TAG_LABELS,
-    _rule_parameter,
     tally_sentence,
 )
 from ra2.ui.views.scoring_states import STALLED_TITLE
@@ -479,7 +480,7 @@ def test_the_rule_carries_the_number_that_decides_it(rule: MatchingRule, words: 
     """10:00 against 10:20 is wrong or right depending on the tolerance, so
     the detail shows it beside the shared rule words (step 4's review). The
     shared fixture has no tolerance feature, hence a direct check."""
-    assert _rule_parameter(rule) == words
+    assert rule_parameter(rule) == words
 
 
 async def test_a_row_that_vanished_says_so_when_opened(scored: Seeded) -> None:
@@ -492,6 +493,30 @@ async def test_a_row_that_vanished_says_so_when_opened(scored: Seeded) -> None:
     _one(scored.user, toggle).click()
     await scored.user.should_see(DETAIL_GONE)
     assert not _marked(scored.user, "mismatch-detail")
+
+
+async def test_a_record_without_a_narrative_says_so_in_the_detail(scored: Seeded) -> None:
+    """Never an empty box: the row says there is no text to read."""
+    async with scored.session_factory() as session:
+        await session.execute(
+            update(Record).where(Record.id == scored.corpus.record_ids[0]).values(text_raw=None)
+        )
+        await session.commit()
+    await scored.user.open(_weather_url(scored.corpus, 1))
+    await _toggle(scored, 0)
+    (narrative,) = _marked(scored.user, "detail-narrative")
+    assert _own_text(narrative) == NO_NARRATIVE
+    assert not _marked(scored.user, "detail-highlight")
+
+
+async def test_filtering_closes_the_detail(scored: Seeded) -> None:
+    """Like sorting and paging: the open row may not be in the new list.
+    (Paging shares `_close_detail` and has no second page here to turn to.)"""
+    await scored.user.open(_weather_url(scored.corpus, 1))
+    await _toggle(scored, 0)
+    assert _marked(scored.user, "mismatch-detail")
+    await _pick(scored, "tag", "untagged")
+    await _until(lambda: not _marked(scored.user, "mismatch-detail"), "the detail closing")
 
 
 async def test_sorting_closes_the_detail(scored: Seeded) -> None:
